@@ -28,8 +28,9 @@ import (
 )
 
 type StateSuite struct {
-	db    *ethdb.MemDatabase
+	db    ethdb.Database
 	state *StateDB
+	tds   *TrieDbState
 }
 
 var _ = checker.Suite(&StateSuite{})
@@ -46,12 +47,15 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(big.NewInt(44))
 
 	// write some of them to the trie
-	s.state.updateStateObject(obj1)
-	s.state.updateStateObject(obj2)
-	s.state.Commit(false)
+	s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(Account))
+	s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(Account))
+	s.state.Finalise(false, s.tds.TrieStateWriter())
+	s.tds.TrieRoot()
+	s.tds.SetBlockNr(1)
+	s.state.Finalise(false, s.tds.DbStateWriter())
 
 	// check that dump contains the state objects that are in trie
-	got := string(s.state.Dump())
+	got := string(s.tds.Dump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -88,23 +92,22 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.state, _ = New(common.Hash{}, NewDatabase(s.db))
+	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
+	s.state = New(s.tds)
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
-	s.state.CreateAccount(address)
+	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value common.Hash
 
 	s.state.SetState(address, common.Hash{}, value)
-	s.state.Commit(false)
-
-	if value := s.state.GetState(address, common.Hash{}); value != (common.Hash{}) {
-		c.Errorf("expected empty current value, got %x", value)
-	}
+	s.state.Finalise(false, s.tds.TrieStateWriter())
+	s.tds.SetBlockNr(1)
+	s.state.Finalise(false, s.tds.DbStateWriter())
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
-		c.Errorf("expected empty committed value, got %x", value)
+		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
@@ -141,7 +144,9 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	state, _ := New(common.Hash{}, NewDatabase(ethdb.NewMemDatabase()))
+	db := ethdb.NewMemDatabase()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	state := New(tds)
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -162,8 +167,10 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	root, _ := state.Commit(false)
-	state.Reset(root)
+	tds.IntermediateRoot(state, false)
+	tds.SetBlockNr(1)
+	state.Finalise(false, tds.DbStateWriter())
+	state.Reset()
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
@@ -184,8 +191,8 @@ func TestSnapshot2(t *testing.T) {
 
 	so0Restored := state.getStateObject(stateobjaddr0)
 	// Update lazily-loaded values before comparing.
-	so0Restored.GetState(state.db, storageaddr)
-	so0Restored.Code(state.db)
+	so0Restored.GetState(storageaddr)
+	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 

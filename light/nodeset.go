@@ -43,8 +43,10 @@ func NewNodeSet() *NodeSet {
 	}
 }
 
+var BucketPrefix = []byte("NodeSet")
+
 // Put stores a new node in the set
-func (db *NodeSet) Put(key []byte, value []byte) error {
+func (db *NodeSet) Put(bucket, key []byte, value []byte) error {
 	db.lock.Lock()
 	defer db.lock.Unlock()
 
@@ -60,8 +62,16 @@ func (db *NodeSet) Put(key []byte, value []byte) error {
 	return nil
 }
 
+func (db *NodeSet) PutS(hBucket, key, value []byte, timestamp uint64) error {
+	return nil
+}
+
+func (db *NodeSet) DeleteTimestamp(timestamp uint64) error {
+	return nil
+}
+
 // Get returns a stored node
-func (db *NodeSet) Get(key []byte) ([]byte, error) {
+func (db *NodeSet) Get(bucket, key []byte) ([]byte, error) {
 	db.lock.RLock()
 	defer db.lock.RUnlock()
 
@@ -71,9 +81,24 @@ func (db *NodeSet) Get(key []byte) ([]byte, error) {
 	return nil, errors.New("not found")
 }
 
+func (db *NodeSet) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	return nil, nil
+}
+
+func (db *NodeSet) Walk(bucket, key []byte, keybits uint, walker func([]byte, []byte) (bool, error)) error {
+	return nil
+}
+
+func (db *NodeSet) GetHash(index uint32) []byte {
+	return nil
+}
+
+func (db *NodeSet) PutHash(index uint32, hash []byte) {
+}
+
 // Has returns true if the node set contains the given key
-func (db *NodeSet) Has(key []byte) (bool, error) {
-	_, err := db.Get(key)
+func (db *NodeSet) Has(bucket, key []byte) (bool, error) {
+	_, err := db.Get(BucketPrefix, key)
 	return err == nil, nil
 }
 
@@ -111,7 +136,7 @@ func (db *NodeSet) Store(target ethdb.Putter) {
 	defer db.lock.RUnlock()
 
 	for key, value := range db.nodes {
-		target.Put([]byte(key), value)
+		target.Put(BucketPrefix, []byte(key), value)
 	}
 }
 
@@ -121,7 +146,7 @@ type NodeList []rlp.RawValue
 // Store writes the contents of the list to the given database
 func (n NodeList) Store(db ethdb.Putter) {
 	for _, node := range n {
-		db.Put(crypto.Keccak256(node), node)
+		db.Put(BucketPrefix, crypto.Keccak256(node), node)
 	}
 }
 
@@ -133,9 +158,26 @@ func (n NodeList) NodeSet() *NodeSet {
 }
 
 // Put stores a new node at the end of the list
-func (n *NodeList) Put(key []byte, value []byte) error {
+func (n *NodeList) Put(bucket, key []byte, value []byte) error {
 	*n = append(*n, value)
 	return nil
+}
+
+// Put stores a new node at the end of the list
+func (n *NodeList) PutS(hBucket, key, value []byte, timestamp uint64) error {
+	*n = append(*n, value)
+	return nil
+}
+
+func (n *NodeList) DeleteTimestamp(timestamp uint64) error {
+	return nil
+}
+
+func (n *NodeList) GetHash(index uint32) []byte {
+	return nil
+}
+
+func (n *NodeList) PutHash(index uint32, hash []byte) {
 }
 
 // DataSize returns the aggregated data size of nodes in the list

@@ -30,7 +30,8 @@ import (
 )
 
 func NewState(ctx context.Context, head *types.Header, odr OdrBackend) *state.StateDB {
-	state, _ := state.New(head.Root, NewStateDatabase(ctx, head, odr))
+	tds, _ := state.NewTrieDbState(head.Root, NewStateDatabase(ctx, head, odr).TrieDB(), head.Number.Uint64())
+	state := state.New(tds)
 	return state
 }
 
@@ -45,11 +46,11 @@ type odrDatabase struct {
 }
 
 func (db *odrDatabase) OpenTrie(root common.Hash) (state.Trie, error) {
-	return &odrTrie{db: db, id: db.id}, nil
+	return &odrTrie{db: db, id: db.id, prefix: state.AccountsBucket}, nil
 }
 
-func (db *odrDatabase) OpenStorageTrie(addrHash, root common.Hash) (state.Trie, error) {
-	return &odrTrie{db: db, id: StorageTrieID(db.id, addrHash, root)}, nil
+func (db *odrDatabase) OpenStorageTrie(addrHash common.Hash, root common.Hash) (state.Trie, error) {
+	return &odrTrie{db: db, id: StorageTrieID(db.id, addrHash, root), prefix: addrHash[:]}, nil
 }
 
 func (db *odrDatabase) CopyTrie(t state.Trie) state.Trie {
@@ -70,7 +71,7 @@ func (db *odrDatabase) ContractCode(addrHash, codeHash common.Hash) ([]byte, err
 	if codeHash == sha3_nil {
 		return nil, nil
 	}
-	if code, err := db.backend.Database().Get(codeHash[:]); err == nil {
+	if code, err := db.backend.Database().Get(state.CodeBucket, codeHash[:]); err == nil {
 		return code, nil
 	}
 	id := *db.id
@@ -85,7 +86,7 @@ func (db *odrDatabase) ContractCodeSize(addrHash, codeHash common.Hash) (int, er
 	return len(code), err
 }
 
-func (db *odrDatabase) TrieDB() *trie.Database {
+func (db *odrDatabase) TrieDB() ethdb.Database {
 	return nil
 }
 
@@ -93,37 +94,36 @@ type odrTrie struct {
 	db   *odrDatabase
 	id   *TrieID
 	trie *trie.Trie
+	// Prefix to form the database key
+	prefix []byte
 }
 
-func (t *odrTrie) TryGet(key []byte) ([]byte, error) {
+func (t *odrTrie) TryGet(db ethdb.Database, key []byte, blockNr uint64) ([]byte, error) {
 	key = crypto.Keccak256(key)
 	var res []byte
 	err := t.do(key, func() (err error) {
-		res, err = t.trie.TryGet(key)
+		res, err = t.trie.TryGet(db, key, blockNr)
 		return err
 	})
 	return res, err
 }
 
-func (t *odrTrie) TryUpdate(key, value []byte) error {
+func (t *odrTrie) TryUpdate(db ethdb.Database, key, value []byte, blockNr uint64) error {
 	key = crypto.Keccak256(key)
 	return t.do(key, func() error {
-		return t.trie.TryUpdate(key, value)
+		return t.trie.TryUpdate(db, key, value, blockNr)
 	})
 }
 
-func (t *odrTrie) TryDelete(key []byte) error {
+func (t *odrTrie) TryDelete(db ethdb.Database, key []byte, blockNr uint64) error {
 	key = crypto.Keccak256(key)
 	return t.do(key, func() error {
-		return t.trie.TryDelete(key)
+		return t.trie.TryDelete(db, key, blockNr)
 	})
 }
 
-func (t *odrTrie) Commit(onleaf trie.LeafCallback) (common.Hash, error) {
-	if t.trie == nil {
-		return t.id.Root, nil
-	}
-	return t.trie.Commit(onleaf)
+func (t *odrTrie) CommitPreimages(dbw ethdb.Putter) error {
+	return nil
 }
 
 func (t *odrTrie) Hash() common.Hash {
@@ -133,29 +133,30 @@ func (t *odrTrie) Hash() common.Hash {
 	return t.trie.Hash()
 }
 
-func (t *odrTrie) NodeIterator(startkey []byte) trie.NodeIterator {
-	return newNodeIterator(t, startkey)
+func (t *odrTrie) NodeIterator(db ethdb.Database, startkey []byte, blockNr uint64) trie.NodeIterator {
+	return newNodeIterator(t, startkey, blockNr)
 }
 
-func (t *odrTrie) GetKey(sha []byte) []byte {
+func (t *odrTrie) GetKey(dbr trie.DatabaseReader, sha []byte) []byte {
 	return nil
 }
 
-func (t *odrTrie) Prove(key []byte, fromLevel uint, proofDb ethdb.Putter) error {
+func (t *odrTrie) Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethdb.Putter, blockNr uint64) error {
 	return errors.New("not implemented, needs client/server interface split")
+}
+
+func (t *odrTrie) HashKey(key []byte) []byte {
+	return nil
 }
 
 // do tries and retries to execute a function until it returns with no error or
 // an error type other than MissingNodeError
 func (t *odrTrie) do(key []byte, fn func() error) error {
 	for {
-		var err error
 		if t.trie == nil {
-			t.trie, err = trie.New(t.id.Root, trie.NewDatabase(t.db.backend.Database()))
+			t.trie = trie.New(t.id.Root, t.prefix, nil, false)
 		}
-		if err == nil {
-			err = fn()
-		}
+		err := fn()
 		if _, ok := err.(*trie.MissingNodeError); !ok {
 			return err
 		}
@@ -172,20 +173,17 @@ type nodeIterator struct {
 	err error
 }
 
-func newNodeIterator(t *odrTrie, startkey []byte) trie.NodeIterator {
+func newNodeIterator(t *odrTrie, startkey []byte, blockNr uint64) trie.NodeIterator {
 	it := &nodeIterator{t: t}
 	// Open the actual non-ODR trie if that hasn't happened yet.
 	if t.trie == nil {
 		it.do(func() error {
-			t, err := trie.New(t.id.Root, trie.NewDatabase(t.db.backend.Database()))
-			if err == nil {
-				it.t.trie = t
-			}
-			return err
+			it.t.trie = trie.New(t.id.Root, t.prefix, nil, false)
+			return nil
 		})
 	}
 	it.do(func() error {
-		it.NodeIterator = it.t.trie.NodeIterator(startkey)
+		it.NodeIterator = it.t.trie.NodeIterator(t.db.backend.Database(), startkey, blockNr)
 		return it.NodeIterator.Error()
 	})
 	return it

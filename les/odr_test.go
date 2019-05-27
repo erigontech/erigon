@@ -89,12 +89,14 @@ func odrAccounts(ctx context.Context, db ethdb.Database, config *params.ChainCon
 	var (
 		res []byte
 		st  *state.StateDB
+		tds *state.TrieDbState
 		err error
 	)
 	for _, addr := range acc {
 		if bc != nil {
 			header := bc.GetHeaderByHash(bhash)
-			st, err = state.New(header.Root, state.NewDatabase(db))
+			tds, err = state.NewTrieDbState(header.Root, db, header.Number.Uint64())
+			st = state.New(tds)
 		} else {
 			header := lc.GetHeaderByHash(bhash)
 			st = light.NewState(ctx, header, lc.Odr())
@@ -126,7 +128,8 @@ func odrContractCall(ctx context.Context, db ethdb.Database, config *params.Chai
 		data[35] = byte(i)
 		if bc != nil {
 			header := bc.GetHeaderByHash(bhash)
-			statedb, err := state.New(header.Root, state.NewDatabase(db))
+			tds, err := state.NewTrieDbState(header.Root, db, header.Number.Uint64())
+			statedb := state.New(tds)
 
 			if err == nil {
 				from := statedb.GetOrNewStateObject(testBankAddress)

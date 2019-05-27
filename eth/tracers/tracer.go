@@ -517,7 +517,10 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+	if depth != 0 {
+		return nil
+	}
 	jst.ctx["type"] = "CALL"
 	if create {
 		jst.ctx["type"] = "CREATE"
@@ -586,7 +589,10 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (jst *Tracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	if depth != 0 {
+		return nil
+	}
 	jst.ctx["output"] = output
 	jst.ctx["gasUsed"] = gasUsed
 	jst.ctx["time"] = t.String()
@@ -594,6 +600,18 @@ func (jst *Tracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, er
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
+	return nil
+}
+
+func (jst *Tracer) CaptureCreate(creator, creation common.Address) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 

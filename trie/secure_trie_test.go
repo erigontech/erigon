@@ -27,17 +27,19 @@ import (
 	"github.com/ethereum/go-ethereum/ethdb"
 )
 
-func newEmptySecure() *SecureTrie {
-	trie, _ := NewSecure(common.Hash{}, NewDatabase(ethdb.NewMemDatabase()), 0)
-	return trie
+func newEmptySecure() (ethdb.Database, *SecureTrie) {
+	diskdb := ethdb.NewMemDatabase()
+
+	trie, _ := NewSecure(common.Hash{}, testbucket, false)
+	return diskdb, trie
 }
 
 // makeTestSecureTrie creates a large enough secure trie for testing.
-func makeTestSecureTrie() (*Database, *SecureTrie, map[string][]byte) {
+func makeTestSecureTrie() (ethdb.Database, *SecureTrie, map[string][]byte) {
 	// Create an empty trie
-	triedb := NewDatabase(ethdb.NewMemDatabase())
+	diskdb := ethdb.NewMemDatabase()
 
-	trie, _ := NewSecure(common.Hash{}, triedb, 0)
+	trie, _ := NewSecure(common.Hash{}, testbucket, false)
 
 	// Fill it with some arbitrary data
 	content := make(map[string][]byte)
@@ -45,27 +47,26 @@ func makeTestSecureTrie() (*Database, *SecureTrie, map[string][]byte) {
 		// Map the same data under multiple keys
 		key, val := common.LeftPadBytes([]byte{1, i}, 32), []byte{i}
 		content[string(key)] = val
-		trie.Update(key, val)
+		trie.Update(diskdb, key, val, 0)
 
 		key, val = common.LeftPadBytes([]byte{2, i}, 32), []byte{i}
 		content[string(key)] = val
-		trie.Update(key, val)
+		trie.Update(diskdb, key, val, 0)
 
 		// Add some other data to inflate the trie
 		for j := byte(3); j < 13; j++ {
 			key, val = common.LeftPadBytes([]byte{j, i}, 32), []byte{j, i}
 			content[string(key)] = val
-			trie.Update(key, val)
+			trie.Update(diskdb, key, val, 0)
 		}
 	}
-	trie.Commit(nil)
 
 	// Return the generated trie
-	return triedb, trie, content
+	return diskdb, trie, content
 }
 
 func TestSecureDelete(t *testing.T) {
-	trie := newEmptySecure()
+	diskdb, trie := newEmptySecure()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -78,9 +79,9 @@ func TestSecureDelete(t *testing.T) {
 	}
 	for _, val := range vals {
 		if val.v != "" {
-			trie.Update([]byte(val.k), []byte(val.v))
+			trie.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 		} else {
-			trie.Delete([]byte(val.k))
+			trie.Delete(diskdb, []byte(val.k), 0)
 		}
 	}
 	hash := trie.Hash()
@@ -91,24 +92,24 @@ func TestSecureDelete(t *testing.T) {
 }
 
 func TestSecureGetKey(t *testing.T) {
-	trie := newEmptySecure()
-	trie.Update([]byte("foo"), []byte("bar"))
+	diskdb, trie := newEmptySecure()
+	trie.Update(diskdb, []byte("foo"), []byte("bar"), 0)
 
 	key := []byte("foo")
 	value := []byte("bar")
 	seckey := crypto.Keccak256(key)
 
-	if !bytes.Equal(trie.Get(key), value) {
+	if !bytes.Equal(trie.Get(diskdb, key, 0), value) {
 		t.Errorf("Get did not return bar")
 	}
-	if k := trie.GetKey(seckey); !bytes.Equal(k, key) {
+	if k := trie.GetKey(diskdb, seckey); !bytes.Equal(k, key) {
 		t.Errorf("GetKey returned %q, want %q", k, key)
 	}
 }
 
 func TestSecureTrieConcurrency(t *testing.T) {
 	// Create an initial trie and copy if for concurrent access
-	_, trie, _ := makeTestSecureTrie()
+	diskdb, trie, _ := makeTestSecureTrie()
 
 	threads := runtime.NumCPU()
 	tries := make([]*SecureTrie, threads)
@@ -126,18 +127,17 @@ func TestSecureTrieConcurrency(t *testing.T) {
 			for j := byte(0); j < 255; j++ {
 				// Map the same data under multiple keys
 				key, val := common.LeftPadBytes([]byte{byte(index), 1, j}, 32), []byte{j}
-				tries[index].Update(key, val)
+				tries[index].Update(diskdb, key, val, 0)
 
 				key, val = common.LeftPadBytes([]byte{byte(index), 2, j}, 32), []byte{j}
-				tries[index].Update(key, val)
+				tries[index].Update(diskdb, key, val, 0)
 
 				// Add some other data to inflate the trie
 				for k := byte(3); k < 13; k++ {
 					key, val = common.LeftPadBytes([]byte{byte(index), k, j}, 32), []byte{k, j}
-					tries[index].Update(key, val)
+					tries[index].Update(diskdb, key, val, 0)
 				}
 			}
-			tries[index].Commit(nil)
 		}(i)
 	}
 	// Wait for all threads to finish

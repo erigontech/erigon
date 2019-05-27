@@ -330,10 +330,8 @@ func (s *stateSync) commit(force bool) error {
 	}
 	start := time.Now()
 	b := s.d.stateDB.NewBatch()
-	if written, err := s.sched.Commit(b); written == 0 || err != nil {
-		return err
-	}
-	if err := b.Write(); err != nil {
+	s.sched.Commit(b)
+	if _, err := b.Commit(); err != nil {
 		return fmt.Errorf("DB write error: %v", err)
 	}
 	s.updateStats(s.numUncommitted, 0, 0, time.Since(start))

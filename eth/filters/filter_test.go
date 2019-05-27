@@ -35,7 +35,7 @@ import (
 )
 
 func makeReceipt(addr common.Address) *types.Receipt {
-	receipt := types.NewReceipt(nil, false, 0)
+	receipt := types.NewReceipt(false, 0)
 	receipt.Logs = []*types.Log{
 		{Address: addr},
 	}
@@ -51,7 +51,7 @@ func BenchmarkFilters(b *testing.B) {
 	defer os.RemoveAll(dir)
 
 	var (
-		db, _      = ethdb.NewLDBDatabase(dir, 0, 0)
+		db, _      = ethdb.NewLDBDatabase(dir)
 		mux        = new(event.TypeMux)
 		txFeed     = new(event.Feed)
 		rmLogsFeed = new(event.Feed)
@@ -110,7 +110,7 @@ func TestFilters(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	var (
-		db, _      = ethdb.NewLDBDatabase(dir, 0, 0)
+		db, _      = ethdb.NewLDBDatabase(dir)
 		mux        = new(event.TypeMux)
 		txFeed     = new(event.Feed)
 		rmLogsFeed = new(event.Feed)
@@ -131,7 +131,7 @@ func TestFilters(t *testing.T) {
 	chain, receipts := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 1000, func(i int, gen *core.BlockGen) {
 		switch i {
 		case 1:
-			receipt := types.NewReceipt(nil, false, 0)
+			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
 				{
 					Address: addr,
@@ -140,7 +140,7 @@ func TestFilters(t *testing.T) {
 			}
 			gen.AddUncheckedReceipt(receipt)
 		case 2:
-			receipt := types.NewReceipt(nil, false, 0)
+			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
 				{
 					Address: addr,
@@ -149,7 +149,7 @@ func TestFilters(t *testing.T) {
 			}
 			gen.AddUncheckedReceipt(receipt)
 		case 998:
-			receipt := types.NewReceipt(nil, false, 0)
+			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
 				{
 					Address: addr,
@@ -158,7 +158,7 @@ func TestFilters(t *testing.T) {
 			}
 			gen.AddUncheckedReceipt(receipt)
 		case 999:
-			receipt := types.NewReceipt(nil, false, 0)
+			receipt := types.NewReceipt(false, 0)
 			receipt.Logs = []*types.Log{
 				{
 					Address: addr,

@@ -31,9 +31,11 @@ var dumper = spew.ConfigState{Indent: "    "}
 func TestStorageRangeAt(t *testing.T) {
 	// Create a state where account 0x010000... has a few storage entries.
 	var (
-		state, _ = state.New(common.Hash{}, state.NewDatabase(ethdb.NewMemDatabase()))
-		addr     = common.Address{0x01}
-		keys     = []common.Hash{ // hashes of Keys of storage
+		db      = ethdb.NewMemDatabase()
+		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		statedb = state.New(tds)
+		addr    = common.Address{0x01}
+		keys    = []common.Hash{ // hashes of Keys of storage
 			common.HexToHash("340dd630ad21bf010b4e676dbfa9ba9a02175262d1fa356232cfde6cb5b47ef2"),
 			common.HexToHash("426fcb404ab2d5d8e61a3d918108006bbb0a9be65e92235bb10eefbdb6dcd053"),
 			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
@@ -47,8 +49,11 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 	)
 	for _, entry := range storage {
-		state.SetState(addr, *entry.Key, entry.Value)
+		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
+	tds.IntermediateRoot(statedb, false)
+	tds.SetBlockNr(1)
+	statedb.Finalise(false, tds.DbStateWriter())
 
 	// Check a few combinations of limit and start/end.
 	tests := []struct {
@@ -77,8 +82,9 @@ func TestStorageRangeAt(t *testing.T) {
 			want: StorageRangeResult{storageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
 		},
 	}
+	dbs := state.NewDbState(db, 1)
 	for _, test := range tests {
-		result, err := storageRangeAt(state.StorageTrie(addr), test.start, test.limit)
+		result, err := storageRangeAt(dbs, addr, test.start, test.limit)
 		if err != nil {
 			t.Error(err)
 		}

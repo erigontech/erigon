@@ -33,11 +33,12 @@ import (
 // BlockGen creates blocks for testing.
 // See GenerateChain for a detailed explanation.
 type BlockGen struct {
-	i       int
-	parent  *types.Block
-	chain   []*types.Block
-	header  *types.Header
-	statedb *state.StateDB
+	i           int
+	parent      *types.Block
+	chain       []*types.Block
+	header      *types.Header
+	statedb     *state.StateDB
+	triedbstate *state.TrieDbState
 
 	gasPool  *GasPool
 	txs      []*types.Transaction
@@ -96,9 +97,16 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 		b.SetCoinbase(common.Address{})
 	}
 	b.statedb.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.header, tx, &b.header.GasUsed, vm.Config{})
+	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.triedbstate.TrieStateWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
+	}
+	if !b.config.IsByzantium(b.header.Number) {
+		rootHash, err := b.triedbstate.TrieRoot()
+		if err != nil {
+			panic(err)
+		}
+		receipt.PostState = rootHash.Bytes()
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -175,9 +183,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &fakeChainReader{config: config}
-	genblock := func(i int, parent *types.Block, statedb *state.StateDB) (*types.Block, types.Receipts) {
-		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, config: config, engine: engine}
-		b.header = makeHeader(chainreader, parent, statedb, b.engine)
+	genblock := func(i int, parent *types.Block, statedb *state.StateDB, tds *state.TrieDbState) (*types.Block, types.Receipts) {
+		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
+		b.header = makeHeader(chainreader, parent, statedb, tds, b.engine)
 
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
@@ -197,26 +205,37 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			block, _ := b.engine.Finalize(chainreader, b.header, statedb, b.txs, b.uncles, b.receipts)
-
+			_, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts)
+			if err != nil {
+				panic(fmt.Sprintf("could not finalize block: %v", err))
+			}
+			b.header.Root, err = tds.IntermediateRoot(statedb, config.IsEIP158(b.header.Number))
+			if err != nil {
+				panic(fmt.Sprintf("could not get root: %v", err))
+			}
+			// Recreating block to make sure Root makes it into the header
+			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			// Write state changes to db
-			root, err := statedb.Commit(config.IsEIP158(b.header.Number))
+			err = statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter())
 			if err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
-			}
-			if err := statedb.Database().TrieDB().Commit(root, false); err != nil {
-				panic(fmt.Sprintf("trie write error: %v", err))
 			}
 			return block, b.receipts
 		}
 		return nil, nil
 	}
+	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
+	if err != nil {
+		panic(err)
+	}
 	for i := 0; i < n; i++ {
-		statedb, err := state.New(parent.Root(), state.NewDatabase(db))
+		statedb := state.New(tds)
+		err = db.DeleteTimestamp(parent.NumberU64() + 1)
 		if err != nil {
 			panic(err)
 		}
-		block, receipt := genblock(i, parent, statedb)
+		block, receipt := genblock(i, parent, statedb, tds)
+		tds.SetBlockNr(block.NumberU64())
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
@@ -224,16 +243,21 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	return blocks, receipts
 }
 
-func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.StateDB, engine consensus.Engine) *types.Header {
+func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.StateDB, tds *state.TrieDbState, engine consensus.Engine) *types.Header {
 	var time *big.Int
 	if parent.Time() == nil {
 		time = big.NewInt(10)
 	} else {
 		time = new(big.Int).Add(parent.Time(), big.NewInt(10)) // block time is fixed at 10 seconds
 	}
+	number := new(big.Int).Add(parent.Number(), common.Big1)
+	//root, err := tds.IntermediateRoot(state, chain.Config().IsEIP158(number))
+	//if err != nil {
+	//	panic(err)
+	//}
 
 	return &types.Header{
-		Root:       state.IntermediateRoot(chain.Config().IsEIP158(parent.Number())),
+		Root:       common.Hash{},
 		ParentHash: parent.Hash(),
 		Coinbase:   parent.Coinbase(),
 		Difficulty: engine.CalcDifficulty(chain, time.Uint64(), &types.Header{
@@ -243,7 +267,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.S
 			UncleHash:  parent.UncleHash(),
 		}),
 		GasLimit: CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
-		Number:   new(big.Int).Add(parent.Number(), common.Big1),
+		Number:   number,
 		Time:     time,
 	}
 }

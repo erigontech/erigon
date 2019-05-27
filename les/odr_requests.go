@@ -565,16 +565,31 @@ type readTraceDB struct {
 }
 
 // Get returns a stored node
-func (db *readTraceDB) Get(k []byte) ([]byte, error) {
+func (db *readTraceDB) Get(bucket, k []byte) ([]byte, error) {
 	if db.reads == nil {
 		db.reads = make(map[string]struct{})
 	}
 	db.reads[string(k)] = struct{}{}
-	return db.db.Get(k)
+	return db.db.Get(bucket, k)
+}
+
+func (db *readTraceDB) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	return db.db.GetAsOf(bucket, hBucket, key, timestamp)
 }
 
 // Has returns true if the node set contains the given key
-func (db *readTraceDB) Has(key []byte) (bool, error) {
-	_, err := db.Get(key)
+func (db *readTraceDB) Has(bucket, key []byte) (bool, error) {
+	_, err := db.Get(bucket, key)
 	return err == nil, nil
+}
+
+func (db *readTraceDB) Walk(bucket, key []byte, keybits uint, walker func([]byte, []byte) (bool, error)) error {
+	return db.db.Walk(bucket, key, keybits, walker)
+}
+
+func (db *readTraceDB) GetHash(index uint32) []byte {
+	return nil
+}
+
+func (db *readTraceDB) PutHash(index uint32, hash []byte) {
 }

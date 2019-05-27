@@ -51,14 +51,14 @@ func TestNodeIterator(t *testing.T) {
 	head := blockchain.CurrentHeader()
 	lightTrie, _ := NewStateDatabase(ctx, head, odr).OpenTrie(head.Root)
 	fullTrie, _ := state.NewDatabase(fulldb).OpenTrie(head.Root)
-	if err := diffTries(fullTrie, lightTrie); err != nil {
+	if err := diffTries(fulldb, lightdb, fullTrie, lightTrie, head.Number.Uint64()); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func diffTries(t1, t2 state.Trie) error {
-	i1 := trie.NewIterator(t1.NodeIterator(nil))
-	i2 := trie.NewIterator(t2.NodeIterator(nil))
+func diffTries(db1, db2 ethdb.Database, t1, t2 state.Trie, blockNr uint64) error {
+	i1 := trie.NewIterator(t1.NodeIterator(db1, nil, blockNr))
+	i2 := trie.NewIterator(t2.NodeIterator(db2, nil, blockNr))
 	for i1.Next() && i2.Next() {
 		if !bytes.Equal(i1.Key, i2.Key) {
 			spew.Dump(i2)

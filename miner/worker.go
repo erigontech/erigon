@@ -81,11 +81,12 @@ type environment struct {
 	signer types.Signer
 
 	state     *state.StateDB // apply state changes here
-	ancestors mapset.Set     // ancestor set (used for checking uncle parent validity)
-	family    mapset.Set     // family set (used for checking uncle invalidity)
-	uncles    mapset.Set     // uncle set
-	tcount    int            // tx count in cycle
-	gasPool   *core.GasPool  // available gas used to pack transactions
+	tds       *state.TrieDbState
+	ancestors mapset.Set    // ancestor set (used for checking uncle parent validity)
+	family    mapset.Set    // family set (used for checking uncle invalidity)
+	uncles    mapset.Set    // uncle set
+	tcount    int           // tx count in cycle
+	gasPool   *core.GasPool // available gas used to pack transactions
 
 	header   *types.Header
 	txs      []*types.Transaction
@@ -96,6 +97,7 @@ type environment struct {
 type task struct {
 	receipts  []*types.Receipt
 	state     *state.StateDB
+	tds       *state.TrieDbState
 	block     *types.Block
 	createdAt time.Time
 }
@@ -163,6 +165,7 @@ type worker struct {
 	snapshotMu    sync.RWMutex // The lock used to protect the block snapshot and state snapshot
 	snapshotBlock *types.Block
 	snapshotState *state.StateDB
+	snapshotTds   *state.TrieDbState
 
 	// atomic status counters
 	running int32 // The indicator whether the consensus engine is running or not.
@@ -246,14 +249,14 @@ func (w *worker) setRecommitInterval(interval time.Duration) {
 }
 
 // pending returns the pending state and corresponding block.
-func (w *worker) pending() (*types.Block, *state.StateDB) {
+func (w *worker) pending() (*types.Block, *state.StateDB, *state.TrieDbState) {
 	// return a snapshot to avoid contention on currentMu mutex
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()
 	if w.snapshotState == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
-	return w.snapshotBlock, w.snapshotState.Copy()
+	return w.snapshotBlock, w.snapshotState.Copy(), w.snapshotTds.Copy()
 }
 
 // pendingBlock returns pending block.
@@ -576,7 +579,7 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			stat, err := w.chain.WriteBlockWithState(block, receipts, task.state)
+			stat, err := w.chain.WriteBlockWithState(block, receipts, task.state, task.tds)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
 				continue
@@ -608,13 +611,14 @@ func (w *worker) resultLoop() {
 
 // makeCurrent creates a new environment for the current cycle.
 func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
-	state, err := w.chain.StateAt(parent.Root())
+	state, tds, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
 	env := &environment{
 		signer:    types.NewEIP155Signer(w.config.ChainID),
 		state:     state,
+		tds:       tds,
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -691,10 +695,17 @@ func (w *worker) updateSnapshot() {
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
 
-	receipt, _, err := core.ApplyTransaction(w.config, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
+	receipt, _, err := core.ApplyTransaction(w.config, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.tds.TrieStateWriter(), w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
+	}
+	if !w.config.IsByzantium(w.current.header.Number) {
+		rootHash, err := w.current.tds.TrieRoot()
+		if err != nil {
+			return nil, err
+		}
+		receipt.PostState = rootHash.Bytes()
 	}
 	w.current.txs = append(w.current.txs, tx)
 	w.current.receipts = append(w.current.receipts, receipt)
@@ -952,7 +963,12 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		*receipts[i] = *l
 	}
 	s := w.current.state.Copy()
-	block, err := w.engine.Finalize(w.chain, w.current.header, s, w.current.txs, uncles, w.current.receipts)
+	tds := w.current.tds.Copy()
+	block, err := w.engine.Finalize(w.config, w.current.header, s, w.current.txs, uncles, w.current.receipts)
+	if err != nil {
+		return err
+	}
+	w.current.header.Root, err = tds.IntermediateRoot(s, w.chain.Config().IsEIP158(w.current.header.Number))
 	if err != nil {
 		return err
 	}
@@ -961,7 +977,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, block: block, createdAt: time.Now()}:
+		case w.taskCh <- &task{receipts: receipts, state: s, tds: tds, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 
 			feesWei := new(big.Int)

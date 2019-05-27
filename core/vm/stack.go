@@ -29,7 +29,7 @@ type Stack struct {
 }
 
 func newstack() *Stack {
-	return &Stack{data: make([]*big.Int, 0, 1024)}
+	return &Stack{}
 }
 
 // Data returns the underlying big.Int array.
@@ -54,6 +54,10 @@ func (st *Stack) pop() (ret *big.Int) {
 }
 
 func (st *Stack) len() int {
+	return len(st.data)
+}
+
+func (st *Stack) Len() int {
 	return len(st.data)
 }
 

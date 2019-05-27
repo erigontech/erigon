@@ -27,16 +27,13 @@ import (
 	"time"
 
 	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/iterator"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/storage"
-	"github.com/syndtr/goleveldb/leveldb/util"
+
+	"github.com/boltdb/bolt"
 )
 
 // Keys in the node database.
 const (
+	bucket         = "b"
 	dbVersionKey   = "version" // Version of the database to flush if changes
 	dbNodePrefix   = "n:"      // Identifier to prefix node entries with
 	dbLocalPrefix  = "local:"
@@ -65,7 +62,7 @@ var zeroIP = make(net.IP, 16)
 // DB is the node database, storing previously seen nodes and any collected metadata about
 // them for QoS purposes.
 type DB struct {
-	lvl    *leveldb.DB   // Interface to the database itself
+	lvl    *bolt.DB      // Interface to the database itself
 	runner sync.Once     // Ensures we can start at most one expirer
 	quit   chan struct{} // Channel to signal the expiring thread to stop
 }
@@ -81,7 +78,7 @@ func OpenDB(path string) (*DB, error) {
 
 // newMemoryNodeDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB() (*DB, error) {
-	db, err := leveldb.Open(storage.NewMemStorage(), nil)
+	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		return nil, err
 	}
@@ -91,11 +88,7 @@ func newMemoryDB() (*DB, error) {
 // newPersistentNodeDB creates/opens a leveldb backed persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
-	opts := &opt.Options{OpenFilesCacheCapacity: 5}
-	db, err := leveldb.OpenFile(path, opts)
-	if _, iscorrupted := err.(*errors.ErrCorrupted); iscorrupted {
-		db, err = leveldb.RecoverFile(path, nil)
-	}
+	db, err := bolt.Open(path, 0600, &bolt.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -104,24 +97,34 @@ func newPersistentDB(path string) (*DB, error) {
 	currentVer := make([]byte, binary.MaxVarintLen64)
 	currentVer = currentVer[:binary.PutVarint(currentVer, int64(dbVersion))]
 
-	blob, err := db.Get([]byte(dbVersionKey), nil)
-	switch err {
-	case leveldb.ErrNotFound:
-		// Version not found (i.e. empty cache), insert it
-		if err := db.Put([]byte(dbVersionKey), currentVer, nil); err != nil {
-			db.Close()
+	var blob []byte
+	if err := db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b != nil {
+			if v := b.Get([]byte(dbVersionKey)); v != nil {
+				// v only lives during transaction tx
+				blob = make([]byte, len(v))
+				copy(blob, v)
+				return nil
+			}
+		}
+		if b == nil {
+			var err error
+			b, err = tx.CreateBucketIfNotExists([]byte(bucket))
+			if err != nil {
+				return err
+			}
+		}
+		return b.Put([]byte(dbVersionKey), currentVer)
+	}); err != nil {
+		return nil, err
+	}
+	if blob != nil && !bytes.Equal(blob, currentVer) {
+		db.Close()
+		if err := os.Remove(path); err != nil {
 			return nil, err
 		}
-
-	case nil:
-		// Version present, flush if different
-		if !bytes.Equal(blob, currentVer) {
-			db.Close()
-			if err = os.RemoveAll(path); err != nil {
-				return nil, err
-			}
-			return newPersistentDB(path)
-		}
+		return newPersistentDB(path)
 	}
 	return &DB{lvl: db, quit: make(chan struct{})}, nil
 }
@@ -182,12 +185,20 @@ func localItemKey(id ID, field string) []byte {
 
 // fetchInt64 retrieves an integer associated with a particular key.
 func (db *DB) fetchInt64(key []byte) int64 {
-	blob, err := db.lvl.Get(key, nil)
-	if err != nil {
-		return 0
-	}
-	val, read := binary.Varint(blob)
-	if read <= 0 {
+	var val int64
+	if err := db.lvl.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
+		}
+		blob := b.Get(key)
+		if blob != nil {
+			if v, read := binary.Varint(blob); read > 0 {
+				val = v
+			}
+		}
+		return nil
+	}); err != nil {
 		return 0
 	}
 	return val
@@ -197,16 +208,31 @@ func (db *DB) fetchInt64(key []byte) int64 {
 func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
-	return db.lvl.Put(key, blob, nil)
+	return db.lvl.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		return b.Put(key, blob)
+	})
 }
 
 // fetchUint64 retrieves an integer associated with a particular key.
 func (db *DB) fetchUint64(key []byte) uint64 {
-	blob, err := db.lvl.Get(key, nil)
-	if err != nil {
+	var val uint64
+	if err := db.lvl.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
+		}
+		blob := b.Get(key)
+		if blob != nil {
+			val, _ = binary.Uvarint(blob)
+		}
+		return nil
+	}); err != nil {
 		return 0
 	}
-	val, _ := binary.Uvarint(blob)
 	return val
 }
 
@@ -214,13 +240,32 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
-	return db.lvl.Put(key, blob, nil)
+	return db.lvl.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		return b.Put(key, blob)
+	})
 }
 
 // Node retrieves a node with a given id from the database.
 func (db *DB) Node(id ID) *Node {
-	blob, err := db.lvl.Get(nodeKey(id), nil)
-	if err != nil {
+	var blob []byte
+	if err := db.lvl.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
+		}
+		if v := b.Get(nodeKey(id)); v != nil {
+			blob = make([]byte, len(v))
+			copy(blob, v)
+		}
+		return nil
+	}); err != nil {
+		return nil
+	}
+	if blob == nil {
 		return nil
 	}
 	return mustDecodeNode(id[:], blob)
@@ -245,7 +290,13 @@ func (db *DB) UpdateNode(node *Node) error {
 	if err != nil {
 		return err
 	}
-	if err := db.lvl.Put(nodeKey(node.ID()), blob, nil); err != nil {
+	if err := db.lvl.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		if err != nil {
+			return err
+		}
+		return b.Put(nodeKey(node.ID()), blob)
+	}); err != nil {
 		return err
 	}
 	return db.storeUint64(nodeItemKey(node.ID(), zeroIP, dbNodeSeq), node.Seq())
@@ -270,12 +321,20 @@ func (db *DB) DeleteNode(id ID) {
 	deleteRange(db.lvl, nodeKey(id))
 }
 
-func deleteRange(db *leveldb.DB, prefix []byte) {
-	it := db.NewIterator(util.BytesPrefix(prefix), nil)
-	defer it.Release()
-	for it.Next() {
-		db.Delete(it.Key(), nil)
-	}
+func deleteRange(db *bolt.DB, prefix []byte) {
+	db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.Seek(prefix); bytes.HasPrefix(k, prefix); k, _ = c.Next() {
+			if err := b.Delete(k); err != nil {
+				return nil
+			}
+		}
+		return nil
+	})
 }
 
 // ensureExpirer is a small helper method ensuring that the data expiration
@@ -309,39 +368,51 @@ func (db *DB) expirer() {
 // expireNodes iterates over the database and deletes all nodes that have not
 // been seen (i.e. received a pong from) for some time.
 func (db *DB) expireNodes() {
-	it := db.lvl.NewIterator(util.BytesPrefix([]byte(dbNodePrefix)), nil)
-	defer it.Release()
-	if !it.Next() {
-		return
-	}
-
 	var (
 		threshold    = time.Now().Add(-dbNodeExpiration).Unix()
 		youngestPong int64
-		atEnd        = false
 	)
-	for !atEnd {
-		id, ip, field := splitNodeItemKey(it.Key())
-		if field == dbNodePong {
-			time, _ := binary.Varint(it.Value())
-			if time > youngestPong {
-				youngestPong = time
-			}
-			if time < threshold {
-				// Last pong from this IP older than threshold, remove fields belonging to it.
-				deleteRange(db.lvl, nodeItemKey(id, ip, ""))
-			}
+	var toDelete [][]byte
+	db.lvl.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
 		}
-		atEnd = !it.Next()
-		nextID, _ := splitNodeKey(it.Key())
-		if atEnd || nextID != id {
-			// We've moved beyond the last entry of the current ID.
-			// Remove everything if there was no recent enough pong.
+		p := []byte(dbNodePrefix)
+		c := b.Cursor()
+		var prevId ID
+		var empty bool = true
+		for k, v := c.Seek(p); bytes.HasPrefix(k, p); k, v = c.Next() {
+			id, ip, field := splitNodeItemKey(k)
+			if field == dbNodePong {
+				time, _ := binary.Varint(v)
+				if time > youngestPong {
+					youngestPong = time
+				}
+				if time < threshold {
+					// Last pong from this IP older than threshold, remove fields belonging to it.
+					toDelete = append(toDelete, nodeItemKey(id, ip, ""))
+				}
+			}
+			if id != prevId {
+				if youngestPong > 0 && youngestPong < threshold {
+					toDelete = append(toDelete, nodeKey(prevId))
+				}
+				youngestPong = 0
+			}
+			prevId = id
+			empty = false
+		}
+		if !empty {
 			if youngestPong > 0 && youngestPong < threshold {
-				deleteRange(db.lvl, nodeKey(id))
+				toDelete = append(toDelete, nodeKey(prevId))
 			}
 			youngestPong = 0
 		}
+		return nil
+	})
+	for _, td := range toDelete {
+		deleteRange(db.lvl, td)
 	}
 }
 
@@ -394,50 +465,47 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 	var (
 		now   = time.Now()
 		nodes = make([]*Node, 0, n)
-		it    = db.lvl.NewIterator(nil, nil)
 		id    ID
 	)
-	defer it.Release()
 
-seek:
-	for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
-		// Seek to a random entry. The first byte is incremented by a
-		// random amount each time in order to increase the likelihood
-		// of hitting all existing nodes in very small databases.
-		ctr := id[0]
-		rand.Read(id[:])
-		id[0] = ctr + id[0]%16
-		it.Seek(nodeKey(id))
-
-		n := nextNode(it)
-		if n == nil {
-			id[0] = 0
-			continue seek // iterator exhausted
+	db.lvl.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte(bucket))
+		if b == nil {
+			return nil
 		}
-		if now.Sub(db.LastPongReceived(n.ID(), n.IP())) > maxAge {
-			continue seek
-		}
-		for i := range nodes {
-			if nodes[i].ID() == n.ID() {
-				continue seek // duplicate
+		c := b.Cursor()
+	seek:
+		for seeks := 0; len(nodes) < n && seeks < n*5; seeks++ {
+			// Seek to a random entry. The first byte is incremented by a
+			// random amount each time in order to increase the likelihood
+			// of hitting all existing nodes in very small databases.
+			ctr := id[0]
+			rand.Read(id[:])
+			id[0] = ctr + id[0]%16
+			var n *Node
+			for k, v := c.Seek(nodeKey(id)); k != nil && n == nil; k, v = c.Next() {
+				id, rest := splitNodeKey(k)
+				if string(rest) == dbDiscoverRoot {
+					n = mustDecodeNode(id[:], v)
+				}
 			}
+			if n == nil {
+				id[0] = 0
+				continue // iterator exhausted
+			}
+			if now.Sub(db.LastPongReceived(n.ID(), n.IP())) > maxAge {
+				continue
+			}
+			for i := range nodes {
+				if nodes[i].ID() == n.ID() {
+					continue seek // duplicate
+				}
+			}
+			nodes = append(nodes, n)
 		}
-		nodes = append(nodes, n)
-	}
+		return nil
+	})
 	return nodes
-}
-
-// reads the next node record from the iterator, skipping over other
-// database entries.
-func nextNode(it iterator.Iterator) *Node {
-	for end := false; !end; end = !it.Next() {
-		id, rest := splitNodeKey(it.Key())
-		if string(rest) != dbDiscoverRoot {
-			continue
-		}
-		return mustDecodeNode(id[:], it.Value())
-	}
-	return nil
 }
 
 // close flushes and closes the database files.

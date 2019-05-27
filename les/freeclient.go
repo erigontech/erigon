@@ -191,7 +191,7 @@ type freeClientPoolStorage struct {
 // loadFromDb restores pool status from the database storage
 // (automatically called at initialization)
 func (f *freeClientPool) loadFromDb() {
-	enc, err := f.db.Get([]byte("freeClientPool"))
+	enc, err := f.db.Get([]byte("freeClientPool"), []byte("freeClientPool"))
 	if err != nil {
 		return
 	}
@@ -230,7 +230,7 @@ func (f *freeClientPool) saveToDb() {
 	if err != nil {
 		log.Error("Failed to encode client list", "err", err)
 	} else {
-		f.db.Put([]byte("freeClientPool"), enc)
+		f.db.Put([]byte("freeClientPool"), []byte("freeClientPool"), enc)
 	}
 }
 

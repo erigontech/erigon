@@ -27,6 +27,7 @@ import (
 	"github.com/ethereum/go-ethereum/consensus/ethash"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/eth/downloader"
@@ -327,7 +328,7 @@ func testGetProofs(t *testing.T, protocol int) {
 	for i := uint64(0); i <= bc.CurrentBlock().NumberU64(); i++ {
 		header := bc.GetHeaderByNumber(i)
 		root := header.Root
-		trie, _ := trie.New(root, trie.NewDatabase(server.db))
+		trie := trie.New(root, state.AccountsBucket, nil, false)
 
 		for _, acc := range accounts {
 			req := ProofReq{
@@ -339,10 +340,10 @@ func testGetProofs(t *testing.T, protocol int) {
 			switch protocol {
 			case 1:
 				var proof light.NodeList
-				trie.Prove(crypto.Keccak256(acc[:]), 0, &proof)
+				trie.Prove(server.db, crypto.Keccak256(acc[:]), 0, &proof, header.Number.Uint64())
 				proofsV1 = append(proofsV1, proof)
 			case 2:
-				trie.Prove(crypto.Keccak256(acc[:]), 0, proofsV2)
+				trie.Prove(server.db, crypto.Keccak256(acc[:]), 0, proofsV2, header.Number.Uint64())
 			}
 		}
 	}
@@ -405,16 +406,16 @@ func testGetCHTProofs(t *testing.T, protocol int) {
 	switch protocol {
 	case 1:
 		root := light.GetChtRoot(server.db, 0, bc.GetHeaderByNumber(frequency-1).Hash())
-		trie, _ := trie.New(root, trie.NewDatabase(ethdb.NewTable(server.db, light.ChtTablePrefix)))
+		trie := trie.New(root, light.ChtTablePrefix, nil, false)
 
 		var proof light.NodeList
-		trie.Prove(key, 0, &proof)
+		trie.Prove(server.db, key, 0, &proof, frequency-1)
 		proofsV1[0].Proof = proof
 
 	case 2:
-		root := light.GetChtRoot(server.db, (frequency/config.ChtSize)-1, bc.GetHeaderByNumber(frequency-1).Hash())
-		trie, _ := trie.New(root, trie.NewDatabase(ethdb.NewTable(server.db, light.ChtTablePrefix)))
-		trie.Prove(key, 0, &proofsV2.Proofs)
+		root := light.GetChtV2Root(server.db, 0, bc.GetHeaderByNumber(frequency-1).Hash())
+		trie := trie.New(root, light.ChtTablePrefix, nil, false)
+		trie.Prove(server.db, key, 0, &proofsV2.Proofs, frequency-1)
 	}
 	// Assemble the requests for the different protocols
 	requestsV1 := []ChtReq{{
@@ -480,8 +481,8 @@ func TestGetBloombitsProofs(t *testing.T) {
 		var proofs HelperTrieResps
 
 		root := light.GetBloomTrieRoot(server.db, 0, bc.GetHeaderByNumber(config.BloomTrieSize-1).Hash())
-		trie, _ := trie.New(root, trie.NewDatabase(ethdb.NewTable(server.db, light.BloomTrieTablePrefix)))
-		trie.Prove(key, 0, &proofs.Proofs)
+		trie := trie.New(root, light.BloomTrieTablePrefix, nil, false)
+		trie.Prove(server.db, key, 0, &proofs.Proofs, params.BloomTrieFrequency-1)
 
 		// Send the proof request and verify the response
 		cost := server.tPeer.GetRequestCost(GetHelperTrieProofsMsg, len(requests))

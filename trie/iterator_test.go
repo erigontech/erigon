@@ -27,7 +27,7 @@ import (
 )
 
 func TestIterator(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -40,12 +40,11 @@ func TestIterator(t *testing.T) {
 	all := make(map[string]string)
 	for _, val := range vals {
 		all[val.k] = val.v
-		trie.Update([]byte(val.k), []byte(val.v))
+		trie.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 	}
-	trie.Commit(nil)
 
 	found := make(map[string]string)
-	it := NewIterator(trie.NodeIterator(nil))
+	it := NewIterator(trie.NodeIterator(diskdb, nil, 0))
 	for it.Next() {
 		found[string(it.Key)] = string(it.Value)
 	}
@@ -63,19 +62,19 @@ type kv struct {
 }
 
 func TestIteratorLargeData(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	vals := make(map[string]*kv)
 
 	for i := byte(0); i < 255; i++ {
 		value := &kv{common.LeftPadBytes([]byte{i}, 32), []byte{i}, false}
 		value2 := &kv{common.LeftPadBytes([]byte{10, i}, 32), []byte{i}, false}
-		trie.Update(value.k, value.v)
-		trie.Update(value2.k, value2.v)
+		trie.Update(diskdb, value.k, value.v, 0)
+		trie.Update(diskdb, value2.k, value2.v, 0)
 		vals[string(value.k)] = value
 		vals[string(value2.k)] = value2
 	}
 
-	it := NewIterator(trie.NodeIterator(nil))
+	it := NewIterator(trie.NodeIterator(diskdb, nil, 0))
 	for it.Next() {
 		vals[string(it.Key)].t = true
 	}
@@ -102,27 +101,14 @@ func TestNodeIteratorCoverage(t *testing.T) {
 
 	// Gather all the node hashes found by the iterator
 	hashes := make(map[common.Hash]struct{})
-	for it := trie.NodeIterator(nil); it.Next(true); {
+	for it := trie.NodeIterator(nil, nil, 0); it.Next(true); {
 		if it.Hash() != (common.Hash{}) {
 			hashes[it.Hash()] = struct{}{}
 		}
 	}
-	// Cross check the hashes and the database itself
-	for hash := range hashes {
-		if _, err := db.Node(hash); err != nil {
-			t.Errorf("failed to retrieve reported node %x: %v", hash, err)
-		}
-	}
-	for hash, obj := range db.dirties {
-		if obj != nil && hash != (common.Hash{}) {
-			if _, ok := hashes[hash]; !ok {
-				t.Errorf("state entry not reported %x", hash)
-			}
-		}
-	}
-	for _, key := range db.diskdb.(*ethdb.MemDatabase).Keys() {
-		if _, ok := hashes[common.BytesToHash(key)]; !ok {
-			t.Errorf("state entry not reported %x", key)
+	for keys, i := db.(ethdb.Mutation).Keys(), 0; i < len(keys); i += 2 {
+		if _, ok := hashes[common.BytesToHash(keys[i+1])]; !ok {
+			t.Errorf("state entry not reported %x", keys[i+1])
 		}
 	}
 }
@@ -153,25 +139,25 @@ var testdata2 = []kvs{
 }
 
 func TestIteratorSeek(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	for _, val := range testdata1 {
-		trie.Update([]byte(val.k), []byte(val.v))
+		trie.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 	}
 
 	// Seek to the middle.
-	it := NewIterator(trie.NodeIterator([]byte("fab")))
+	it := NewIterator(trie.NodeIterator(diskdb, []byte("fab"), 0))
 	if err := checkIteratorOrder(testdata1[4:], it); err != nil {
 		t.Fatal(err)
 	}
 
 	// Seek to a non-existent key.
-	it = NewIterator(trie.NodeIterator([]byte("barc")))
+	it = NewIterator(trie.NodeIterator(diskdb, []byte("barc"), 0))
 	if err := checkIteratorOrder(testdata1[1:], it); err != nil {
 		t.Fatal(err)
 	}
 
 	// Seek beyond the end.
-	it = NewIterator(trie.NodeIterator([]byte("z")))
+	it = NewIterator(trie.NodeIterator(diskdb, []byte("z"), 0))
 	if err := checkIteratorOrder(nil, it); err != nil {
 		t.Fatal(err)
 	}
@@ -194,20 +180,18 @@ func checkIteratorOrder(want []kvs, it *Iterator) error {
 }
 
 func TestDifferenceIterator(t *testing.T) {
-	triea := newEmpty()
+	diskdba, triea := newEmpty()
 	for _, val := range testdata1 {
-		triea.Update([]byte(val.k), []byte(val.v))
+		triea.Update(diskdba, []byte(val.k), []byte(val.v), 0)
 	}
-	triea.Commit(nil)
 
-	trieb := newEmpty()
+	diskdbb, trieb := newEmpty()
 	for _, val := range testdata2 {
-		trieb.Update([]byte(val.k), []byte(val.v))
+		trieb.Update(diskdbb, []byte(val.k), []byte(val.v), 0)
 	}
-	trieb.Commit(nil)
 
 	found := make(map[string]string)
-	di, _ := NewDifferenceIterator(triea.NodeIterator(nil), trieb.NodeIterator(nil))
+	di, _ := NewDifferenceIterator(triea.NodeIterator(diskdba, nil, 0), trieb.NodeIterator(diskdbb, nil, 0))
 	it := NewIterator(di)
 	for it.Next() {
 		found[string(it.Key)] = string(it.Value)
@@ -230,19 +214,17 @@ func TestDifferenceIterator(t *testing.T) {
 }
 
 func TestUnionIterator(t *testing.T) {
-	triea := newEmpty()
+	diskdba, triea := newEmpty()
 	for _, val := range testdata1 {
-		triea.Update([]byte(val.k), []byte(val.v))
+		triea.Update(diskdba, []byte(val.k), []byte(val.v), 0)
 	}
-	triea.Commit(nil)
 
-	trieb := newEmpty()
+	diskdbb, trieb := newEmpty()
 	for _, val := range testdata2 {
-		trieb.Update([]byte(val.k), []byte(val.v))
+		trieb.Update(diskdbb, []byte(val.k), []byte(val.v), 0)
 	}
-	trieb.Commit(nil)
 
-	di, _ := NewUnionIterator([]NodeIterator{triea.NodeIterator(nil), trieb.NodeIterator(nil)})
+	di, _ := NewUnionIterator([]NodeIterator{triea.NodeIterator(diskdba, nil, 0), trieb.NodeIterator(diskdbb, nil, 0)})
 	it := NewIterator(di)
 
 	all := []struct{ k, v string }{
@@ -279,69 +261,57 @@ func TestUnionIterator(t *testing.T) {
 func TestIteratorNoDups(t *testing.T) {
 	var tr Trie
 	for _, val := range testdata1 {
-		tr.Update([]byte(val.k), []byte(val.v))
+		tr.Update(nil, []byte(val.k), []byte(val.v), 0)
 	}
-	checkIteratorNoDups(t, tr.NodeIterator(nil), nil)
+	checkIteratorNoDups(t, tr.NodeIterator(nil, nil, 0), nil)
 }
 
 // This test checks that nodeIterator.Next can be retried after inserting missing trie nodes.
-func TestIteratorContinueAfterErrorDisk(t *testing.T)    { testIteratorContinueAfterError(t, false) }
-func TestIteratorContinueAfterErrorMemonly(t *testing.T) { testIteratorContinueAfterError(t, true) }
+func testIteratorContinueAfterErrorDisk(t *testing.T)    { testIteratorContinueAfterError(t, false) }
+func testIteratorContinueAfterErrorMemonly(t *testing.T) { testIteratorContinueAfterError(t, true) }
 
 func testIteratorContinueAfterError(t *testing.T, memonly bool) {
 	diskdb := ethdb.NewMemDatabase()
-	triedb := NewDatabase(diskdb)
 
-	tr, _ := New(common.Hash{}, triedb)
+	bucket := []byte("B")
+	tr := New(common.Hash{}, bucket, nil, false)
 	for _, val := range testdata1 {
-		tr.Update([]byte(val.k), []byte(val.v))
+		tr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 	}
-	tr.Commit(nil)
-	if !memonly {
-		triedb.Commit(tr.Hash(), true)
-	}
-	wantNodeCount := checkIteratorNoDups(t, tr.NodeIterator(nil), nil)
+	wantNodeCount := checkIteratorNoDups(t, tr.NodeIterator(nil, nil, 0), nil)
 
 	var (
 		diskKeys [][]byte
 		memKeys  []common.Hash
 	)
-	if memonly {
-		memKeys = triedb.Nodes()
-	} else {
-		diskKeys = diskdb.Keys()
-	}
+	diskKeys = diskdb.Keys()
 	for i := 0; i < 20; i++ {
 		// Create trie that will load all nodes from DB.
-		tr, _ := New(tr.Hash(), triedb)
+		tr := New(tr.Hash(), bucket, nil, false)
 
 		// Remove a random node from the database. It can't be the root node
 		// because that one is already loaded.
 		var (
 			rkey common.Hash
 			rval []byte
-			robj *cachedNode
 		)
 		for {
 			if memonly {
 				rkey = memKeys[rand.Intn(len(memKeys))]
 			} else {
-				copy(rkey[:], diskKeys[rand.Intn(len(diskKeys))])
+				copy(rkey[:], diskKeys[1+2*rand.Intn(len(diskKeys)/2)])
 			}
 			if rkey != tr.Hash() {
 				break
 			}
 		}
-		if memonly {
-			robj = triedb.dirties[rkey]
-			delete(triedb.dirties, rkey)
-		} else {
-			rval, _ = diskdb.Get(rkey[:])
-			diskdb.Delete(rkey[:])
+		if !memonly {
+			rval, _ = diskdb.Get(bucket, rkey[:])
+			diskdb.Delete(bucket, rkey[:])
 		}
 		// Iterate until the error is hit.
 		seen := make(map[string]bool)
-		it := tr.NodeIterator(nil)
+		it := tr.NodeIterator(nil, nil, 0)
 		checkIteratorNoDups(t, it, seen)
 		missing, ok := it.Error().(*MissingNodeError)
 		if !ok || missing.NodeHash != rkey {
@@ -349,10 +319,8 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool) {
 		}
 
 		// Add the node back and continue iteration.
-		if memonly {
-			triedb.dirties[rkey] = robj
-		} else {
-			diskdb.Put(rkey[:], rval)
+		if !memonly {
+			diskdb.Put(bucket, rkey[:], rval)
 		}
 		checkIteratorNoDups(t, it, seen)
 		if it.Error() != nil {
@@ -367,42 +335,34 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool) {
 // Similar to the test above, this one checks that failure to create nodeIterator at a
 // certain key prefix behaves correctly when Next is called. The expectation is that Next
 // should retry seeking before returning true for the first time.
-func TestIteratorContinueAfterSeekErrorDisk(t *testing.T) {
+func testIteratorContinueAfterSeekErrorDisk(t *testing.T) {
 	testIteratorContinueAfterSeekError(t, false)
 }
-func TestIteratorContinueAfterSeekErrorMemonly(t *testing.T) {
+func testIteratorContinueAfterSeekErrorMemonly(t *testing.T) {
 	testIteratorContinueAfterSeekError(t, true)
 }
 
 func testIteratorContinueAfterSeekError(t *testing.T, memonly bool) {
 	// Commit test trie to db, then remove the node containing "bars".
 	diskdb := ethdb.NewMemDatabase()
-	triedb := NewDatabase(diskdb)
-
-	ctr, _ := New(common.Hash{}, triedb)
+	bucket := []byte("B")
+	ctr := New(common.Hash{}, bucket, nil, false)
 	for _, val := range testdata1 {
-		ctr.Update([]byte(val.k), []byte(val.v))
-	}
-	root, _ := ctr.Commit(nil)
-	if !memonly {
-		triedb.Commit(root, true)
+		ctr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 	}
 	barNodeHash := common.HexToHash("05041990364eb72fcb1127652ce40d8bab765f2bfe53225b1170d276cc101c2e")
 	var (
 		barNodeBlob []byte
-		barNodeObj  *cachedNode
 	)
-	if memonly {
-		barNodeObj = triedb.dirties[barNodeHash]
-		delete(triedb.dirties, barNodeHash)
-	} else {
-		barNodeBlob, _ = diskdb.Get(barNodeHash[:])
-		diskdb.Delete(barNodeHash[:])
+	if !memonly {
+		barNodeBlob, _ = diskdb.Get(bucket, barNodeHash[:])
+		diskdb.Delete(bucket, barNodeHash[:])
 	}
+	root := ctr.Hash()
 	// Create a new iterator that seeks to "bars". Seeking can't proceed because
 	// the node is missing.
-	tr, _ := New(root, triedb)
-	it := tr.NodeIterator([]byte("bars"))
+	tr := New(root, bucket, nil, false)
+	it := tr.NodeIterator(diskdb, []byte("bars"), 0)
 	missing, ok := it.Error().(*MissingNodeError)
 	if !ok {
 		t.Fatal("want MissingNodeError, got", it.Error())
@@ -410,10 +370,8 @@ func testIteratorContinueAfterSeekError(t *testing.T, memonly bool) {
 		t.Fatal("wrong node missing")
 	}
 	// Reinsert the missing node.
-	if memonly {
-		triedb.dirties[barNodeHash] = barNodeObj
-	} else {
-		diskdb.Put(barNodeHash[:], barNodeBlob)
+	if !memonly {
+		diskdb.Put(bucket, barNodeHash[:], barNodeBlob)
 	}
 	// Check that iteration produces the right set of values.
 	if err := checkIteratorOrder(testdata1[2:], NewIterator(it)); err != nil {

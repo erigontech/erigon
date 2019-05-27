@@ -514,15 +514,16 @@ func (f *Fetcher) loop() {
 			bodyFilterInMeter.Mark(int64(len(task.transactions)))
 
 			blocks := []*types.Block{}
+			unmatched_transactions := [][]*types.Transaction{}
+			unmatched_uncles := [][]*types.Header{}
 			for i := 0; i < len(task.transactions) && i < len(task.uncles); i++ {
 				// Match up a body to any possible completion request
 				matched := false
 
+				txnHash := types.DeriveSha(types.Transactions(task.transactions[i]))
+				uncleHash := types.CalcUncleHash(task.uncles[i])
 				for hash, announce := range f.completing {
 					if f.queued[hash] == nil {
-						txnHash := types.DeriveSha(types.Transactions(task.transactions[i]))
-						uncleHash := types.CalcUncleHash(task.uncles[i])
-
 						if txnHash == announce.header.TxHash && uncleHash == announce.header.UncleHash && announce.origin == task.peer {
 							// Mark the body matched, reassemble if still unknown
 							matched = true
@@ -538,13 +539,13 @@ func (f *Fetcher) loop() {
 						}
 					}
 				}
-				if matched {
-					task.transactions = append(task.transactions[:i], task.transactions[i+1:]...)
-					task.uncles = append(task.uncles[:i], task.uncles[i+1:]...)
-					i--
-					continue
+				if !matched {
+					unmatched_transactions = append(unmatched_transactions, task.transactions[i])
+					unmatched_uncles = append(unmatched_uncles, task.uncles[i])
 				}
 			}
+			task.transactions = unmatched_transactions
+			task.uncles = unmatched_uncles
 
 			bodyFilterOutMeter.Mark(int64(len(task.transactions)))
 			select {

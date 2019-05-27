@@ -75,16 +75,16 @@ type receiptRLP struct {
 type receiptStorageRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Bloom             Bloom
-	TxHash            common.Hash
-	ContractAddress   common.Address
-	Logs              []*LogForStorage
-	GasUsed           uint64
+	//Bloom             Bloom
+	//TxHash            common.Hash
+	ContractAddress common.Address
+	Logs            []*LogForStorage
+	GasUsed         uint64
 }
 
 // NewReceipt creates a barebone transaction receipt, copying the init fields.
-func NewReceipt(root []byte, failed bool, cumulativeGasUsed uint64) *Receipt {
-	r := &Receipt{PostState: common.CopyBytes(root), CumulativeGasUsed: cumulativeGasUsed}
+func NewReceipt(failed bool, cumulativeGasUsed uint64) *Receipt {
+	r := &Receipt{CumulativeGasUsed: cumulativeGasUsed}
 	if failed {
 		r.Status = ReceiptStatusFailed
 	} else {
@@ -159,11 +159,11 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	enc := &receiptStorageRLP{
 		PostStateOrStatus: (*Receipt)(r).statusEncoding(),
 		CumulativeGasUsed: r.CumulativeGasUsed,
-		Bloom:             r.Bloom,
-		TxHash:            r.TxHash,
-		ContractAddress:   r.ContractAddress,
-		Logs:              make([]*LogForStorage, len(r.Logs)),
-		GasUsed:           r.GasUsed,
+		//Bloom:             r.Bloom,
+		//TxHash:            r.TxHash,
+		ContractAddress: r.ContractAddress,
+		Logs:            make([]*LogForStorage, len(r.Logs)),
+		GasUsed:         r.GasUsed,
 	}
 	for i, log := range r.Logs {
 		enc.Logs[i] = (*LogForStorage)(log)
@@ -182,13 +182,13 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// Assign the consensus fields
-	r.CumulativeGasUsed, r.Bloom = dec.CumulativeGasUsed, dec.Bloom
+	r.CumulativeGasUsed = dec.CumulativeGasUsed
 	r.Logs = make([]*Log, len(dec.Logs))
 	for i, log := range dec.Logs {
 		r.Logs[i] = (*Log)(log)
 	}
 	// Assign the implementation fields
-	r.TxHash, r.ContractAddress, r.GasUsed = dec.TxHash, dec.ContractAddress, dec.GasUsed
+	r.ContractAddress, r.GasUsed = dec.ContractAddress, dec.GasUsed
 	return nil
 }
 

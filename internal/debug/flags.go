@@ -22,7 +22,9 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
@@ -144,6 +146,13 @@ func Setup(ctx *cli.Context, logdir string) error {
 			return err
 		}
 	}
+
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+		<-c
+		Exit()
+	}()
 
 	// pprof server
 	if ctx.GlobalBool(pprofFlag.Name) {

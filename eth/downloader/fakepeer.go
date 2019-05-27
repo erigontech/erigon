@@ -127,7 +127,7 @@ func (p *FakePeer) RequestBodies(hashes []common.Hash) error {
 		uncles [][]*types.Header
 	)
 	for _, hash := range hashes {
-		block := rawdb.ReadBlock(p.db, hash, *p.hc.GetBlockNumber(hash))
+		block := rawdb.ReadBlock(p.db, hash, *p.hc.GetBlockNumber(p.db, hash))
 
 		txs = append(txs, block.Transactions())
 		uncles = append(uncles, block.Uncles())
@@ -141,7 +141,7 @@ func (p *FakePeer) RequestBodies(hashes []common.Hash) error {
 func (p *FakePeer) RequestReceipts(hashes []common.Hash) error {
 	var receipts [][]*types.Receipt
 	for _, hash := range hashes {
-		receipts = append(receipts, rawdb.ReadReceipts(p.db, hash, *p.hc.GetBlockNumber(hash)))
+		receipts = append(receipts, rawdb.ReadReceipts(p.db, hash, *p.hc.GetBlockNumber(p.db, hash)))
 	}
 	p.dl.DeliverReceipts(p.id, receipts)
 	return nil
@@ -152,7 +152,7 @@ func (p *FakePeer) RequestReceipts(hashes []common.Hash) error {
 func (p *FakePeer) RequestNodeData(hashes []common.Hash) error {
 	var data [][]byte
 	for _, hash := range hashes {
-		if entry, err := p.db.Get(hash.Bytes()); err == nil {
+		if entry, err := p.db.Get([]byte("FakePeer"), hash.Bytes()); err == nil {
 			data = append(data, entry)
 		}
 	}

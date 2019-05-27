@@ -463,7 +463,7 @@ func (pool *serverPool) findOrNewNode(node *enode.Node) *poolEntry {
 
 // loadNodes loads known nodes and their statistics from the database
 func (pool *serverPool) loadNodes() {
-	enc, err := pool.db.Get(pool.dbKey)
+	enc, err := pool.db.Get([]byte("pool"), pool.dbKey)
 	if err != nil {
 		return
 	}
@@ -525,7 +525,7 @@ func (pool *serverPool) saveNodes() {
 	}
 	enc, err := rlp.EncodeToBytes(list)
 	if err == nil {
-		pool.db.Put(pool.dbKey, enc)
+		pool.db.Put([]byte("pool"), pool.dbKey, enc)
 	}
 }
 

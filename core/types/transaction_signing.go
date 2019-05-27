@@ -31,13 +31,6 @@ var (
 	ErrInvalidChainId = errors.New("invalid chain id for signer")
 )
 
-// sigCache is used to cache the derived sender and contains
-// the signer used to derive it.
-type sigCache struct {
-	signer Signer
-	from   common.Address
-}
-
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
 	var signer Signer
@@ -71,20 +64,13 @@ func SignTx(tx *Transaction, s Signer, prv *ecdsa.PrivateKey) (*Transaction, err
 // not match the signer used in the current call.
 func Sender(signer Signer, tx *Transaction) (common.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		sigCache := sc.(sigCache)
-		// If the signer used to derive from in a previous
-		// call is not the same as used current, invalidate
-		// the cache.
-		if sigCache.signer.Equal(signer) {
-			return sigCache.from, nil
-		}
+		return sc.(common.Address), nil
 	}
-
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return common.Address{}, err
 	}
-	tx.from.Store(sigCache{signer: signer, from: addr})
+	tx.from.Store(addr)
 	return addr, nil
 }
 

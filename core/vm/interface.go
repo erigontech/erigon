@@ -25,7 +25,7 @@ import (
 
 // StateDB is an EVM database for full state querying.
 type StateDB interface {
-	CreateAccount(common.Address)
+	CreateAccount(common.Address, bool)
 
 	SubBalance(common.Address, *big.Int)
 	AddBalance(common.Address, *big.Int)
@@ -62,8 +62,6 @@ type StateDB interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool)
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

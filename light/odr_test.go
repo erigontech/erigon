@@ -82,12 +82,12 @@ func (odr *testOdr) Retrieve(ctx context.Context, req OdrRequest) error {
 			req.Receipts = rawdb.ReadReceipts(odr.sdb, req.Hash, *number)
 		}
 	case *TrieRequest:
-		t, _ := trie.New(req.Id.Root, trie.NewDatabase(odr.sdb))
+		t := trie.New(req.Id.Root, state.AccountsBucket, nil, false /*trie.NewDatabase(odr.sdb)*/)
 		nodes := NewNodeSet()
-		t.Prove(req.Key, 0, nodes)
+		t.Prove(odr.sdb, req.Key, 0, nodes, 0)
 		req.Proof = nodes
 	case *CodeRequest:
-		req.Data, _ = odr.sdb.Get(req.Hash[:])
+		req.Data, _ = odr.sdb.Get([]byte{}, req.Hash[:])
 	}
 	req.StoreResult(odr.ldb)
 	return nil
@@ -149,7 +149,8 @@ func odrAccounts(ctx context.Context, db ethdb.Database, bc *core.BlockChain, lc
 		st = NewState(ctx, header, lc.Odr())
 	} else {
 		header := bc.GetHeaderByHash(bhash)
-		st, _ = state.New(header.Root, state.NewDatabase(db))
+		tds, _ := state.NewTrieDbState(header.Root, db, header.Number.Uint64())
+		st = state.New(tds)
 	}
 
 	var res []byte
@@ -189,7 +190,8 @@ func odrContractCall(ctx context.Context, db ethdb.Database, bc *core.BlockChain
 		} else {
 			chain = bc
 			header = bc.GetHeaderByHash(bhash)
-			st, _ = state.New(header.Root, state.NewDatabase(db))
+			tds, _ := state.NewTrieDbState(header.Root, db, header.Number.Uint64())
+			st = state.New(tds)
 		}
 
 		// Perform read-only call.

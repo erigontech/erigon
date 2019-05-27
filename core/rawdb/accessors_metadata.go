@@ -29,7 +29,7 @@ import (
 func ReadDatabaseVersion(db DatabaseReader) *uint64 {
 	var version uint64
 
-	enc, _ := db.Get(databaseVerisionKey)
+	enc, _ := db.Get(databaseVerisionKey, databaseVerisionKey)
 	if len(enc) == 0 {
 		return nil
 	}
@@ -46,14 +46,14 @@ func WriteDatabaseVersion(db DatabaseWriter, version uint64) {
 	if err != nil {
 		log.Crit("Failed to encode database version", "err", err)
 	}
-	if err = db.Put(databaseVerisionKey, enc); err != nil {
+	if err = db.Put(databaseVerisionKey, databaseVerisionKey, enc); err != nil {
 		log.Crit("Failed to store the database version", "err", err)
 	}
 }
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db DatabaseReader, hash common.Hash) *params.ChainConfig {
-	data, _ := db.Get(configKey(hash))
+	data, _ := db.Get(configPrefix, hash[:])
 	if len(data) == 0 {
 		return nil
 	}
@@ -74,21 +74,21 @@ func WriteChainConfig(db DatabaseWriter, hash common.Hash, cfg *params.ChainConf
 	if err != nil {
 		log.Crit("Failed to JSON encode chain config", "err", err)
 	}
-	if err := db.Put(configKey(hash), data); err != nil {
+	if err := db.Put(configPrefix, hash[:], data); err != nil {
 		log.Crit("Failed to store chain config", "err", err)
 	}
 }
 
 // ReadPreimage retrieves a single preimage of the provided hash.
 func ReadPreimage(db DatabaseReader, hash common.Hash) []byte {
-	data, _ := db.Get(preimageKey(hash))
+	data, _ := db.Get(preimagePrefix, hash.Bytes())
 	return data
 }
 
 // WritePreimages writes the provided set of preimages to the database.
 func WritePreimages(db DatabaseWriter, preimages map[common.Hash][]byte) {
 	for hash, preimage := range preimages {
-		if err := db.Put(preimageKey(hash), preimage); err != nil {
+		if err := db.Put(preimagePrefix, hash.Bytes(), preimage); err != nil {
 			log.Crit("Failed to store trie preimage", "err", err)
 		}
 	}

@@ -182,7 +182,10 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 		atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		return manager.blockchain.InsertChain(blocks)
 	}
-	manager.fetcher = fetcher.New(blockchain.GetBlockByHash, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
+	blockGetter := func(hash common.Hash) *types.Block {
+		return blockchain.GetBlockByHash(hash)
+	}
+	manager.fetcher = fetcher.New(blockGetter, validator, manager.BroadcastBlock, heighter, inserter, manager.removePeer)
 
 	return manager, nil
 }
@@ -437,26 +440,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		var headers []*types.Header
 		if err := msg.Decode(&headers); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
-		}
-		// If no headers were received, but we're expending a DAO fork check, maybe it's that
-		if len(headers) == 0 && p.forkDrop != nil {
-			// Possibly an empty reply to the fork header checks, sanity check TDs
-			verifyDAO := true
-
-			// If we already have a DAO header, we can check the peer's TD against it. If
-			// the peer's ahead of this, it too must have a reply to the DAO check
-			if daoHeader := pm.blockchain.GetHeaderByNumber(pm.chainconfig.DAOForkBlock.Uint64()); daoHeader != nil {
-				if _, td := p.Head(); td.Cmp(pm.blockchain.GetTd(daoHeader.Hash(), daoHeader.Number.Uint64())) >= 0 {
-					verifyDAO = false
-				}
-			}
-			// If we're seemingly on the same chain, disable the drop timer
-			if verifyDAO {
-				p.Log().Debug("Seems to be on the same side of the DAO fork")
-				p.forkDrop.Stop()
-				p.forkDrop = nil
-				return nil
-			}
 		}
 		// Filter out any explicitly requested headers, deliver the rest to the downloader
 		filter := len(headers) == 1

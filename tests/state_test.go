@@ -60,7 +60,7 @@ func TestState(t *testing.T) {
 			name := name + "/" + key
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-					_, err := test.Run(subtest, vmconfig)
+					_, _, err := test.Run(subtest, vmconfig)
 					return st.checkFailure(t, name, err)
 				})
 			})

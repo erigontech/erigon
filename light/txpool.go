@@ -209,7 +209,9 @@ func (pool *TxPool) rollbackTxs(hash common.Hash, txc txStateChanges) {
 		}
 		delete(pool.mined, hash)
 	}
-	batch.Write()
+	if _, err := batch.Commit(); err != nil {
+		panic(err)
+	}
 }
 
 // reorgOnNewHead sets a new head header, processing (and rolling back if necessary)
@@ -439,7 +441,7 @@ func (self *TxPool) Add(ctx context.Context, tx *types.Transaction) error {
 	//fmt.Println("Send", tx.Hash())
 	self.relay.Send(types.Transactions{tx})
 
-	self.chainDb.Put(tx.Hash().Bytes(), data)
+	self.chainDb.Put([]byte("LightTx"), tx.Hash().Bytes(), data)
 	return nil
 }
 
@@ -512,10 +514,12 @@ func (self *TxPool) RemoveTransactions(txs types.Transactions) {
 	for _, tx := range txs {
 		hash := tx.Hash()
 		delete(self.pending, hash)
-		batch.Delete(hash.Bytes())
+		self.chainDb.Delete([]byte("LightTx"), hash.Bytes())
 		hashes = append(hashes, hash)
 	}
-	batch.Write()
+	if _, err := batch.Commit(); err != nil {
+		panic(err)
+	}
 	self.relay.Discard(hashes)
 }
 
@@ -525,6 +529,6 @@ func (pool *TxPool) RemoveTx(hash common.Hash) {
 	defer pool.mu.Unlock()
 	// delete from pending pool
 	delete(pool.pending, hash)
-	pool.chainDb.Delete(hash[:])
+	pool.chainDb.Delete([]byte("LightTx"), hash[:])
 	pool.relay.Discard([]common.Hash{hash})
 }

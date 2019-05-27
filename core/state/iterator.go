@@ -28,7 +28,7 @@ import (
 // NodeIterator is an iterator to traverse the entire state trie post-order,
 // including all of the contract code and contract state tries.
 type NodeIterator struct {
-	state *StateDB // State being iterated
+	state *TrieDbState // State being iterated
 
 	stateIt trie.NodeIterator // Primary iterator for the global state trie
 	dataIt  trie.NodeIterator // Secondary iterator for the data trie of a contract
@@ -40,11 +40,13 @@ type NodeIterator struct {
 	Hash   common.Hash // Hash of the current entry being iterated (nil if not standalone)
 	Parent common.Hash // Hash of the first full ancestor node (nil if current is the root)
 
+	blockNr uint64
+
 	Error error // Failure set in case of an internal error in the iterator
 }
 
 // NewNodeIterator creates an post-order state node iterator.
-func NewNodeIterator(state *StateDB) *NodeIterator {
+func NewNodeIterator(state *TrieDbState) *NodeIterator {
 	return &NodeIterator{
 		state: state,
 	}
@@ -74,7 +76,7 @@ func (it *NodeIterator) step() error {
 	}
 	// Initialize the iterator if we've just started
 	if it.stateIt == nil {
-		it.stateIt = it.state.trie.NodeIterator(nil)
+		it.stateIt = it.state.t.NodeIterator(it.state.db, nil, it.state.blockNr)
 	}
 	// If we had data nodes previously, we surely have at least state nodes
 	if it.dataIt != nil {
@@ -108,18 +110,18 @@ func (it *NodeIterator) step() error {
 	if err := rlp.Decode(bytes.NewReader(it.stateIt.LeafBlob()), &account); err != nil {
 		return err
 	}
-	dataTrie, err := it.state.db.OpenStorageTrie(common.BytesToHash(it.stateIt.LeafKey()), account.Root)
+	dataTrie, err := NewDatabase(it.state.db).OpenStorageTrie(common.BytesToHash(it.stateIt.LeafKey()), account.Root)
 	if err != nil {
 		return err
 	}
-	it.dataIt = dataTrie.NodeIterator(nil)
+	it.dataIt = dataTrie.NodeIterator(it.state.db, nil, it.blockNr)
 	if !it.dataIt.Next(true) {
 		it.dataIt = nil
 	}
 	if !bytes.Equal(account.CodeHash, emptyCodeHash) {
 		it.codeHash = common.BytesToHash(account.CodeHash)
 		addrHash := common.BytesToHash(it.stateIt.LeafKey())
-		it.code, err = it.state.db.ContractCode(addrHash, common.BytesToHash(account.CodeHash))
+		it.code, err = NewDatabase(it.state.db).ContractCode(addrHash, common.BytesToHash(account.CodeHash))
 		if err != nil {
 			return fmt.Errorf("code %x: %v", account.CodeHash, err)
 		}

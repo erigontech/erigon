@@ -47,6 +47,8 @@ type OdrBackend interface {
 	IndexerConfig() *IndexerConfig
 }
 
+var OdrBucket = []byte("ODR")
+
 // OdrRequest is an interface for retrieval requests
 type OdrRequest interface {
 	StoreResult(db ethdb.Database)
@@ -73,7 +75,7 @@ func StateTrieID(header *types.Header) *TrieID {
 // StorageTrieID returns a TrieID for a contract storage trie at a given account
 // of a given state trie. It also requires the root hash of the trie for
 // checking Merkle proofs.
-func StorageTrieID(state *TrieID, addrHash, root common.Hash) *TrieID {
+func StorageTrieID(state *TrieID, addrHash common.Hash, root common.Hash) *TrieID {
 	return &TrieID{
 		BlockHash:   state.BlockHash,
 		BlockNumber: state.BlockNumber,
@@ -105,7 +107,7 @@ type CodeRequest struct {
 
 // StoreResult stores the retrieved data in local database
 func (req *CodeRequest) StoreResult(db ethdb.Database) {
-	db.Put(req.Hash[:], req.Data)
+	db.Put(OdrBucket, req.Hash[:], req.Data)
 }
 
 // BlockRequest is the ODR request type for retrieving block bodies

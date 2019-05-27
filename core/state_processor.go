@@ -17,7 +17,13 @@
 package core
 
 import (
+	//"os"
+	//"encoding/json"
+	//"bytes"
+	"fmt"
+
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/consensus/misc"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -46,6 +52,57 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 	}
 }
 
+// StructLogRes stores a structured log emitted by the EVM while replaying a
+// transaction in debug mode
+type StructLogRes struct {
+	Pc      uint64             `json:"pc"`
+	Op      string             `json:"op"`
+	Gas     uint64             `json:"gas"`
+	GasCost uint64             `json:"gasCost"`
+	Depth   int                `json:"depth"`
+	Error   error              `json:"error,omitempty"`
+	Stack   *[]string          `json:"stack,omitempty"`
+	Memory  *[]string          `json:"memory,omitempty"`
+	Storage *map[string]string `json:"storage,omitempty"`
+}
+
+// formatLogs formats EVM returned structured logs for json output
+func FormatLogs(logs []vm.StructLog) []StructLogRes {
+	formatted := make([]StructLogRes, len(logs))
+	for index, trace := range logs {
+		formatted[index] = StructLogRes{
+			Pc:      trace.Pc,
+			Op:      trace.Op.String(),
+			Gas:     trace.Gas,
+			GasCost: trace.GasCost,
+			Depth:   trace.Depth,
+			Error:   trace.Err,
+		}
+		if trace.Stack != nil {
+			stack := make([]string, len(trace.Stack))
+			for i, stackValue := range trace.Stack {
+				stack[i] = fmt.Sprintf("%x", math.PaddedBigBytes(stackValue, 32))
+			}
+			formatted[index].Stack = &stack
+		}
+		if trace.Memory != nil {
+			memory := make([]string, 0, (len(trace.Memory)+31)/32)
+			for i := 0; i+32 <= len(trace.Memory); i += 32 {
+				memory = append(memory, fmt.Sprintf("%x", trace.Memory[i:i+32]))
+			}
+			formatted[index].Memory = &memory
+		}
+		if trace.Storage != nil {
+			storage := make(map[string]string)
+			for i, storageValue := range trace.Storage {
+				storage[fmt.Sprintf("%x", i)] = fmt.Sprintf("%x", storageValue)
+			}
+			formatted[index].Storage = &storage
+		}
+	}
+	return formatted
+}
+
 // Process processes the state changes according to the Ethereum rules by running
 // the transaction messages using the statedb and applying any rewards to both
 // the processor (coinbase) and any included uncles.
@@ -53,7 +110,7 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 // Process returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
+func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds *state.TrieDbState, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
 	var (
 		receipts types.Receipts
 		usedGas  = new(uint64)
@@ -68,24 +125,34 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, cfg
 	// Iterate over and process the individual transactions
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
-		receipt, _, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, header, tx, usedGas, cfg)
+		receipt, _, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, cfg)
 		if err != nil {
 			return nil, nil, 0, err
+		}
+		if !p.config.IsByzantium(header.Number) {
+			rootHash, err := tds.TrieRoot()
+			if err != nil {
+				return nil, nil, 0, err
+			}
+			receipt.PostState = rootHash.Bytes()
 		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.bc, header, statedb, block.Transactions(), block.Uncles(), receipts)
-
-	return receipts, allLogs, *usedGas, nil
+	_, err := p.engine.Finalize(p.config, header, statedb, block.Transactions(), block.Uncles(), receipts)
+	if err != nil {
+		return receipts, allLogs, *usedGas, err
+	}
+	header.Root, err = tds.IntermediateRoot(statedb, p.config.IsEIP158(header.Number))
+	return receipts, allLogs, *usedGas, err
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database
 // and uses the input parameters for its environment. It returns the receipt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
-func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, uint64, error) {
+func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.StateDB, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, uint64, error) {
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, 0, err
@@ -101,17 +168,13 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		return nil, 0, err
 	}
 	// Update the state with pending changes
-	var root []byte
-	if config.IsByzantium(header.Number) {
-		statedb.Finalise(true)
-	} else {
-		root = statedb.IntermediateRoot(config.IsEIP158(header.Number)).Bytes()
-	}
+	statedb.Finalise(config.IsEIP158(header.Number), stateWriter)
+
 	*usedGas += gas
 
 	// Create a new receipt for the transaction, storing the intermediate root and gas used by the tx
-	// based on the eip phase, we're passing whether the root touch-delete accounts.
-	receipt := types.NewReceipt(root, failed, *usedGas)
+	// based on the eip phase, we're passing wether the root touch-delete accounts.
+	receipt := types.NewReceipt(failed, *usedGas)
 	receipt.TxHash = tx.Hash()
 	receipt.GasUsed = gas
 	// if the transaction created a contract, store the creation address in the receipt.
