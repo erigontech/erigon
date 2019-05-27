@@ -23,17 +23,18 @@ import (
 	"math"
 	"math/big"
 	mrand "math/rand"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 const (
@@ -111,12 +112,12 @@ func NewHeaderChain(chainDb ethdb.Database, config *params.ChainConfig, engine c
 
 // GetBlockNumber retrieves the block number belonging to the given hash
 // from the cache or database
-func (hc *HeaderChain) GetBlockNumber(hash common.Hash) *uint64 {
+func (hc *HeaderChain) GetBlockNumber(dbr ethdb.Getter, hash common.Hash) *uint64 {
 	if cached, ok := hc.numberCache.Get(hash); ok {
 		number := cached.(uint64)
 		return &number
 	}
-	number := rawdb.ReadHeaderNumber(hc.chainDb, hash)
+	number := rawdb.ReadHeaderNumber(dbr, hash)
 	if number != nil {
 		hc.numberCache.Add(hash, *number)
 	}
@@ -139,15 +140,16 @@ func (hc *HeaderChain) WriteHeader(header *types.Header) (status WriteStatus, er
 		number = header.Number.Uint64()
 	)
 	// Calculate the total difficulty of the header
-	ptd := hc.GetTd(header.ParentHash, number-1)
+	ptd := hc.GetTd(hc.chainDb, header.ParentHash, number-1)
 	if ptd == nil {
+		fmt.Printf("%s\n", debug.Stack())
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
-	localTd := hc.GetTd(hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())
+	localTd := hc.GetTd(hc.chainDb, hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())
 	externTd := new(big.Int).Add(header.Difficulty, ptd)
 
 	// Irrelevant of the canonical status, write the td and header to the database
-	if err := hc.WriteTd(hash, number, externTd); err != nil {
+	if err := hc.WriteTd(hc.chainDb, hash, number, externTd); err != nil {
 		log.Crit("Failed to write header total difficulty", "err", err)
 	}
 	rawdb.WriteHeader(hc.chainDb, header)
@@ -165,7 +167,9 @@ func (hc *HeaderChain) WriteHeader(header *types.Header) (status WriteStatus, er
 			}
 			rawdb.DeleteCanonicalHash(batch, i)
 		}
-		batch.Write()
+		if _, err := batch.Commit(); err != nil {
+			return NonStatTy, err
+		}
 
 		// Overwrite any stale canonical number assignments
 		var (
@@ -277,8 +281,8 @@ func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, writeHeader WhCa
 		// If the header's already known, skip it, otherwise store
 		hash := header.Hash()
 		if hc.HasHeader(hash, header.Number.Uint64()) {
-			externTd := hc.GetTd(hash, header.Number.Uint64())
-			localTd := hc.GetTd(hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())
+			externTd := hc.GetTd(hc.chainDb, hash, header.Number.Uint64())
+			localTd := hc.GetTd(hc.chainDb, hc.currentHeaderHash, hc.CurrentHeader().Number.Uint64())
 			if externTd == nil || externTd.Cmp(localTd) <= 0 {
 				stats.ignored++
 				continue
@@ -372,12 +376,12 @@ func (hc *HeaderChain) GetAncestor(hash common.Hash, number, ancestor uint64, ma
 
 // GetTd retrieves a block's total difficulty in the canonical chain from the
 // database by hash and number, caching it if found.
-func (hc *HeaderChain) GetTd(hash common.Hash, number uint64) *big.Int {
+func (hc *HeaderChain) GetTd(dbr ethdb.Getter, hash common.Hash, number uint64) *big.Int {
 	// Short circuit if the td's already in the cache, retrieve otherwise
 	if cached, ok := hc.tdCache.Get(hash); ok {
 		return cached.(*big.Int)
 	}
-	td := rawdb.ReadTd(hc.chainDb, hash, number)
+	td := rawdb.ReadTd(dbr, hash, number)
 	if td == nil {
 		return nil
 	}
@@ -389,17 +393,17 @@ func (hc *HeaderChain) GetTd(hash common.Hash, number uint64) *big.Int {
 // GetTdByHash retrieves a block's total difficulty in the canonical chain from the
 // database by hash, caching it if found.
 func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
-	number := hc.GetBlockNumber(hash)
+	number := hc.GetBlockNumber(hc.chainDb, hash)
 	if number == nil {
 		return nil
 	}
-	return hc.GetTd(hash, *number)
+	return hc.GetTd(hc.chainDb, hash, *number)
 }
 
 // WriteTd stores a block's total difficulty into the database, also caching it
 // along the way.
-func (hc *HeaderChain) WriteTd(hash common.Hash, number uint64, td *big.Int) error {
-	rawdb.WriteTd(hc.chainDb, hash, number, td)
+func (hc *HeaderChain) WriteTd(dbw ethdb.Putter, hash common.Hash, number uint64, td *big.Int) error {
+	rawdb.WriteTd(dbw, hash, number, td)
 	hc.tdCache.Add(hash, new(big.Int).Set(td))
 	return nil
 }
@@ -423,7 +427,7 @@ func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header 
 // GetHeaderByHash retrieves a block header from the database by hash, caching it if
 // found.
 func (hc *HeaderChain) GetHeaderByHash(hash common.Hash) *types.Header {
-	number := hc.GetBlockNumber(hash)
+	number := hc.GetBlockNumber(hc.chainDb, hash)
 	if number == nil {
 		return nil
 	}
@@ -459,8 +463,8 @@ func (hc *HeaderChain) CurrentHeader() *types.Header {
 }
 
 // SetCurrentHeader sets the current head header of the canonical chain.
-func (hc *HeaderChain) SetCurrentHeader(head *types.Header) {
-	rawdb.WriteHeadHeaderHash(hc.chainDb, head.Hash())
+func (hc *HeaderChain) SetCurrentHeader(dbw ethdb.Putter, head *types.Header) {
+	rawdb.WriteHeadHeaderHash(dbw, head.Hash())
 
 	hc.currentHeader.Store(head)
 	hc.currentHeaderHash = head.Hash()
@@ -470,11 +474,11 @@ func (hc *HeaderChain) SetCurrentHeader(head *types.Header) {
 type (
 	// UpdateHeadBlocksCallback is a callback function that is called by SetHead
 	// before head header is updated.
-	UpdateHeadBlocksCallback func(ethdb.KeyValueWriter, *types.Header)
+	UpdateHeadBlocksCallback func(rawdb.DatabaseWriter, *types.Header)
 
 	// DeleteBlockContentCallback is a callback function that is called by SetHead
 	// before each header is deleted.
-	DeleteBlockContentCallback func(ethdb.KeyValueWriter, common.Hash, uint64)
+	DeleteBlockContentCallback func(rawdb.DatabaseDeleter, common.Hash, uint64)
 )
 
 // SetHead rewinds the local chain to a new head. Everything above the new head
@@ -519,7 +523,9 @@ func (hc *HeaderChain) SetHead(head uint64, updateFn UpdateHeadBlocksCallback, d
 		hc.currentHeaderHash = parentHash
 		headHeaderGauge.Update(parent.Number.Int64())
 	}
-	batch.Write()
+	if _, err := batch.Commit(); err != nil {
+		panic(err)
+	}
 
 	// Clear out any stale content from the caches
 	hc.headerCache.Purge()

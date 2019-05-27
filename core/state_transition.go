@@ -18,13 +18,14 @@ package core
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 var (
@@ -56,7 +57,7 @@ type StateTransition struct {
 	initialGas uint64
 	value      *big.Int
 	data       []byte
-	state      vm.StateDB
+	state      vm.IntraBlockState
 	evm        *vm.EVM
 }
 
@@ -121,7 +122,7 @@ func NewStateTransition(evm *vm.EVM, msg Message, gp *GasPool) *StateTransition 
 		gasPrice: msg.GasPrice(),
 		value:    msg.Value(),
 		data:     msg.Data(),
-		state:    evm.StateDB,
+		state:    evm.IntraBlockState,
 	}
 }
 
@@ -168,13 +169,18 @@ func (st *StateTransition) buyGas() error {
 	return nil
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck() error {
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {
 		nonce := st.state.GetNonce(st.msg.From())
 		if nonce < st.msg.Nonce() {
+			fmt.Printf("Nonce too high from 0x%x state nonce %d, tx nonce %d\n", st.msg.From(), nonce, st.msg.Nonce())
+			log.Error("Nonce too high", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
 			return ErrNonceTooHigh
 		} else if nonce > st.msg.Nonce() {
+			fmt.Printf("Nonce too low from 0x%x state nonce %d, tx nonce %d\n", st.msg.From(), nonce, st.msg.Nonce())
+			log.Error("Nonce too low", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
 			return ErrNonceTooLow
 		}
 	}

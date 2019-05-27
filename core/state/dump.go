@@ -17,27 +17,27 @@
 package state
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
 // DumpAccount represents an account in the state
 type DumpAccount struct {
-	Balance   string                 `json:"balance"`
-	Nonce     uint64                 `json:"nonce"`
-	Root      string                 `json:"root"`
-	CodeHash  string                 `json:"codeHash"`
-	Code      string                 `json:"code,omitempty"`
-	Storage   map[common.Hash]string `json:"storage,omitempty"`
-	Address   *common.Address        `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey hexutil.Bytes          `json:"key,omitempty"`     // If we don't have address, we can output the key
-
+	Balance     string            `json:"balance"`
+	Nonce       uint64            `json:"nonce"`
+	Root        string            `json:"root"`
+	CodeHash    string            `json:"codeHash"`
+	Code        string            `json:"code,omitempty"`
+	Storage     map[string]string `json:"storage,omitempty"`
+	StorageSize *uint64           `json:",omitempty"`
+	Address     *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
+	SecureKey   hexutil.Bytes     `json:"key,omitempty"`     // If we don't have address, we can output the key
 }
 
 // Dump represents the full dump in a collected format, as one large map
@@ -79,62 +79,85 @@ func (self iterativeDump) onAccount(addr common.Address, account DumpAccount) {
 	}
 	(*json.Encoder)(&self).Encode(dumpAccount)
 }
+
 func (self iterativeDump) onRoot(root common.Hash) {
 	(*json.Encoder)(&self).Encode(struct {
 		Root common.Hash `json:"root"`
 	}{root})
 }
-
-func (self *StateDB) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
+func (self *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
 	emptyAddress := (common.Address{})
 	missingPreimages := 0
-	c.onRoot(self.trie.Hash())
-	it := trie.NewIterator(self.trie.NodeIterator(nil))
-	for it.Next() {
-		var data Account
-		if err := rlp.DecodeBytes(it.Value, &data); err != nil {
-			panic(err)
+	c.onRoot(self.t.Hash())
+	var acc accounts.Account
+	var prefix [32]byte
+	err := self.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+		addr := common.BytesToAddress(self.GetKey(k))
+		var err error
+		if err = acc.DecodeForStorage(v); err != nil {
+			return false, err
 		}
-		addr := common.BytesToAddress(self.trie.GetKey(it.Key))
-		obj := newObject(nil, addr, data)
+		var code []byte
+
+		if !acc.IsEmptyCodeHash() {
+			if code, err = self.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
+				return false, err
+			}
+		}
 		account := DumpAccount{
-			Balance:  data.Balance.String(),
-			Nonce:    data.Nonce,
-			Root:     common.Bytes2Hex(data.Root[:]),
-			CodeHash: common.Bytes2Hex(data.CodeHash),
+			Balance:  acc.Balance.String(),
+			Nonce:    acc.Nonce,
+			Root:     common.Bytes2Hex(acc.Root[:]),
+			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
+			Storage:  make(map[string]string),
 		}
 		if emptyAddress == addr {
 			// Preimage missing
 			missingPreimages++
 			if excludeMissingPreimages {
-				continue
+				return true, nil
 			}
-			account.SecureKey = it.Key
+			account.SecureKey = common.CopyBytes(k)
 		}
 		if !excludeCode {
-			account.Code = common.Bytes2Hex(obj.Code(self.db))
+			account.Code = common.Bytes2Hex(code)
 		}
-		if !excludeStorage {
-			account.Storage = make(map[common.Hash]string)
-			storageIt := trie.NewIterator(obj.getTrie(self.db).NodeIterator(nil))
-			for storageIt.Next() {
-				_, content, _, err := rlp.Split(storageIt.Value)
-				if err != nil {
-					log.Error("Failed to decode the value returned by iterator", "error", err)
-					continue
-				}
-				account.Storage[common.BytesToHash(self.trie.GetKey(storageIt.Key))] = common.Bytes2Hex(content)
+
+		if acc.HasStorageSize {
+			var storageSize = acc.StorageSize
+			account.StorageSize = &storageSize
+		}
+
+		buf := make([]byte, binary.MaxVarintLen64)
+		binary.PutUvarint(buf, acc.GetIncarnation())
+
+		addrHash, err := self.HashAddress(addr, false)
+		if err != nil {
+			return false, err
+		}
+
+		err = self.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := self.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
+
+			if !excludeStorage {
+				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			}
+
+			return true, nil
+		})
+		if err != nil {
+			return false, err
 		}
 		c.onAccount(addr, account)
-	}
-	if missingPreimages > 0 {
-		log.Warn("Dump incomplete due to missing preimages", "missing", missingPreimages)
+		return true, nil
+	})
+	if err != nil {
+		panic(err)
 	}
 }
 
 // RawDump returns the entire state an a single large object
-func (self *StateDB) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (self *TrieDbState) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
@@ -142,8 +165,17 @@ func (self *StateDB) RawDump(excludeCode, excludeStorage, excludeMissingPreimage
 	return *dump
 }
 
+func (self *TrieDbState) DefaultRawDump() Dump {
+	return self.RawDump(false, false, false)
+}
+
+// DefaultDump returns a JSON string representing the state with the default params
+func (self *TrieDbState) DefaultDump() []byte {
+	return self.Dump(false, false, false)
+}
+
 // Dump returns a JSON string representing the entire state as a single json-object
-func (self *StateDB) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
+func (self *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
 	dump := self.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
@@ -153,6 +185,6 @@ func (self *StateDB) Dump(excludeCode, excludeStorage, excludeMissingPreimages b
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (self *StateDB) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+func (self *TrieDbState) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
 	self.dump(iterativeDump(*output), excludeCode, excludeStorage, excludeMissingPreimages)
 }

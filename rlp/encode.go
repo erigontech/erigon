@@ -65,6 +65,18 @@ func Encode(w io.Writer, val interface{}) error {
 	return eb.toWriter(w)
 }
 
+func Write(w io.Writer, val []byte) error {
+	if outer, ok := w.(*encbuf); ok {
+		// Encode was called by some type's EncodeRLP.
+		// Avoid copying by writing to the outer encbuf directly.
+		_, err := outer.Write(val)
+		return err
+	}
+
+	_, err := w.Write(val)
+	return err
+}
+
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
 func EncodeToBytes(val interface{}) ([]byte, error) {

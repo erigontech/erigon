@@ -24,9 +24,9 @@ import (
 
 	"strings"
 
-	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/internal/debug"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
+	"github.com/urfave/cli"
 )
 
 // AppHelpTemplate is the test template for the default, global app help topic.
@@ -80,10 +80,15 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.SyncModeFlag,
 			utils.ExitWhenSyncedFlag,
 			utils.GCModeFlag,
+			utils.GCModeLimitFlag,
+			utils.GCModeBlockToPruneFlag,
+			utils.GCModeTickTimeout,
 			utils.EthStatsURLFlag,
 			utils.IdentityFlag,
 			utils.LightKDFFlag,
 			utils.WhitelistFlag,
+			utils.NoHistory,
+			utils.ArchiveSyncInterval,
 		},
 	},
 	{
@@ -150,6 +155,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.CacheTrieFlag,
 			utils.CacheGCFlag,
 			utils.CacheNoPrefetchFlag,
+			utils.TrieCacheGenFlag,
 		},
 	},
 	{
@@ -245,10 +251,6 @@ var AppHelpFlagGroups = []flagGroup{
 	{
 		Name:  "METRICS AND STATS",
 		Flags: metricsFlags,
-	},
-	{
-		Name:  "WHISPER (EXPERIMENTAL)",
-		Flags: whisperFlags,
 	},
 	{
 		Name: "DEPRECATED",

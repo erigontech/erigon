@@ -17,12 +17,10 @@
 package core
 
 import (
-	"time"
+	"context"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 // insertStats tracks and reports on block insertion.
@@ -35,11 +33,12 @@ type insertStats struct {
 
 // statsReportLimit is the time limit during import and export after which we
 // always print out progress. This avoids the user wondering what's going on.
-const statsReportLimit = 8 * time.Second
+//const statsReportLimit = 8 * time.Second
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, dirty common.StorageSize) {
+/*
+func (st *insertStats) report(chain []*types.Block, index int, cache common.StorageSize) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
@@ -77,6 +76,7 @@ func (st *insertStats) report(chain []*types.Block, index int, dirty common.Stor
 		*st = insertStats{startTime: now, lastIndex: index + 1}
 	}
 }
+*/
 
 // insertIterator is a helper to assist during chain import.
 type insertIterator struct {
@@ -103,8 +103,7 @@ func newInsertIterator(chain types.Blocks, results <-chan error, validator Valid
 
 // next returns the next block in the iterator, along with any potential validation
 // error for that block. When the end is reached, it will return (nil, nil).
-func (it *insertIterator) next() (*types.Block, error) {
-	// If we reached the end of the chain, abort
+func (it *insertIterator) next(ctx context.Context) (*types.Block, error) {
 	if it.index+1 >= len(it.chain) {
 		it.index = len(it.chain)
 		return nil, nil
@@ -117,8 +116,7 @@ func (it *insertIterator) next() (*types.Block, error) {
 	if it.errors[it.index] != nil {
 		return it.chain[it.index], it.errors[it.index]
 	}
-	// Block header valid, run body validation and return
-	return it.chain[it.index], it.validator.ValidateBody(it.chain[it.index])
+	return it.chain[it.index], it.validator.ValidateBody(ctx, it.chain[it.index])
 }
 
 // peek returns the next block in the iterator, along with any potential validation

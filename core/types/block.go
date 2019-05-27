@@ -27,9 +27,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -68,6 +68,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 //go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
 
 // Header represents a block header in the Ethereum blockchain.
+// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Header struct {
 	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
 	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
@@ -141,6 +142,12 @@ func rlpHash(x interface{}) (h common.Hash) {
 // a block's data contents (transactions and uncles) together.
 type Body struct {
 	Transactions []*Transaction
+	Senders      []common.Address // Transaction senders
+	Uncles       []*Header
+}
+
+type SmallBody struct {
+	Transactions []*Transaction
 	Uncles       []*Header
 }
 
@@ -191,6 +198,28 @@ type storageblock struct {
 	Txs    []*Transaction
 	Uncles []*Header
 	TD     *big.Int
+}
+
+// Copy transaction senders from body into the transactions
+func (b *Body) SendersToTxs() {
+	if b.Senders == nil {
+		return
+	}
+	for i, tx := range b.Transactions {
+		if b.Senders[i] != (common.Address{}) {
+			tx.from.Store(b.Senders[i])
+		}
+	}
+}
+
+// Copy transaction senders from transactions to the body
+func (b *Body) SendersFromTxs() {
+	b.Senders = make([]common.Address, len(b.Transactions))
+	for i, tx := range b.Transactions {
+		if sc := tx.from.Load(); sc != nil {
+			b.Senders[i] = sc.(common.Address)
+		}
+	}
 }
 
 // NewBlock creates a new block. The input data is copied,
@@ -322,7 +351,11 @@ func (b *Block) Extra() []byte            { return common.CopyBytes(b.header.Ext
 func (b *Block) Header() *Header { return CopyHeader(b.header) }
 
 // Body returns the non-header content of the block.
-func (b *Block) Body() *Body { return &Body{b.transactions, b.uncles} }
+func (b *Block) Body() *Body {
+	bd := &Body{Transactions: b.transactions, Uncles: b.uncles}
+	bd.SendersFromTxs()
+	return bd
+}
 
 // Size returns the true RLP encoded storage size of the block, either by encoding
 // and returning it, or returning a previsouly cached value.

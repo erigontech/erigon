@@ -29,9 +29,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 const (
@@ -87,7 +87,6 @@ type Peer interface {
 	LightPeer
 	RequestBodies([]common.Hash) error
 	RequestReceipts([]common.Hash) error
-	RequestNodeData([]common.Hash) error
 }
 
 // lightPeerWrapper wraps a LightPeer struct, stubbing out the Peer-only methods.
@@ -107,9 +106,6 @@ func (w *lightPeerWrapper) RequestBodies([]common.Hash) error {
 }
 func (w *lightPeerWrapper) RequestReceipts([]common.Hash) error {
 	panic("RequestReceipts not supported in light client mode sync")
-}
-func (w *lightPeerWrapper) RequestNodeData([]common.Hash) error {
-	panic("RequestNodeData not supported in light client mode sync")
 }
 
 // newPeerConnection creates a new downloader peer.
@@ -201,23 +197,6 @@ func (p *peerConnection) FetchReceipts(request *fetchRequest) error {
 		hashes = append(hashes, header.Hash())
 	}
 	go p.peer.RequestReceipts(hashes)
-
-	return nil
-}
-
-// FetchNodeData sends a node state data retrieval request to the remote peer.
-func (p *peerConnection) FetchNodeData(hashes []common.Hash) error {
-	// Sanity check the protocol version
-	if p.version < 63 {
-		panic(fmt.Sprintf("node data fetch [eth/63+] requested on eth/%d", p.version))
-	}
-	// Short circuit if the peer is already fetching
-	if !atomic.CompareAndSwapInt32(&p.stateIdle, 0, 1) {
-		return errAlreadyFetching
-	}
-	p.stateStarted = time.Now()
-
-	go p.peer.RequestNodeData(hashes)
 
 	return nil
 }

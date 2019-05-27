@@ -25,10 +25,10 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 )
 
 var nullNode *enode.Node
@@ -40,7 +40,10 @@ func init() {
 }
 
 func newTestTable(t transport) (*Table, *enode.DB) {
-	db, _ := enode.OpenDB("")
+	db, err := enode.OpenDB("")
+	if err != nil {
+		panic(err)
+	}
 	tab, _ := newTable(t, db, nil, log.Root())
 	go tab.loop()
 	return tab, db

@@ -25,7 +25,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var discard = Protocol{
@@ -38,9 +38,7 @@ var discard = Protocol{
 				return err
 			}
 			fmt.Printf("discarding %d\n", msg.Code)
-			if err = msg.Discard(); err != nil {
-				return err
-			}
+			msg.Discard()
 		}
 	},
 }

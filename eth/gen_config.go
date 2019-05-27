@@ -6,33 +6,33 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/eth/gasprice"
-	"github.com/ethereum/go-ethereum/miner"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
+	"github.com/ledgerwatch/turbo-geth/miner"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkId               uint64
+		NetworkID               uint64
 		SyncMode                downloader.SyncMode
 		NoPruning               bool
 		NoPrefetch              bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
-		LightServ               int                    `toml:",omitempty"`
 		LightIngress            int                    `toml:",omitempty"`
 		LightEgress             int                    `toml:",omitempty"`
-		LightPeers              int                    `toml:",omitempty"`
-		UltraLightServers       []string               `toml:",omitempty"`
-		UltraLightFraction      int                    `toml:",omitempty"`
-		UltraLightOnlyAnnounce  bool                   `toml:",omitempty"`
-		SkipBcVersionCheck      bool                   `toml:"-"`
-		DatabaseHandles         int                    `toml:"-"`
+		NoHistory               bool
+		ArchiveSyncInterval     int
+		LightServ               int `toml:",omitempty"`
+		LightPeers              int `toml:",omitempty"`
+		OnlyAnnounce            bool
+		SkipBcVersionCheck      bool `toml:"-"`
+		DatabaseHandles         int  `toml:"-"`
 		DatabaseCache           int
 		DatabaseFreezer         string
 		TrieCleanCache          int
@@ -52,18 +52,17 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
-	enc.NetworkId = c.NetworkId
+	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.NoPruning = c.NoPruning
 	enc.NoPrefetch = c.NoPrefetch
 	enc.Whitelist = c.Whitelist
+	enc.NoHistory = c.NoHistory
+	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
 	enc.LightEgress = c.LightEgress
 	enc.LightPeers = c.LightPeers
-	enc.UltraLightServers = c.UltraLightServers
-	enc.UltraLightFraction = c.UltraLightFraction
-	enc.UltraLightOnlyAnnounce = c.UltraLightOnlyAnnounce
 	enc.SkipBcVersionCheck = c.SkipBcVersionCheck
 	enc.DatabaseHandles = c.DatabaseHandles
 	enc.DatabaseCache = c.DatabaseCache
@@ -89,20 +88,20 @@ func (c Config) MarshalTOML() (interface{}, error) {
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkId               *uint64
+		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
 		NoPruning               *bool
 		NoPrefetch              *bool
 		Whitelist               map[uint64]common.Hash `toml:"-"`
-		LightServ               *int                   `toml:",omitempty"`
 		LightIngress            *int                   `toml:",omitempty"`
 		LightEgress             *int                   `toml:",omitempty"`
-		LightPeers              *int                   `toml:",omitempty"`
-		UltraLightServers       []string               `toml:",omitempty"`
-		UltraLightFraction      *int                   `toml:",omitempty"`
-		UltraLightOnlyAnnounce  *bool                  `toml:",omitempty"`
-		SkipBcVersionCheck      *bool                  `toml:"-"`
-		DatabaseHandles         *int                   `toml:"-"`
+		NoHistory               *bool
+		ArchiveSyncInterval     *int
+		LightServ               *int `toml:",omitempty"`
+		LightPeers              *int `toml:",omitempty"`
+		OnlyAnnounce            *bool
+		SkipBcVersionCheck      *bool `toml:"-"`
+		DatabaseHandles         *int  `toml:"-"`
 		DatabaseCache           *int
 		DatabaseFreezer         *string
 		TrieCleanCache          *int
@@ -127,8 +126,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Genesis != nil {
 		c.Genesis = dec.Genesis
 	}
-	if dec.NetworkId != nil {
-		c.NetworkId = *dec.NetworkId
+	if dec.NetworkID != nil {
+		c.NetworkID = *dec.NetworkID
 	}
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode
@@ -142,6 +141,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
 	}
+	if dec.NoHistory != nil {
+		c.NoHistory = *dec.NoHistory
+	}
+	if dec.ArchiveSyncInterval != nil {
+		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval
+	}
 	if dec.LightServ != nil {
 		c.LightServ = *dec.LightServ
 	}
@@ -153,15 +158,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.LightPeers != nil {
 		c.LightPeers = *dec.LightPeers
-	}
-	if dec.UltraLightServers != nil {
-		c.UltraLightServers = dec.UltraLightServers
-	}
-	if dec.UltraLightFraction != nil {
-		c.UltraLightFraction = *dec.UltraLightFraction
-	}
-	if dec.UltraLightOnlyAnnounce != nil {
-		c.UltraLightOnlyAnnounce = *dec.UltraLightOnlyAnnounce
 	}
 	if dec.SkipBcVersionCheck != nil {
 		c.SkipBcVersionCheck = *dec.SkipBcVersionCheck

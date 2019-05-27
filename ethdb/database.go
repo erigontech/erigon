@@ -17,115 +17,657 @@
 // Package ethdb defines the interfaces for an Ethereum data store.
 package ethdb
 
-import "io"
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path"
+	"sync"
 
-// KeyValueReader wraps the Has and Get method of a backing data store.
-type KeyValueReader interface {
-	// Has retrieves if a key is present in the key-value data store.
-	Has(key []byte) (bool, error)
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/log"
 
-	// Get retrieves the given key if it's present in the key-value data store.
-	Get(key []byte) ([]byte, error)
+	"github.com/ledgerwatch/bolt"
+	"github.com/petar/GoLLRB/llrb"
+)
+
+var OpenFileLimit = 64
+var ErrKeyNotFound = errors.New("boltdb: key not found in range")
+
+const HeapSize = 512 * 1024 * 1024
+
+type BoltDatabase struct {
+	fn string   // filename for reporting
+	db *bolt.DB // BoltDB instance
+
+	quitLock sync.Mutex      // Mutex protecting the quit channel access
+	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
+
+	log log.Logger // Contextual logger tracking the database path
 }
 
-// KeyValueWriter wraps the Put method of a backing data store.
-type KeyValueWriter interface {
-	// Put inserts the given value into the key-value data store.
-	Put(key []byte, value []byte) error
+// NewBoltDatabase returns a LevelDB wrapped object.
+func NewBoltDatabase(file string) (*BoltDatabase, error) {
+	logger := log.New("database", file)
 
-	// Delete removes the key from the key-value data store.
-	Delete(key []byte) error
+	// Create necessary directories
+	if err := os.MkdirAll(path.Dir(file), os.ModePerm); err != nil {
+		return nil, err
+	}
+	// Open the db and recover any potential corruptions
+	db, err := bolt.Open(file, 0600, &bolt.Options{})
+	// (Re)check for errors and abort if opening of the db failed
+	if err != nil {
+		return nil, err
+	}
+	return &BoltDatabase{
+		fn:  file,
+		db:  db,
+		log: logger,
+	}, nil
 }
 
-// Stater wraps the Stat method of a backing data store.
-type Stater interface {
-	// Stat returns a particular internal stat of the database.
-	Stat(property string) (string, error)
+// Path returns the path to the database directory.
+func (db *BoltDatabase) Path() string {
+	return db.fn
 }
 
-// Compacter wraps the Compact method of a backing data store.
-type Compacter interface {
-	// Compact flattens the underlying data store for the given key range. In essence,
-	// deleted and overwritten versions are discarded, and the data is rearranged to
-	// reduce the cost of operations needed to access them.
-	//
-	// A nil start is treated as a key before all keys in the data store; a nil limit
-	// is treated as a key after all keys in the data store. If both is nil then it
-	// will compact entire data store.
-	Compact(start []byte, limit []byte) error
+// Put puts the given key / value to the queue
+func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(bucket, true)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, value)
+	})
+	return err
 }
 
-// KeyValueStore contains all the methods required to allow handling different
-// key-value data stores backing the high level database.
-type KeyValueStore interface {
-	KeyValueReader
-	KeyValueWriter
-	Batcher
-	Iteratee
-	Stater
-	Compacter
-	io.Closer
+// Put puts the given key / value to the queue
+func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
+	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
+	suffixkey := make([]byte, len(suffix)+len(hBucket))
+	copy(suffixkey, suffix)
+	copy(suffixkey[len(suffix):], hBucket)
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
+		if err != nil {
+			return err
+		}
+		if err = hb.Put(composite, value); err != nil {
+			return err
+		}
+		sb, err := tx.CreateBucketIfNotExists(dbutils.SuffixBucket, true)
+		if err != nil {
+			return err
+		}
+
+		dat, _ := sb.Get(suffixkey)
+		dat = dbutils.ToSuffix(dat).Add(key)
+		return sb.Put(suffixkey, dat)
+	})
+	return err
 }
 
-// AncientReader contains the methods required to read from immutable ancient data.
-type AncientReader interface {
-	// HasAncient returns an indicator whether the specified data exists in the
-	// ancient store.
-	HasAncient(kind string, number uint64) (bool, error)
-
-	// Ancient retrieves an ancient binary blob from the append-only immutable files.
-	Ancient(kind string, number uint64) ([]byte, error)
-
-	// Ancients returns the ancient item numbers in the ancient store.
-	Ancients() (uint64, error)
-
-	// AncientSize returns the ancient size of the specified category.
-	AncientSize(kind string) (uint64, error)
+func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+	var savedTx *bolt.Tx
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		for bucketStart := 0; bucketStart < len(tuples); {
+			bucketEnd := bucketStart
+			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
+			}
+			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart], false)
+			if err != nil {
+				return err
+			}
+			l := (bucketEnd - bucketStart) / 3
+			pairs := make([][]byte, 2*l)
+			for i := 0; i < l; i++ {
+				pairs[2*i] = tuples[bucketStart+3*i+1]
+				pairs[2*i+1] = tuples[bucketStart+3*i+2]
+			}
+			if err := b.MultiPut(pairs...); err != nil {
+				return err
+			}
+			bucketStart = bucketEnd
+		}
+		savedTx = tx
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(savedTx.Stats().Write), nil
 }
 
-// AncientWriter contains the methods required to write to immutable ancient data.
-type AncientWriter interface {
-	// AppendAncient injects all binary blobs belong to block at the end of the
-	// append-only immutable table files.
-	AppendAncient(number uint64, hash, header, body, receipt, td []byte) error
-
-	// TruncateAncients discards all but the first n ancient data from the ancient store.
-	TruncateAncients(n uint64) error
-
-	// Sync flushes all in-memory ancient store data to disk.
-	Sync() error
+func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
+	var has bool
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			has = false
+		} else {
+			v, _ := b.Get(key)
+			has = v != nil
+		}
+		return nil
+	})
+	return has, err
 }
 
-// Reader contains the methods required to read data from both key-value as well as
-// immutable ancient data.
-type Reader interface {
-	KeyValueReader
-	AncientReader
+func (db *BoltDatabase) Size() int {
+	return db.db.Size()
 }
 
-// Writer contains the methods required to write data to both key-value as well as
-// immutable ancient data.
-type Writer interface {
-	KeyValueWriter
-	AncientWriter
+// Get returns the given key if it's present.
+func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			v, _ := b.Get(key)
+			if v != nil {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+			}
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
 }
 
-// AncientStore contains all the methods required to allow handling different
-// ancient data stores backing immutable chain data store.
-type AncientStore interface {
-	AncientReader
-	AncientWriter
-	io.Closer
+func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	return db.Get(hBucket, composite)
 }
 
-// Database contains all the methods required by the high level database to not
-// only access the key-value data store but also the chain freezer.
-type Database interface {
-	Reader
-	Writer
-	Batcher
-	Iteratee
-	Stater
-	Compacter
-	io.Closer
+// GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
+// if there are not such (k, v)
+func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		{
+			hB := tx.Bucket(hBucket)
+			if hB == nil {
+				return ErrKeyNotFound
+			}
+			hC := hB.Cursor()
+			hK, hV := hC.Seek(composite)
+			if hK != nil && bytes.HasPrefix(hK, key) {
+				dat = make([]byte, len(hV))
+				copy(dat, hV)
+				return nil
+			}
+		}
+		{
+			b := tx.Bucket(bucket)
+			if b == nil {
+				return ErrKeyNotFound
+			}
+			c := b.Cursor()
+			k, v := c.Seek(key)
+			if k != nil && bytes.Equal(k, key) {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		}
+
+		return ErrKeyNotFound
+	})
+	return dat, err
+}
+
+func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
+	fixedbytes = int((fixedbits + 7) / 8)
+	shiftbits := fixedbits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return fixedbytes, mask
+}
+
+func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		k, v := c.Seek(startkey)
+		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
+			goOn, err := walker(k, v)
+			if err != nil {
+				return err
+			}
+			if !goOn {
+				break
+			}
+			k, v = c.Next()
+		}
+		return nil
+	})
+	return err
+}
+
+func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+	if len(startkeys) == 0 {
+		return nil
+	}
+	keyIdx := 0 // What is the current key we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
+	startkey := startkeys[keyIdx]
+	if err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		k, v := c.Seek(startkey)
+		for k != nil {
+			// Adjust keyIdx if needed
+			if fixedbytes > 0 {
+				cmp := int(-1)
+				for cmp != 0 {
+					cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+					if cmp == 0 {
+						k1 := k[fixedbytes-1] & mask
+						k2 := startkey[fixedbytes-1] & mask
+						if k1 < k2 {
+							cmp = -1
+						} else if k1 > k2 {
+							cmp = 1
+						}
+					}
+					if cmp < 0 {
+						k, v = c.SeekTo(startkey)
+						if k == nil {
+							return nil
+						}
+					} else if cmp > 0 {
+						keyIdx++
+						if keyIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
+						startkey = startkeys[keyIdx]
+					}
+				}
+			}
+			if len(v) > 0 {
+				_, err := walker(keyIdx, k, v)
+				if err != nil {
+					return err
+				}
+			}
+			k, v = c.Next()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	suffix := dbutils.EncodeTimestamp(timestamp)
+	l := len(startkey)
+	sl := l + len(suffix)
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		hB := tx.Bucket(hBucket)
+		if hB == nil {
+			return nil
+		}
+		c := b.Cursor()
+		hC := hB.Cursor()
+		k, v := c.Seek(startkey)
+		hK, hV := hC.Seek(startkey)
+		goOn := true
+		var err error
+		for goOn {
+			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				k = nil
+			}
+			if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				k = nil
+			}
+			if hK != nil && fixedbits > 0 && !bytes.Equal(hK[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				hK = nil
+			}
+			if hK != nil && fixedbits > 0 && (hK[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				hK = nil
+			}
+
+			// historical key points to an old block
+			if hK != nil && bytes.Compare(hK[l:], suffix) < 0 {
+				copy(keyBuffer, hK[:l])
+				copy(keyBuffer[l:], suffix)
+				// update historical key/value to the desired block
+				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				continue
+			}
+
+			var cmp int
+			if k == nil {
+				if hK == nil {
+					goOn = false
+					break
+				} else {
+					cmp = 1
+				}
+			} else if hK == nil {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(k, hK[:l])
+			}
+			if cmp < 0 {
+				goOn, err = walker(k, v)
+			} else {
+				goOn, err = walker(hK[:l], hV)
+			}
+			if goOn {
+				if cmp <= 0 {
+					k, v = c.Next()
+				}
+				if cmp >= 0 {
+					copy(keyBuffer, hK[:l])
+					copy(keyBuffer[l:], EndSuffix)
+					hK, hV = hC.SeekTo(keyBuffer)
+				}
+			}
+		}
+		return err
+	})
+	return err
+}
+
+func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+	if len(startkeys) == 0 {
+		return nil
+	}
+	keyIdx := 0 // What is the current key we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
+	startkey := startkeys[keyIdx]
+	suffix := dbutils.EncodeTimestamp(timestamp)
+	l := len(startkey)
+	sl := l + len(suffix)
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	if err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		hB := tx.Bucket(hBucket)
+		if hB == nil {
+			return nil
+		}
+		c := b.Cursor()
+		hC := hB.Cursor()
+		hC1 := hB.Cursor()
+		k, v := c.Seek(startkey)
+		hK, hV := hC.Seek(startkey)
+		goOn := true
+		var err error
+		for goOn { // k != nil
+			fit := k != nil
+			hKFit := hK != nil
+			if fixedbytes > 0 {
+				cmp := 1
+				hCmp := 1
+				for cmp != 0 && hCmp != 0 {
+					if k != nil {
+						cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+						if cmp == 0 {
+							k1 := k[fixedbytes-1] & mask
+							k2 := startkey[fixedbytes-1] & mask
+							if k1 < k2 {
+								cmp = -1
+							} else if k1 > k2 {
+								cmp = 1
+							}
+						}
+						if cmp < 0 {
+							k, v = c.SeekTo(startkey)
+							if k == nil {
+								cmp = 1
+							}
+						}
+					}
+					if hK != nil {
+						hCmp = bytes.Compare(hK[:fixedbytes-1], startkey[:fixedbytes-1])
+						if hCmp == 0 {
+							k1 := hK[fixedbytes-1] & mask
+							k2 := startkey[fixedbytes-1] & mask
+							if k1 < k2 {
+								hCmp = -1
+							} else if k1 > k2 {
+								hCmp = 1
+							}
+						}
+						if hCmp < 0 {
+							hK, hV = hC.SeekTo(startkey)
+							if hK == nil {
+								hCmp = 1
+							}
+						}
+					}
+					if cmp > 0 && hCmp > 0 {
+						keyIdx++
+						if keyIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
+						startkey = startkeys[keyIdx]
+					}
+				}
+				fit = cmp == 0
+				hKFit = hCmp == 0
+			}
+			if hKFit && bytes.Compare(hK[l:], suffix) < 0 {
+				copy(keyBuffer, hK[:l])
+				copy(keyBuffer[l:], suffix)
+				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				continue
+			}
+			var cmp int
+			if !fit {
+				if !hKFit {
+					goOn = false
+					break
+				} else {
+					cmp = 1
+				}
+			} else if !hKFit {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(k, hK[:l])
+			}
+			if cmp < 0 {
+				hK1, _ := hC1.Seek(k)
+				if bytes.HasPrefix(hK1, k) {
+					goOn, err = walker(keyIdx, k, v)
+				}
+			} else {
+				goOn, err = walker(keyIdx, hK[:l], hV)
+			}
+			if goOn {
+				if cmp <= 0 {
+					k, v = c.Next()
+				}
+				if cmp >= 0 {
+					copy(keyBuffer, hK[:l])
+					copy(keyBuffer[l:], EndSuffix)
+					hK, hV = hC.SeekTo(keyBuffer)
+				}
+			}
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+	return rewindData(db, timestampSrc, timestampDst, df)
+}
+
+// Delete deletes the key from the queue and database
+func (db *BoltDatabase) Delete(bucket, key []byte) error {
+	// Execute the actual operation
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			return b.Delete(key)
+		} else {
+			return nil
+		}
+	})
+	return err
+}
+
+// Deletes all keys with specified suffix from all the buckets
+func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
+	suffix := dbutils.EncodeTimestamp(timestamp)
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		sb := tx.Bucket(dbutils.SuffixBucket)
+		if sb == nil {
+			return nil
+		}
+		var keys [][]byte
+		c := sb.Cursor()
+		for k, v := c.Seek(suffix); k != nil && bytes.HasPrefix(k, suffix); k, v = c.Next() {
+			hb := tx.Bucket(k[len(suffix):])
+			if hb == nil {
+				return nil
+			}
+			changedAccounts := dbutils.ToSuffix(v)
+			err := changedAccounts.Walk(func(kk []byte) error {
+				kk = append(kk, suffix...)
+				if err := hb.Delete(kk); err != nil {
+					return err
+				}
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+			keys = append(keys, k)
+		}
+		for _, k := range keys {
+			if err := sb.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
+}
+
+func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		if err := tx.DeleteBucket(bucket); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
+}
+
+func (db *BoltDatabase) Close() {
+	// Stop the metrics collection to avoid internal database races
+	db.quitLock.Lock()
+	defer db.quitLock.Unlock()
+
+	if db.quitChan != nil {
+		errc := make(chan error)
+		db.quitChan <- errc
+		if err := <-errc; err != nil {
+			db.log.Error("Metrics collection failed", "err", err)
+		}
+		db.quitChan = nil
+	}
+	if err := db.db.Close(); err == nil {
+		db.log.Info("Database closed")
+	} else {
+		db.log.Error("Failed to close database", "err", err)
+	}
+}
+
+func (db *BoltDatabase) Keys() ([][]byte, error) {
+	var keys [][]byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			var nameCopy = make([]byte, len(name))
+			copy(nameCopy, name)
+			return b.ForEach(func(k, _ []byte) error {
+				var kCopy = make([]byte, len(k))
+				copy(kCopy, k)
+				keys = append(append(keys, nameCopy), kCopy)
+				return nil
+			})
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keys, err
+}
+
+func (db *BoltDatabase) DB() *bolt.DB {
+	return db.db
+}
+
+type PutItem struct {
+	key, value []byte
+}
+
+func (a *PutItem) Less(b llrb.Item) bool {
+	bi := b.(*PutItem)
+	return bytes.Compare(a.key, bi.key) < 0
+}
+
+func (db *BoltDatabase) NewBatch() Mutation {
+	m := &mutation{
+		db:         db,
+		puts:       make(map[string]*llrb.LLRB),
+		suffixkeys: make(map[uint64]map[string][][]byte),
+	}
+	return m
+}
+
+// [TURBO-GETH] Freezer support (not implemented yet)
+// Ancients returns an error as we don't have a backing chain freezer.
+func (db *BoltDatabase) Ancients() (uint64, error) {
+	return 0, errNotSupported
+}
+
+// TruncateAncients returns an error as we don't have a backing chain freezer.
+func (db *BoltDatabase) TruncateAncients(items uint64) error {
+	return errNotSupported
+}
+
+func InspectDatabase(db Database) error {
+	// FIXME: implement in Turbo-Geth
+	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
+	return errNotSupported
+}
+
+func NewDatabaseWithFreezer(db Database, dir, suffix string) (Database, error) {
+	// FIXME: implement freezer in Turbo-Geth
+	return db, nil
 }

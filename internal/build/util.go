@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"flag"
 	"fmt"
+	"go/build"
 	"io"
 	"io/ioutil"
 	"log"
@@ -55,7 +56,9 @@ func MustRunCommand(cmd string, args ...string) {
 // variable should be set to.
 func GOPATH() string {
 	if os.Getenv("GOPATH") == "" {
-		log.Fatal("GOPATH is not set")
+		// Starting with go 1.8 this variable contains the default GOPATH if
+		// no env variable is set.
+		return build.Default.GOPATH
 	}
 	return os.Getenv("GOPATH")
 }

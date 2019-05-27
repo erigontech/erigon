@@ -25,12 +25,12 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ethereum/go-ethereum/accounts/keystore"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/console"
-	"github.com/ethereum/go-ethereum/p2p/dnsdisc"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/console"
+	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	cli "github.com/urfave/cli"
 )
 
 var (

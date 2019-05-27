@@ -25,13 +25,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/p2p/enr"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/p2p/enr"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -294,7 +294,8 @@ func (p *Peer) handle(msg Msg) error {
 		return reason[0]
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
-		return msg.Discard()
+		msg.Discard()
+		return nil
 	default:
 		// it's a subprotocol message
 		proto, err := p.getProto(msg.Code)

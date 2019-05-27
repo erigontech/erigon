@@ -20,26 +20,27 @@
 package eth
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
+	"log"
 	"math/big"
 	"sort"
 	"sync"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/eth/downloader"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 var (
@@ -54,19 +55,33 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	var (
 		evmux  = new(event.TypeMux)
 		engine = ethash.NewFaker()
-		db     = rawdb.NewMemoryDatabase()
 		gspec  = &core.Genesis{
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{testBank: {Balance: big.NewInt(1000000)}},
 		}
-		genesis       = gspec.MustCommit(db)
-		blockchain, _ = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+		dbGen   = ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+		genesis = gspec.MustCommit(dbGen)
 	)
-	chain, _ := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, blocks, generator)
-	if _, err := blockchain.InsertChain(chain); err != nil {
-		panic(err)
+	var chain []*types.Block
+	// Fresh database
+	db := ethdb.NewMemDatabase()
+	// Regenerate genesis block in the fresh database
+	gspec.MustCommit(db)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		return nil, nil, err
 	}
-	pm, err := NewProtocolManager(gspec.Config, nil, mode, DefaultConfig.NetworkId, evmux, &testTxPool{added: newtx}, engine, blockchain, db, 1, nil)
+	blockchain.EnableReceipts(true)
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
+	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+
+	if _, err := blockchain.InsertChain(chain); err != nil {
+		return nil, nil, err
+	}
+
+	cht := &params.TrustedCheckpoint{}
+	pm, err := NewProtocolManager(gspec.Config, cht, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx}, engine, blockchain, db, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,6 +157,12 @@ type testPeer struct {
 	*peer
 }
 
+type testFirehosePeer struct {
+	net  p2p.MsgReadWriter // Network layer reader/writer to simulate remote messaging
+	app  *p2p.MsgPipeRW    // Application layer reader/writer to simulate the local side
+	peer *firehosePeer
+}
+
 // newTestPeer creates a new peer registered at the given protocol manager.
 func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*testPeer, <-chan error) {
 	// Create a message pipe to communicate through
@@ -176,12 +197,40 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 	return tp, errc
 }
 
+func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <-chan error) {
+	// Create a message pipe to communicate through
+	app, net := p2p.MsgPipe()
+
+	// Generate a random id and create the peer
+	var id enode.ID
+	// #nosec G404
+	if _, err := rand.Read(id[:]); err != nil {
+		log.Fatal(err)
+	}
+
+	peer := &firehosePeer{Peer: p2p.NewPeer(id, name, nil), rw: net}
+
+	// Start the peer on a new thread
+	errc := make(chan error, 1)
+	go func() {
+		select {
+		case <-pm.quitSync:
+			errc <- p2p.DiscQuitting
+		default:
+			errc <- pm.handleFirehose(peer)
+		}
+	}()
+
+	tp := &testFirehosePeer{app: app, net: net, peer: peer}
+	return tp, errc
+}
+
 // handshake simulates a trivial handshake that expects the same state from the
 // remote side as we are simulating locally.
 func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesis common.Hash) {
 	msg := &statusData{
 		ProtocolVersion: uint32(p.version),
-		NetworkId:       DefaultConfig.NetworkId,
+		NetworkID:       DefaultConfig.NetworkID,
 		TD:              td,
 		CurrentBlock:    head,
 		GenesisBlock:    genesis,
@@ -197,5 +246,9 @@ func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesi
 // close terminates the local side of the peer, notifying the remote protocol
 // manager of termination.
 func (p *testPeer) close() {
+	p.app.Close()
+}
+
+func (p *testFirehosePeer) close() {
 	p.app.Close()
 }

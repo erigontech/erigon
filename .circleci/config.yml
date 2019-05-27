@@ -1,0 +1,61 @@
+version: 2
+jobs:
+  build:
+    docker:
+      - image: circleci/golang:1.12.9
+
+    working_directory: /go/src/github.com/ledgerwatch/turbo-geth
+
+    steps:
+      - run:
+          name: "Setup custom environment variables"
+          command: |
+              echo 'export GO111MODULE="on"' >> $BASH_ENV
+              echo 'export TEST_RESULTS="/tmp/test-results"' >> $BASH_ENV
+              source $BASH_ENV
+
+      - checkout
+      - run: mkdir -p ${TEST_RESULTS}
+      - run: go env
+
+      - restore_cache:
+          keys:
+            - v1-pkg-cache-{{ checksum "go.sum" }}
+            - v1-pkg-cache
+
+      - run: git submodule update --init --recursive
+
+      - run: go mod download
+      - run: go mod verify
+
+      - run: go get github.com/jstemmer/go-junit-report
+
+      - run: make lintci-deps
+
+      - run:
+          name: Run extra linters
+          command: make lintci
+          no_output_timeout: 10m
+
+      - run: make
+
+      - run:
+          name: Run unit tests
+          command: |
+            trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
+            make test | tee ${TEST_RESULTS}/go-test.out
+          no_output_timeout: 10m
+
+      - save_cache:
+          key: v1-pkg-cache-{{ checksum "go.sum" }}
+          paths:
+            - "/go/pkg"
+            - "/go/pkg/mod"
+
+      - store_artifacts:
+          path: /tmp/test-results
+          destination: raw-test-output
+
+      - store_test_results:
+          path: /tmp/test-results
+

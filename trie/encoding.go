@@ -16,10 +16,17 @@
 
 package trie
 
+import (
+	"io"
+
+	"github.com/ledgerwatch/turbo-geth/rlp"
+)
+
 // Trie keys are dealt with in three distinct encodings:
 //
 // KEYBYTES encoding contains the actual key and nothing else. This encoding is the
-// input to most API functions.
+// input to most API functions. It is a packed encoding of hex sequences
+// with 2 nibbles per byte.
 //
 // HEX encoding contains one byte for each nibble of the key and an optional trailing
 // 'terminator' byte of value 0x10 which indicates whether or not the node at the key
@@ -51,6 +58,10 @@ func hexToCompact(hex []byte) []byte {
 	return buf
 }
 
+func compactLen(compact []byte) int {
+	return 2*len(compact) - 2 + int((compact[0]&0x10)>>4)
+}
+
 func compactToHex(compact []byte) []byte {
 	if len(compact) == 0 {
 		return compact
@@ -63,6 +74,89 @@ func compactToHex(compact []byte) []byte {
 	// apply odd flag
 	chop := 2 - base[0]&1
 	return base[chop:]
+}
+
+// Keybytes represent a packed encoding of hex sequences
+// where 2 nibbles per byte are stored in Data
+// + an additional flag for terminating nodes.
+type Keybytes struct {
+	Data        []byte
+	Odd         bool
+	Terminating bool
+}
+
+// Nibbles returns the number of nibbles.
+func (x *Keybytes) Nibbles() int {
+	n := len(x.Data) * 2
+	if x.Odd {
+		n--
+	}
+	return n
+}
+
+// ToHex translates from KEYBYTES to HEX encoding.
+func (x *Keybytes) ToHex() []byte {
+	return compactToHex(x.ToCompact())
+}
+
+// ToCompact translates from KEYBYTES to COMPACT encoding.
+func (x *Keybytes) ToCompact() []byte {
+	l := len(x.Data)
+	if !x.Odd {
+		l++
+	}
+
+	var compact = make([]byte, l)
+
+	if x.Terminating {
+		compact[0] = 0x20
+	}
+
+	if x.Odd {
+		compact[0] += 0x10
+		compact[0] += x.Data[0] >> 4
+		for i := 1; i < len(x.Data); i++ {
+			compact[i] = (x.Data[i-1] << 4) + (x.Data[i] >> 4)
+		}
+	} else {
+		copy(compact[1:], x.Data)
+	}
+
+	return compact
+}
+
+// CompactToKeybytes translates from COMPACT to KEYBYTES encoding.
+func CompactToKeybytes(c []byte) Keybytes {
+	var k Keybytes
+	k.Odd = (c[0] & 0x10) != 0
+	k.Terminating = (c[0] & 0x20) != 0
+
+	if k.Odd {
+		k.Data = make([]byte, len(c))
+		for i := 1; i < len(c); i++ {
+			k.Data[i-1] = (c[i-1] << 4) + (c[i] >> 4)
+		}
+		k.Data[len(c)-1] = c[len(c)-1] << 4
+	} else {
+		k.Data = c[1:]
+	}
+
+	return k
+}
+
+// EncodeRLP implements rlp.Encoder and encodes Keybytes in the COMPACT encoding.
+func (x *Keybytes) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, x.ToCompact())
+}
+
+// DecodeRLP implements rlp.Decoder and decodes Keybytes from the COMPACT encoding.
+func (x *Keybytes) DecodeRLP(s *rlp.Stream) error {
+	var compact []byte
+	if err := s.Decode(&compact); err != nil {
+		return err
+	}
+	*x = CompactToKeybytes(compact)
+	return nil
 }
 
 func keybytesToHex(str []byte) []byte {
@@ -91,8 +185,16 @@ func hexToKeybytes(hex []byte) []byte {
 }
 
 func decodeNibbles(nibbles []byte, bytes []byte) {
-	for bi, ni := 0, 0; ni < len(nibbles); bi, ni = bi+1, ni+2 {
-		bytes[bi] = nibbles[ni]<<4 | nibbles[ni+1]
+	if hasTerm(nibbles) {
+		nibbles = nibbles[:len(nibbles)-1]
+	}
+	nl := len(nibbles)
+	for bi, ni := 0, 0; ni < nl; bi, ni = bi+1, ni+2 {
+		if ni == nl-1 {
+			bytes[bi] = (bytes[bi] &^ 0xf0) | nibbles[ni]<<4
+		} else {
+			bytes[bi] = nibbles[ni]<<4 | nibbles[ni+1]
+		}
 	}
 }
 

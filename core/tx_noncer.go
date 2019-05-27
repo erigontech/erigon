@@ -19,21 +19,21 @@ package core
 import (
 	"sync"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/state"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 )
 
 // txNoncer is a tiny virtual state database to manage the executable nonces of
 // accounts in the pool, falling back to reading from a real state database if
 // an account is unknown.
 type txNoncer struct {
-	fallback *state.StateDB
+	fallback *state.IntraBlockState
 	nonces   map[common.Address]uint64
 	lock     sync.Mutex
 }
 
 // newTxNoncer creates a new virtual state database to track the pool nonces.
-func newTxNoncer(statedb *state.StateDB) *txNoncer {
+func newTxNoncer(statedb *state.IntraBlockState) *txNoncer {
 	return &txNoncer{
 		fallback: statedb.Copy(),
 		nonces:   make(map[common.Address]uint64),

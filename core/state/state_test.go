@@ -19,18 +19,22 @@ package state
 import (
 	"bytes"
 	"math/big"
+	"os"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"context"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	checker "gopkg.in/check.v1"
 )
 
 type StateSuite struct {
 	db    ethdb.Database
-	state *StateDB
+	state *IntraBlockState
+	tds   *TrieDbState
 }
 
 var _ = checker.Suite(&StateSuite{})
@@ -47,12 +51,25 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(big.NewInt(44))
 
 	// write some of them to the trie
-	s.state.updateStateObject(obj1)
-	s.state.updateStateObject(obj2)
-	s.state.Commit(false)
+	ctx := context.TODO()
+	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+
+	err = s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
+	_, err = s.tds.ComputeTrieRoots()
+	c.Check(err, checker.IsNil)
+
+	s.tds.SetBlockNr(1)
+
+	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
-	got := string(s.state.Dump(false, false, true))
+	got := string(s.tds.DefaultDump())
 	want := `{
     "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
     "accounts": {
@@ -83,24 +100,31 @@ func (s *StateSuite) TestDump(c *checker.C) {
 }
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
-	s.db = rawdb.NewMemoryDatabase()
-	s.state, _ = New(common.Hash{}, NewDatabase(s.db))
+	s.db = ethdb.NewMemDatabase()
+	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
+	s.state = New(s.tds)
+	s.tds.StartNewBuffer()
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
 	address := common.HexToAddress("0x823140710bf13990e4500136726d8b55")
-	s.state.CreateAccount(address)
+	s.state.CreateAccount(address, true)
 	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value common.Hash
 
 	s.state.SetState(address, common.Hash{}, value)
-	s.state.Commit(false)
 
-	if value := s.state.GetState(address, common.Hash{}); value != (common.Hash{}) {
-		c.Errorf("expected empty current value, got %x", value)
-	}
+	ctx := context.TODO()
+	err := s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
+	s.tds.SetBlockNr(1)
+
+	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
+
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
-		c.Errorf("expected empty committed value, got %x", value)
+		c.Errorf("expected empty hash. got %x", value)
 	}
 }
 
@@ -137,7 +161,11 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // use testing instead of checker because checker does not support
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
-	state, _ := New(common.Hash{}, NewDatabase(rawdb.NewMemoryDatabase()))
+	db := ethdb.NewMemDatabase()
+	ctx := context.TODO()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	state := New(tds)
+	tds.StartNewBuffer()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -158,8 +186,22 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	root, _ := state.Commit(false)
-	state.Reset(root)
+	err := state.FinalizeTx(ctx, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalizing transaction", err)
+	}
+
+	_, err = tds.ComputeTrieRoots()
+	if err != nil {
+		t.Fatal("error while computing trie roots", err)
+	}
+
+	tds.SetBlockNr(1)
+
+	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
@@ -180,8 +222,8 @@ func TestSnapshot2(t *testing.T) {
 
 	so0Restored := state.getStateObject(stateobjaddr0)
 	// Update lazily-loaded values before comparing.
-	so0Restored.GetState(state.db, storageaddr)
-	so0Restored.Code(state.db)
+	so0Restored.GetState(storageaddr)
+	so0Restored.Code()
 	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 
@@ -237,5 +279,83 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 		if so1.originStorage[k] != v {
 			t.Errorf("Origin storage key %x mismatch: have %v, want none.", k, v)
 		}
+	}
+}
+
+func TestDump(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	state := New(tds)
+	tds.StartNewBuffer()
+
+	// generate a few entries
+	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1.AddBalance(big.NewInt(22))
+	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	obj3.SetBalance(big.NewInt(44))
+
+	// write some of them to the trie
+	ctx := context.TODO()
+	err := tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = state.FinalizeTx(ctx, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("last root", tds.LastRoot().String())
+	_, err = tds.ComputeTrieRoots()
+	t.Log("last root", tds.LastRoot().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tds.SetBlockNr(1)
+
+	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, _ := os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trie_wrong.txt")
+	tds.t.Print(f)
+
+	// check that dump contains the state objects that are in trie
+	got := string(tds.DefaultDump())
+	want := `{
+    "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
+    "accounts": {
+        "0x0000000000000000000000000000000000000001": {
+            "balance": "22",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000002": {
+            "balance": "44",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000102": {
+            "balance": "0",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
+            "code": "03030303030303"
+        }
+    }
+}`
+	if got != want {
+		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
 }

@@ -24,10 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/steakknife/bloomfilter"
 )
 
@@ -66,7 +66,7 @@ type SyncBloom struct {
 
 // NewSyncBloom creates a new bloom filter of the given size (in megabytes) and
 // initializes it from the database. The bloom is hard coded to use 3 filters.
-func NewSyncBloom(memory uint64, database ethdb.Iteratee) *SyncBloom {
+func NewSyncBloom(memory uint64, database ethdb.Database) *SyncBloom {
 	// Create the bloom filter to track known trie nodes
 	bloom, err := bloomfilter.New(memory*1024*1024*8, 3)
 	if err != nil {
@@ -91,7 +91,7 @@ func NewSyncBloom(memory uint64, database ethdb.Iteratee) *SyncBloom {
 }
 
 // init iterates over the database, pushing every trie hash into the bloom filter.
-func (b *SyncBloom) init(database ethdb.Iteratee) {
+func (b *SyncBloom) init(database ethdb.Database) {
 	// Iterate over the database, but restart every now and again to avoid holding
 	// a persistent snapshot since fast sync can push a ton of data concurrently,
 	// bloating the disk.
@@ -99,30 +99,33 @@ func (b *SyncBloom) init(database ethdb.Iteratee) {
 	// Note, this is fine, because everything inserted into leveldb by fast sync is
 	// also pushed into the bloom directly, so we're not missing anything when the
 	// iterator is swapped out for a new one.
-	it := database.NewIterator()
-
 	var (
 		start = time.Now()
-		swap  = time.Now()
+		//swap  = time.Now()
 	)
-	for it.Next() && atomic.LoadUint32(&b.closed) == 0 {
-		// If the database entry is a trie node, add it to the bloom
-		if key := it.Key(); len(key) == common.HashLength {
-			b.bloom.Add(syncBloomHasher(key))
-			bloomLoadMeter.Mark(1)
-		}
-		// If enough time elapsed since the last iterator swap, restart
-		if time.Since(swap) > 8*time.Second {
-			key := common.CopyBytes(it.Key())
+	if atomic.LoadUint32(&b.closed) == 0 {
+		database.Walk(nil, []byte{}, 0, func(key, val []byte) (bool, error) {
+			// If the database entry is a trie node, add it to the bloom
+			if len(key) == common.HashLength {
+				b.bloom.Add(syncBloomHasher(key))
+				bloomLoadMeter.Mark(1)
+			}
+			return true, nil
+			// FIXME: restore or remove in Turbo-Geth
+			/*
+				// If enough time elapsed since the last iterator swap, restart
+				if time.Since(swap) > 8*time.Second {
+					key := common.CopyBytes(it.Key())
 
-			it.Release()
-			it = database.NewIteratorWithStart(key)
+					it.Release()
+					it = database.NewIteratorWithStart(key)
 
-			log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
-			swap = time.Now()
-		}
+					log.Info("Initializing fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))
+					swap = time.Now()
+				}
+			*/
+		})
 	}
-	it.Release()
 
 	// Mark the bloom filter inited and return
 	log.Info("Initialized fast sync bloom", "items", b.bloom.N(), "errorrate", b.errorRate(), "elapsed", common.PrettyDuration(time.Since(start)))

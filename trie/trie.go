@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -7,7 +7,7 @@
 // (at your option) any later version.
 //
 // The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// but WITHOUT ANY WARRANTY; without even the implied warranty off
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
@@ -19,25 +19,23 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 var (
-	// emptyRoot is the known root hash of an empty trie.
-	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	// EmptyRoot is the known root hash of an empty trie.
+	// DESCRIBED: docs/programmers_guide/guide.md#root
+	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
 	emptyState = crypto.Keccak256Hash(nil)
 )
-
-// LeafCallback is a callback type invoked when a trie operation reaches a leaf
-// node. It's used by state sync and commit to allow handling external references
-// between account and storage tries.
-type LeafCallback func(leaf []byte, parent common.Hash) error
 
 // Trie is a Merkle Patricia Trie.
 // The zero value is an empty trie with no database.
@@ -45,13 +43,11 @@ type LeafCallback func(leaf []byte, parent common.Hash) error
 //
 // Trie is not safe for concurrent use.
 type Trie struct {
-	db   *Database
 	root node
-}
 
-// newFlag returns the cache flag value for a newly created node.
-func (t *Trie) newFlag() nodeFlag {
-	return nodeFlag{dirty: true}
+	touchFunc func(hex []byte, del bool)
+
+	Version uint8
 }
 
 // New creates a trie with an existing root node from db.
@@ -60,82 +56,124 @@ func (t *Trie) newFlag() nodeFlag {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-func New(root common.Hash, db *Database) (*Trie, error) {
-	if db == nil {
-		panic("trie.New called without a database")
-	}
+func New(root common.Hash) *Trie {
 	trie := &Trie{
-		db: db,
+		touchFunc: func([]byte, bool) {},
 	}
-	if root != (common.Hash{}) && root != emptyRoot {
-		rootnode, err := trie.resolveHash(root[:], nil)
-		if err != nil {
-			return nil, err
-		}
-		trie.root = rootnode
+	if (root != common.Hash{}) && root != EmptyRoot {
+		trie.root = hashNode(root[:])
 	}
-	return trie, nil
+	return trie
 }
 
-// NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
-// the key after the given start key.
-func (t *Trie) NodeIterator(start []byte) NodeIterator {
-	return newNodeIterator(t, start)
+func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
+	t.touchFunc = touchFunc
 }
 
 // Get returns the value for key stored in the trie.
-// The value bytes must not be modified by the caller.
-func (t *Trie) Get(key []byte) []byte {
-	res, err := t.TryGet(key)
-	if err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
+func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
+	if t.root == nil {
+		return nil, true
 	}
-	return res
+
+	hex := keybytesToHex(key)
+	return t.get(t.root, hex, 0)
 }
 
-// TryGet returns the value for key stored in the trie.
-// The value bytes must not be modified by the caller.
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryGet(key []byte) ([]byte, error) {
-	key = keybytesToHex(key)
-	value, newroot, didResolve, err := t.tryGet(t.root, key, 0)
-	if err == nil && didResolve {
-		t.root = newroot
+func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
+	if t.root == nil {
+		return nil, true
 	}
-	return value, err
+
+	hex := keybytesToHex(key)
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode != nil {
+		var value accounts.Account
+		value.Copy(&accNode.Account)
+		return &value, gotValue
+	}
+	return nil, gotValue
 }
 
-func (t *Trie) tryGet(origNode node, key []byte, pos int) (value []byte, newnode node, didResolve bool, err error) {
+func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNode, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
-		return nil, nil, false, nil
-	case valueNode:
-		return n, n, false, nil
+		return nil, true
 	case *shortNode:
-		if len(key)-pos < len(n.Key) || !bytes.Equal(n.Key, key[pos:pos+len(n.Key)]) {
-			// key not found in trie
-			return nil, n, false, nil
+		matchlen := prefixLen(key[pos:], n.Key)
+		if matchlen == len(n.Key) {
+			if v, ok := n.Val.(*accountNode); ok {
+				return v, true
+			} else {
+				return t.getAccount(n.Val, key, pos+matchlen)
+			}
+		} else {
+			return nil, true
 		}
-		value, newnode, didResolve, err = t.tryGet(n.Val, key, pos+len(n.Key))
-		if err == nil && didResolve {
-			n = n.copy()
-			n.Val = newnode
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			return t.getAccount(n.child1, key, pos+1)
+		case i2:
+			return t.getAccount(n.child2, key, pos+1)
+		default:
+			return nil, true
 		}
-		return value, n, didResolve, err
 	case *fullNode:
-		value, newnode, didResolve, err = t.tryGet(n.Children[key[pos]], key, pos+1)
-		if err == nil && didResolve {
-			n = n.copy()
-			n.Children[key[pos]] = newnode
-		}
-		return value, n, didResolve, err
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		return t.getAccount(child, key, pos+1)
 	case hashNode:
-		child, err := t.resolveHash(n, key[:pos])
-		if err != nil {
-			return nil, n, true, err
+		return nil, false
+
+	case *accountNode:
+		return n, true
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
+	}
+}
+
+func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
+	switch n := (origNode).(type) {
+	case nil:
+		return nil, true
+	case valueNode:
+		return n, true
+	case *accountNode:
+		return t.get(n.storage, key, pos)
+	case *shortNode:
+		matchlen := prefixLen(key[pos:], n.Key)
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+			value, gotValue = t.get(n.Val, key, pos+matchlen)
+		} else {
+			value, gotValue = nil, true
 		}
-		value, newnode, _, err := t.tryGet(child, key, pos)
-		return value, newnode, true, err
+		return
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			value, gotValue = t.get(n.child1, key, pos+1)
+		case i2:
+			value, gotValue = t.get(n.child2, key, pos+1)
+		default:
+			value, gotValue = nil, true
+		}
+		return
+	case *fullNode:
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		if child == nil {
+			return nil, true
+		}
+		return t.get(child, key, pos+1)
+	case hashNode:
+		return n, false
+
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -147,236 +185,965 @@ func (t *Trie) tryGet(origNode node, key []byte, pos int) (value []byte, newnode
 //
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
-func (t *Trie) Update(key, value []byte) {
-	if err := t.TryUpdate(key, value); err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
-	}
-}
+// DESCRIBED: docs/programmers_guide/guide.md#root
+func (t *Trie) Update(key, value []byte, blockNr uint64) {
+	hex := keybytesToHex(key)
 
-// TryUpdate associates key with value in the trie. Subsequent calls to
-// Get will return value. If value has length zero, any existing value
-// is deleted from the trie and calls to Get will return nil.
-//
-// The value bytes must not be modified by the caller while they are
-// stored in the trie.
-//
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryUpdate(key, value []byte) error {
-	k := keybytesToHex(key)
-	if len(value) != 0 {
-		_, n, err := t.insert(t.root, nil, k, valueNode(value))
-		if err != nil {
-			return err
-		}
-		t.root = n
+	if t.root == nil {
+		newnode := &shortNode{Key: hex, Val: valueNode(value)}
+		t.root = newnode
 	} else {
-		_, n, err := t.delete(t.root, nil, k)
-		if err != nil {
-			return err
-		}
-		t.root = n
+		_, t.root = t.insert(t.root, hex, 0, valueNode(value))
 	}
-	return nil
 }
 
-func (t *Trie) insert(n node, prefix, key []byte, value node) (bool, node, error) {
-	if len(key) == 0 {
-		if v, ok := n.(valueNode); ok {
-			return !bytes.Equal(v, value.(valueNode)), value, nil
+func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
+	//make account copy. There are some pointer into big.Int
+	value := new(accounts.Account)
+	value.Copy(acc)
+	hex := keybytesToHex(key)
+	if t.root == nil {
+		var newnode node
+		if value.Root == EmptyRoot {
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true}}
+		} else {
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true}}
 		}
-		return true, value, nil
+		t.root = newnode
+	} else {
+		if value.Root == EmptyRoot {
+			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, nil, true})
+		} else {
+			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, hashNode(value.Root[:]), true})
+		}
 	}
-	switch n := n.(type) {
+}
+
+// ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
+// subtrie is specifed by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
+// is useful to ensure that specific leaves of the trie are fully expanded (and not rolled into
+// the hashes). One might think of two uses of ResolveRequests (and perhaps we need to consider
+// splitting them into two types). First type is to fetch certain number of levels of a given
+// subtrie, but specifying resolveHex and resolvePos such that resolvePos == len(resolveHex).
+// In such situations, it want to also set topLevels field in the TrieResolver to a non-zero
+// value, otherwise only a hashNode will be resolved.
+// Second type is to fetch a subtrie in such a way that a set of keys will be fully expanded,
+// so that one can perform reads, inserts, and deletes on those keys without needing to do
+// any more resolving.
+type ResolveRequest struct {
+	t             *Trie    // trie to act upon
+	contract      []byte   // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
+	resolveHex    []byte   // Key for which the resolution is requested
+	resolvePos    int      // Position in the key for which resolution is requested
+	extResolvePos int      // Internal field, does not need to be set when ResolveRequest is created
+	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
+	RequiresRLP   bool     // whether to output node's RLP
+	NodeRLP       []byte   // [OUT] RLP of the resolved node
+}
+
+// NewResolveRequest creates a new ResolveRequest.
+// contract must be either address hash + incarnation (32+8 bytes) or nil
+func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
+	return &ResolveRequest{t: t, contract: contract, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
+}
+
+func (rr *ResolveRequest) String() string {
+	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
+}
+
+// NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
+// from the database, if one were to access the key specified
+// In the case of "Yes", also returns a corresponding ResolveRequest
+// contract, if not empty, must be equal to the address hash
+// key must be in the KEYBYTES encoding
+func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
+	var nd = t.root
+	hex := keybytesToHex(concat(contract, key...))
+	pos := 0
+	var incarnation uint64
+	for {
+		switch n := nd.(type) {
+		case nil:
+			return false, nil
+		case *shortNode:
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+				nd = n.Val
+			} else {
+				return false, nil
+			}
+			pos += matchlen
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return false, nil
+			}
+		case *fullNode:
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return false, nil
+			}
+			nd = child
+			pos++
+		case valueNode:
+			return false, nil
+		case *accountNode:
+			if pos == len(hex) {
+				return false, nil
+			}
+			nd = n.storage
+			incarnation = n.Incarnation
+		case hashNode:
+			if contract == nil {
+				return true, t.NewResolveRequest(nil, hex, pos, common.CopyBytes(n))
+			}
+			// 8 is IncarnationLength
+			prefix := make([]byte, len(contract)+8)
+			copy(prefix, contract)
+			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation^0xffffffffffffffff)
+			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
+
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+}
+
+func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
+	var nd = t.root
+	hex := keybytesToHex(key)
+	pos := 0
+	for {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			pg.addShort(contract, hex, pos, n.Key)
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) {
+				nd = n.Val
+				pos += matchlen
+			} else {
+				proofHex := make([]byte, pos+len(n.Key))
+				copy(proofHex, hex[:pos])
+				copy(proofHex[pos:], n.Key)
+				if v, ok := n.Val.(valueNode); ok {
+					pg.addValue(contract, proofHex, pos+len(n.Key), common.CopyBytes(v))
+				} else if v, ok := n.Val.(*accountNode); ok {
+					encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
+					v.EncodeForHashing(encodedAccount.B)
+					enc := encodedAccount.Bytes()
+					pool.PutBuffer(encodedAccount)
+
+					pg.addValue(contract, proofHex, pos+len(n.Key), enc)
+				} else {
+					pg.addSoleHash(contract, proofHex, pos+len(n.Key), common.BytesToHash(n.Val.hash()))
+				}
+				return
+			}
+		case *duoNode:
+			mask, hashes, m := n.hashesExcept(hex[pos])
+			pg.addProof(contract, hex, pos, mask, hashes)
+			if m != nil {
+				for idx, s := range m {
+					proofHex := make([]byte, pos+1+len(s.Key))
+					copy(proofHex, hex[:pos])
+					proofHex[pos] = idx
+					copy(proofHex[pos+1:], s.Key)
+					pg.addShort(contract, proofHex, pos+1, s.Key)
+					if v, ok := s.Val.(valueNode); ok {
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
+					} else if v, ok := s.Val.(*accountNode); ok {
+						encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
+						v.EncodeForHashing(encodedAccount.B)
+						enc := encodedAccount.Bytes()
+						pool.PutBuffer(encodedAccount)
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), enc)
+					} else {
+						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
+					}
+				}
+			}
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			mask, hashes, m := n.hashesExcept(hex[pos])
+			pg.addProof(contract, hex, pos, mask, hashes)
+			if m != nil {
+				for idx, s := range m {
+					proofHex := make([]byte, pos+1+len(s.Key))
+					copy(proofHex, hex[:pos])
+					proofHex[pos] = idx
+					copy(proofHex[pos+1:], s.Key)
+					pg.addShort(contract, proofHex, pos+1, s.Key)
+					if v, ok := s.Val.(valueNode); ok {
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
+					} else {
+						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
+					}
+				}
+			}
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			} else {
+				nd = child
+				pos++
+			}
+		case valueNode:
+			pg.addValue(contract, hex, pos, common.CopyBytes(n))
+			return
+		case *accountNode:
+			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+			n.EncodeForHashing(encodedAccount.B)
+			enc := encodedAccount.Bytes()
+			pool.PutBuffer(encodedAccount)
+			pg.addValue(contract, hex, pos, enc)
+			return
+		case hashNode:
+			pg.addSoleHash(contract, hex, pos, common.BytesToHash(n))
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+}
+
+func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
+	//fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
+
+	var nn node
+	if len(key) == pos {
+		origN, origNok := origNode.(valueNode)
+		vn, vnok := value.(valueNode)
+		if origNok && vnok {
+			updated = !bytes.Equal(origN, vn)
+			if updated {
+				newNode = value
+			} else {
+				newNode = vn
+			}
+			return updated, newNode
+		}
+		origAccN, origNok := origNode.(*accountNode)
+		vAccN, vnok := value.(*accountNode)
+		if origNok && vnok {
+			updated = !origAccN.Equals(&vAccN.Account)
+			if updated {
+				origAccN.Account.Copy(&vAccN.Account)
+			}
+			return updated, origAccN
+		}
+
+		return true, value
+	}
+
+	switch n := origNode.(type) {
+	case nil:
+		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
+		return true, s
+	case *accountNode:
+		updated, nn = t.insert(n.storage, key, pos, value)
+		if updated {
+			n.storage = nn
+			n.hashCorrect = false
+		}
+		return updated, n
 	case *shortNode:
-		matchlen := prefixLen(key, n.Key)
+		matchlen := prefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
-		if matchlen == len(n.Key) {
-			dirty, nn, err := t.insert(n.Val, append(prefix, key[:matchlen]...), key[matchlen:], value)
-			if !dirty || err != nil {
-				return false, n, err
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
+			if updated {
+				n.Val = nn
 			}
-			return true, &shortNode{n.Key, nn, t.newFlag()}, nil
+			newNode = n
+		} else {
+			// Otherwise branch out at the index where they differ.
+			var c1 node
+			if len(n.Key) == matchlen+1 {
+				c1 = n.Val
+			} else {
+				s1 := &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val}
+				c1 = s1
+			}
+			var c2 node
+			if len(key) == pos+matchlen+1 {
+				c2 = value
+			} else {
+				s2 := &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value}
+				c2 = s2
+			}
+			branch := &duoNode{}
+			if n.Key[matchlen] < key[pos+matchlen] {
+				branch.child1 = c1
+				branch.child2 = c2
+			} else {
+				branch.child1 = c2
+				branch.child2 = c1
+			}
+			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
+			branch.flags.dirty = true
+
+			// Replace this shortNode with the branch if it occurs at index 0.
+			if matchlen == 0 {
+				t.touchFunc(key[:pos], false)
+				newNode = branch // current node leaves the generation, but new node branch joins it
+			} else {
+				// Otherwise, replace it with a short node leading up to the branch.
+				t.touchFunc(key[:pos+matchlen], false)
+				n.Key = common.CopyBytes(key[pos : pos+matchlen])
+				n.Val = branch
+				newNode = n
+			}
+			updated = true
 		}
-		// Otherwise branch out at the index where they differ.
-		branch := &fullNode{flags: t.newFlag()}
-		var err error
-		_, branch.Children[n.Key[matchlen]], err = t.insert(nil, append(prefix, n.Key[:matchlen+1]...), n.Key[matchlen+1:], n.Val)
-		if err != nil {
-			return false, nil, err
+		return
+
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			updated, nn = t.insert(n.child1, key, pos+1, value)
+			if updated {
+				n.child1 = nn
+				n.flags.dirty = true
+			}
+			newNode = n
+		case i2:
+			updated, nn = t.insert(n.child2, key, pos+1, value)
+			if updated {
+				n.child2 = nn
+				n.flags.dirty = true
+			}
+			newNode = n
+		default:
+			var child node
+			if len(key) == pos+1 {
+				child = value
+			} else {
+				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
+				child = short
+			}
+			newnode := &fullNode{}
+			newnode.Children[i1] = n.child1
+			newnode.Children[i2] = n.child2
+			newnode.flags.dirty = true
+			newnode.Children[key[pos]] = child
+			updated = true
+			// current node leaves the generation but newnode joins it
+			newNode = newnode
 		}
-		_, branch.Children[key[matchlen]], err = t.insert(nil, append(prefix, key[:matchlen+1]...), key[matchlen+1:], value)
-		if err != nil {
-			return false, nil, err
-		}
-		// Replace this shortNode with the branch if it occurs at index 0.
-		if matchlen == 0 {
-			return true, branch, nil
-		}
-		// Otherwise, replace it with a short node leading up to the branch.
-		return true, &shortNode{key[:matchlen], branch, t.newFlag()}, nil
+		return
 
 	case *fullNode:
-		dirty, nn, err := t.insert(n.Children[key[0]], append(prefix, key[0]), key[1:], value)
-		if !dirty || err != nil {
-			return false, n, err
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		if child == nil {
+			if len(key) == pos+1 {
+				n.Children[key[pos]] = value
+			} else {
+				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
+				n.Children[key[pos]] = short
+			}
+			updated = true
+			n.flags.dirty = true
+		} else {
+			updated, nn = t.insert(child, key, pos+1, value)
+			if updated {
+				n.Children[key[pos]] = nn
+				n.flags.dirty = true
+			}
 		}
-		n = n.copy()
-		n.flags = t.newFlag()
-		n.Children[key[0]] = nn
-		return true, n, nil
-
-	case nil:
-		return true, &shortNode{key, value, t.newFlag()}, nil
-
-	case hashNode:
-		// We've hit a part of the trie that isn't loaded yet. Load
-		// the node and insert into it. This leaves all child nodes on
-		// the path to the value in the trie.
-		rn, err := t.resolveHash(n, prefix)
-		if err != nil {
-			return false, nil, err
-		}
-		dirty, nn, err := t.insert(rn, prefix, key, value)
-		if !dirty || err != nil {
-			return false, rn, err
-		}
-		return true, nn, nil
-
+		newNode = n
+		return
 	default:
+		fmt.Printf("Key: %x, Pos: %d\n", key, pos)
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
 	}
 }
 
-// Delete removes any existing value for key from the trie.
-func (t *Trie) Delete(key []byte) {
-	if err := t.TryDelete(key); err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
+//
+//func convertToDuoNode(orig *shortNode, pos uint64) node {
+//	// Otherwise branch out at the index where they differ.
+//	var c1 node
+//	if len(nKey) == matchlen+1 {
+//		c1 = n.Val
+//	} else {
+//		s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
+//		c1 = s1
+//	}
+//	var c2 node
+//	if len(key) == pos+matchlen+1 {
+//		c2 = value
+//	} else {
+//		s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
+//		c2 = s2
+//	}
+//	branch := &duoNode{}
+//	if nKey[matchlen] < key[pos+matchlen] {
+//		branch.child1 = c1
+//		branch.child2 = c2
+//	} else {
+//		branch.child1 = c2
+//		branch.child2 = c1
+//	}
+//	branch.mask = (1 << (nKey[matchlen])) | (1 << (key[pos+matchlen]))
+//	branch.flags.dirty = true
+//
+//	// Replace this shortNode with the branch if it occurs at index 0.
+//	if matchlen == 0 {
+//		t.touchFunc(key[:pos], false)
+//		newNode = branch // current node leaves the generation, but new node branch joins it
+//	} else {
+//		// Otherwise, replace it with a short node leading up to the branch.
+//		t.touchFunc(key[:pos+matchlen], false)
+//		n.Key = hexToCompact(key[pos : pos+matchlen])
+//		n.Val = branch
+//		newNode = n
+//	}
+//	updated = true
+//}
+
+func (t *Trie) hook(hex []byte, n node) {
+	var nd = t.root
+	var parent node
+	pos := 0
+	var account bool
+	for pos < len(hex) || account {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+				parent = n
+				nd = n.Val
+				pos += matchlen
+				if _, ok := nd.(*accountNode); ok {
+					account = true
+				}
+			} else {
+				return
+			}
+		case *duoNode:
+			t.touchFunc(hex[:pos], false)
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				parent = n
+				nd = n.child1
+				pos++
+			case i2:
+				parent = n
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			t.touchFunc(hex[:pos], false)
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			} else {
+				parent = n
+				nd = child
+				pos++
+			}
+		case *accountNode:
+			parent = n
+			nd = n.storage
+			account = false
+		case valueNode:
+			return
+		case hashNode:
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	if _, ok := nd.(hashNode); !ok {
+		return
+	}
+	t.touchAll(n, hex, false)
+	switch p := parent.(type) {
+	case nil:
+		t.root = n
+	case *shortNode:
+		p.Val = n
+	case *duoNode:
+		i1, i2 := p.childrenIdx()
+		switch hex[len(hex)-1] {
+		case i1:
+			p.child1 = n
+		case i2:
+			p.child2 = n
+		}
+	case *fullNode:
+		idx := hex[len(hex)-1]
+		p.Children[idx] = n
+	case *accountNode:
+		p.storage = n
 	}
 }
 
-// TryDelete removes any existing value for key from the trie.
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryDelete(key []byte) error {
-	k := keybytesToHex(key)
-	_, n, err := t.delete(t.root, nil, k)
-	if err != nil {
-		return err
+func (t *Trie) touchAll(n node, hex []byte, del bool) {
+	switch n := n.(type) {
+	case *shortNode:
+		if _, ok := n.Val.(valueNode); !ok {
+			// Don't need to compute prefix for a leaf
+			h := n.Key
+			// Remove terminator
+			if h[len(h)-1] == 16 {
+				h = h[:len(h)-1]
+			}
+			hexVal := concat(hex, h...)
+			t.touchAll(n.Val, hexVal, del)
+		}
+	case *duoNode:
+		t.touchFunc(hex, del)
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		t.touchAll(n.child1, hex1, del)
+		t.touchAll(n.child2, hex2, del)
+	case *fullNode:
+		t.touchFunc(hex, del)
+		for i, child := range n.Children {
+			if child != nil {
+				t.touchAll(child, concat(hex, byte(i)), del)
+			}
+		}
+	case *accountNode:
+		if n.storage != nil {
+			t.touchAll(n.storage, hex, del)
+		}
 	}
-	t.root = n
-	return nil
+}
+
+// Delete removes any existing value for key from the trie.
+// DESCRIBED: docs/programmers_guide/guide.md#root
+func (t *Trie) Delete(key []byte, blockNr uint64) {
+	hex := keybytesToHex(key)
+	_, t.root = t.delete(t.root, hex, 0)
+}
+
+func (t *Trie) convertToShortNode(child node, pos uint) node {
+	cnode := child
+	if pos != 16 {
+		// If the remaining entry is a short node, it replaces
+		// n and its key gets the missing nibble tacked to the
+		// front. This avoids creating an invalid
+		// shortNode{..., shortNode{...}}.  Since the entry
+		// might not be loaded yet, resolve it just for this
+		// check.
+		if short, ok := child.(*shortNode); ok {
+			k := make([]byte, len(short.Key)+1)
+			k[0] = byte(pos)
+			copy(k[1:], short.Key)
+			return &shortNode{Key: k, Val: short.Val}
+		}
+	}
+	// Otherwise, n is replaced by a one-nibble short node
+	// containing the child.
+	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
+	return &shortNode{Key: []byte{byte(pos)}, Val: cnode}
 }
 
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
-func (t *Trie) delete(n node, prefix, key []byte) (bool, node, error) {
-	switch n := n.(type) {
+func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, newNode node) {
+	var nn node
+	switch n := origNode.(type) {
 	case *shortNode:
-		matchlen := prefixLen(key, n.Key)
-		if matchlen < len(n.Key) {
-			return false, n, nil // don't replace n on mismatch
+		matchlen := prefixLen(key[keyStart:], n.Key)
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+			if matchlen == len(key)-keyStart {
+				updated = true
+				touchKey := key[:keyStart+matchlen]
+				if touchKey[len(touchKey)-1] == 16 {
+					touchKey = touchKey[:len(touchKey)-1]
+				}
+				t.touchAll(n.Val, touchKey, true)
+				newNode = nil // remove n entirely for whole matches
+			} else {
+				// The key is longer than n.Key. Remove the remaining suffix
+				// from the subtrie. Child can never be nil here since the
+				// subtrie must contain at least two other values with keys
+				// longer than n.Key.
+				updated, nn = t.delete(n.Val, key, keyStart+matchlen)
+				if !updated {
+					newNode = n
+				} else {
+					if nn == nil {
+						newNode = nil
+					} else {
+						if shortChild, ok := nn.(*shortNode); ok {
+							// Deleting from the subtrie reduced it to another
+							// short node. Merge the nodes to avoid creating a
+							// shortNode{..., shortNode{...}}. Use concat (which
+							// always creates a new slice) instead of append to
+							// avoid modifying n.Key since it might be shared with
+							// other nodes.
+							newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
+						} else {
+							n.Val = nn
+							newNode = n
+						}
+					}
+				}
+			}
+		} else {
+			updated = false
+			newNode = n // don't replace n on mismatch
 		}
-		if matchlen == len(key) {
-			return true, nil, nil // remove n entirely for whole matches
-		}
-		// The key is longer than n.Key. Remove the remaining suffix
-		// from the subtrie. Child can never be nil here since the
-		// subtrie must contain at least two other values with keys
-		// longer than n.Key.
-		dirty, child, err := t.delete(n.Val, append(prefix, key[:len(n.Key)]...), key[len(n.Key):])
-		if !dirty || err != nil {
-			return false, n, err
-		}
-		switch child := child.(type) {
-		case *shortNode:
-			// Deleting from the subtrie reduced it to another
-			// short node. Merge the nodes to avoid creating a
-			// shortNode{..., shortNode{...}}. Use concat (which
-			// always creates a new slice) instead of append to
-			// avoid modifying n.Key since it might be shared with
-			// other nodes.
-			return true, &shortNode{concat(n.Key, child.Key...), child.Val, t.newFlag()}, nil
+		return
+
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		switch key[keyStart] {
+		case i1:
+			updated, nn = t.delete(n.child1, key, keyStart+1)
+			if !updated {
+				t.touchFunc(key[:keyStart], false)
+				newNode = n
+			} else {
+				if nn == nil {
+					t.touchFunc(key[:keyStart], true)
+					newNode = t.convertToShortNode(n.child2, uint(i2))
+				} else {
+					t.touchFunc(key[:keyStart], false)
+					n.child1 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
+		case i2:
+			updated, nn = t.delete(n.child2, key, keyStart+1)
+			if !updated {
+				t.touchFunc(key[:keyStart], false)
+				newNode = n
+			} else {
+				if nn == nil {
+					t.touchFunc(key[:keyStart], true)
+					newNode = t.convertToShortNode(n.child1, uint(i1))
+				} else {
+					t.touchFunc(key[:keyStart], false)
+					n.child2 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
 		default:
-			return true, &shortNode{n.Key, child, t.newFlag()}, nil
+			t.touchFunc(key[:keyStart], false)
+			updated = false
+			newNode = n
 		}
+		return
 
 	case *fullNode:
-		dirty, nn, err := t.delete(n.Children[key[0]], append(prefix, key[0]), key[1:])
-		if !dirty || err != nil {
-			return false, n, err
-		}
-		n = n.copy()
-		n.flags = t.newFlag()
-		n.Children[key[0]] = nn
-
-		// Check how many non-nil entries are left after deleting and
-		// reduce the full node to a short node if only one entry is
-		// left. Since n must've contained at least two children
-		// before deletion (otherwise it would not be a full node) n
-		// can never be reduced to nil.
-		//
-		// When the loop is done, pos contains the index of the single
-		// value that is left in n or -2 if n contains at least two
-		// values.
-		pos := -1
-		for i, cld := range &n.Children {
-			if cld != nil {
-				if pos == -1 {
-					pos = i
+		child := n.Children[key[keyStart]]
+		updated, nn = t.delete(child, key, keyStart+1)
+		if !updated {
+			t.touchFunc(key[:keyStart], false)
+			newNode = n
+		} else {
+			n.Children[key[keyStart]] = nn
+			// Check how many non-nil entries are left after deleting and
+			// reduce the full node to a short node if only one entry is
+			// left. Since n must've contained at least two children
+			// before deletion (otherwise it would not be a full node) n
+			// can never be reduced to nil.
+			//
+			// When the loop is done, pos contains the index of the single
+			// value that is left in n or -2 if n contains at least two
+			// values.
+			var pos1, pos2 int
+			count := 0
+			for i, cld := range n.Children {
+				if cld != nil {
+					if count == 0 {
+						pos1 = i
+					}
+					if count == 1 {
+						pos2 = i
+					}
+					count++
+					if count > 2 {
+						break
+					}
+				}
+			}
+			if count == 1 {
+				t.touchFunc(key[:keyStart], true)
+				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
+			} else if count == 2 {
+				t.touchFunc(key[:keyStart], false)
+				duo := &duoNode{}
+				if pos1 == int(key[keyStart]) {
+					duo.child1 = nn
 				} else {
-					pos = -2
-					break
+					duo.child1 = n.Children[pos1]
 				}
+				if pos2 == int(key[keyStart]) {
+					duo.child2 = nn
+				} else {
+					duo.child2 = n.Children[pos2]
+				}
+				duo.flags.dirty = true
+				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
+				newNode = duo
+			} else if count > 2 {
+				t.touchFunc(key[:keyStart], false)
+				// n still contains at least three values and cannot be reduced.
+				n.flags.dirty = true
+				newNode = n
 			}
 		}
-		if pos >= 0 {
-			if pos != 16 {
-				// If the remaining entry is a short node, it replaces
-				// n and its key gets the missing nibble tacked to the
-				// front. This avoids creating an invalid
-				// shortNode{..., shortNode{...}}.  Since the entry
-				// might not be loaded yet, resolve it just for this
-				// check.
-				cnode, err := t.resolve(n.Children[pos], prefix)
-				if err != nil {
-					return false, nil, err
-				}
-				if cnode, ok := cnode.(*shortNode); ok {
-					k := append([]byte{byte(pos)}, cnode.Key...)
-					return true, &shortNode{k, cnode.Val, t.newFlag()}, nil
-				}
-			}
-			// Otherwise, n is replaced by a one-nibble short node
-			// containing the child.
-			return true, &shortNode{[]byte{byte(pos)}, n.Children[pos], t.newFlag()}, nil
-		}
-		// n still contains at least two values and cannot be reduced.
-		return true, n, nil
+		return
 
 	case valueNode:
-		return true, nil, nil
+		updated = true
+		newNode = nil
+		return
+
+	case *accountNode:
+		if key[keyStart] == 16 {
+			// Key terminates here
+			if n.storage != nil {
+				// Mark all the storage nodes as deleted
+				t.touchAll(n.storage, key[:keyStart], true)
+			}
+			return true, nil
+		}
+		updated, nn = t.delete(n.storage, key, keyStart)
+		if updated {
+			n.storage = nn
+			n.hashCorrect = false
+		}
+		updated = true
+		newNode = n
+		return
 
 	case nil:
-		return false, nil, nil
-
-	case hashNode:
-		// We've hit a part of the trie that isn't loaded yet. Load
-		// the node and delete from it. This leaves all child nodes on
-		// the path to the value in the trie.
-		rn, err := t.resolveHash(n, prefix)
-		if err != nil {
-			return false, nil, err
-		}
-		dirty, nn, err := t.delete(rn, prefix, key)
-		if !dirty || err != nil {
-			return false, rn, err
-		}
-		return true, nn, nil
+		updated = false
+		newNode = nil
+		return
 
 	default:
-		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key))
+		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
+}
+
+func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr uint64) (updated bool, newNode node) {
+	if keyStart+1 == len(key) {
+		return true, nil
+	}
+
+	var nn node
+	switch n := origNode.(type) {
+	case *shortNode:
+		matchlen := prefixLen(key[keyStart:], n.Key)
+		switch {
+		case len(key) == keyStart:
+			updated = true
+			newNode = nil
+		case matchlen == len(key[keyStart:])-1:
+			return true, nil
+		case matchlen < len(n.Key) && matchlen != len(key[keyStart:]):
+			updated = false
+			newNode = n
+		default:
+
+			if keyStart+1 == len(key) {
+				return true, nil
+			}
+			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(n.Key), blockNr)
+			if !updated {
+				newNode = n
+			} else {
+				if nn == nil {
+					newNode = nil
+				} else {
+					if shortChild, ok := nn.(*shortNode); ok {
+						// Deleting from the subtrie reduced it to another
+						// short node. Merge the nodes to avoid creating a
+						// shortNode{..., shortNode{...}}. Use concat (which
+						// always creates a new slice) instead of append to
+						// avoid modifying n.Key since it might be shared with
+						// other nodes.
+						newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
+					} else {
+						n.Val = nn
+						newNode = n
+					}
+				}
+			}
+		}
+		return updated, newNode
+
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		switch key[keyStart] {
+		case i1:
+			updated, nn = t.deleteSubtree(n.child1, key, keyStart+1, blockNr)
+			if !updated {
+				newNode = n
+			} else {
+				if nn == nil {
+					newNode = t.convertToShortNode(n.child2, uint(i2))
+				} else {
+					n.child1 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
+		case i2:
+			updated, nn = t.deleteSubtree(n.child2, key, keyStart+1, blockNr)
+			if !updated {
+				newNode = n
+			} else {
+				if nn == nil {
+					newNode = t.convertToShortNode(n.child1, uint(i1))
+
+				} else {
+					n.child2 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
+
+		default:
+			updated = false
+			newNode = n
+		}
+
+		return updated, newNode
+
+	case *fullNode:
+		child := n.Children[key[keyStart]]
+		updated, nn = t.deleteSubtree(child, key, keyStart+1, blockNr)
+		if !updated {
+			t.touchFunc(key[:keyStart], false)
+			newNode = n
+		} else {
+			n.Children[key[keyStart]] = nn
+			// Check how many non-nil entries are left after deleting and
+			// reduce the full node to a short node if only one entry is
+			// left. Since n must've contained at least two children
+			// before deletion (otherwise it would not be a full node) n
+			// can never be reduced to nil.
+			//
+			// When the loop is done, pos contains the index of the single
+			// value that is left in n or -2 if n contains at least two
+			// values.
+			var pos1, pos2 int
+			count := 0
+			for i, cld := range n.Children {
+				if cld != nil {
+					if count == 0 {
+						pos1 = i
+					}
+					if count == 1 {
+						pos2 = i
+					}
+					count++
+					if count > 2 {
+						break
+					}
+				}
+			}
+			if count == 1 {
+				t.touchFunc(key[:keyStart], true)
+				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
+			} else if count == 2 {
+				t.touchFunc(key[:keyStart], false)
+				duo := &duoNode{}
+				if pos1 == int(key[keyStart]) {
+					duo.child1 = nn
+				} else {
+					duo.child1 = n.Children[pos1]
+				}
+				if pos2 == int(key[keyStart]) {
+					duo.child2 = nn
+				} else {
+					duo.child2 = n.Children[pos2]
+				}
+				duo.flags.dirty = true
+				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
+				newNode = duo
+			} else if count > 2 {
+				t.touchFunc(key[:keyStart], false)
+				// n still contains at least three values and cannot be reduced.
+				n.flags.dirty = true
+				newNode = n
+			}
+		}
+		return
+	case valueNode:
+		updated = true
+		newNode = nil
+		return
+
+	case *accountNode:
+		if keyStart >= len(key) || key[keyStart] == 16 {
+			// Key terminates here
+			if n.storage != nil {
+				// Mark all the storage nodes as deleted
+				t.touchAll(n.storage, key[:keyStart], true)
+			}
+			n.storage = nil
+			n.hashCorrect = false
+			return true, n
+		}
+
+		updated, nn = t.deleteSubtree(n.storage, key, keyStart, 0)
+		if updated {
+			n.storage = nn
+			n.hashCorrect = false
+		}
+		updated = true
+		newNode = n
+
+		return
+
+	case nil:
+		updated = false
+		newNode = nil
+		return
+
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
+	}
+}
+
+func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -386,48 +1153,188 @@ func concat(s1 []byte, s2 ...byte) []byte {
 	return r
 }
 
-func (t *Trie) resolve(n node, prefix []byte) (node, error) {
-	if n, ok := n.(hashNode); ok {
-		return t.resolveHash(n, prefix)
-	}
-	return n, nil
-}
-
-func (t *Trie) resolveHash(n hashNode, prefix []byte) (node, error) {
-	hash := common.BytesToHash(n)
-	if node := t.db.node(hash); node != nil {
-		return node, nil
-	}
-	return nil, &MissingNodeError{NodeHash: hash, Path: prefix}
-}
+// Root returns the root hash of the trie.
+// Deprecated: use Hash instead.
+func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
+// DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
-	hash, cached, _ := t.hashRoot(nil, nil)
-	t.root = cached
+	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))
 }
 
-// Commit writes all nodes to the trie's memory database, tracking the internal
-// and external (for account tries) references.
-func (t *Trie) Commit(onleaf LeafCallback) (root common.Hash, err error) {
-	if t.db == nil {
-		panic("commit called on trie with nil database")
+// DeepHash returns internal hash of a node reachable by the specified key prefix
+// Note that if the prefix points into the middle of a key for a leaf node or of an extention
+// node, it will return the hash of a modified leaf node or extension node, where the
+// key prefix is removed from the key.
+// First returned value is `true` if the node with the specified prefix is found
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	accNode, gotValue := t.getAccount(t.root, hexPrefix, 0)
+	if !gotValue {
+		return false, common.Hash{}
 	}
-	hash, cached, err := t.hashRoot(t.db, onleaf)
-	if err != nil {
-		return common.Hash{}, err
+	//if accNode==nil {
+	//	return gotValue, common.Hash{}
+	//}
+	if accNode.hashCorrect {
+		return true, accNode.Root
 	}
-	t.root = cached
-	return common.BytesToHash(hash.(hashNode)), nil
+	if accNode.storage == nil {
+		accNode.Root = EmptyRoot
+		accNode.hashCorrect = true
+	} else {
+		h := newHasher(false)
+		defer returnHasherToPool(h)
+		h.hash(accNode.storage, true, accNode.Root[:])
+	}
+	return true, accNode.Root
 }
 
-func (t *Trie) hashRoot(db *Database, onleaf LeafCallback) (node, node, error) {
-	if t.root == nil {
-		return hashNode(emptyRoot.Bytes()), nil, nil
+func (t *Trie) unload(hex []byte, h *hasher) {
+	nd := t.root
+	var parent node
+	pos := 0
+	var account bool
+	for pos < len(hex) || account {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+				parent = n
+				nd = n.Val
+				pos += matchlen
+				if _, ok := n.Val.(*accountNode); ok {
+					account = true
+				}
+			} else {
+				return
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				parent = n
+				nd = n.child1
+				pos++
+			case i2:
+				parent = n
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			}
+			parent = n
+			nd = child
+			pos++
+		case valueNode:
+			return
+		case *accountNode:
+			parent = n
+			nd = n.storage
+			account = false
+		case hashNode:
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
 	}
-	h := newHasher(onleaf)
+	if _, ok := nd.(hashNode); ok {
+		return
+	}
+	var hn common.Hash
+	h.hash(nd, len(hex) == 0, hn[:])
+	hnode := hashNode(hn[:])
+	switch p := parent.(type) {
+	case nil:
+		t.root = hnode
+	case *shortNode:
+		p.Val = hnode
+	case *duoNode:
+		i1, i2 := p.childrenIdx()
+		switch hex[len(hex)-1] {
+		case i1:
+			p.child1 = hnode
+		case i2:
+			p.child2 = hnode
+		}
+	case *fullNode:
+		idx := hex[len(hex)-1]
+		p.Children[idx] = hnode
+	case *accountNode:
+		p.storage = hnode
+	}
+}
+
+func (t *Trie) CountPrunableNodes() int {
+	return t.countPrunableNodes(t.root, []byte{}, false)
+}
+
+func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
+	switch n := nd.(type) {
+	case nil:
+		return 0
+	case valueNode:
+		return 0
+	case *accountNode:
+		return t.countPrunableNodes(n.storage, hex, print)
+	case hashNode:
+		return 0
+	case *shortNode:
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			h := n.Key
+			if h[len(h)-1] == 16 {
+				h = h[:len(h)-1]
+			}
+			hexVal = concat(hex, h...)
+		}
+		//@todo accountNode?
+		return t.countPrunableNodes(n.Val, hexVal, print)
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = byte(i1)
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = byte(i2)
+		if print {
+			fmt.Printf("%T node: %x\n", n, hex)
+		}
+		return 1 + t.countPrunableNodes(n.child1, hex1, print) + t.countPrunableNodes(n.child2, hex2, print)
+	case *fullNode:
+		if print {
+			fmt.Printf("%T node: %x\n", n, hex)
+		}
+		count := 0
+		for i, child := range n.Children {
+			if child != nil {
+				count += t.countPrunableNodes(child, concat(hex, byte(i)), print)
+			}
+		}
+		return 1 + count
+	default:
+		panic("")
+	}
+}
+
+func (t *Trie) hashRoot() (node, error) {
+	if t.root == nil {
+		return hashNode(EmptyRoot.Bytes()), nil
+	}
+	h := newHasher(false)
 	defer returnHasherToPool(h)
-	return h.hash(t.root, db, true)
+	var hn common.Hash
+	h.hash(t.root, true, hn[:])
+	return hashNode(hn[:]), nil
 }

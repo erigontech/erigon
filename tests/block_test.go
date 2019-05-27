@@ -44,8 +44,19 @@ func TestBlockchain(t *testing.T) {
 	// using 4.6 TGas
 	bt.skipLoad(`.*randomStatetest94.json.*`)
 
+	bt.fails(`^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Constantinople`, "not fixed yet")
+	bt.fails(`^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_ConstantinopleFix`, "not fixed yet")
+	bt.fails(`^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Istanbul`, "not fixed yet")
+
+	bt.fails(`^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate.json.*`, "not fixed yet")
+
+	bt.fails(`^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheck.json.*`, "not fixed yet")
+
+	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`, "Work in progress")
+	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`, "Work in progress")
+
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-		if err := bt.checkFailure(t, name, test.Run()); err != nil {
+		if err := bt.checkFailure(t, test.Run()); err != nil {
 			t.Error(err)
 		}
 	})

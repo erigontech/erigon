@@ -26,28 +26,27 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/consensus/misc"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/node"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/consensus/misc"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 
-	cli "gopkg.in/urfave/cli.v1"
+	cli "github.com/urfave/cli"
 )
 
 var (
@@ -102,8 +101,8 @@ type RetestWeb3API interface {
 }
 
 type RetestethAPI struct {
-	ethDb         ethdb.Database
-	db            state.Database
+	ethDb ethdb.Database
+	//db            state.Database
 	chainConfig   *params.ChainConfig
 	author        common.Address
 	extraData     []byte
@@ -220,7 +219,7 @@ func (e *NoRewardEngine) Prepare(chain consensus.ChainReader, header *types.Head
 	return e.inner.Prepare(chain, header)
 }
 
-func (e *NoRewardEngine) accumulateRewards(config *params.ChainConfig, state *state.StateDB, header *types.Header, uncles []*types.Header) {
+func (e *NoRewardEngine) accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
 	// Simply touch miner and uncle coinbase accounts
 	reward := big.NewInt(0)
 	for _, uncle := range uncles {
@@ -229,23 +228,23 @@ func (e *NoRewardEngine) accumulateRewards(config *params.ChainConfig, state *st
 	state.AddBalance(header.Coinbase, reward)
 }
 
-func (e *NoRewardEngine) Finalize(chain consensus.ChainReader, header *types.Header, statedb *state.StateDB, txs []*types.Transaction,
+func (e *NoRewardEngine) Finalize(chainConfig *params.ChainConfig, header *types.Header, statedb *state.IntraBlockState, txs []*types.Transaction,
 	uncles []*types.Header) {
 	if e.rewardsOn {
-		e.inner.Finalize(chain, header, statedb, txs, uncles)
+		e.inner.Finalize(chainConfig, header, statedb, txs, uncles)
 	} else {
-		e.accumulateRewards(chain.Config(), statedb, header, uncles)
-		header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+		e.accumulateRewards(chainConfig, statedb, header, uncles)
+		//header.Root = statedb.IntermediateRoot(chainConfig.IsEIP158(header.Number))
 	}
 }
 
-func (e *NoRewardEngine) FinalizeAndAssemble(chain consensus.ChainReader, header *types.Header, statedb *state.StateDB, txs []*types.Transaction,
+func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, header *types.Header, statedb *state.IntraBlockState, txs []*types.Transaction,
 	uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	if e.rewardsOn {
-		return e.inner.FinalizeAndAssemble(chain, header, statedb, txs, uncles, receipts)
+		return e.inner.FinalizeAndAssemble(chainConfig, header, statedb, txs, uncles, receipts)
 	} else {
-		e.accumulateRewards(chain.Config(), statedb, header, uncles)
-		header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
+		e.accumulateRewards(chainConfig, statedb, header, uncles)
+		//header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
 		// Header seems complete, assemble into a block and return
 		return types.NewBlock(header, txs, uncles, receipts), nil
@@ -283,7 +282,7 @@ func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainPa
 	if api.ethDb != nil {
 		api.ethDb.Close()
 	}
-	ethDb := rawdb.NewMemoryDatabase()
+	ethDb := ethdb.NewMemDatabase()
 	accounts := make(core.GenesisAlloc)
 	for address, account := range chainParams.Accounts {
 		balance := big.NewInt(0)
@@ -375,7 +374,7 @@ func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainPa
 		ParentHash: chainParams.Genesis.ParentHash,
 		Alloc:      accounts,
 	}
-	chainConfig, genesisHash, err := core.SetupGenesisBlock(ethDb, genesis)
+	chainConfig, genesisHash, _, err := core.SetupGenesisBlock(ethDb, genesis)
 	if err != nil {
 		return false, err
 	}
@@ -410,7 +409,7 @@ func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainPa
 	api.ethDb = ethDb
 	api.engine = engine
 	api.blockchain = blockchain
-	api.db = state.NewDatabase(api.ethDb)
+	//api.db = state.NewDatabase(api.ethDb)
 	api.blockNumber = 0
 	api.txMap = make(map[common.Address]map[uint64]*types.Transaction)
 	api.txSenders = make(map[common.Address]struct{})
@@ -484,7 +483,7 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	statedb, err := api.blockchain.StateAt(parent.Root())
+	statedb, _, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
@@ -514,6 +513,7 @@ func (api *RetestethAPI) mineBlock() error {
 					&api.author,
 					gasPool,
 					statedb,
+					nil,
 					header, tx, &header.GasUsed, *api.blockchain.GetVMConfig(),
 				)
 				if err != nil {
@@ -539,7 +539,7 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	block, err := api.engine.FinalizeAndAssemble(api.blockchain, header, statedb, txs, []*types.Header{}, receipts)
+	block, err := api.engine.FinalizeAndAssemble(api.blockchain.Config(), header, statedb, txs, []*types.Header{}, receipts)
 	if err != nil {
 		return err
 	}
@@ -635,17 +635,17 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 	}
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.StateDB
+	var statedb *state.IntraBlockState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, err = api.blockchain.StateAt(root)
+		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
 	} else {
 		root = parentHeader.Root
-		statedb, err = api.blockchain.StateAt(root)
+		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
@@ -662,44 +662,48 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			}
 			// Ensure any modifications are committed to the state
 			// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-			root = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
+			//root = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				root, err = statedb.Commit(api.chainConfig.IsEIP158(block.Number()))
-				if err != nil {
-					return AccountRangeResult{}, err
-				}
+				//err = statedb.CommitBlock(api.chainConfig.IsEIP158(block.Number()), nil)
+				//if err != nil {
+				//	return AccountRangeResult{}, err
+				//}
 				break
 			}
 		}
 	}
-	accountTrie, err := statedb.Database().OpenTrie(root)
-	if err != nil {
-		return AccountRangeResult{}, err
-	}
-	it := trie.NewIterator(accountTrie.NodeIterator(common.BigToHash((*big.Int)(addressHash)).Bytes()))
-	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
-	for i := 0; i < int(maxResults) && it.Next(); i++ {
-		if preimage := accountTrie.GetKey(it.Key); preimage != nil {
-			result.AddressMap[common.BytesToHash(it.Key)] = common.BytesToAddress(preimage)
-			//fmt.Printf("%x: %x\n", it.Key, preimage)
-		} else {
-			//fmt.Printf("could not find preimage for %x\n", it.Key)
+	/*
+		accountTrie, err := statedb.Database().OpenTrie(root)
+		if err != nil {
+			return AccountRangeResult{}, err
 		}
-	}
-	//fmt.Printf("Number of entries returned: %d\n", len(result.AddressMap))
-	// Add the 'next key' so clients can continue downloading.
-	if it.Next() {
-		next := common.BytesToHash(it.Key)
-		result.NextKey = next
-	}
+		it := trie.NewIterator(accountTrie.NodeIterator(common.BigToHash((*big.Int)(addressHash)).Bytes()))
+	*/
+	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
+	/*
+		for i := 0; i < int(maxResults) && it.Next(); i++ {
+			if preimage := accountTrie.GetKey(it.Key); preimage != nil {
+				result.AddressMap[common.BytesToHash(it.Key)] = common.BytesToAddress(preimage)
+				//fmt.Printf("%x: %x\n", it.Key, preimage)
+			} else {
+				//fmt.Printf("could not find preimage for %x\n", it.Key)
+			}
+		}
+		//fmt.Printf("Number of entries returned: %d\n", len(result.AddressMap))
+		// Add the 'next key' so clients can continue downloading.
+		if it.Next() {
+			next := common.BytesToHash(it.Key)
+			result.NextKey = next
+		}
+	*/
 	return result, nil
 }
 
 func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, err := api.blockchain.StateAt(header.Root)
+	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -708,7 +712,7 @@ func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address,
 
 func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, err := api.blockchain.StateAt(header.Root)
+	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +721,7 @@ func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, bl
 
 func (api *RetestethAPI) GetTransactionCount(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
-	statedb, err := api.blockchain.StateAt(header.Root)
+	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -748,17 +752,17 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 	}
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.StateDB
+	var statedb *state.IntraBlockState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, err = api.blockchain.StateAt(root)
+		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
 	} else {
 		root = parentHeader.Root
-		statedb, err = api.blockchain.StateAt(root)
+		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
@@ -775,49 +779,53 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			}
 			// Ensure any modifications are committed to the state
 			// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-			_ = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
+			//_ = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				_, err = statedb.Commit(vmenv.ChainConfig().IsEIP158(block.Number()))
+				//_, err = statedb.Commit(vmenv.ChainConfig().IsEIP158(block.Number()))
 				if err != nil {
 					return StorageRangeResult{}, err
 				}
 			}
 		}
 	}
-	storageTrie := statedb.StorageTrie(address)
-	it := trie.NewIterator(storageTrie.NodeIterator(common.BigToHash((*big.Int)(begin)).Bytes()))
+	/*
+		storageTrie := statedb.StorageTrie(address)
+		it := trie.NewIterator(storageTrie.NodeIterator(common.BigToHash((*big.Int)(begin)).Bytes()))
+	*/
 	result := StorageRangeResult{Storage: make(map[common.Hash]SRItem)}
-	for i := 0; /*i < int(maxResults) && */ it.Next(); i++ {
-		if preimage := storageTrie.GetKey(it.Key); preimage != nil {
-			key := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(preimage))
-			v, _, err := rlp.SplitString(it.Value)
-			if err != nil {
-				return StorageRangeResult{}, err
+	/*
+		for i := 0; i < int(maxResults) && it.Next(); i++ {
+			if preimage := storageTrie.GetKey(it.Key); preimage != nil {
+				key := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(preimage))
+				v, _, err := rlp.SplitString(it.Value)
+				if err != nil {
+					return StorageRangeResult{}, err
+				}
+				value := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(v))
+				ks, _ := key.MarshalText()
+				vs, _ := value.MarshalText()
+				if len(ks)%2 != 0 {
+					ks = append(append(append([]byte{}, ks[:2]...), byte('0')), ks[2:]...)
+				}
+				if len(vs)%2 != 0 {
+					vs = append(append(append([]byte{}, vs[:2]...), byte('0')), vs[2:]...)
+				}
+				result.Storage[common.BytesToHash(it.Key)] = SRItem{
+					Key:   string(ks),
+					Value: string(vs),
+				}
+				//fmt.Printf("Key: %s, Value: %s\n", ks, vs)
+			} else {
+				//fmt.Printf("Did not find preimage for %x\n", it.Key)
 			}
-			value := (*math.HexOrDecimal256)(big.NewInt(0).SetBytes(v))
-			ks, _ := key.MarshalText()
-			vs, _ := value.MarshalText()
-			if len(ks)%2 != 0 {
-				ks = append(append(append([]byte{}, ks[:2]...), byte('0')), ks[2:]...)
-			}
-			if len(vs)%2 != 0 {
-				vs = append(append(append([]byte{}, vs[:2]...), byte('0')), vs[2:]...)
-			}
-			result.Storage[common.BytesToHash(it.Key)] = SRItem{
-				Key:   string(ks),
-				Value: string(vs),
-			}
-			//fmt.Printf("Key: %s, Value: %s\n", ks, vs)
-		} else {
-			//fmt.Printf("Did not find preimage for %x\n", it.Key)
 		}
-	}
-	if it.Next() {
-		result.Complete = false
-	} else {
-		result.Complete = true
-	}
+		if it.Next() {
+			result.Complete = false
+		} else {
+			result.Complete = true
+		}
+	*/
 	return result, nil
 }
 

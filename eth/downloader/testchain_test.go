@@ -17,29 +17,30 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // Test chain parameters.
 var (
 	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
-	testDB      = rawdb.NewMemoryDatabase()
-	testGenesis = core.GenesisBlockForTesting(testDB, testAddress, big.NewInt(1000000000))
+	testDb      = ethdb.NewMemDatabase()
+	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
 )
 
 // The common prefix of all test chains:
-var testChainBase = newTestChain(blockCacheItems+200, testGenesis)
+var testChainBase = newTestChain(blockCacheItems+200, testDb, testGenesis)
 
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
@@ -55,17 +56,20 @@ func init() {
 }
 
 type testChain struct {
+	db       ethdb.Database
 	genesis  *types.Block
 	chain    []common.Hash
 	headerm  map[common.Hash]*types.Header
 	blockm   map[common.Hash]*types.Block
 	receiptm map[common.Hash][]*types.Receipt
 	tdm      map[common.Hash]*big.Int
+	cpyLock  sync.Mutex
 }
 
 // newTestChain creates a blockchain of the given length.
-func newTestChain(length int, genesis *types.Block) *testChain {
+func newTestChain(length int, db *ethdb.BoltDatabase, genesis *types.Block) *testChain {
 	tc := new(testChain).copy(length)
+	tc.db = db
 	tc.genesis = genesis
 	tc.chain = append(tc.chain, genesis.Hash())
 	tc.headerm[tc.genesis.Hash()] = tc.genesis.Header()
@@ -92,12 +96,17 @@ func (tc *testChain) shorten(length int) *testChain {
 }
 
 func (tc *testChain) copy(newlen int) *testChain {
+	tc.cpyLock.Lock()
+	defer tc.cpyLock.Unlock()
 	cpy := &testChain{
 		genesis:  tc.genesis,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
 		blockm:   make(map[common.Hash]*types.Block, newlen),
 		receiptm: make(map[common.Hash][]*types.Receipt, newlen),
 		tdm:      make(map[common.Hash]*big.Int, newlen),
+	}
+	if tc.db != nil {
+		cpy.db = tc.db.MemCopy()
 	}
 	for i := 0; i < len(tc.chain) && i < newlen; i++ {
 		hash := tc.chain[i]
@@ -117,8 +126,10 @@ func (tc *testChain) copy(newlen int) *testChain {
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
 	// start := time.Now()
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
+	tc.cpyLock.Lock()
+	defer tc.cpyLock.Unlock()
 
-	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), testDB, n, func(i int, block *core.BlockGen) {
+	blocks, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 		// If a heavy chain is requested, delay blocks to raise difficulty
 		if heavy {

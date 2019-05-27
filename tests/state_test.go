@@ -19,12 +19,16 @@ package tests
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
+
+var testVMConfig = vm.Config{}
 
 func TestState(t *testing.T) {
 	t.Parallel()
@@ -57,11 +61,15 @@ func TestState(t *testing.T) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			name := name + "/" + key
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-					_, err := test.Run(subtest, vmconfig)
-					return st.checkFailure(t, name, err)
+					config, ok := Forks[subtest.Fork]
+					if !ok {
+						return UnsupportedForkError{subtest.Fork}
+					}
+					ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
+					_, _, _, err := test.Run(ctx, subtest, vmconfig)
+					return st.checkFailure(t, err)
 				})
 			})
 		}
@@ -74,8 +82,8 @@ func TestState(t *testing.T) {
 			name := name + "/" + key
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-					_, err := test.Run(subtest, vmconfig)
-					return st.checkFailure(t, name, err)
+					_, _, _, err := test.Run(context.Background(), subtest, vmconfig)
+					return st.checkFailureWithName(t, name, err)
 				})
 			})
 		}

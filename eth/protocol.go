@@ -21,11 +21,11 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Constants to match up protocol versions and messages
@@ -34,16 +34,16 @@ const (
 	eth63 = 63
 )
 
-// protocolName is the official short name of the protocol used during capability negotiation.
-const protocolName = "eth"
+// ProtocolName is the official short name of the protocol used during capability negotiation.
+const ProtocolName = "eth"
 
 // ProtocolVersions are the supported versions of the eth protocol (first is primary).
 var ProtocolVersions = []uint{eth63}
 
 // protocolLengths are the number of implemented message corresponding to different protocol versions.
-var protocolLengths = map[uint]uint64{eth63: 17, eth62: 8}
+var ProtocolLengths = map[uint]uint64{eth63: 17, eth62: 8}
 
-const protocolMaxMsgSize = 10 * 1024 * 1024 // Maximum cap on the size of a protocol message
+const ProtocolMaxMsgSize = 10 * 1024 * 1024 // Maximum cap on the size of a protocol message
 
 // eth protocol message codes
 const (
@@ -58,8 +58,8 @@ const (
 	NewBlockMsg        = 0x07
 
 	// Protocol messages belonging to eth/63
-	GetNodeDataMsg = 0x0d
-	NodeDataMsg    = 0x0e
+	GetNodeDataMsg = 0x0d // NOT IMPLEMENTED
+	NodeDataMsg    = 0x0e // NOT IMPLEMENTED
 	GetReceiptsMsg = 0x0f
 	ReceiptsMsg    = 0x10
 )
@@ -76,6 +76,7 @@ const (
 	ErrNoStatusMsg
 	ErrExtraStatusMsg
 	ErrSuspendedPeer
+	ErrNotImplemented
 )
 
 func (e errCode) String() string {
@@ -88,11 +89,12 @@ var errorToString = map[int]string{
 	ErrDecode:                  "Invalid message",
 	ErrInvalidMsgCode:          "Invalid message code",
 	ErrProtocolVersionMismatch: "Protocol version mismatch",
-	ErrNetworkIdMismatch:       "NetworkId mismatch",
+	ErrNetworkIdMismatch:       "NetworkID mismatch",
 	ErrGenesisBlockMismatch:    "Genesis block mismatch",
 	ErrNoStatusMsg:             "No status message",
 	ErrExtraStatusMsg:          "Extra status message",
 	ErrSuspendedPeer:           "Suspended peer",
+	ErrNotImplemented:          "Not implemented yet",
 }
 
 type txPool interface {
@@ -111,7 +113,7 @@ type txPool interface {
 // statusData is the network packet for the status message.
 type statusData struct {
 	ProtocolVersion uint32
-	NetworkId       uint64
+	NetworkID       uint64
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash

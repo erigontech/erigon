@@ -11,13 +11,44 @@
 GOBIN = ./build/bin
 GO ?= latest
 
+LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
+ifeq ($(LATEST_COMMIT),)
+LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
+endif
+
+
 geth:
 	build/env.sh go run build/ci.go install ./cmd/geth
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/geth\" to launch geth."
 
+hack:
+	build/env.sh go run build/ci.go install ./cmd/hack
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/hack\" to launch hack."
+
+tester:
+	build/env.sh go run build/ci.go install ./cmd/tester
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tester\" to launch tester."
+
+rpctest:
+	build/env.sh go run build/ci.go install ./cmd/rpctest
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
+
+state:
+	build/env.sh go run build/ci.go install ./cmd/state
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/state\" to launch state."
+	
+pics:
+	build/env.sh go run build/ci.go install ./cmd/pics
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/pics\" to launch pics."
+
 all:
-	build/env.sh go run build/ci.go install
+	build/env.sh go run build/ci.go install -procs=1
 
 android:
 	build/env.sh go run build/ci.go aar --local
@@ -32,8 +63,29 @@ ios:
 test: all
 	build/env.sh go run build/ci.go test
 
-lint: ## Run linters.
-	build/env.sh go run build/ci.go lint
+lint: lintci
+
+lintci:
+	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step1.yml \
+	    --exclude "which can be annoying to use"
+
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step2.yml
+
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step3.yml
+
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step4.yml
+
+lintci-deps:
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.16.0
 
 clean:
 	./build/clean_go_build_cache.sh
@@ -143,3 +195,6 @@ geth-windows-amd64:
 	build/env.sh go run build/ci.go xgo -- --go=$(GO) --targets=windows/amd64 -v ./cmd/geth
 	@echo "Windows amd64 cross compilation done:"
 	@ls -ld $(GOBIN)/geth-windows-* | grep amd64
+
+bindings:
+	go generate ./tests/contracts/

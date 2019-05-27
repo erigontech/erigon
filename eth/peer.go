@@ -24,10 +24,10 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -298,7 +298,7 @@ func (p *peer) SendBlockBodiesRLP(bodies []rlp.RawValue) error {
 	return p2p.Send(p.rw, BlockBodiesMsg, bodies)
 }
 
-// SendNodeDataRLP sends a batch of arbitrary internal data, corresponding to the
+// SendNodeData sends a batch of arbitrary internal data, corresponding to the
 // hashes requested.
 func (p *peer) SendNodeData(data [][]byte) error {
 	return p2p.Send(p.rw, NodeDataMsg, data)
@@ -359,13 +359,17 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	var status statusData // safe to read after two values have been received from errc
 
 	go func() {
-		errc <- p2p.Send(p.rw, StatusMsg, &statusData{
+		err := p2p.Send(p.rw, StatusMsg, &statusData{
 			ProtocolVersion: uint32(p.version),
-			NetworkId:       network,
+			NetworkID:       network,
 			TD:              td,
 			CurrentBlock:    head,
 			GenesisBlock:    genesis,
 		})
+		if err != nil {
+			p.Log().Debug("Failed to send Status msg", "err", err)
+		}
+		errc <- err
 	}()
 	go func() {
 		errc <- p.readStatus(network, &status, genesis)
@@ -389,13 +393,14 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 func (p *peer) readStatus(network uint64, status *statusData, genesis common.Hash) (err error) {
 	msg, err := p.rw.ReadMsg()
 	if err != nil {
+		p.Log().Debug("Failed to read Status msg", "err", err)
 		return err
 	}
 	if msg.Code != StatusMsg {
 		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, StatusMsg)
 	}
-	if msg.Size > protocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, protocolMaxMsgSize)
+	if msg.Size > ProtocolMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
 	if err := msg.Decode(&status); err != nil {
@@ -404,8 +409,8 @@ func (p *peer) readStatus(network uint64, status *statusData, genesis common.Has
 	if status.GenesisBlock != genesis {
 		return errResp(ErrGenesisBlockMismatch, "%x (!= %x)", status.GenesisBlock[:8], genesis[:8])
 	}
-	if status.NetworkId != network {
-		return errResp(ErrNetworkIdMismatch, "%d (!= %d)", status.NetworkId, network)
+	if status.NetworkID != network {
+		return errResp(ErrNetworkIdMismatch, "%d (!= %d)", status.NetworkID, network)
 	}
 	if int(status.ProtocolVersion) != p.version {
 		return errResp(ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, p.version)

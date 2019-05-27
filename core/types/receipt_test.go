@@ -23,10 +23,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func TestLegacyReceiptDecoding(t *testing.T) {
@@ -38,14 +38,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 			"StoredReceiptRLP",
 			encodeAsStoredReceiptRLP,
 		},
-		{
-			"V4StoredReceiptRLP",
-			encodeAsV4StoredReceiptRLP,
-		},
-		{
-			"V3StoredReceiptRLP",
-			encodeAsV3StoredReceiptRLP,
-		},
+		// Turbo-Geth: all the legacy formats are removed intentionally
 	}
 
 	tx := NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil)
@@ -113,37 +106,6 @@ func encodeAsStoredReceiptRLP(want *Receipt) ([]byte, error) {
 		PostStateOrStatus: want.statusEncoding(),
 		CumulativeGasUsed: want.CumulativeGasUsed,
 		Logs:              make([]*LogForStorage, len(want.Logs)),
-	}
-	for i, log := range want.Logs {
-		stored.Logs[i] = (*LogForStorage)(log)
-	}
-	return rlp.EncodeToBytes(stored)
-}
-
-func encodeAsV4StoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &v4StoredReceiptRLP{
-		PostStateOrStatus: want.statusEncoding(),
-		CumulativeGasUsed: want.CumulativeGasUsed,
-		TxHash:            want.TxHash,
-		ContractAddress:   want.ContractAddress,
-		Logs:              make([]*LogForStorage, len(want.Logs)),
-		GasUsed:           want.GasUsed,
-	}
-	for i, log := range want.Logs {
-		stored.Logs[i] = (*LogForStorage)(log)
-	}
-	return rlp.EncodeToBytes(stored)
-}
-
-func encodeAsV3StoredReceiptRLP(want *Receipt) ([]byte, error) {
-	stored := &v3StoredReceiptRLP{
-		PostStateOrStatus: want.statusEncoding(),
-		CumulativeGasUsed: want.CumulativeGasUsed,
-		Bloom:             want.Bloom,
-		TxHash:            want.TxHash,
-		ContractAddress:   want.ContractAddress,
-		Logs:              make([]*LogForStorage, len(want.Logs)),
-		GasUsed:           want.GasUsed,
 	}
 	for i, log := range want.Logs {
 		stored.Logs[i] = (*LogForStorage)(log)

@@ -25,11 +25,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/log"
 	duktape "gopkg.in/olebedev/go-duktape.v3"
 )
 
@@ -177,7 +177,7 @@ func (sw *stackWrapper) pushObject(vm *duktape.Context) {
 
 // dbWrapper provides a JavaScript wrapper around vm.Database.
 type dbWrapper struct {
-	db vm.StateDB
+	db vm.IntraBlockState
 }
 
 // pushObject assembles a JSVM object wrapping a swappable database and pushes it
@@ -517,7 +517,10 @@ func wrapError(context string, err error) error {
 }
 
 // CaptureStart implements the Tracer interface to initialize the tracing operation.
-func (jst *Tracer) CaptureStart(from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+func (jst *Tracer) CaptureStart(depth int, from common.Address, to common.Address, create bool, input []byte, gas uint64, value *big.Int) error {
+	if depth != 0 {
+		return nil
+	}
 	jst.ctx["type"] = "CALL"
 	if create {
 		jst.ctx["type"] = "CREATE"
@@ -548,13 +551,13 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		jst.stackWrapper.stack = stack
 		jst.memoryWrapper.memory = memory
 		jst.contractWrapper.contract = contract
-		jst.dbWrapper.db = env.StateDB
+		jst.dbWrapper.db = env.IntraBlockState
 
 		*jst.pcValue = uint(pc)
 		*jst.gasValue = uint(gas)
 		*jst.costValue = uint(cost)
 		*jst.depthValue = uint(depth)
-		*jst.refundValue = uint(env.StateDB.GetRefund())
+		*jst.refundValue = uint(env.IntraBlockState.GetRefund())
 
 		jst.errorValue = nil
 		if err != nil {
@@ -586,7 +589,10 @@ func (jst *Tracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 }
 
 // CaptureEnd is called after the call finishes to finalize the tracing.
-func (jst *Tracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, err error) error {
+func (jst *Tracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
+	if depth != 0 {
+		return nil
+	}
 	jst.ctx["output"] = output
 	jst.ctx["gasUsed"] = gasUsed
 	jst.ctx["time"] = t.String()
@@ -594,6 +600,18 @@ func (jst *Tracer) CaptureEnd(output []byte, gasUsed uint64, t time.Duration, er
 	if err != nil {
 		jst.ctx["error"] = err.Error()
 	}
+	return nil
+}
+
+func (jst *Tracer) CaptureCreate(creator, creation common.Address) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureAccountRead(account common.Address) error {
+	return nil
+}
+
+func (jst *Tracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 

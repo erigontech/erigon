@@ -19,9 +19,9 @@ package types
 import (
 	"io"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 //go:generate gencodec -type Log -field-override logMarshaling -out gen_log_json.go
@@ -73,14 +73,14 @@ type rlpStorageLog rlpLog
 
 // legacyRlpStorageLog is the previous storage encoding of a log including some redundant fields.
 type legacyRlpStorageLog struct {
-	Address     common.Address
-	Topics      []common.Hash
-	Data        []byte
-	BlockNumber uint64
-	TxHash      common.Hash
-	TxIndex     uint
-	BlockHash   common.Hash
-	Index       uint
+	Address common.Address
+	Topics  []common.Hash
+	Data    []byte
+	//BlockNumber uint64
+	//TxHash      common.Hash
+	//TxIndex     uint
+	//BlockHash   common.Hash
+	//Index       uint
 }
 
 // EncodeRLP implements rlp.Encoder.
@@ -108,6 +108,11 @@ func (l *LogForStorage) EncodeRLP(w io.Writer) error {
 		Address: l.Address,
 		Topics:  l.Topics,
 		Data:    l.Data,
+		//BlockNumber: l.BlockNumber,
+		//TxHash:      l.TxHash,
+		//TxIndex:     l.TxIndex,
+		//BlockHash:   l.BlockHash,
+		//Index:       l.Index,
 	})
 }
 

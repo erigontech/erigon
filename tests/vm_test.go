@@ -19,7 +19,7 @@ package tests
 import (
 	"testing"
 
-	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
 func TestVM(t *testing.T) {
@@ -30,7 +30,7 @@ func TestVM(t *testing.T) {
 
 	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
 		withTrace(t, test.json.Exec.GasLimit, func(vmconfig vm.Config) error {
-			return vmt.checkFailure(t, name, test.Run(vmconfig))
+			return vmt.checkFailure(t, test.Run(vmconfig, 0))
 		})
 	})
 }

@@ -22,21 +22,14 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 var (
 	ErrInvalidChainId = errors.New("invalid chain id for signer")
 )
-
-// sigCache is used to cache the derived sender and contains
-// the signer used to derive it.
-type sigCache struct {
-	signer Signer
-	from   common.Address
-}
 
 // MakeSigner returns a Signer based on the given chain config and block number.
 func MakeSigner(config *params.ChainConfig, blockNumber *big.Int) Signer {
@@ -71,20 +64,13 @@ func SignTx(tx *Transaction, s Signer, prv *ecdsa.PrivateKey) (*Transaction, err
 // not match the signer used in the current call.
 func Sender(signer Signer, tx *Transaction) (common.Address, error) {
 	if sc := tx.from.Load(); sc != nil {
-		sigCache := sc.(sigCache)
-		// If the signer used to derive from in a previous
-		// call is not the same as used current, invalidate
-		// the cache.
-		if sigCache.signer.Equal(signer) {
-			return sigCache.from, nil
-		}
+		return sc.(common.Address), nil
 	}
-
 	addr, err := signer.Sender(tx)
 	if err != nil {
 		return common.Address{}, err
 	}
-	tx.from.Store(sigCache{signer: signer, from: addr})
+	tx.from.Store(addr)
 	return addr, nil
 }
 
@@ -100,6 +86,8 @@ type Signer interface {
 	Hash(tx *Transaction) common.Hash
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(Signer) bool
+	// Return 0 for pre-EIP155 signers
+	ChainId() *big.Int
 }
 
 // EIP155Transaction implements Signer using the EIP155 rules.
@@ -164,6 +152,10 @@ func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 	})
 }
 
+func (s EIP155Signer) ChainId() *big.Int {
+	return s.chainId
+}
+
 // HomesteadTransaction implements TransactionInterface using the
 // homestead rules.
 type HomesteadSigner struct{ FrontierSigner }
@@ -217,6 +209,10 @@ func (fs FrontierSigner) Hash(tx *Transaction) common.Hash {
 
 func (fs FrontierSigner) Sender(tx *Transaction) (common.Address, error) {
 	return recoverPlain(fs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, false)
+}
+
+func (fs FrontierSigner) ChainId() *big.Int {
+	return big.NewInt(0)
 }
 
 func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (common.Address, error) {

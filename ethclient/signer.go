@@ -20,8 +20,8 @@ import (
 	"errors"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
 // senderFromServer is a types.Signer that remembers the sender address returned by the RPC
@@ -49,6 +49,10 @@ func (s *senderFromServer) Sender(tx *types.Transaction) (common.Address, error)
 		return common.Address{}, errNotCached
 	}
 	return s.addr, nil
+}
+
+func (s *senderFromServer) ChainId() *big.Int {
+	return big.NewInt(0)
 }
 
 func (s *senderFromServer) Hash(tx *types.Transaction) common.Hash {

@@ -26,15 +26,15 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"golang.org/x/crypto/sha3"
 )
 
 // Lengths of hashes and addresses in bytes.
 const (
-	// HashLength is the expected length of the hash
+	// HashLength is the expected length of the hash (in bytes)
 	HashLength = 32
-	// AddressLength is the expected length of the address
+	// AddressLength is the expected length of the address (in bytes)
 	AddressLength = 20
 )
 

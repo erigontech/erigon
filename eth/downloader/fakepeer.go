@@ -19,11 +19,11 @@ package downloader
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // FakePeer is a mock downloader peer that operates on a local database instance
@@ -127,7 +127,7 @@ func (p *FakePeer) RequestBodies(hashes []common.Hash) error {
 		uncles [][]*types.Header
 	)
 	for _, hash := range hashes {
-		block := rawdb.ReadBlock(p.db, hash, *p.hc.GetBlockNumber(hash))
+		block := rawdb.ReadBlock(p.db, hash, *p.hc.GetBlockNumber(p.db, hash))
 
 		txs = append(txs, block.Transactions())
 		uncles = append(uncles, block.Uncles())
@@ -141,21 +141,8 @@ func (p *FakePeer) RequestBodies(hashes []common.Hash) error {
 func (p *FakePeer) RequestReceipts(hashes []common.Hash) error {
 	var receipts [][]*types.Receipt
 	for _, hash := range hashes {
-		receipts = append(receipts, rawdb.ReadRawReceipts(p.db, hash, *p.hc.GetBlockNumber(hash)))
+		receipts = append(receipts, rawdb.ReadRawReceipts(p.db, hash, *p.hc.GetBlockNumber(p.db, hash)))
 	}
 	p.dl.DeliverReceipts(p.id, receipts)
-	return nil
-}
-
-// RequestNodeData implements downloader.Peer, returning a batch of state trie
-// nodes corresponding to the specified trie hashes.
-func (p *FakePeer) RequestNodeData(hashes []common.Hash) error {
-	var data [][]byte
-	for _, hash := range hashes {
-		if entry, err := p.db.Get(hash.Bytes()); err == nil {
-			data = append(data, entry)
-		}
-	}
-	p.dl.DeliverNodeData(p.id, data)
 	return nil
 }

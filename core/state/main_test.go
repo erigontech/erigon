@@ -17,9 +17,7 @@
 package state
 
 import (
-	"testing"
-
-	checker "gopkg.in/check.v1"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-func Test(t *testing.T) { checker.TestingT(t) }
+var _ ethdb.Database = &ethdb.BoltDatabase{}

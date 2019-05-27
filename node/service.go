@@ -17,15 +17,13 @@
 package node
 
 import (
-	"path/filepath"
 	"reflect"
 
-	"github.com/ethereum/go-ethereum/accounts"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/ethdb"
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/p2p"
-	"github.com/ethereum/go-ethereum/rpc"
+	"github.com/ledgerwatch/turbo-geth/accounts"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // ServiceContext is a collection of service independent options inherited from
@@ -38,34 +36,35 @@ type ServiceContext struct {
 	AccountManager *accounts.Manager        // Account manager created by the node.
 }
 
+// OpenDatabaseWithFreezer
+// FIXME: implement the functionality
+func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, freezer string) (ethdb.Database, error) {
+	return ctx.OpenDatabase(name)
+}
+
 // OpenDatabase opens an existing database with the given name (or creates one
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
-func (ctx *ServiceContext) OpenDatabase(name string, cache int, handles int, namespace string) (ethdb.Database, error) {
+func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 	if ctx.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
+		return ethdb.NewMemDatabase(), nil
 	}
-	return rawdb.NewLevelDBDatabase(ctx.config.ResolvePath(name), cache, handles, namespace)
-}
+	return ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
+	/*
+		if err != nil {
+			return nil, err
+		}
+		root := ctx.config.ResolvePath(name)
 
-// OpenDatabaseWithFreezer opens an existing database with the given name (or
-// creates one if no previous can be found) from within the node's data directory,
-// also attaching a chain freezer to it that moves ancient chain data from the
-// database to immutable append-only files. If the node is an ephemeral one, a
-// memory database is returned.
-func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, cache int, handles int, freezer string, namespace string) (ethdb.Database, error) {
-	if ctx.config.DataDir == "" {
-		return rawdb.NewMemoryDatabase(), nil
-	}
-	root := ctx.config.ResolvePath(name)
-
-	switch {
-	case freezer == "":
-		freezer = filepath.Join(root, "ancient")
-	case !filepath.IsAbs(freezer):
-		freezer = ctx.config.ResolvePath(freezer)
-	}
-	return rawdb.NewLevelDBDatabaseWithFreezer(root, cache, handles, freezer, namespace)
+			FIXME: restore and move to OpenDatabaseWithFreezer
+			switch {
+			case freezer == "":
+				freezer = filepath.Join(root, "ancient")
+			case !filepath.IsAbs(freezer):
+				freezer = ctx.config.ResolvePath(freezer)
+			}
+		return ethdb.NewBoltDatabase(root)
+	*/
 }
 
 // ResolvePath resolves a user path into the data directory if that was relative

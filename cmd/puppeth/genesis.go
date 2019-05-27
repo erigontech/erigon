@@ -23,12 +23,12 @@ import (
 	"math/big"
 	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	math2 "github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/consensus/ethash"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	math2 "github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // alethGenesisSpec represents the genesis specification format used by the
@@ -42,6 +42,7 @@ type alethGenesisSpec struct {
 		DaoHardforkBlock        math2.HexOrDecimal64   `json:"daoHardforkBlock"`
 		EIP150ForkBlock         hexutil.Uint64         `json:"EIP150ForkBlock"`
 		EIP158ForkBlock         hexutil.Uint64         `json:"EIP158ForkBlock"`
+		EIP2027ForkBlock        hexutil.Uint64         `json:"EIP2027ForkBlock"`
 		ByzantiumForkBlock      hexutil.Uint64         `json:"byzantiumForkBlock"`
 		ConstantinopleForkBlock hexutil.Uint64         `json:"constantinopleForkBlock"`
 		MinGasLimit             hexutil.Uint64         `json:"minGasLimit"`
@@ -111,6 +112,9 @@ func newAlethGenesisSpec(network string, genesis *core.Genesis) (*alethGenesisSp
 	spec.Params.HomesteadForkBlock = (hexutil.Uint64)(genesis.Config.HomesteadBlock.Uint64())
 	spec.Params.EIP150ForkBlock = (hexutil.Uint64)(genesis.Config.EIP150Block.Uint64())
 	spec.Params.EIP158ForkBlock = (hexutil.Uint64)(genesis.Config.EIP158Block.Uint64())
+	if genesis.Config.EIP2027Block != nil {
+		spec.Params.EIP2027ForkBlock = (hexutil.Uint64)(genesis.Config.EIP2027Block.Uint64())
+	}
 
 	// Byzantium
 	if num := genesis.Config.ByzantiumBlock; num != nil {

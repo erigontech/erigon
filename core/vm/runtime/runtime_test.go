@@ -21,12 +21,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestDefaults(t *testing.T) {
@@ -72,7 +72,7 @@ func TestEVM(t *testing.T) {
 		byte(vm.ORIGIN),
 		byte(vm.BLOCKHASH),
 		byte(vm.COINBASE),
-	}, nil, nil)
+	}, nil, nil, 0)
 }
 
 func TestExecute(t *testing.T) {
@@ -83,7 +83,7 @@ func TestExecute(t *testing.T) {
 		byte(vm.PUSH1), 32,
 		byte(vm.PUSH1), 0,
 		byte(vm.RETURN),
-	}, nil, nil)
+	}, nil, nil, 0)
 	if err != nil {
 		t.Fatal("didn't expect error", err)
 	}
@@ -95,7 +95,9 @@ func TestExecute(t *testing.T) {
 }
 
 func TestCall(t *testing.T) {
-	state, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()))
+	db := ethdb.NewMemDatabase()
+	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	state := state.New(tds)
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
 		byte(vm.PUSH1), 10,
@@ -143,20 +145,21 @@ func BenchmarkCall(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for j := 0; j < 400; j++ {
-			Execute(code, cpurchase, nil)
-			Execute(code, creceived, nil)
-			Execute(code, refund, nil)
+			Execute(code, cpurchase, nil, 0)
+			Execute(code, creceived, nil, 0)
+			Execute(code, refund, nil, 0)
 		}
 	}
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	var (
-		statedb, _ = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()))
-		sender     = common.BytesToAddress([]byte("sender"))
-		receiver   = common.BytesToAddress([]byte("receiver"))
+		tds, _   = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		statedb  = state.New(tds)
+		sender   = common.BytesToAddress([]byte("sender"))
+		receiver = common.BytesToAddress([]byte("receiver"))
 	)
 
-	statedb.CreateAccount(sender)
+	statedb.CreateAccount(sender, true)
 	statedb.SetCode(receiver, common.FromHex(code))
 	runtimeConfig := Config{
 		Origin:      sender,

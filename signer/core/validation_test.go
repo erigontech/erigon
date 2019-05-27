@@ -16,7 +16,9 @@
 
 package core
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestPasswordValidation(t *testing.T) {
 	testcases := []struct {

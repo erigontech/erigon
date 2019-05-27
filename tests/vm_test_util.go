@@ -18,19 +18,19 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/common/math"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // VMTest checks EVM execution without block or transaction context.
@@ -78,10 +78,18 @@ type vmExecMarshaling struct {
 	GasPrice *math.HexOrDecimal256
 }
 
-func (t *VMTest) Run(vmconfig vm.Config) error {
-	statedb := MakePreState(rawdb.NewMemoryDatabase(), t.json.Pre)
-	ret, gasRemaining, err := t.exec(statedb, vmconfig)
-
+func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
+	db := ethdb.NewMemDatabase()
+	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr)))
+	state, tds, err := MakePreState(ctx, db, t.json.Pre, blockNr)
+	if err != nil {
+		return fmt.Errorf("error in MakePreState: %v", err)
+	}
+	tds.StartNewBuffer()
+	ret, gasRemaining, err := t.exec(state, vmconfig)
+	// err is not supposed to be checked here, because in VM tests, the failure
+	// is indicated by the absence of the post-condition section.
+	// In other words, when such section is not present, we expect an error
 	if t.json.GasRemaining == nil {
 		if err == nil {
 			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")
@@ -100,36 +108,40 @@ func (t *VMTest) Run(vmconfig vm.Config) error {
 	}
 	for addr, account := range t.json.Post {
 		for k, wantV := range account.Storage {
-			if haveV := statedb.GetState(addr, k); haveV != wantV {
+			if haveV := state.GetState(addr, k); haveV != wantV {
 				return fmt.Errorf("wrong storage value at %x:\n  got  %x\n  want %x", k, haveV, wantV)
 			}
 		}
 	}
-	// if root := statedb.IntermediateRoot(false); root != t.json.PostStateRoot {
-	// 	return fmt.Errorf("post state root mismatch, got %x, want %x", root, t.json.PostStateRoot)
-	// }
-	if logs := rlpHash(statedb.Logs()); logs != common.Hash(t.json.Logs) {
+	roots, err := tds.ComputeTrieRoots()
+	if err != nil {
+		return fmt.Errorf("Error calculating state root: %v", err)
+	}
+	if t.json.PostStateRoot != (common.Hash{}) && roots[len(roots)-1] != t.json.PostStateRoot {
+		return fmt.Errorf("post state root mismatch, got %x, want %x", roots[len(roots)-1], t.json.PostStateRoot)
+	}
+	if logs := rlpHash(state.Logs()); logs != common.Hash(t.json.Logs) {
 		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, t.json.Logs)
 	}
 	return nil
 }
 
-func (t *VMTest) exec(statedb *state.StateDB, vmconfig vm.Config) ([]byte, uint64, error) {
-	evm := t.newEVM(statedb, vmconfig)
+func (t *VMTest) exec(state vm.IntraBlockState, vmconfig vm.Config) ([]byte, uint64, error) {
+	evm := t.newEVM(state, vmconfig)
 	e := t.json.Exec
 	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, e.Value)
 }
 
-func (t *VMTest) newEVM(statedb *state.StateDB, vmconfig vm.Config) *vm.EVM {
+func (t *VMTest) newEVM(state vm.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 	initialCall := true
-	canTransfer := func(db vm.StateDB, address common.Address, amount *big.Int) bool {
+	canTransfer := func(db vm.IntraBlockState, address common.Address, amount *big.Int) bool {
 		if initialCall {
 			initialCall = false
 			return true
 		}
 		return core.CanTransfer(db, address, amount)
 	}
-	transfer := func(db vm.StateDB, sender, recipient common.Address, amount *big.Int) {}
+	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *big.Int) {}
 	context := vm.Context{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,
@@ -143,7 +155,7 @@ func (t *VMTest) newEVM(statedb *state.StateDB, vmconfig vm.Config) *vm.EVM {
 		GasPrice:    t.json.Exec.GasPrice,
 	}
 	vmconfig.NoRecursion = true
-	return vm.NewEVM(context, statedb, params.MainnetChainConfig, vmconfig)
+	return vm.NewEVM(context, state, params.MainnetChainConfig, vmconfig)
 }
 
 func vmTestBlockHash(n uint64) common.Hash {

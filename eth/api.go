@@ -28,16 +28,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/internal/ethapi"
-	"github.com/ethereum/go-ethereum/rlp"
-	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/ethereum/go-ethereum/trie"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // PublicEthereumAPI provides an API to access Ethereum full node-related
@@ -63,6 +63,9 @@ func (api *PublicEthereumAPI) Coinbase() (common.Address, error) {
 
 // Hashrate returns the POW hashrate
 func (api *PublicEthereumAPI) Hashrate() hexutil.Uint64 {
+	if api.e.Miner() == nil {
+		return hexutil.Uint64(0)
+	}
 	return hexutil.Uint64(api.e.Miner().HashRate())
 }
 
@@ -270,8 +273,8 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 		// If we're dumping the pending state, we need to request
 		// both the pending block as well as the pending state from
 		// the miner and operate on those
-		_, stateDb := api.eth.miner.Pending()
-		return stateDb.RawDump(false, false, true), nil
+		_, _, tds := api.eth.miner.Pending()
+		return tds.DefaultRawDump(), nil
 	}
 	var block *types.Block
 	if blockNr == rpc.LatestBlockNumber {
@@ -282,11 +285,11 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 	if block == nil {
 		return state.Dump{}, fmt.Errorf("block #%d not found", blockNr)
 	}
-	stateDb, err := api.eth.BlockChain().StateAt(block.Root())
+	_, tds, err := api.eth.BlockChain().StateAt(block.Root(), uint64(blockNr))
 	if err != nil {
 		return state.Dump{}, err
 	}
-	return stateDb.RawDump(false, false, true), nil
+	return tds.DefaultRawDump(), nil
 }
 
 // PrivateDebugAPI is the collection of Ethereum full node APIs exposed over
@@ -348,30 +351,25 @@ type AccountRangeResult struct {
 	Next     common.Hash                     `json:"next"`
 }
 
-func accountRange(st state.Trie, start *common.Hash, maxResults int) (AccountRangeResult, error) {
+func accountRange(dbstate *state.DbState, start *common.Hash, maxResults int) (AccountRangeResult, error) {
 	if start == nil {
 		start = &common.Hash{0}
 	}
-	it := trie.NewIterator(st.NodeIterator(start.Bytes()))
 	result := AccountRangeResult{Accounts: make(map[common.Hash]*common.Address), Next: common.Hash{}}
 
 	if maxResults > AccountRangeMaxResults {
 		maxResults = AccountRangeMaxResults
 	}
 
-	for i := 0; i < maxResults && it.Next(); i++ {
-		if preimage := st.GetKey(it.Key); preimage != nil {
-			addr := &common.Address{}
-			addr.SetBytes(preimage)
-			result.Accounts[common.BytesToHash(it.Key)] = addr
+	resultCount := 0
+	dbstate.ForEachAccount(start[:], func(address *common.Address, addrHash common.Hash) {
+		if resultCount < maxResults {
+			result.Accounts[addrHash] = address
 		} else {
-			result.Accounts[common.BytesToHash(it.Key)] = nil
+			result.Next = addrHash
 		}
-	}
-
-	if it.Next() {
-		result.Next = common.BytesToHash(it.Key)
-	}
+		resultCount++
+	}, maxResults+1)
 
 	return result, nil
 }
@@ -381,28 +379,16 @@ const AccountRangeMaxResults = 256
 
 // AccountRange enumerates all accounts in the latest state
 func (api *PrivateDebugAPI) AccountRange(ctx context.Context, start *common.Hash, maxResults int) (AccountRangeResult, error) {
-	var statedb *state.StateDB
+	var dbstate *state.DbState // Read-only
 	var err error
 	block := api.eth.blockchain.CurrentBlock()
 
-	if len(block.Transactions()) == 0 {
-		statedb, err = api.computeStateDB(block, defaultTraceReexec)
-		if err != nil {
-			return AccountRangeResult{}, err
-		}
-	} else {
-		_, _, statedb, err = api.computeTxEnv(block.Hash(), len(block.Transactions())-1, 0)
-		if err != nil {
-			return AccountRangeResult{}, err
-		}
-	}
-
-	trie, err := statedb.Database().OpenTrie(block.Header().Root)
+	_, _, _, dbstate, _, err = api.computeTxEnv(block.Hash(), len(block.Transactions())-1)
 	if err != nil {
 		return AccountRangeResult{}, err
 	}
 
-	return accountRange(trie, start, maxResults)
+	return accountRange(dbstate, start, maxResults)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -420,37 +406,38 @@ type storageEntry struct {
 
 // StorageRangeAt returns the storage at the given block height and transaction index.
 func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (StorageRangeResult, error) {
-	_, _, statedb, err := api.computeTxEnv(blockHash, txIndex, 0)
+	block := api.eth.blockchain.GetBlockByHash(blockHash)
+	if block == nil {
+		return StorageRangeResult{}, fmt.Errorf("block %x not found", blockHash)
+	}
+	_, _, _, dbstate, _, err := api.computeTxEnv(blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}
-	st := statedb.StorageTrie(contractAddress)
-	if st == nil {
-		return StorageRangeResult{}, fmt.Errorf("account %x doesn't exist", contractAddress)
-	}
-	return storageRangeAt(st, keyStart, maxResult)
+	//dbstate.SetBlockNr(block.NumberU64())
+	//statedb.CommitBlock(api.eth.chainConfig.IsEIP158(block.Number()), dbstate)
+	return storageRangeAt(dbstate, contractAddress, keyStart, maxResult)
 }
 
-func storageRangeAt(st state.Trie, start []byte, maxResult int) (StorageRangeResult, error) {
-	it := trie.NewIterator(st.NodeIterator(start))
+func storageRangeAt(dbstate *state.DbState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+	account, err := dbstate.ReadAccountData(contractAddress)
+	if err != nil {
+		return StorageRangeResult{}, fmt.Errorf("error reading account %x: %v", contractAddress, err)
+	}
+	if account == nil {
+		return StorageRangeResult{}, fmt.Errorf("account %x doesn't exist", contractAddress)
+	}
 	result := StorageRangeResult{Storage: storageMap{}}
-	for i := 0; i < maxResult && it.Next(); i++ {
-		_, content, _, err := rlp.Split(it.Value)
-		if err != nil {
-			return StorageRangeResult{}, err
+	resultCount := 0
+	dbstate.ForEachStorage(contractAddress, start, func(key, seckey, value common.Hash) bool {
+		if resultCount < maxResult {
+			result.Storage[seckey] = storageEntry{Key: &key, Value: value}
+		} else {
+			result.NextKey = &seckey
 		}
-		e := storageEntry{Value: common.BytesToHash(content)}
-		if preimage := st.GetKey(it.Key); preimage != nil {
-			preimage := common.BytesToHash(preimage)
-			e.Key = &preimage
-		}
-		result.Storage[common.BytesToHash(it.Key)] = e
-	}
-	// Add the 'next key' so clients can continue downloading.
-	if it.Next() {
-		next := common.BytesToHash(it.Key)
-		result.NextKey = &next
-	}
+		resultCount++
+		return resultCount <= maxResult
+	}, maxResult+1)
 	return result, nil
 }
 
@@ -510,29 +497,12 @@ func (api *PrivateDebugAPI) GetModifiedAccountsByHash(startHash common.Hash, end
 }
 
 func (api *PrivateDebugAPI) getModifiedAccounts(startBlock, endBlock *types.Block) ([]common.Address, error) {
-	if startBlock.Number().Uint64() >= endBlock.Number().Uint64() {
-		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startBlock.Number().Uint64(), endBlock.Number().Uint64())
+	startNum := startBlock.NumberU64()
+	endNum := endBlock.NumberU64()
+	if startNum >= endNum {
+		return nil, fmt.Errorf("start block height (%d) must be less than end block height (%d)", startNum, endNum)
 	}
-	triedb := api.eth.BlockChain().StateCache().TrieDB()
 
-	oldTrie, err := trie.NewSecure(startBlock.Root(), triedb)
-	if err != nil {
-		return nil, err
-	}
-	newTrie, err := trie.NewSecure(endBlock.Root(), triedb)
-	if err != nil {
-		return nil, err
-	}
-	diff, _ := trie.NewDifferenceIterator(oldTrie.NodeIterator([]byte{}), newTrie.NodeIterator([]byte{}))
-	iter := trie.NewIterator(diff)
-
-	var dirty []common.Address
-	for iter.Next() {
-		key := newTrie.GetKey(iter.Key)
-		if key == nil {
-			return nil, fmt.Errorf("no preimage found for hash %x", iter.Key)
-		}
-		dirty = append(dirty, common.BytesToAddress(key))
-	}
-	return dirty, nil
+	dirty, err := ethdb.GetModifiedAccounts(api.eth.blockchain.ChainDb(), startNum, endNum)
+	return dirty, err
 }

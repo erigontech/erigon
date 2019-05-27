@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -26,17 +27,17 @@ import (
 	"runtime/pprof"
 	"time"
 
-	"github.com/ethereum/go-ethereum/cmd/evm/internal/compiler"
-	"github.com/ethereum/go-ethereum/cmd/utils"
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/core/vm/runtime"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/params"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/cmd/evm/internal/compiler"
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm/runtime"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
+	cli "github.com/urfave/cli"
 )
 
 var runCommand = cli.Command{
@@ -81,7 +82,8 @@ func runCmd(ctx *cli.Context) error {
 	var (
 		tracer        vm.Tracer
 		debugLogger   *vm.StructLogger
-		statedb       *state.StateDB
+		statedb       *state.IntraBlockState
+		tds           *state.TrieDbState
 		chainConfig   *params.ChainConfig
 		sender        = common.BytesToAddress([]byte("sender"))
 		receiver      = common.BytesToAddress([]byte("receiver"))
@@ -98,18 +100,21 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.GlobalString(GenesisFlag.Name) != "" {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
-		db := rawdb.NewMemoryDatabase()
-		genesis := gen.ToBlock(db)
-		statedb, _ = state.New(genesis.Root(), state.NewDatabase(db))
+		db := ethdb.NewMemDatabase()
+		genesis, _, tds, _ := gen.ToBlock(db)
+		tds, _ = state.NewTrieDbState(genesis.Root(), db, 0)
+		statedb = state.New(tds)
 		chainConfig = gen.Config
 	} else {
-		statedb, _ = state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()))
+		db := ethdb.NewMemDatabase()
+		tds, _ = state.NewTrieDbState(common.Hash{}, db, 0)
+		statedb = state.New(tds)
 		genesisConfig = new(core.Genesis)
 	}
 	if ctx.GlobalString(SenderFlag.Name) != "" {
 		sender = common.HexToAddress(ctx.GlobalString(SenderFlag.Name))
 	}
-	statedb.CreateAccount(sender)
+	statedb.CreateAccount(sender, true)
 
 	if ctx.GlobalString(ReceiverFlag.Name) != "" {
 		receiver = common.HexToAddress(ctx.GlobalString(ReceiverFlag.Name))
@@ -205,7 +210,7 @@ func runCmd(ctx *cli.Context) error {
 	var leftOverGas uint64
 	if ctx.GlobalBool(CreateFlag.Name) {
 		input := append(code, common.Hex2Bytes(ctx.GlobalString(InputFlag.Name))...)
-		ret, _, leftOverGas, err = runtime.Create(input, &runtimeConfig)
+		ret, _, leftOverGas, err = runtime.Create(input, &runtimeConfig, 0)
 	} else {
 		if len(code) > 0 {
 			statedb.SetCode(receiver, code)
@@ -215,9 +220,15 @@ func runCmd(ctx *cli.Context) error {
 	execTime := time.Since(tstart)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		statedb.Commit(true)
-		statedb.IntermediateRoot(true)
-		fmt.Println(string(statedb.Dump(false, false, true)))
+		ctx := context.Background()
+		if chainConfig != nil {
+			ctx = chainConfig.WithEIPsFlags(context.Background(), runtimeConfig.BlockNumber)
+		}
+		if err = statedb.CommitBlock(ctx, state.NewNoopWriter()); err != nil {
+			fmt.Println("Could not commit state: ", err)
+			os.Exit(1)
+		}
+		fmt.Println(string(tds.DefaultDump()))
 	}
 
 	if memProfilePath := ctx.GlobalString(MemProfileFlag.Name); memProfilePath != "" {

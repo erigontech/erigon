@@ -18,10 +18,11 @@ package types
 
 import (
 	"fmt"
+	"hash"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"golang.org/x/crypto/sha3"
 )
 
 type bytesBacked interface {
@@ -59,7 +60,7 @@ func (b *Bloom) SetBytes(d []byte) {
 // Add adds d to the filter. Future calls of Test(d) will return true.
 func (b *Bloom) Add(d *big.Int) {
 	bin := new(big.Int).SetBytes(b[:])
-	bin.Or(bin, bloom9(d.Bytes()))
+	bin.Or(bin, Bloom9(d.Bytes()))
 	b.SetBytes(bin.Bytes())
 }
 
@@ -91,46 +92,67 @@ func (b *Bloom) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("Bloom", input, b[:])
 }
 
+// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
+// Read to get a variable amount of data from the hash state. Read is faster than Sum
+// because it doesn't copy the internal state, but also modifies the internal state.
+type keccakState interface {
+	hash.Hash
+	Read([]byte) (int, error)
+}
+
 func CreateBloom(receipts Receipts) Bloom {
+	var buf [6]byte
+	sha3 := sha3.NewLegacyKeccak256().(keccakState)
 	bin := new(big.Int)
 	for _, receipt := range receipts {
-		bin.Or(bin, LogsBloom(receipt.Logs))
+		bin.Or(bin, logsBloom(receipt.Logs, buf, sha3))
 	}
 
 	return BytesToBloom(bin.Bytes())
 }
 
 func LogsBloom(logs []*Log) *big.Int {
+	var buf [6]byte
+	h := sha3.NewLegacyKeccak256().(keccakState)
+	return logsBloom(logs, buf, h)
+}
+
+func logsBloom(logs []*Log, buf [6]byte, h keccakState) *big.Int {
 	bin := new(big.Int)
 	for _, log := range logs {
-		bin.Or(bin, bloom9(log.Address.Bytes()))
+		bin.Or(bin, bloom9(log.Address.Bytes(), buf, h))
 		for _, b := range log.Topics {
-			bin.Or(bin, bloom9(b[:]))
+			bin.Or(bin, bloom9(b[:], buf, h))
 		}
 	}
 
 	return bin
 }
 
-func bloom9(b []byte) *big.Int {
-	b = crypto.Keccak256(b)
+func bloom9(b []byte, buf [6]byte, h keccakState) *big.Int {
+	h.Reset()
+	h.Write(b[:])
+	h.Read(buf[:]) // It only uses 6 bytes
 
 	r := new(big.Int)
 
 	for i := 0; i < 6; i += 2 {
 		t := big.NewInt(1)
-		b := (uint(b[i+1]) + (uint(b[i]) << 8)) & 2047
-		r.Or(r, t.Lsh(t, b))
+		bt := (uint(buf[i+1]) + (uint(buf[i]) << 8)) & 2047
+		r.Or(r, t.Lsh(t, bt))
 	}
 
 	return r
 }
 
-var Bloom9 = bloom9
+func Bloom9(b []byte) *big.Int {
+	var buf [6]byte
+	h := sha3.NewLegacyKeccak256().(keccakState)
+	return bloom9(b, buf, h)
+}
 
 func BloomLookup(bin Bloom, topic bytesBacked) bool {
 	bloom := bin.Big()
-	cmp := bloom9(topic.Bytes())
-
+	cmp := Bloom9(topic.Bytes())
 	return bloom.And(bloom, cmp).Cmp(cmp) == 0
 }

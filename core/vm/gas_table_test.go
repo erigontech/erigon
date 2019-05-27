@@ -17,15 +17,16 @@
 package vm
 
 import (
+	"context"
 	"math"
 	"math/big"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/core/rawdb"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -81,17 +82,23 @@ func TestEIP2200(t *testing.T) {
 	for i, tt := range eip2200Tests {
 		address := common.BytesToAddress([]byte("contract"))
 
-		statedb, _ := state.New(common.Hash{}, state.NewDatabase(rawdb.NewMemoryDatabase()))
-		statedb.CreateAccount(address)
-		statedb.SetCode(address, hexutil.MustDecode(tt.input))
-		statedb.SetState(address, common.Hash{}, common.BytesToHash([]byte{tt.original}))
-		statedb.Finalise(true) // Push the state into the "original" slot
+		db := ethdb.NewMemDatabase()
+		tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+		s := state.New(tds)
+		s.CreateAccount(address, true)
+		s.SetCode(address, hexutil.MustDecode(tt.input))
+		s.SetState(address, common.Hash{}, common.BytesToHash([]byte{tt.original}))
+
+		s.CommitBlock(context.Background(), tds.DbStateWriter())
+
+		// re-initialize the state
+		state := state.New(state.NewDbState(db, 0))
 
 		vmctx := Context{
-			CanTransfer: func(StateDB, common.Address, *big.Int) bool { return true },
-			Transfer:    func(StateDB, common.Address, common.Address, *big.Int) {},
+			CanTransfer: func(IntraBlockState, common.Address, *big.Int) bool { return true },
+			Transfer:    func(IntraBlockState, common.Address, common.Address, *big.Int) {},
 		}
-		vmenv := NewEVM(vmctx, statedb, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
+		vmenv := NewEVM(vmctx, state, params.AllEthashProtocolChanges, Config{ExtraEips: []int{2200}})
 
 		_, gas, err := vmenv.Call(AccountRef(common.Address{}), address, nil, tt.gaspool, new(big.Int))
 		if err != tt.failure {
@@ -100,7 +107,7 @@ func TestEIP2200(t *testing.T) {
 		if used := tt.gaspool - gas; used != tt.used {
 			t.Errorf("test %d: gas used mismatch: have %v, want %v", i, used, tt.used)
 		}
-		if refund := vmenv.StateDB.GetRefund(); refund != tt.refund {
+		if refund := vmenv.IntraBlockState.GetRefund(); refund != tt.refund {
 			t.Errorf("test %d: gas refund mismatch: have %v, want %v", i, refund, tt.refund)
 		}
 	}

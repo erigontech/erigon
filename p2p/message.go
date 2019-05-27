@@ -22,12 +22,13 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"sync/atomic"
 	"time"
 
-	"github.com/ethereum/go-ethereum/event"
-	"github.com/ethereum/go-ethereum/p2p/enode"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Msg defines the structure of a p2p message.
@@ -65,9 +66,11 @@ func (msg Msg) String() string {
 }
 
 // Discard reads any remaining payload data into a black hole.
-func (msg Msg) Discard() error {
+func (msg Msg) Discard() {
 	_, err := io.Copy(ioutil.Discard, msg.Payload)
-	return err
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 type MsgReader interface {
@@ -232,7 +235,8 @@ func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
 		return fmt.Errorf("message code mismatch: got %d, expected %d", msg.Code, code)
 	}
 	if content == nil {
-		return msg.Discard()
+		msg.Discard()
+		return nil
 	}
 	contentEnc, err := rlp.EncodeToBytes(content)
 	if err != nil {

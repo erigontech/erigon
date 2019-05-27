@@ -17,18 +17,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
 
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/vm"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/tests"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/tests"
 
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var stateTestCommand = cli.Command{
@@ -44,7 +45,7 @@ type StatetestResult struct {
 	Name  string      `json:"name"`
 	Pass  bool        `json:"pass"`
 	Fork  string      `json:"fork"`
-	Error string      `json:"error,omitempty"`
+	Error *string     `json:"error,omitempty"`
 	State *state.Dump `json:"state,omitempty"`
 }
 
@@ -95,17 +96,17 @@ func stateTestCmd(ctx *cli.Context) error {
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
-			state, err := test.Run(st, cfg)
+			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
+			statedb, tds, root, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
-			if ctx.GlobalBool(MachineFlag.Name) && state != nil {
-				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", state.IntermediateRoot(false))
+			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
+				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root)
 			}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, result.Error = false, err.Error()
-				if ctx.GlobalBool(DumpFlag.Name) && state != nil {
-					dump := state.RawDump(false, false, true)
+				result.Pass, *result.Error = false, err.Error()
+				if ctx.GlobalBool(DumpFlag.Name) && tds != nil {
+					dump := tds.DefaultRawDump()
 					result.State = &dump
 				}
 			}

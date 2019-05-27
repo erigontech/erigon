@@ -98,6 +98,8 @@ Depending on whether we approve or deny the request, the original NetCat process
 or
 
 {"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"Request denied"}}
+
+#cp $GOPATH/src/github.com/ledgerwatch/turbo-geth/cmd/clef/4byte.json $PWD
 ```
 
 Apart from listing accounts, you can also *request* creating a new account; signing transactions and data; and recovering signatures. You can find the available methods in the Clef [External API Spec](https://github.com/ethereum/go-ethereum/tree/master/cmd/clef#external-api-1) and the [External API Changelog](https://github.com/ethereum/go-ethereum/blob/master/cmd/clef/extapi_changelog.md).

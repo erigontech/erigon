@@ -19,6 +19,10 @@ package trie
 import (
 	"bytes"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func TestHexCompact(t *testing.T) {
@@ -73,6 +77,42 @@ func TestHexKeybytes(t *testing.T) {
 			t.Errorf("hexToKeybytes(%x) -> %x, want %x", test.hexIn, k, test.key)
 		}
 	}
+}
+
+func TestKeybytesToCompact(t *testing.T) {
+	keybytes := Keybytes{common.FromHex("5a70"), true, true}
+	compact := keybytes.ToCompact()
+	assert.Equal(t, common.FromHex("35a7"), compact)
+
+	keybytes = Keybytes{common.FromHex("5a70"), true, false}
+	compact = keybytes.ToCompact()
+	assert.Equal(t, common.FromHex("15a7"), compact)
+
+	keybytes = Keybytes{common.FromHex("5a7c"), false, true}
+	compact = keybytes.ToCompact()
+	assert.Equal(t, common.FromHex("205a7c"), compact)
+
+	keybytes = Keybytes{common.FromHex("5a7c"), false, false}
+	compact = keybytes.ToCompact()
+	assert.Equal(t, common.FromHex("005a7c"), compact)
+}
+
+func TestCompactToKeybytes(t *testing.T) {
+	compact := common.FromHex("35a7")
+	keybytes := CompactToKeybytes(compact)
+	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, true}, keybytes)
+
+	compact = common.FromHex("15a7")
+	keybytes = CompactToKeybytes(compact)
+	assert.Equal(t, Keybytes{common.FromHex("5a70"), true, false}, keybytes)
+
+	compact = common.FromHex("205a7c")
+	keybytes = CompactToKeybytes(compact)
+	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, true}, keybytes)
+
+	compact = common.FromHex("005a7c")
+	keybytes = CompactToKeybytes(compact)
+	assert.Equal(t, Keybytes{common.FromHex("5a7c"), false, false}, keybytes)
 }
 
 func BenchmarkHexToCompact(b *testing.B) {

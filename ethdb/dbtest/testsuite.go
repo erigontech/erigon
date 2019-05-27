@@ -22,12 +22,16 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
+
+type dataStore interface {
+	ethdb.Database
+}
 
 // TestDatabaseSuite runs a suite of tests against a KeyValueStore database
 // implementation.
-func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
+func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 	t.Run("Iterator", func(t *testing.T) {
 		tests := []struct {
 			content map[string]string
@@ -81,103 +85,77 @@ func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
 			// Create the key-value data store
 			db := New()
 			for key, val := range tt.content {
-				if err := db.Put([]byte(key), []byte(val)); err != nil {
+				if err := db.Put(nil, []byte(key), []byte(val)); err != nil {
 					t.Fatalf("test %d: failed to insert item %s:%s into database: %v", i, key, val, err)
 				}
 			}
 			// Iterate over the database with the given configs and verify the results
-			it, idx := db.NewIteratorWithPrefix([]byte(tt.prefix)), 0
-			for it.Next() {
+			idx := 0
+			err := db.Walk(nil, []byte(tt.prefix), 0, func(key, val []byte) (bool, error) {
 				if len(tt.order) <= idx {
-					t.Errorf("test %d: prefix=%q more items than expected: checking idx=%d (key %q), expecting len=%d", i, tt.prefix, idx, it.Key(), len(tt.order))
-					break
+					t.Errorf("test %d: prefix=%q more items than expected: checking idx=%d (key %q), expecting len=%d", i, tt.prefix, idx, key, len(tt.order))
+					return false, nil
 				}
-				if !bytes.Equal(it.Key(), []byte(tt.order[idx])) {
-					t.Errorf("test %d: item %d: key mismatch: have %s, want %s", i, idx, string(it.Key()), tt.order[idx])
+				if !bytes.Equal(key, []byte(tt.order[idx])) {
+					t.Errorf("test %d: item %d: key mismatch: have %s, want %s", i, idx, string(key), tt.order[idx])
 				}
-				if !bytes.Equal(it.Value(), []byte(tt.content[tt.order[idx]])) {
-					t.Errorf("test %d: item %d: value mismatch: have %s, want %s", i, idx, string(it.Value()), tt.content[tt.order[idx]])
+				if !bytes.Equal(val, []byte(tt.content[tt.order[idx]])) {
+					t.Errorf("test %d: item %d: value mismatch: have %s, want %s", i, idx, string(val), tt.content[tt.order[idx]])
 				}
 				idx++
-			}
-			if err := it.Error(); err != nil {
+				return true, nil
+			})
+			if err != nil {
 				t.Errorf("test %d: iteration failed: %v", i, err)
 			}
 			if idx != len(tt.order) {
 				t.Errorf("test %d: iteration terminated prematurely: have %d, want %d", i, idx, len(tt.order))
 			}
-			db.Close()
 		}
 	})
 
 	t.Run("IteratorWith", func(t *testing.T) {
 		db := New()
-		defer db.Close()
 
 		keys := []string{"1", "2", "3", "4", "6", "10", "11", "12", "20", "21", "22"}
 		sort.Strings(keys) // 1, 10, 11, etc
 
 		for _, k := range keys {
-			if err := db.Put([]byte(k), nil); err != nil {
+			if err := db.Put(nil, []byte(k), nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 
 		{
-			it := db.NewIterator()
-			got, want := iterateKeys(it), keys
-			if err := it.Error(); err != nil {
-				t.Fatal(err)
-			}
-			it.Release()
+			got, want := iterateKeys(db), keys
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("Iterator: got: %s; want: %s", got, want)
 			}
 		}
 
 		{
-			it := db.NewIteratorWithPrefix([]byte("1"))
-			got, want := iterateKeys(it), []string{"1", "10", "11", "12"}
-			if err := it.Error(); err != nil {
-				t.Fatal(err)
-			}
-			it.Release()
+			got, want := iterateKeysFromKey(db, []byte("1")), []string{"1", "10", "11", "12"}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("IteratorWithPrefix(1): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
-			it := db.NewIteratorWithPrefix([]byte("5"))
-			got, want := iterateKeys(it), []string{}
-			if err := it.Error(); err != nil {
-				t.Fatal(err)
-			}
-			it.Release()
+			got, want := iterateKeysFromKey(db, []byte("5")), []string{}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("IteratorWithPrefix(1): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
-			it := db.NewIteratorWithStart([]byte("2"))
-			got, want := iterateKeys(it), []string{"2", "20", "21", "22", "3", "4", "6"}
-			if err := it.Error(); err != nil {
-				t.Fatal(err)
-			}
-			it.Release()
+			got, want := iterateKeysFromKey(db, []byte("2")), []string{"2", "20", "21", "22", "3", "4", "6"}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("IteratorWithStart(2): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
-			it := db.NewIteratorWithStart([]byte("5"))
-			got, want := iterateKeys(it), []string{"6"}
-			if err := it.Error(); err != nil {
-				t.Fatal(err)
-			}
-			it.Release()
+			got, want := iterateKeysFromKey(db, []byte("5")), []string{"6"}
 			if !reflect.DeepEqual(got, want) {
 				t.Errorf("IteratorWithStart(2): got: %s; want: %s", got, want)
 			}
@@ -186,38 +164,37 @@ func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
 
 	t.Run("KeyValueOperations", func(t *testing.T) {
 		db := New()
-		defer db.Close()
 
 		key := []byte("foo")
 
-		if got, err := db.Has(key); err != nil {
+		if got, err := db.Has(nil, key); err != nil {
 			t.Error(err)
 		} else if got {
 			t.Errorf("wrong value: %t", got)
 		}
 
 		value := []byte("hello world")
-		if err := db.Put(key, value); err != nil {
+		if err := db.Put(nil, key, value); err != nil {
 			t.Error(err)
 		}
 
-		if got, err := db.Has(key); err != nil {
+		if got, err := db.Has(nil, key); err != nil {
 			t.Error(err)
 		} else if !got {
 			t.Errorf("wrong value: %t", got)
 		}
 
-		if got, err := db.Get(key); err != nil {
+		if got, err := db.Get(nil, key); err != nil {
 			t.Error(err)
 		} else if !bytes.Equal(got, value) {
 			t.Errorf("wrong value: %q", got)
 		}
 
-		if err := db.Delete(key); err != nil {
+		if err := db.Delete(nil, key); err != nil {
 			t.Error(err)
 		}
 
-		if got, err := db.Has(key); err != nil {
+		if got, err := db.Has(nil, key); err != nil {
 			t.Error(err)
 		} else if got {
 			t.Errorf("wrong value: %t", got)
@@ -230,86 +207,58 @@ func TestDatabaseSuite(t *testing.T, New func() ethdb.KeyValueStore) {
 
 		b := db.NewBatch()
 		for _, k := range []string{"1", "2", "3", "4"} {
-			if err := b.Put([]byte(k), nil); err != nil {
+			if err := b.Put(nil, []byte(k), nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 
-		if has, err := db.Has([]byte("1")); err != nil {
+		if has, err := db.Has(nil, []byte("1")); err != nil {
 			t.Fatal(err)
 		} else if has {
 			t.Error("db contains element before batch write")
 		}
 
-		if err := b.Write(); err != nil {
+		if _, err := b.Commit(); err != nil {
 			t.Fatal(err)
 		}
 
 		{
-			it := db.NewIterator()
-			if got, want := iterateKeys(it), []string{"1", "2", "3", "4"}; !reflect.DeepEqual(got, want) {
+			if got, want := iterateKeys(db), []string{"1", "2", "3", "4"}; !reflect.DeepEqual(got, want) {
 				t.Errorf("got: %s; want: %s", got, want)
 			}
-			it.Release()
 		}
 
-		b.Reset()
+		b = db.NewBatch()
 
 		// Mix writes and deletes in batch
-		b.Put([]byte("5"), nil)
-		b.Delete([]byte("1"))
-		b.Put([]byte("6"), nil)
-		b.Delete([]byte("3"))
-		b.Put([]byte("3"), nil)
+		b.Put(nil, []byte("5"), nil)
+		b.Delete(nil, []byte("1"))
+		b.Put(nil, []byte("6"), nil)
+		b.Delete(nil, []byte("3"))
+		b.Put(nil, []byte("3"), nil)
 
-		if err := b.Write(); err != nil {
+		if _, err := b.Commit(); err != nil {
 			t.Fatal(err)
 		}
 
 		{
-			it := db.NewIterator()
-			if got, want := iterateKeys(it), []string{"2", "3", "4", "5", "6"}; !reflect.DeepEqual(got, want) {
+			if got, want := iterateKeys(db), []string{"2", "3", "4", "5", "6"}; !reflect.DeepEqual(got, want) {
 				t.Errorf("got: %s; want: %s", got, want)
 			}
-			it.Release()
 		}
 	})
-
-	t.Run("BatchReplay", func(t *testing.T) {
-		db := New()
-		defer db.Close()
-
-		want := []string{"1", "2", "3", "4"}
-		b := db.NewBatch()
-		for _, k := range want {
-			if err := b.Put([]byte(k), nil); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		b2 := db.NewBatch()
-		if err := b.Replay(b2); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := b2.Replay(db); err != nil {
-			t.Fatal(err)
-		}
-
-		it := db.NewIterator()
-		if got := iterateKeys(it); !reflect.DeepEqual(got, want) {
-			t.Errorf("got: %s; want: %s", got, want)
-		}
-		it.Release()
-	})
-
 }
 
-func iterateKeys(it ethdb.Iterator) []string {
+func iterateKeys(db ethdb.Database) []string {
+	return iterateKeysFromKey(db, []byte{})
+}
+
+func iterateKeysFromKey(db ethdb.Database, fromKey []byte) []string {
 	keys := []string{}
-	for it.Next() {
-		keys = append(keys, string(it.Key()))
-	}
+	db.Walk(nil, fromKey, 0, func(key, value []byte) (bool, error) {
+		keys = append(keys, string(key))
+		return true, nil
+	})
 	sort.Strings(keys)
 	return keys
 }

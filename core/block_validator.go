@@ -17,12 +17,19 @@
 package core
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io/ioutil"
+	"os"
+	"strconv"
+	"strings"
 
-	"github.com/ethereum/go-ethereum/consensus"
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/consensus"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // BlockValidator is responsible for validating block headers, uncles and
@@ -33,6 +40,7 @@ type BlockValidator struct {
 	config *params.ChainConfig // Chain configuration options
 	bc     *BlockChain         // Canonical block chain
 	engine consensus.Engine    // Consensus engine used for validating
+	dblks  map[uint64]bool     // Block numbers to run diagnostics on
 }
 
 // NewBlockValidator returns a new block validator which is safe for re-use
@@ -41,6 +49,34 @@ func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain, engin
 		config: config,
 		engine: engine,
 		bc:     blockchain,
+		dblks:  make(map[uint64]bool),
+	}
+	files, err := ioutil.ReadDir("./")
+	if err != nil {
+		panic(err)
+	}
+	for _, f := range files {
+		if !f.IsDir() && strings.HasPrefix(f.Name(), "root_") && strings.HasSuffix(f.Name(), ".txt") {
+			blockNumber, err := strconv.ParseUint(f.Name()[len("root_"):len(f.Name())-len(".txt")], 10, 64)
+			if err != nil {
+				panic(err)
+			}
+			if _, ok := validator.dblks[blockNumber]; !ok {
+				validator.dblks[blockNumber] = true
+			}
+		}
+		if !f.IsDir() && strings.HasPrefix(f.Name(), "right_") && strings.HasSuffix(f.Name(), ".txt") {
+			blockNumber, err := strconv.ParseUint(f.Name()[len("right_"):len(f.Name())-len(".txt")], 10, 64)
+			if err != nil {
+				panic(err)
+			}
+			validator.dblks[blockNumber] = false
+		}
+	}
+	for blockNumber, ok := range validator.dblks {
+		if ok {
+			log.Info("Block validator will watch", "block", blockNumber)
+		}
 	}
 	return validator
 }
@@ -48,10 +84,15 @@ func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain, engin
 // ValidateBody validates the given block's uncles and verifies the block
 // header's transaction and uncle roots. The headers are assumed to be already
 // validated at this point.
-func (v *BlockValidator) ValidateBody(block *types.Block) error {
+func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) error {
 	// Check whether the block's known, and if not, that it's linkable
-	if v.bc.HasBlockAndState(block.Hash(), block.NumberU64()) {
-		return ErrKnownBlock
+	//if v.bc.HasBlockAndState(block.Hash(), block.NumberU64()) {
+	//	return ErrKnownBlock
+	//}
+	// Check whether the block is linkable
+	_, noHistory := params.GetNoHistoryByBlock(ctx, block.Number())
+	if !noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
+		return consensus.ErrUnknownAncestor
 	}
 	// Header validity is known at this point, check the uncles and transactions
 	header := block.Header()
@@ -63,6 +104,9 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	}
 	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
 		return fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
+	}
+	if noHistory {
+		return nil
 	}
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
@@ -77,26 +121,54 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 // transition, such as amount of used gas, the receipt roots and the state root
 // itself. ValidateState returns a database batch if the validation was a success
 // otherwise nil and an error is returned.
-func (v *BlockValidator) ValidateState(block *types.Block, statedb *state.StateDB, receipts types.Receipts, usedGas uint64) error {
+func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, receipts types.Receipts, usedGas uint64) error {
 	header := block.Header()
+	var errorBuf strings.Builder
 	if block.GasUsed() != usedGas {
-		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
+		fmt.Fprintf(&errorBuf, "invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
 	}
 	// Validate the received block's bloom with the one derived from the generated receipts.
 	// For valid blocks this should always validate to true.
 	rbloom := types.CreateBloom(receipts)
 	if rbloom != header.Bloom {
-		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
 	}
 	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, R1]]))
 	receiptSha := types.DeriveSha(receipts)
 	if receiptSha != header.ReceiptHash {
-		return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 	}
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
-	if root := statedb.IntermediateRoot(v.config.IsEIP158(header.Number)); header.Root != root {
-		return fmt.Errorf("invalid merkle root (remote: %x local: %x)", header.Root, root)
+	if root := tds.LastRoot(); header.Root != root {
+		filename := fmt.Sprintf("root_%d.txt", block.NumberU64())
+		log.Warn("Generating deep snapshot of the wront tries...", "file", filename)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			tds.PrintTrie(f)
+		}
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid merkle root (remote: %x local: %x)", header.Root, root)
+	} else if has, ok := v.dblks[block.NumberU64()]; ok && has {
+		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
+		log.Warn("Generating deep snapshot of right tries...", "file", filename)
+		f, err := os.Create(filename)
+		if err == nil {
+			defer f.Close()
+			tds.PrintTrie(f)
+		}
+	}
+	if errorBuf.Len() > 0 {
+		return errors.New(errorBuf.String())
 	}
 	return nil
 }

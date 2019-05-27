@@ -17,33 +17,49 @@
 package trie
 
 import (
-	"fmt"
 	"io"
-	"strings"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "[17]"}
 
 type node interface {
+	print(io.Writer)
 	fstring(string) string
-	cache() (hashNode, bool)
+	dirty() bool
+	hash() []byte
 }
 
 type (
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	fullNode struct {
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
 		flags    nodeFlag
 	}
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
+	duoNode struct {
+		mask   uint32 // Bitmask. The set bits indicate the child is not nil
+		child1 node
+		child2 node
+		flags  nodeFlag
+	}
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		Key   []byte
-		Val   node
-		flags nodeFlag
+		Key []byte
+		Val node
 	}
 	hashNode  []byte
 	valueNode []byte
+
+	accountNode struct {
+		accounts.Account
+		storage     node
+		hashCorrect bool
+	}
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
@@ -64,162 +80,206 @@ func (n *fullNode) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, nodes)
 }
 
-func (n *fullNode) copy() *fullNode   { copy := *n; return &copy }
-func (n *shortNode) copy() *shortNode { copy := *n; return &copy }
+func (n *duoNode) EncodeRLP(w io.Writer) error {
+	var children [17]node
+	i1, i2 := n.childrenIdx()
+	children[i1] = n.child1
+	children[i2] = n.child2
+	for i := 0; i < 17; i++ {
+		if i != int(i1) && i != int(i2) {
+			children[i] = valueNode(nil)
+		}
+	}
+	return rlp.Encode(w, children)
+}
+
+func (n *duoNode) childrenIdx() (i1 byte, i2 byte) {
+	child := 1
+	var m uint32 = 1
+	for i := 0; i < 17; i++ {
+		if (n.mask & m) > 0 {
+			if child == 1 {
+				i1 = byte(i)
+				child = 2
+			} else if child == 2 {
+				i2 = byte(i)
+				break
+			}
+		}
+		m <<= 1
+	}
+	return i1, i2
+}
+
+func (n *fullNode) copy() *fullNode {
+	c := *n
+	return &c
+}
+
+func (n *fullNode) mask() uint32 {
+	var m uint32
+	for i, child := range n.Children {
+		if child != nil {
+			m |= (uint32(1) << uint(i))
+		}
+	}
+	return m
+}
+
+func (n *fullNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
+	hashes := []common.Hash{}
+	var mask uint32
+	var m map[byte]*shortNode
+	for i, child := range n.Children {
+		if child != nil && i != int(idx) {
+			short := false
+			if s, ok := child.(*shortNode); ok {
+				if m == nil {
+					m = make(map[byte]*shortNode)
+				}
+				m[byte(i)] = s
+				short = true
+			}
+			if !short {
+				mask |= (uint32(1) << uint(i))
+				hashes = append(hashes, common.BytesToHash(child.hash()))
+			}
+		}
+	}
+	return mask, hashes, m
+}
+
+func (n *fullNode) duoCopy() *duoNode {
+	c := duoNode{}
+	first := true
+	for i, child := range n.Children {
+		if child == nil {
+			continue
+		}
+		if first {
+			first = false
+			c.mask |= (uint32(1) << uint(i))
+			c.child1 = child
+		} else {
+			c.mask |= (uint32(1) << uint(i))
+			c.child2 = child
+			break
+		}
+	}
+	if !n.flags.dirty {
+		copy(c.flags.hash[:], n.flags.hash[:])
+	}
+	c.flags.dirty = n.flags.dirty
+	return &c
+}
+
+func (n *duoNode) fullCopy() *fullNode {
+	c := fullNode{}
+	i1, i2 := n.childrenIdx()
+	c.Children[i1] = n.child1
+	c.Children[i2] = n.child2
+	if !n.flags.dirty {
+		copy(c.flags.hash[:], n.flags.hash[:])
+	}
+	c.flags.dirty = n.flags.dirty
+	return &c
+}
+
+func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
+	i1, i2 := n.childrenIdx()
+	var hash1, hash2 common.Hash
+	var short1, short2 *shortNode
+	if n.child1 != nil {
+		if s, ok := n.child1.(*shortNode); ok {
+			short1 = s
+		}
+		if short1 == nil {
+			hash1 = common.BytesToHash(n.child1.hash())
+		}
+	}
+	if n.child2 != nil {
+		if s, ok := n.child2.(*shortNode); ok {
+			short2 = s
+		}
+		if short2 == nil {
+			hash2 = common.BytesToHash(n.child2.hash())
+		}
+	}
+	switch idx {
+	case i1:
+		if short2 == nil {
+			return uint32(1) << i2, []common.Hash{hash2}, nil
+		} else {
+			m := make(map[byte]*shortNode)
+			m[i2] = short2
+			return 0, []common.Hash{}, m
+		}
+	case i2:
+		if short1 == nil {
+			return uint32(1) << i1, []common.Hash{hash1}, nil
+		} else {
+			m := make(map[byte]*shortNode)
+			m[i1] = short1
+			return 0, []common.Hash{}, m
+		}
+	default:
+		if short1 == nil {
+			if short2 == nil {
+				return (uint32(1) << i1) | (uint32(1) << i2), []common.Hash{hash1, hash2}, nil
+			} else {
+				m := make(map[byte]*shortNode)
+				m[i2] = short2
+				return (uint32(1) << i1), []common.Hash{hash1}, m
+			}
+		} else {
+			if short2 == nil {
+				m := make(map[byte]*shortNode)
+				m[i1] = short1
+				return (uint32(1) << i2), []common.Hash{hash2}, m
+			} else {
+				m := make(map[byte]*shortNode)
+				m[i1] = short1
+				m[i2] = short2
+				return 0, []common.Hash{}, m
+			}
+		}
+	}
+}
+
+func (n *duoNode) copy() *duoNode {
+	c := *n
+	return &c
+}
+
+func (n *shortNode) copy() *shortNode {
+	c := *n
+	return &c
+}
 
 // nodeFlag contains caching-related metadata about a node.
 type nodeFlag struct {
-	hash  hashNode // cached hash of the node (may be nil)
-	dirty bool     // whether the node has changes that must be written to the database
+	hash  common.Hash // cached hash of the node
+	dirty bool        // whether the hash field represent the true hash
 }
 
-func (n *fullNode) cache() (hashNode, bool)  { return n.flags.hash, n.flags.dirty }
-func (n *shortNode) cache() (hashNode, bool) { return n.flags.hash, n.flags.dirty }
-func (n hashNode) cache() (hashNode, bool)   { return nil, true }
-func (n valueNode) cache() (hashNode, bool)  { return nil, true }
+func (n hashNode) dirty() bool      { return false }
+func (n valueNode) dirty() bool     { return true }
+func (n *fullNode) dirty() bool     { return n.flags.dirty }
+func (n *duoNode) dirty() bool      { return n.flags.dirty }
+func (n *shortNode) dirty() bool    { return true }
+func (an *accountNode) dirty() bool { return true }
+
+func (n hashNode) hash() []byte      { return n }
+func (n valueNode) hash() []byte     { return nil }
+func (n *fullNode) hash() []byte     { return n.flags.hash[:] }
+func (n *duoNode) hash() []byte      { return n.flags.hash[:] }
+func (n *shortNode) hash() []byte    { return nil }
+func (an *accountNode) hash() []byte { return nil }
 
 // Pretty printing.
-func (n *fullNode) String() string  { return n.fstring("") }
-func (n *shortNode) String() string { return n.fstring("") }
-func (n hashNode) String() string   { return n.fstring("") }
-func (n valueNode) String() string  { return n.fstring("") }
-
-func (n *fullNode) fstring(ind string) string {
-	resp := fmt.Sprintf("[\n%s  ", ind)
-	for i, node := range &n.Children {
-		if node == nil {
-			resp += fmt.Sprintf("%s: <nil> ", indices[i])
-		} else {
-			resp += fmt.Sprintf("%s: %v", indices[i], node.fstring(ind+"  "))
-		}
-	}
-	return resp + fmt.Sprintf("\n%s] ", ind)
-}
-func (n *shortNode) fstring(ind string) string {
-	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
-}
-func (n hashNode) fstring(ind string) string {
-	return fmt.Sprintf("<%x> ", []byte(n))
-}
-func (n valueNode) fstring(ind string) string {
-	return fmt.Sprintf("%x ", []byte(n))
-}
-
-func mustDecodeNode(hash, buf []byte) node {
-	n, err := decodeNode(hash, buf)
-	if err != nil {
-		panic(fmt.Sprintf("node %x: %v", hash, err))
-	}
-	return n
-}
-
-// decodeNode parses the RLP encoding of a trie node.
-func decodeNode(hash, buf []byte) (node, error) {
-	if len(buf) == 0 {
-		return nil, io.ErrUnexpectedEOF
-	}
-	elems, _, err := rlp.SplitList(buf)
-	if err != nil {
-		return nil, fmt.Errorf("decode error: %v", err)
-	}
-	switch c, _ := rlp.CountValues(elems); c {
-	case 2:
-		n, err := decodeShort(hash, elems)
-		return n, wrapError(err, "short")
-	case 17:
-		n, err := decodeFull(hash, elems)
-		return n, wrapError(err, "full")
-	default:
-		return nil, fmt.Errorf("invalid number of list elements: %v", c)
-	}
-}
-
-func decodeShort(hash, elems []byte) (node, error) {
-	kbuf, rest, err := rlp.SplitString(elems)
-	if err != nil {
-		return nil, err
-	}
-	flag := nodeFlag{hash: hash}
-	key := compactToHex(kbuf)
-	if hasTerm(key) {
-		// value node
-		val, _, err := rlp.SplitString(rest)
-		if err != nil {
-			return nil, fmt.Errorf("invalid value node: %v", err)
-		}
-		return &shortNode{key, append(valueNode{}, val...), flag}, nil
-	}
-	r, _, err := decodeRef(rest)
-	if err != nil {
-		return nil, wrapError(err, "val")
-	}
-	return &shortNode{key, r, flag}, nil
-}
-
-func decodeFull(hash, elems []byte) (*fullNode, error) {
-	n := &fullNode{flags: nodeFlag{hash: hash}}
-	for i := 0; i < 16; i++ {
-		cld, rest, err := decodeRef(elems)
-		if err != nil {
-			return n, wrapError(err, fmt.Sprintf("[%d]", i))
-		}
-		n.Children[i], elems = cld, rest
-	}
-	val, _, err := rlp.SplitString(elems)
-	if err != nil {
-		return n, err
-	}
-	if len(val) > 0 {
-		n.Children[16] = append(valueNode{}, val...)
-	}
-	return n, nil
-}
-
-const hashLen = len(common.Hash{})
-
-func decodeRef(buf []byte) (node, []byte, error) {
-	kind, val, rest, err := rlp.Split(buf)
-	if err != nil {
-		return nil, buf, err
-	}
-	switch {
-	case kind == rlp.List:
-		// 'embedded' node reference. The encoding must be smaller
-		// than a hash in order to be valid.
-		if size := len(buf) - len(rest); size > hashLen {
-			err := fmt.Errorf("oversized embedded node (size is %d bytes, want size < %d)", size, hashLen)
-			return nil, buf, err
-		}
-		n, err := decodeNode(nil, buf)
-		return n, rest, err
-	case kind == rlp.String && len(val) == 0:
-		// empty node
-		return nil, rest, nil
-	case kind == rlp.String && len(val) == 32:
-		return append(hashNode{}, val...), rest, nil
-	default:
-		return nil, nil, fmt.Errorf("invalid RLP string size %d (want 0 or 32)", len(val))
-	}
-}
-
-// wraps a decoding error with information about the path to the
-// invalid child node (for debugging encoding issues).
-type decodeError struct {
-	what  error
-	stack []string
-}
-
-func wrapError(err error, ctx string) error {
-	if err == nil {
-		return nil
-	}
-	if decErr, ok := err.(*decodeError); ok {
-		decErr.stack = append(decErr.stack, ctx)
-		return decErr
-	}
-	return &decodeError{err, []string{ctx}}
-}
-
-func (err *decodeError) Error() string {
-	return fmt.Sprintf("%v (decode path: %s)", err.what, strings.Join(err.stack, "<-"))
-}
+func (n fullNode) String() string     { return n.fstring("") }
+func (n duoNode) String() string      { return n.fstring("") }
+func (n shortNode) String() string    { return n.fstring("") }
+func (n hashNode) String() string     { return n.fstring("") }
+func (n valueNode) String() string    { return n.fstring("") }
+func (an accountNode) String() string { return an.fstring("") }

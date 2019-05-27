@@ -19,13 +19,13 @@ package vm
 import (
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
-// StateDB is an EVM database for full state querying.
-type StateDB interface {
-	CreateAccount(common.Address)
+// IntraBlockState is an EVM database for full state querying.
+type IntraBlockState interface {
+	CreateAccount(common.Address, bool)
 
 	SubBalance(common.Address, *big.Int)
 	AddBalance(common.Address, *big.Int)
@@ -47,6 +47,8 @@ type StateDB interface {
 	GetState(common.Address, common.Hash) common.Hash
 	SetState(common.Address, common.Hash, common.Hash)
 
+	SetStorageSize(addr common.Address, currentLocation common.Hash, newLocation common.Hash, val *big.Int)
+
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool
 
@@ -62,8 +64,6 @@ type StateDB interface {
 
 	AddLog(*types.Log)
 	AddPreimage(common.Hash, []byte)
-
-	ForEachStorage(common.Address, func(common.Hash, common.Hash) bool) error
 }
 
 // CallContext provides a basic interface for the EVM calling conventions. The EVM

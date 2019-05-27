@@ -56,10 +56,11 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/ethereum/go-ethereum/internal/build"
-	"github.com/ethereum/go-ethereum/params"
+	"github.com/ledgerwatch/turbo-geth/internal/build"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 var (
@@ -80,6 +81,7 @@ var (
 		executablePath("rlpdump"),
 		executablePath("wnode"),
 		executablePath("clef"),
+		executablePath("hack"),
 	}
 
 	// A debian package is created for all executables listed here.
@@ -130,6 +132,9 @@ var (
 	debPackages = []debPackage{
 		debEthereum,
 	}
+
+	// Packages to be cross-compiled by the xgo command
+	allCrossCompiledArchiveFiles = allToolsArchiveFiles
 
 	// Distros for which packages are created.
 	// Note: vivid is unsupported because there is no golang-1.6 package for it.
@@ -189,11 +194,13 @@ func main() {
 
 func doInstall(cmdline []string) {
 	var (
-		arch = flag.String("arch", "", "Architecture to cross build for")
-		cc   = flag.String("cc", "", "C compiler to cross build with")
+		arch     = flag.String("arch", "", "Architecture to cross build for")
+		cc       = flag.String("cc", "", "C compiler to cross build with")
+		procsVal = flag.Int("procs", runtime.NumCPU(), "compile in number of threads")
 	)
 	flag.CommandLine.Parse(cmdline)
 	env := build.Env()
+	procs := *procsVal
 
 	// Check Go version. People regularly open issues about compilation
 	// failure with outdated Go. This should save them the trouble.
@@ -216,10 +223,39 @@ func doInstall(cmdline []string) {
 	}
 
 	if *arch == "" || *arch == runtime.GOARCH {
-		goinstall := goTool("install", buildFlags(env)...)
-		goinstall.Args = append(goinstall.Args, "-v")
-		goinstall.Args = append(goinstall.Args, packages...)
-		build.MustRun(goinstall)
+		packCh := make(chan string, 2*procs)
+		wg := sync.WaitGroup{}
+		wg.Add(procs)
+
+		for i := 0; i < procs; i++ {
+			go func() {
+				for pack := range packCh {
+					goinstall := goTool("install", buildFlags(env)...)
+					goinstall.Args = append(goinstall.Args, "-v")
+					goinstall.Args = append(goinstall.Args, pack)
+					build.MustRun(goinstall)
+				}
+				wg.Done()
+			}()
+		}
+
+		for _, pack := range packages {
+			dir := strings.TrimPrefix(pack, "github.com/ledgerwatch/turbo-geth/")
+			pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
+			if err != nil {
+				continue
+			}
+
+			for name := range pkgs {
+				if name == "main" {
+					packCh <- pack
+					break
+				}
+			}
+		}
+
+		close(packCh)
+		wg.Wait()
 		return
 	}
 	// If we are cross compiling to ARMv5 ARMv6 or ARMv7, clean any previous builds
@@ -777,7 +813,7 @@ func doAndroidArchive(cmdline []string) {
 	}
 	// Build the Android archive and Maven resources
 	build.MustRun(goTool("get", "golang.org/x/mobile/cmd/gomobile", "golang.org/x/mobile/cmd/gobind"))
-	build.MustRun(gomobileTool("bind", "-ldflags", "-s -w", "--target", "android", "--javapkg", "org.ethereum", "-v", "github.com/ethereum/go-ethereum/mobile"))
+	build.MustRun(gomobileTool("bind", "-ldflags", "-s -w", "--target", "android", "--javapkg", "org.ethereum", "-v", "github.com/ledgerwatch/turbo-geth/mobile"))
 
 	if *local {
 		// If we're building locally, copy bundle to build dir and skip Maven
@@ -898,7 +934,7 @@ func doXCodeFramework(cmdline []string) {
 	// Build the iOS XCode framework
 	build.MustRun(goTool("get", "golang.org/x/mobile/cmd/gomobile", "golang.org/x/mobile/cmd/gobind"))
 	build.MustRun(gomobileTool("init"))
-	bind := gomobileTool("bind", "-ldflags", "-s -w", "--target", "ios", "-v", "github.com/ethereum/go-ethereum/mobile")
+	bind := gomobileTool("bind", "-ldflags", "-s -w", "--target", "ios", "--tags", "ios", "-v", "github.com/ledgerwatch/turbo-geth/mobile")
 
 	if *local {
 		// If we're building locally, use the build folder and stop afterwards
