@@ -25,6 +25,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/bloombits"
+	"github.com/ethereum/go-ethereum/core/rawdb"
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -89,7 +90,7 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.StateDB, *types.Header, error) {
 	// Pending state is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
-		block, state := b.eth.miner.Pending()
+		block, state, _ := b.eth.miner.Pending()
 		return state, block.Header(), nil
 	}
 	// Otherwise resolve the block number and return its state
@@ -97,8 +98,9 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 	if header == nil || err != nil {
 		return nil, nil, err
 	}
-	stateDb, err := b.eth.BlockChain().StateAt(header.Root)
-	return stateDb, header, err
+	ds := state.NewDbState(b.eth.chainDb, uint64(blockNr))
+	stateDb := state.New(ds)
+	return stateDb, header, nil
 }
 
 func (b *EthAPIBackend) GetBlock(ctx context.Context, hash common.Hash) (*types.Block, error) {
@@ -106,11 +108,37 @@ func (b *EthAPIBackend) GetBlock(ctx context.Context, hash common.Hash) (*types.
 }
 
 func (b *EthAPIBackend) GetReceipts(ctx context.Context, hash common.Hash) (types.Receipts, error) {
-	return b.eth.blockchain.GetReceiptsByHash(hash), nil
+	if number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash); number != nil {
+		block := rawdb.ReadBlock(b.eth.chainDb, hash, *number)
+		dbstate := state.NewDbState(b.eth.chainDb, *number-1)
+		statedb := state.New(dbstate)
+		header := block.Header()
+		var receipts types.Receipts
+		var usedGas = new(uint64)
+		var gp = new(core.GasPool).AddGas(block.GasLimit())
+		vmConfig := vm.Config{}
+		for i, tx := range block.Transactions() {
+			statedb.Prepare(tx.Hash(), block.Hash(), i)
+			receipt, _, err := core.ApplyTransaction(b.eth.chainConfig, b.eth.blockchain, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+			if err != nil {
+				return nil, err
+			}
+			receipts = append(receipts, receipt)
+		}
+		return receipts, nil
+	}
+	return nil, nil
 }
 
 func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*types.Log, error) {
-	receipts := b.eth.blockchain.GetReceiptsByHash(hash)
+	number := rawdb.ReadHeaderNumber(b.eth.chainDb, hash)
+	if number == nil {
+		return nil, nil
+	}
+	receipts, err := b.GetReceipts(ctx, hash)
+	if err != nil {
+		return nil, err
+	}
 	if receipts == nil {
 		return nil, nil
 	}

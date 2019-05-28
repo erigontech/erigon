@@ -19,39 +19,30 @@
 package ethdb
 
 import (
+	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
-	"strconv"
-	"strings"
+	"os"
+	"path"
 	"sync"
-	"time"
 
+	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/metrics"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/errors"
-	"github.com/syndtr/goleveldb/leveldb/filter"
-	"github.com/syndtr/goleveldb/leveldb/iterator"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/syndtr/goleveldb/leveldb/util"
-)
 
-const (
-	writePauseWarningThrottler = 1 * time.Minute
+	"github.com/ledgerwatch/bolt"
+	"github.com/petar/GoLLRB/llrb"
 )
 
 var OpenFileLimit = 64
+var ErrKeyNotFound = errors.New("boltdb: key not found in range")
+var SuffixBucket = []byte("SUFFIX")
+
+const HeapSize = 512 * 1024 * 1024
 
 type LDBDatabase struct {
-	fn string      // filename for reporting
-	db *leveldb.DB // LevelDB instance
-
-	compTimeMeter    metrics.Meter // Meter for measuring the total time spent in database compaction
-	compReadMeter    metrics.Meter // Meter for measuring the data read during compaction
-	compWriteMeter   metrics.Meter // Meter for measuring the data written during compaction
-	writeDelayNMeter metrics.Meter // Meter for measuring the write delay number due to database compaction
-	writeDelayMeter  metrics.Meter // Meter for measuring the write delay duration due to database compaction
-	diskReadMeter    metrics.Meter // Meter for measuring the effective amount of data read
-	diskWriteMeter   metrics.Meter // Meter for measuring the effective amount of data written
+	fn string   // filename for reporting
+	db *bolt.DB // BoltDB instance
 
 	quitLock sync.Mutex      // Mutex protecting the quit channel access
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
@@ -60,28 +51,15 @@ type LDBDatabase struct {
 }
 
 // NewLDBDatabase returns a LevelDB wrapped object.
-func NewLDBDatabase(file string, cache int, handles int) (*LDBDatabase, error) {
+func NewLDBDatabase(file string) (*LDBDatabase, error) {
 	logger := log.New("database", file)
 
-	// Ensure we have some minimal caching and file guarantees
-	if cache < 16 {
-		cache = 16
+	// Create necessary directories
+	if err := os.MkdirAll(path.Dir(file), os.ModePerm); err != nil {
+		return nil, err
 	}
-	if handles < 16 {
-		handles = 16
-	}
-	logger.Info("Allocated cache and file handles", "cache", cache, "handles", handles)
-
 	// Open the db and recover any potential corruptions
-	db, err := leveldb.OpenFile(file, &opt.Options{
-		OpenFilesCacheCapacity: handles,
-		BlockCacheCapacity:     cache / 2 * opt.MiB,
-		WriteBuffer:            cache / 4 * opt.MiB, // Two of these are used internally
-		Filter:                 filter.NewBloomFilter(10),
-	})
-	if _, corrupted := err.(*errors.ErrCorrupted); corrupted {
-		db, err = leveldb.RecoverFile(file, nil)
-	}
+	db, err := bolt.Open(file, 0600, &bolt.Options{})
 	// (Re)check for errors and abort if opening of the db failed
 	if err != nil {
 		return nil, err
@@ -99,35 +77,579 @@ func (db *LDBDatabase) Path() string {
 }
 
 // Put puts the given key / value to the queue
-func (db *LDBDatabase) Put(key []byte, value []byte) error {
-	return db.db.Put(key, value, nil)
+func (db *LDBDatabase) Put(bucket, key []byte, value []byte) error {
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(bucket, true)
+		if err != nil {
+			return err
+		}
+		return b.Put(key, value)
+	})
+	return err
 }
 
-func (db *LDBDatabase) Has(key []byte) (bool, error) {
-	return db.db.Has(key, nil)
+func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
+	suffix = encodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(suffix))
+	copy(composite, key)
+	copy(composite[len(key):], suffix)
+	return composite, suffix
+}
+
+func historyBucket(bucket []byte) []byte {
+	hb := make([]byte, len(bucket)+1)
+	hb[0] = byte('h')
+	copy(hb[1:], bucket)
+	return hb
+}
+
+// Put puts the given key / value to the queue
+func (db *LDBDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
+	composite, suffix := compositeKeySuffix(key, timestamp)
+	suffixkey := make([]byte, len(suffix)+len(hBucket))
+	copy(suffixkey, suffix)
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
+		if err != nil {
+			return err
+		}
+		if err = hb.Put(composite, value); err != nil {
+			return err
+		}
+		sb, err := tx.CreateBucketIfNotExists(SuffixBucket, true)
+		if err != nil {
+			return err
+		}
+		dat, _ := sb.Get(suffixkey)
+		var l int
+		if dat == nil {
+			l = 4
+		} else {
+			l = len(dat)
+		}
+		dv := make([]byte, l+1+len(key))
+		copy(dv, dat)
+		binary.BigEndian.PutUint32(dv, 1+binary.BigEndian.Uint32(dv)) // Increment the counter of keys
+		dv[l] = byte(len(key))
+		copy(dv[l+1:], key)
+		return sb.Put(suffixkey, dv)
+	})
+	return err
+}
+
+func (db *LDBDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+	var savedTx *bolt.Tx
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		for bucketStart := 0; bucketStart < len(tuples); {
+			bucketEnd := bucketStart
+			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
+			}
+			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart], false)
+			if err != nil {
+				return err
+			}
+			l := (bucketEnd - bucketStart) / 3
+			pairs := make([][]byte, 2*l)
+			for i := 0; i < l; i++ {
+				pairs[2*i] = tuples[bucketStart+3*i+1]
+				pairs[2*i+1] = tuples[bucketStart+3*i+2]
+			}
+			if err := b.MultiPut(pairs...); err != nil {
+				return err
+			}
+			bucketStart = bucketEnd
+		}
+		savedTx = tx
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(savedTx.Stats().Write), nil
+}
+
+func (db *LDBDatabase) Has(bucket, key []byte) (bool, error) {
+	var has bool
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			has = false
+		} else {
+			v, _ := b.Get(key)
+			has = v != nil
+		}
+		return nil
+	})
+	return has, err
+}
+
+func (db *LDBDatabase) Size() int {
+	return db.db.Size()
 }
 
 // Get returns the given key if it's present.
-func (db *LDBDatabase) Get(key []byte) ([]byte, error) {
-	dat, err := db.db.Get(key, nil)
-	if err != nil {
-		return nil, err
+func (db *LDBDatabase) Get(bucket, key []byte) ([]byte, error) {
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			v, _ := b.Get(key)
+			if v != nil {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+			}
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
 	}
-	return dat, nil
+	return dat, err
+}
+
+func (db *LDBDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := compositeKeySuffix(key, timestamp)
+	return db.Get(hBucket, composite)
+}
+
+// GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
+// if there are not such (k, v)
+func (db *LDBDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := compositeKeySuffix(key, timestamp)
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		{
+			hB := tx.Bucket(hBucket)
+			if hB == nil {
+				return ErrKeyNotFound
+			}
+			hC := hB.Cursor()
+			hK, hV := hC.Seek(composite)
+			if hK != nil && bytes.HasPrefix(hK, key) {
+				dat = make([]byte, len(hV))
+				copy(dat, hV)
+				return nil
+			}
+		}
+		{
+			b := tx.Bucket(bucket)
+			if b == nil {
+				return ErrKeyNotFound
+			}
+			c := b.Cursor()
+			k, v := c.Seek(key)
+			if k != nil && bytes.Equal(k, key) {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		}
+		return ErrKeyNotFound
+	})
+	return dat, err
+}
+
+func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
+	fixedbytes = int((fixedbits + 7) / 8)
+	shiftbits := fixedbits & 7
+	mask = byte(0xff)
+	if shiftbits != 0 {
+		mask = 0xff << (8 - shiftbits)
+	}
+	return fixedbytes, mask
+}
+
+func (db *LDBDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		k, v := c.Seek(startkey)
+		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
+			goOn, err := walker(k, v)
+			if err != nil {
+				return err
+			}
+			if !goOn {
+				break
+			}
+			k, v = c.Next()
+		}
+		return nil
+	})
+	return err
+}
+
+func (db *LDBDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+	if len(startkeys) == 0 {
+		return nil
+	}
+	keyIdx := 0 // What is the current key we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
+	startkey := startkeys[keyIdx]
+	if err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		k, v := c.Seek(startkey)
+		for k != nil {
+			// Adjust keyIdx if needed
+			if fixedbytes > 0 {
+				cmp := int(-1)
+				for cmp != 0 {
+					cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+					if cmp == 0 {
+						k1 := k[fixedbytes-1] & mask
+						k2 := startkey[fixedbytes-1] & mask
+						if k1 < k2 {
+							cmp = -1
+						} else if k1 > k2 {
+							cmp = 1
+						}
+					}
+					if cmp < 0 {
+						k, v = c.SeekTo(startkey)
+						if k == nil {
+							return nil
+						}
+					} else if cmp > 0 {
+						keyIdx++
+						if _, err := walker(keyIdx, nil, nil); err != nil {
+							return err
+						}
+						if keyIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
+						startkey = startkeys[keyIdx]
+						//k, v = c.SeekTo(startkey)
+						//if k == nil {
+						//	return nil
+						//}
+					}
+				}
+			}
+			if len(v) > 0 {
+				_, err := walker(keyIdx, k, v)
+				if err != nil {
+					return err
+				}
+			}
+			k, v = c.Next()
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for keyIdx < len(startkeys) {
+		keyIdx++
+		if _, err := walker(keyIdx, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *LDBDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	suffix := encodeTimestamp(timestamp)
+	l := len(startkey)
+	sl := l + len(suffix)
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		hB := tx.Bucket(hBucket)
+		if hB == nil {
+			return nil
+		}
+		c := b.Cursor()
+		hC := hB.Cursor()
+		k, v := c.Seek(startkey)
+		hK, hV := hC.Seek(startkey)
+		goOn := true
+		var err error
+		for goOn {
+			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				k = nil
+			}
+			if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				k = nil
+			}
+			if hK != nil && fixedbits > 0 && !bytes.Equal(hK[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				hK = nil
+			}
+			if hK != nil && fixedbits > 0 && (hK[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				hK = nil
+			}
+			if hK != nil && bytes.Compare(hK[l:], suffix) < 0 {
+				copy(keyBuffer, hK[:l])
+				copy(keyBuffer[l:], suffix)
+				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				continue
+			}
+			var cmp int
+			if k == nil {
+				if hK == nil {
+					goOn = false
+					break
+				} else {
+					cmp = 1
+				}
+			} else if hK == nil {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(k, hK[:l])
+			}
+			if cmp < 0 {
+				goOn, err = walker(k, v)
+			} else {
+				goOn, err = walker(hK[:l], hV)
+			}
+			if goOn {
+				if cmp <= 0 {
+					k, v = c.Next()
+				}
+				if cmp >= 0 {
+					copy(keyBuffer, hK[:l])
+					copy(keyBuffer[l:], EndSuffix)
+					hK, hV = hC.SeekTo(keyBuffer)
+				}
+			}
+		}
+		return err
+	})
+	return err
+}
+
+func (db *LDBDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+	if len(startkeys) == 0 {
+		return nil
+	}
+	keyIdx := 0 // What is the current key we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
+	startkey := startkeys[keyIdx]
+	suffix := encodeTimestamp(timestamp)
+	l := len(startkey)
+	sl := l + len(suffix)
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	if err := db.db.View(func(tx *bolt.Tx) error {
+		pre := tx.Bucket([]byte("secure-key-"))
+		if pre == nil {
+			return nil
+		}
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
+		}
+		hB := tx.Bucket(hBucket)
+		if hB == nil {
+			return nil
+		}
+		c := b.Cursor()
+		hC := hB.Cursor()
+		hC1 := hB.Cursor()
+		k, v := c.Seek(startkey)
+		hK, hV := hC.Seek(startkey)
+		goOn := true
+		var err error
+		for goOn { // k != nil
+			kFit := k != nil
+			hKFit := hK != nil
+			if fixedbytes > 0 {
+				cmp := 1
+				hCmp := 1
+				for cmp != 0 && hCmp != 0 {
+					if k != nil {
+						cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+						if cmp == 0 {
+							k1 := k[fixedbytes-1] & mask
+							k2 := startkey[fixedbytes-1] & mask
+							if k1 < k2 {
+								cmp = -1
+							} else if k1 > k2 {
+								cmp = 1
+							}
+						}
+						if cmp < 0 {
+							k, v = c.SeekTo(startkey)
+							if k == nil {
+								cmp = 1
+							}
+						}
+					}
+					if hK != nil {
+						hCmp = bytes.Compare(hK[:fixedbytes-1], startkey[:fixedbytes-1])
+						if hCmp == 0 {
+							k1 := hK[fixedbytes-1] & mask
+							k2 := startkey[fixedbytes-1] & mask
+							if k1 < k2 {
+								hCmp = -1
+							} else if k1 > k2 {
+								hCmp = 1
+							}
+						}
+						if hCmp < 0 {
+							hK, hV = hC.SeekTo(startkey)
+							if hK == nil {
+								hCmp = 1
+							}
+						}
+					}
+					if cmp > 0 && hCmp > 0 {
+						keyIdx++
+						if _, err := walker(keyIdx, nil, nil); err != nil {
+							return err
+						}
+						if keyIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
+						startkey = startkeys[keyIdx]
+					}
+				}
+				kFit = cmp == 0
+				hKFit = hCmp == 0
+			}
+			if hKFit && bytes.Compare(hK[l:], suffix) < 0 {
+				copy(keyBuffer, hK[:l])
+				copy(keyBuffer[l:], suffix)
+				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				continue
+			}
+			var cmp int
+			if !kFit {
+				if !hKFit {
+					goOn = false
+					break
+				} else {
+					cmp = 1
+				}
+			} else if !hKFit {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(k, hK[:l])
+			}
+			if cmp < 0 {
+				if l == 32 {
+					//addr := pre.Get(k)
+					//fmt.Printf("c %x (%x): %x\n", k, addr, v)
+				} else {
+					//fmt.Printf("c %x: %x\n", k, v)
+				}
+				hK1, _ := hC1.Seek(k)
+				if bytes.HasPrefix(hK1, k) {
+					goOn, err = walker(keyIdx, k, v)
+				}
+			} else {
+				if hKFit && bytes.Equal(hK[l:], suffix) && timestamp == 3436035 {
+					if l == 32 {
+						addr, _ := pre.Get(hK[:l])
+						fmt.Printf("h %x (%x): %x\n", hK[:l], addr, hV)
+					} else {
+						item, _ := pre.Get(hK[20:52])
+						fmt.Printf("h %x (%x): %x\n", hK[:l], item, hV)
+					}
+				}
+				goOn, err = walker(keyIdx, hK[:l], hV)
+			}
+			if goOn {
+				if cmp <= 0 {
+					k, v = c.Next()
+				}
+				if cmp >= 0 {
+					copy(keyBuffer, hK[:l])
+					copy(keyBuffer[l:], EndSuffix)
+					hK, hV = hC.SeekTo(keyBuffer)
+				}
+			}
+		}
+		return err
+	}); err != nil {
+		return err
+	}
+	for keyIdx < len(startkeys) {
+		keyIdx++
+		if _, err := walker(keyIdx, nil, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *LDBDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+	return rewindData(db, timestampSrc, timestampDst, df)
 }
 
 // Delete deletes the key from the queue and database
-func (db *LDBDatabase) Delete(key []byte) error {
-	return db.db.Delete(key, nil)
+func (db *LDBDatabase) Delete(bucket, key []byte) error {
+	// Execute the actual operation
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			return b.Delete(key)
+		} else {
+			return nil
+		}
+	})
+	return err
 }
 
-func (db *LDBDatabase) NewIterator() iterator.Iterator {
-	return db.db.NewIterator(nil, nil)
+// Deletes all keys with specified suffix from all the buckets
+func (db *LDBDatabase) DeleteTimestamp(timestamp uint64) error {
+	suffix := encodeTimestamp(timestamp)
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		sb := tx.Bucket(SuffixBucket)
+		if sb == nil {
+			return nil
+		}
+		var keys [][]byte
+		c := sb.Cursor()
+		for k, v := c.Seek(suffix); k != nil && bytes.HasPrefix(k, suffix); k, v = c.Next() {
+			hb := tx.Bucket(k[len(suffix):])
+			if hb == nil {
+				return nil
+			}
+			keycount := int(binary.BigEndian.Uint32(v))
+			for i, ki := 4, 0; ki < keycount; ki++ {
+				l := int(v[i])
+				i++
+				kk := make([]byte, l+len(suffix))
+				copy(kk, v[i:i+l])
+				copy(kk[l:], suffix)
+				if err := hb.Delete(kk); err != nil {
+					return err
+				}
+				i += l
+			}
+			keys = append(keys, k)
+		}
+		for _, k := range keys {
+			if err := sb.Delete(k); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	return err
 }
 
-// NewIteratorWithPrefix returns a iterator to iterate over subset of database content with a particular prefix.
-func (db *LDBDatabase) NewIteratorWithPrefix(prefix []byte) iterator.Iterator {
-	return db.db.NewIterator(util.BytesPrefix(prefix), nil)
+func (db *LDBDatabase) DeleteBucket(bucket []byte) error {
+	err := db.db.Update(func(tx *bolt.Tx) error {
+		if err := tx.DeleteBucket(bucket); err != nil {
+			return err
+		}
+		return nil
+	})
+	return err
 }
 
 func (db *LDBDatabase) Close() {
@@ -143,242 +665,474 @@ func (db *LDBDatabase) Close() {
 		}
 		db.quitChan = nil
 	}
-	err := db.db.Close()
-	if err == nil {
+	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 	} else {
 		db.log.Error("Failed to close database", "err", err)
 	}
 }
 
-func (db *LDBDatabase) LDB() *leveldb.DB {
-	return db.db
+type PutItem struct {
+	key, value []byte
 }
 
-// Meter configures the database metrics collectors and
-func (db *LDBDatabase) Meter(prefix string) {
-	// Initialize all the metrics collector at the requested prefix
-	db.compTimeMeter = metrics.NewRegisteredMeter(prefix+"compact/time", nil)
-	db.compReadMeter = metrics.NewRegisteredMeter(prefix+"compact/input", nil)
-	db.compWriteMeter = metrics.NewRegisteredMeter(prefix+"compact/output", nil)
-	db.diskReadMeter = metrics.NewRegisteredMeter(prefix+"disk/read", nil)
-	db.diskWriteMeter = metrics.NewRegisteredMeter(prefix+"disk/write", nil)
-	db.writeDelayMeter = metrics.NewRegisteredMeter(prefix+"compact/writedelay/duration", nil)
-	db.writeDelayNMeter = metrics.NewRegisteredMeter(prefix+"compact/writedelay/counter", nil)
-
-	// Create a quit channel for the periodic collector and run it
-	db.quitLock.Lock()
-	db.quitChan = make(chan chan error)
-	db.quitLock.Unlock()
-
-	go db.meter(3 * time.Second)
+func (a *PutItem) Less(b llrb.Item) bool {
+	bi := b.(*PutItem)
+	return bytes.Compare(a.key, bi.key) < 0
 }
 
-// meter periodically retrieves internal leveldb counters and reports them to
-// the metrics subsystem.
-//
-// This is how a stats table look like (currently):
-//   Compactions
-//    Level |   Tables   |    Size(MB)   |    Time(sec)  |    Read(MB)   |   Write(MB)
-//   -------+------------+---------------+---------------+---------------+---------------
-//      0   |          0 |       0.00000 |       1.27969 |       0.00000 |      12.31098
-//      1   |         85 |     109.27913 |      28.09293 |     213.92493 |     214.26294
-//      2   |        523 |    1000.37159 |       7.26059 |      66.86342 |      66.77884
-//      3   |        570 |    1113.18458 |       0.00000 |       0.00000 |       0.00000
-//
-// This is how the write delay look like (currently):
-// DelayN:5 Delay:406.604657ms Paused: false
-//
-// This is how the iostats look like (currently):
-// Read(MB):3895.04860 Write(MB):3654.64712
-func (db *LDBDatabase) meter(refresh time.Duration) {
-	// Create the counters to store current and previous compaction values
-	compactions := make([][]float64, 2)
-	for i := 0; i < 2; i++ {
-		compactions[i] = make([]float64, 3)
+type mutation struct {
+	puts       map[string]*llrb.LLRB // Map buckets to RB tree containing items
+	suffixkeys map[uint64]map[string][][]byte
+	mu         sync.RWMutex
+	db         Database
+}
+
+func (db *LDBDatabase) NewBatch() Mutation {
+	m := &mutation{
+		db:         db,
+		puts:       make(map[string]*llrb.LLRB),
+		suffixkeys: make(map[uint64]map[string][][]byte),
 	}
-	// Create storage for iostats.
-	var iostats [2]float64
+	return m
+}
 
-	// Create storage and warning log tracer for write delay.
-	var (
-		delaystats      [2]int64
-		lastWritePaused time.Time
-	)
-
-	var (
-		errc chan error
-		merr error
-	)
-
-	// Iterate ad infinitum and collect the stats
-	for i := 1; errc == nil && merr == nil; i++ {
-		// Retrieve the database stats
-		stats, err := db.db.GetProperty("leveldb.stats")
-		if err != nil {
-			db.log.Error("Failed to read database stats", "err", err)
-			merr = err
-			continue
+func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if t, ok := m.puts[string(bucket)]; ok {
+		i := t.Get(&PutItem{key: key})
+		if i == nil {
+			return nil, false
 		}
-		// Find the compaction table, skip the header
-		lines := strings.Split(stats, "\n")
-		for len(lines) > 0 && strings.TrimSpace(lines[0]) != "Compactions" {
-			lines = lines[1:]
-		}
-		if len(lines) <= 3 {
-			db.log.Error("Compaction table not found")
-			merr = errors.New("compaction table not found")
-			continue
-		}
-		lines = lines[3:]
-
-		// Iterate over all the table rows, and accumulate the entries
-		for j := 0; j < len(compactions[i%2]); j++ {
-			compactions[i%2][j] = 0
-		}
-		for _, line := range lines {
-			parts := strings.Split(line, "|")
-			if len(parts) != 6 {
-				break
+		if item, ok := i.(*PutItem); ok {
+			if item.value == nil {
+				return nil, true
 			}
-			for idx, counter := range parts[3:] {
-				value, err := strconv.ParseFloat(strings.TrimSpace(counter), 64)
-				if err != nil {
-					db.log.Error("Compaction entry parsing failed", "err", err)
-					merr = err
-					continue
+			v := make([]byte, len(item.value))
+			copy(v, item.value)
+			return v, true
+		}
+		return nil, false
+	} else {
+		return nil, false
+	}
+}
+
+// Can only be called from the worker thread
+func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
+	if value, ok := m.getMem(bucket, key); ok {
+		if value == nil {
+			return nil, ErrKeyNotFound
+		}
+		return value, nil
+	}
+	if m.db != nil {
+		return m.db.Get(bucket, key)
+	}
+	return nil, ErrKeyNotFound
+}
+
+func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := compositeKeySuffix(key, timestamp)
+	return m.Get(hBucket, composite)
+}
+
+func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
+	if t, ok := m.puts[string(bucket)]; ok {
+		i := t.Get(&PutItem{key: key})
+		if i != nil {
+			if item, ok := i.(*PutItem); ok {
+				if item.value == nil {
+					return nil, ErrKeyNotFound
 				}
-				compactions[i%2][idx] += value
+				return common.CopyBytes(item.value), nil
 			}
 		}
-		// Update all the requested meters
-		if db.compTimeMeter != nil {
-			db.compTimeMeter.Mark(int64((compactions[i%2][0] - compactions[(i-1)%2][0]) * 1000 * 1000 * 1000))
-		}
-		if db.compReadMeter != nil {
-			db.compReadMeter.Mark(int64((compactions[i%2][1] - compactions[(i-1)%2][1]) * 1024 * 1024))
-		}
-		if db.compWriteMeter != nil {
-			db.compWriteMeter.Mark(int64((compactions[i%2][2] - compactions[(i-1)%2][2]) * 1024 * 1024))
-		}
-
-		// Retrieve the write delay statistic
-		writedelay, err := db.db.GetProperty("leveldb.writedelay")
-		if err != nil {
-			db.log.Error("Failed to read database write delay statistic", "err", err)
-			merr = err
-			continue
-		}
-		var (
-			delayN        int64
-			delayDuration string
-			duration      time.Duration
-			paused        bool
-		)
-		if n, err := fmt.Sscanf(writedelay, "DelayN:%d Delay:%s Paused:%t", &delayN, &delayDuration, &paused); n != 3 || err != nil {
-			db.log.Error("Write delay statistic not found")
-			merr = err
-			continue
-		}
-		duration, err = time.ParseDuration(delayDuration)
-		if err != nil {
-			db.log.Error("Failed to parse delay duration", "err", err)
-			merr = err
-			continue
-		}
-		if db.writeDelayNMeter != nil {
-			db.writeDelayNMeter.Mark(delayN - delaystats[0])
-		}
-		if db.writeDelayMeter != nil {
-			db.writeDelayMeter.Mark(duration.Nanoseconds() - delaystats[1])
-		}
-		// If a warning that db is performing compaction has been displayed, any subsequent
-		// warnings will be withheld for one minute not to overwhelm the user.
-		if paused && delayN-delaystats[0] == 0 && duration.Nanoseconds()-delaystats[1] == 0 &&
-			time.Now().After(lastWritePaused.Add(writePauseWarningThrottler)) {
-			db.log.Warn("Database compacting, degraded performance")
-			lastWritePaused = time.Now()
-		}
-		delaystats[0], delaystats[1] = delayN, duration.Nanoseconds()
-
-		// Retrieve the database iostats.
-		ioStats, err := db.db.GetProperty("leveldb.iostats")
-		if err != nil {
-			db.log.Error("Failed to read database iostats", "err", err)
-			merr = err
-			continue
-		}
-		var nRead, nWrite float64
-		parts := strings.Split(ioStats, " ")
-		if len(parts) < 2 {
-			db.log.Error("Bad syntax of ioStats", "ioStats", ioStats)
-			merr = fmt.Errorf("bad syntax of ioStats %s", ioStats)
-			continue
-		}
-		if n, err := fmt.Sscanf(parts[0], "Read(MB):%f", &nRead); n != 1 || err != nil {
-			db.log.Error("Bad syntax of read entry", "entry", parts[0])
-			merr = err
-			continue
-		}
-		if n, err := fmt.Sscanf(parts[1], "Write(MB):%f", &nWrite); n != 1 || err != nil {
-			db.log.Error("Bad syntax of write entry", "entry", parts[1])
-			merr = err
-			continue
-		}
-		if db.diskReadMeter != nil {
-			db.diskReadMeter.Mark(int64((nRead - iostats[0]) * 1024 * 1024))
-		}
-		if db.diskWriteMeter != nil {
-			db.diskWriteMeter.Mark(int64((nWrite - iostats[1]) * 1024 * 1024))
-		}
-		iostats[0], iostats[1] = nRead, nWrite
-
-		// Sleep a bit, then repeat the stats collection
-		select {
-		case errc = <-db.quitChan:
-			// Quit requesting, stop hammering the database
-		case <-time.After(refresh):
-			// Timeout, gather a new set of stats
-		}
 	}
-
-	if errc == nil {
-		errc = <-db.quitChan
+	if m.db != nil {
+		return m.db.Get(bucket, key)
 	}
-	errc <- merr
+	return nil, ErrKeyNotFound
 }
 
-func (db *LDBDatabase) NewBatch() Batch {
-	return &ldbBatch{db: db.db, b: new(leveldb.Batch)}
+func (m *mutation) hasMem(bucket, key []byte) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if t, ok := m.puts[string(bucket)]; ok {
+		return t.Has(&PutItem{key: key})
+	}
+	return false
 }
 
-type ldbBatch struct {
-	db   *leveldb.DB
-	b    *leveldb.Batch
-	size int
+func (m *mutation) Has(bucket, key []byte) (bool, error) {
+	if m.hasMem(bucket, key) {
+		return true, nil
+	}
+	if m.db != nil {
+		return m.db.Has(bucket, key)
+	}
+	return false, nil
 }
 
-func (b *ldbBatch) Put(key, value []byte) error {
-	b.b.Put(key, value)
-	b.size += len(value)
+func (m *mutation) Size() int {
+	if m.db == nil {
+		return 0
+	}
+	return m.db.Size()
+}
+
+func (m *mutation) Put(bucket, key []byte, value []byte) error {
+	bb := make([]byte, len(bucket))
+	copy(bb, bucket)
+	k := make([]byte, len(key))
+	copy(k, key)
+	v := make([]byte, len(value))
+	copy(v, value)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var t *llrb.LLRB
+	var ok bool
+	if t, ok = m.puts[string(bb)]; !ok {
+		t = llrb.New()
+		m.puts[string(bb)] = t
+	}
+	t.ReplaceOrInsert(&PutItem{key: k, value: v})
 	return nil
 }
 
-func (b *ldbBatch) Delete(key []byte) error {
-	b.b.Delete(key)
-	b.size += 1
+// Assumes that bucket, key, and value won't be modified
+func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
+	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
+	composite, _ := compositeKeySuffix(key, timestamp)
+	suffix_m, ok := m.suffixkeys[timestamp]
+	if !ok {
+		suffix_m = make(map[string][][]byte)
+		m.suffixkeys[timestamp] = suffix_m
+	}
+	suffix_l, ok := suffix_m[string(hBucket)]
+	if !ok {
+		suffix_l = [][]byte{}
+	}
+	suffix_l = append(suffix_l, key)
+	suffix_m[string(hBucket)] = suffix_l
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var ht *llrb.LLRB
+	if ht, ok = m.puts[string(hBucket)]; !ok {
+		ht = llrb.New()
+		m.puts[string(hBucket)] = ht
+	}
+	ht.ReplaceOrInsert(&PutItem{key: composite, value: value})
 	return nil
 }
 
-func (b *ldbBatch) Write() error {
-	return b.db.Write(b.b, nil)
+func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	l := len(tuples)
+	for i := 0; i < l; i += 3 {
+		var t *llrb.LLRB
+		var ok bool
+		if t, ok = m.puts[string(tuples[i])]; !ok {
+			t = llrb.New()
+			m.puts[string(tuples[i])] = t
+		}
+		t.ReplaceOrInsert(&PutItem{key: tuples[i+1], value: tuples[i+2]})
+	}
+	return 0, nil
 }
 
-func (b *ldbBatch) ValueSize() int {
-	return b.size
+func (m *mutation) BatchSize() int {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	size := 0
+	for _, t := range m.puts {
+		size += t.Len()
+	}
+	return size
 }
 
-func (b *ldbBatch) Reset() {
-	b.b.Reset()
-	b.size = 0
+func (m *mutation) getAsOfMem(hBucket, key []byte, timestamp uint64) ([]byte, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var t *llrb.LLRB
+	var ok bool
+	if t, ok = m.puts[string(hBucket)]; !ok {
+		return nil, false
+	}
+	composite, _ := compositeKeySuffix(key, timestamp)
+	var dat []byte
+	t.AscendGreaterOrEqual(&PutItem{key: composite}, func(i llrb.Item) bool {
+		item := i.(*PutItem)
+		if !bytes.HasPrefix(item.key, key) {
+			return false
+		}
+		if item.value == nil {
+			return true
+		}
+		dat = make([]byte, len(item.value))
+		copy(dat, item.value)
+		return false
+	})
+	if dat != nil {
+		return dat, true
+	}
+	return nil, false
+}
+
+func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	if m.db == nil {
+		panic("Not implemented")
+	} else {
+		return m.db.GetAsOf(bucket, hBucket, key, timestamp)
+	}
+}
+
+func (m *mutation) walkMem(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	var t *llrb.LLRB
+	var ok bool
+	if t, ok = m.puts[string(bucket)]; !ok {
+		return nil
+	}
+	for nextkey := startkey; nextkey != nil; {
+		from := nextkey
+		nextkey = nil
+		var extErr error
+		t.AscendGreaterOrEqual(&PutItem{key: from}, func(i llrb.Item) bool {
+			item := i.(*PutItem)
+			if item.value == nil {
+				return true
+			}
+			if fixedbits > 0 && (!bytes.Equal(item.key[:fixedbytes-1], startkey[:fixedbytes-1]) || (item.key[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask)) {
+				return true
+			}
+			goOn, err := walker(item.key, item.value)
+			if err != nil {
+				extErr = err
+				return false
+			}
+			return goOn
+		})
+		if extErr != nil {
+			return extErr
+		}
+	}
+	return nil
+}
+
+func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
+	if m.db == nil {
+		return m.walkMem(bucket, startkey, fixedbits, walker)
+	} else {
+		return m.db.Walk(bucket, startkey, fixedbits, walker)
+	}
+}
+
+func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+	panic("Not implemented")
+}
+
+func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+	if m.db == nil {
+		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
+	} else {
+		return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
+	}
+}
+
+func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	if m.db == nil {
+		panic("Not implemented")
+	} else {
+		return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
+	}
+}
+
+func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+	if m.db == nil {
+		panic("Not implemented")
+	} else {
+		return m.db.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
+	}
+}
+
+func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+	return rewindData(m, timestampSrc, timestampDst, df)
+}
+
+func (m *mutation) Delete(bucket, key []byte) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bb := make([]byte, len(bucket))
+	copy(bb, bucket)
+	var t *llrb.LLRB
+	var ok bool
+	if t, ok = m.puts[string(bb)]; !ok {
+		t = llrb.New()
+		m.puts[string(bb)] = t
+	}
+	k := make([]byte, len(key))
+	copy(k, key)
+	t.ReplaceOrInsert(&PutItem{key: k, value: nil})
+	return nil
+}
+
+// Deletes all keys with specified suffix from all the buckets
+func (m *mutation) DeleteTimestamp(timestamp uint64) error {
+	suffix := encodeTimestamp(timestamp)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var t *llrb.LLRB
+	var ok bool
+	if t, ok = m.puts[string(SuffixBucket)]; !ok {
+		t = llrb.New()
+		m.puts[string(SuffixBucket)] = t
+	}
+	err := m.Walk(SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
+		hBucket := k[len(suffix):]
+		keycount := int(binary.BigEndian.Uint32(v))
+		var ht *llrb.LLRB
+		var ok bool
+		if keycount > 0 {
+			hBucketStr := string(common.CopyBytes(hBucket))
+			if ht, ok = m.puts[hBucketStr]; !ok {
+				ht = llrb.New()
+				m.puts[hBucketStr] = ht
+			}
+		}
+		for i, ki := 4, 0; ki < keycount; ki++ {
+			l := int(v[i])
+			i++
+			kk := make([]byte, l+len(suffix))
+			copy(kk, v[i:i+l])
+			copy(kk[l:], suffix)
+			ht.ReplaceOrInsert(&PutItem{key: kk, value: nil})
+			i += l
+		}
+		t.ReplaceOrInsert(&PutItem{key: common.CopyBytes(k), value: nil})
+		return true, nil
+	})
+	return err
+}
+
+func (m *mutation) Commit() (uint64, error) {
+	if m.db == nil {
+		return 0, nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var t *llrb.LLRB
+	var ok bool
+	if len(m.suffixkeys) > 0 {
+		if t, ok = m.puts[string(SuffixBucket)]; !ok {
+			t = llrb.New()
+			m.puts[string(SuffixBucket)] = t
+		}
+	}
+	for timestamp, suffix_m := range m.suffixkeys {
+		suffix := encodeTimestamp(timestamp)
+		for bucketStr, suffix_l := range suffix_m {
+			hBucket := []byte(bucketStr)
+			suffixkey := make([]byte, len(suffix)+len(hBucket))
+			copy(suffixkey, suffix)
+			copy(suffixkey[len(suffix):], hBucket)
+			dat, err := m.getNoLock(SuffixBucket, suffixkey)
+			if err != nil && err != ErrKeyNotFound {
+				return 0, err
+			}
+			var l int
+			if dat == nil {
+				l = 4
+			} else {
+				l = len(dat)
+			}
+			newlen := len(suffix_l)
+			for _, key := range suffix_l {
+				newlen += len(key)
+			}
+			dv := make([]byte, l+newlen)
+			copy(dv, dat)
+			binary.BigEndian.PutUint32(dv, uint32(len(suffix_l))+binary.BigEndian.Uint32(dv))
+			i := l
+			for _, key := range suffix_l {
+				dv[i] = byte(len(key))
+				i++
+				copy(dv[i:], key)
+				i += len(key)
+			}
+			t.ReplaceOrInsert(&PutItem{key: suffixkey, value: dv})
+		}
+	}
+	m.suffixkeys = make(map[uint64]map[string][][]byte)
+	size := 0
+	for _, t := range m.puts {
+		size += t.Len()
+	}
+	tuples := make([][]byte, size*3)
+	var index int
+	for bucketStr, bt := range m.puts {
+		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
+			item := i.(*PutItem)
+			tuples[index] = []byte(bucketStr)
+			index++
+			tuples[index] = item.key
+			index++
+			tuples[index] = item.value
+			index++
+			return true
+		})
+	}
+	var written uint64
+	var putErr error
+	if written, putErr = m.db.MultiPut(tuples...); putErr != nil {
+		return 0, putErr
+	}
+	m.puts = make(map[string]*llrb.LLRB)
+	return written, nil
+}
+
+func (m *mutation) Rollback() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.suffixkeys = make(map[uint64]map[string][][]byte)
+	m.puts = make(map[string]*llrb.LLRB)
+}
+
+func (m *mutation) Keys() [][]byte {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	size := 0
+	for _, t := range m.puts {
+		size += t.Len()
+	}
+	pairs := make([][]byte, 2*size)
+	idx := 0
+	for bucketStr, bt := range m.puts {
+		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
+			item := i.(*PutItem)
+			pairs[idx] = []byte(bucketStr)
+			idx++
+			pairs[idx] = item.key
+			idx++
+			return true
+		})
+	}
+	return pairs
+}
+
+func (m *mutation) Close() {
+	m.Rollback()
+}
+
+func (m *mutation) NewBatch() Mutation {
+	mm := &mutation{
+		db:         m,
+		puts:       make(map[string]*llrb.LLRB),
+		suffixkeys: make(map[uint64]map[string][][]byte),
+	}
+	return mm
 }

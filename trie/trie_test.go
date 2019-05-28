@@ -19,7 +19,6 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -42,9 +41,10 @@ func init() {
 }
 
 // Used for testing
-func newEmpty() *Trie {
-	trie, _ := New(common.Hash{}, NewDatabase(ethdb.NewMemDatabase()))
-	return trie
+func newEmpty() (ethdb.Database, *Trie) {
+	diskdb := ethdb.NewMemDatabase()
+	trie := New(common.Hash{}, testbucket, false)
+	return diskdb, trie
 }
 
 func TestEmptyTrie(t *testing.T) {
@@ -60,136 +60,118 @@ func TestNull(t *testing.T) {
 	var trie Trie
 	key := make([]byte, 32)
 	value := []byte("test")
-	trie.Update(key, value)
-	if !bytes.Equal(trie.Get(key), value) {
+	trie.Update(nil, key, value, 0)
+	if !bytes.Equal(trie.Get(nil, key, 0), value) {
 		t.Fatal("wrong value")
 	}
 }
 
-func TestMissingRoot(t *testing.T) {
-	trie, err := New(common.HexToHash("0beec7b5ea3f0fdbc95d0dd47f3c5bc275da8a33"), NewDatabase(ethdb.NewMemDatabase()))
-	if trie != nil {
-		t.Error("New returned non-nil trie for invalid root")
-	}
-	if _, ok := err.(*MissingNodeError); !ok {
-		t.Errorf("New returned wrong error: %v", err)
-	}
-}
-
-func TestMissingNodeDisk(t *testing.T)    { testMissingNode(t, false) }
-func TestMissingNodeMemonly(t *testing.T) { testMissingNode(t, true) }
+func testMissingNodeDisk(t *testing.T)    { testMissingNode(t, false) }
+func testMissingNodeMemonly(t *testing.T) { testMissingNode(t, true) }
 
 func testMissingNode(t *testing.T, memonly bool) {
 	diskdb := ethdb.NewMemDatabase()
-	triedb := NewDatabase(diskdb)
 
-	trie, _ := New(common.Hash{}, triedb)
-	updateString(trie, "120000", "qwerqwerqwerqwerqwerqwerqwerqwer")
-	updateString(trie, "123456", "asdfasdfasdfasdfasdfasdfasdfasdf")
-	root, _ := trie.Commit(nil)
-	if !memonly {
-		triedb.Commit(root, true)
-	}
+	trie := New(common.Hash{}, testbucket, false)
+	updateString(trie, diskdb, "120000", "qwerqwerqwerqwerqwerqwerqwerqwer")
+	updateString(trie, diskdb, "123456", "asdfasdfasdfasdfasdfasdfasdfasdf")
+	root := trie.Hash()
 
-	trie, _ = New(root, triedb)
-	_, err := trie.TryGet([]byte("120000"))
+	trie = New(root, testbucket, false)
+	_, _, err := trie.TryGet(diskdb, []byte("120000"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	_, err = trie.TryGet([]byte("120099"))
+	trie = New(root, testbucket, false)
+	_, _, err = trie.TryGet(diskdb, []byte("120099"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	_, err = trie.TryGet([]byte("123456"))
+	trie = New(root, testbucket, false)
+	_, _, err = trie.TryGet(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	err = trie.TryUpdate([]byte("120099"), []byte("zxcvzxcvzxcvzxcvzxcvzxcvzxcvzxcv"))
+	trie = New(root, testbucket, false)
+	err = trie.TryUpdate(diskdb, []byte("120099"), []byte("zxcvzxcvzxcvzxcvzxcvzxcvzxcvzxcv"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	err = trie.TryDelete([]byte("123456"))
+	trie = New(root, testbucket, false)
+	err = trie.TryDelete(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
 
 	hash := common.HexToHash("0xe1d943cc8f061a0c0b98162830b970395ac9315654824bf21b73b891365262f9")
-	if memonly {
-		delete(triedb.dirties, hash)
-	} else {
-		diskdb.Delete(hash[:])
+	if !memonly {
+		diskdb.Delete(testbucket, hash[:])
 	}
 
-	trie, _ = New(root, triedb)
-	_, err = trie.TryGet([]byte("120000"))
+	trie = New(root, testbucket, false)
+	_, _, err = trie.TryGet(diskdb, []byte("120000"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	_, err = trie.TryGet([]byte("120099"))
+	trie = New(root, testbucket, false)
+	_, _, err = trie.TryGet(diskdb, []byte("120099"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	_, err = trie.TryGet([]byte("123456"))
+	trie = New(root, testbucket, false)
+	_, _, err = trie.TryGet(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	err = trie.TryUpdate([]byte("120099"), []byte("zxcv"))
+	trie = New(root, testbucket, false)
+	err = trie.TryUpdate(diskdb, []byte("120099"), []byte("zxcv"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie, _ = New(root, triedb)
-	err = trie.TryDelete([]byte("123456"))
+	trie = New(root, testbucket, false)
+	err = trie.TryDelete(diskdb, []byte("123456"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
 }
 
 func TestInsert(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 
-	updateString(trie, "doe", "reindeer")
-	updateString(trie, "dog", "puppy")
-	updateString(trie, "dogglesworth", "cat")
+	updateString(trie, diskdb, "doe", "reindeer")
+	updateString(trie, diskdb, "dog", "puppy")
+	updateString(trie, diskdb, "dogglesworth", "cat")
 
+	fmt.Printf("\n\n%s\n\n", trie.root.fstring(""))
 	exp := common.HexToHash("8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3")
 	root := trie.Hash()
 	if root != exp {
 		t.Errorf("exp %x got %x", exp, root)
 	}
 
-	trie = newEmpty()
-	updateString(trie, "A", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	diskdb, trie = newEmpty()
+	updateString(trie, diskdb, "A", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 	exp = common.HexToHash("d23786fb4a010da3ce639d66d5e904a11dbc02746d1ce25029e53290cabf28ab")
-	root, err := trie.Commit(nil)
-	if err != nil {
-		t.Fatalf("commit error: %v", err)
-	}
+	root = trie.Hash()
 	if root != exp {
 		t.Errorf("exp %x got %x", exp, root)
 	}
 }
 
 func TestGet(t *testing.T) {
-	trie := newEmpty()
-	updateString(trie, "doe", "reindeer")
-	updateString(trie, "dog", "puppy")
-	updateString(trie, "dogglesworth", "cat")
+	diskdb, trie := newEmpty()
+	updateString(trie, diskdb, "doe", "reindeer")
+	updateString(trie, diskdb, "dog", "puppy")
+	updateString(trie, diskdb, "dogglesworth", "cat")
 
 	for i := 0; i < 2; i++ {
-		res := getString(trie, "dog")
+		res := getString(trie, diskdb, "dog")
 		if !bytes.Equal(res, []byte("puppy")) {
 			t.Errorf("expected puppy got %x", res)
 		}
 
-		unknown := getString(trie, "unknown")
+		unknown := getString(trie, diskdb, "unknown")
 		if unknown != nil {
 			t.Errorf("expected nil got %x", unknown)
 		}
@@ -197,12 +179,11 @@ func TestGet(t *testing.T) {
 		if i == 1 {
 			return
 		}
-		trie.Commit(nil)
 	}
 }
 
 func TestDelete(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -215,9 +196,9 @@ func TestDelete(t *testing.T) {
 	}
 	for _, val := range vals {
 		if val.v != "" {
-			updateString(trie, val.k, val.v)
+			updateString(trie, diskdb, val.k, val.v)
 		} else {
-			deleteString(trie, val.k)
+			deleteString(trie, diskdb, val.k)
 		}
 	}
 
@@ -229,7 +210,7 @@ func TestDelete(t *testing.T) {
 }
 
 func TestEmptyValues(t *testing.T) {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
@@ -242,7 +223,7 @@ func TestEmptyValues(t *testing.T) {
 		{"shaman", ""},
 	}
 	for _, val := range vals {
-		updateString(trie, val.k, val.v)
+		updateString(trie, diskdb, val.k, val.v)
 	}
 
 	hash := trie.Hash()
@@ -252,8 +233,8 @@ func TestEmptyValues(t *testing.T) {
 	}
 }
 
-func TestReplication(t *testing.T) {
-	trie := newEmpty()
+func testReplication(t *testing.T) {
+	diskdb, trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -264,27 +245,18 @@ func TestReplication(t *testing.T) {
 		{"somethingveryoddindeedthis is", "myothernodedata"},
 	}
 	for _, val := range vals {
-		updateString(trie, val.k, val.v)
+		updateString(trie, diskdb, val.k, val.v)
 	}
-	exp, err := trie.Commit(nil)
-	if err != nil {
-		t.Fatalf("commit error: %v", err)
-	}
+	exp := trie.Hash()
 
 	// create a new trie on top of the database and check that lookups work.
-	trie2, err := New(exp, trie.db)
-	if err != nil {
-		t.Fatalf("can't recreate trie at %x: %v", exp, err)
-	}
+	trie2 := New(exp, testbucket, false)
 	for _, kv := range vals {
-		if string(getString(trie2, kv.k)) != kv.v {
+		if string(getString(trie2, diskdb, kv.k)) != kv.v {
 			t.Errorf("trie2 doesn't have %q => %q", kv.k, kv.v)
 		}
 	}
-	hash, err := trie2.Commit(nil)
-	if err != nil {
-		t.Fatalf("commit error: %v", err)
-	}
+	hash := trie2.Hash()
 	if hash != exp {
 		t.Errorf("root failure. expected %x got %x", exp, hash)
 	}
@@ -302,7 +274,7 @@ func TestReplication(t *testing.T) {
 		// {"shaman", ""},
 	}
 	for _, val := range vals2 {
-		updateString(trie2, val.k, val.v)
+		updateString(trie2, diskdb, val.k, val.v)
 	}
 	if hash := trie2.Hash(); hash != exp {
 		t.Errorf("root failure. expected %x got %x", exp, hash)
@@ -310,9 +282,9 @@ func TestReplication(t *testing.T) {
 }
 
 func TestLargeValue(t *testing.T) {
-	trie := newEmpty()
-	trie.Update([]byte("key1"), []byte{99, 99, 99, 99})
-	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32))
+	diskdb, trie := newEmpty()
+	trie.Update(diskdb, []byte("key1"), []byte{99, 99, 99, 99}, 0)
+	trie.Update(diskdb, []byte("key2"), bytes.Repeat([]byte{1}, 32), 0)
 	trie.Hash()
 }
 
@@ -321,41 +293,9 @@ type countingDB struct {
 	gets map[string]int
 }
 
-func (db *countingDB) Get(key []byte) ([]byte, error) {
+func (db *countingDB) Get(bucket []byte, key []byte) ([]byte, error) {
 	db.gets[string(key)]++
-	return db.Database.Get(key)
-}
-
-// TestCacheUnload checks that decoded nodes are unloaded after a
-// certain number of commit operations.
-func TestCacheUnload(t *testing.T) {
-	// Create test trie with two branches.
-	trie := newEmpty()
-	key1 := "---------------------------------"
-	key2 := "---some other branch"
-	updateString(trie, key1, "this is the branch of key1.")
-	updateString(trie, key2, "this is the branch of key2.")
-
-	root, _ := trie.Commit(nil)
-	trie.db.Commit(root, true)
-
-	// Commit the trie repeatedly and access key1.
-	// The branch containing it is loaded from DB exactly two times:
-	// in the 0th and 6th iteration.
-	diskdb := &countingDB{Database: trie.db.diskdb, gets: make(map[string]int)}
-	triedb := NewDatabase(diskdb)
-	trie, _ = New(root, triedb)
-	trie.SetCacheLimit(5)
-	for i := 0; i < 12; i++ {
-		getString(trie, key1)
-		trie.Commit(nil)
-	}
-	// Check that it got loaded two times.
-	for dbkey, count := range diskdb.gets {
-		if count != 2 {
-			t.Errorf("db key %x loaded %d times, want %d times", []byte(dbkey), count, 2)
-		}
-	}
+	return db.Database.Get(bucket, key)
 }
 
 // randTest performs random trie operations.
@@ -412,52 +352,41 @@ func (randTest) Generate(r *rand.Rand, size int) reflect.Value {
 }
 
 func runRandTest(rt randTest) bool {
-	triedb := NewDatabase(ethdb.NewMemDatabase())
-
-	tr, _ := New(common.Hash{}, triedb)
+	diskdb := ethdb.NewMemDatabase()
+	tr := New(common.Hash{}, testbucket, false)
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
 		switch step.op {
 		case opUpdate:
-			tr.Update(step.key, step.value)
+			tr.Update(diskdb, step.key, step.value, 0)
 			values[string(step.key)] = string(step.value)
 		case opDelete:
-			tr.Delete(step.key)
+			tr.Delete(diskdb, step.key, 0)
 			delete(values, string(step.key))
 		case opGet:
-			v := tr.Get(step.key)
+			v := tr.Get(diskdb, step.key, 0)
 			want := values[string(step.key)]
 			if string(v) != want {
 				rt[i].err = fmt.Errorf("mismatch for key 0x%x, got 0x%x want 0x%x", step.key, v, want)
 			}
 		case opCommit:
-			_, rt[i].err = tr.Commit(nil)
 		case opHash:
 			tr.Hash()
 		case opReset:
-			hash, err := tr.Commit(nil)
-			if err != nil {
-				rt[i].err = err
-				return false
-			}
-			newtr, err := New(hash, triedb)
-			if err != nil {
-				rt[i].err = err
-				return false
-			}
+			hash := tr.Hash()
+			newtr := New(hash, testbucket, false)
 			tr = newtr
 		case opItercheckhash:
-			checktr, _ := New(common.Hash{}, triedb)
-			it := NewIterator(tr.NodeIterator(nil))
+			checktr := New(common.Hash{}, testbucket, false)
+			it := NewIterator(tr.NodeIterator(diskdb, nil, 0))
 			for it.Next() {
-				checktr.Update(it.Key, it.Value)
+				checktr.Update(diskdb, it.Key, it.Value, 0)
 			}
 			if tr.Hash() != checktr.Hash() {
 				rt[i].err = fmt.Errorf("hash mismatch in opItercheckhash")
 			}
 		case opCheckCacheInvariant:
-			rt[i].err = checkCacheInvariant(tr.root, nil, tr.cachegen, false, 0)
 		}
 		// Abort the test on error.
 		if rt[i].err != nil {
@@ -467,41 +396,7 @@ func runRandTest(rt randTest) bool {
 	return true
 }
 
-func checkCacheInvariant(n, parent node, parentCachegen uint16, parentDirty bool, depth int) error {
-	var children []node
-	var flag nodeFlag
-	switch n := n.(type) {
-	case *shortNode:
-		flag = n.flags
-		children = []node{n.Val}
-	case *fullNode:
-		flag = n.flags
-		children = n.Children[:]
-	default:
-		return nil
-	}
-
-	errorf := func(format string, args ...interface{}) error {
-		msg := fmt.Sprintf(format, args...)
-		msg += fmt.Sprintf("\nat depth %d node %s", depth, spew.Sdump(n))
-		msg += fmt.Sprintf("parent: %s", spew.Sdump(parent))
-		return errors.New(msg)
-	}
-	if flag.gen > parentCachegen {
-		return errorf("cache invariant violation: %d > %d\n", flag.gen, parentCachegen)
-	}
-	if depth > 0 && !parentDirty && flag.dirty {
-		return errorf("cache invariant violation: %d > %d\n", flag.gen, parentCachegen)
-	}
-	for _, child := range children {
-		if err := checkCacheInvariant(child, n, flag.gen, flag.dirty, depth+1); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func TestRandom(t *testing.T) {
+func testRandom(t *testing.T) {
 	if err := quick.Check(runRandTest, nil); err != nil {
 		if cerr, ok := err.(*quick.CheckError); ok {
 			t.Fatalf("random test iteration %d failed: %s", cerr.Count, spew.Sdump(cerr.In))
@@ -519,39 +414,37 @@ const benchElemCount = 20000
 
 func benchGet(b *testing.B, commit bool) {
 	trie := new(Trie)
+	var tmpdb ethdb.Database
 	if commit {
-		_, tmpdb := tempDB()
-		trie, _ = New(common.Hash{}, tmpdb)
+		_, tmpdb = tempDB()
+		trie = New(common.Hash{}, testbucket, false)
 	}
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {
 		binary.LittleEndian.PutUint64(k, uint64(i))
-		trie.Update(k, k)
+		trie.Update(tmpdb, k, k, 0)
 	}
 	binary.LittleEndian.PutUint64(k, benchElemCount/2)
-	if commit {
-		trie.Commit(nil)
-	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		trie.Get(k)
+		trie.Get(tmpdb, k, 0)
 	}
 	b.StopTimer()
 
 	if commit {
-		ldb := trie.db.diskdb.(*ethdb.LDBDatabase)
+		ldb := tmpdb.(*ethdb.LDBDatabase)
 		ldb.Close()
 		os.RemoveAll(ldb.Path())
 	}
 }
 
 func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	k := make([]byte, 32)
 	for i := 0; i < b.N; i++ {
 		e.PutUint64(k, uint64(i))
-		trie.Update(k, k)
+		trie.Update(diskdb, k, k, 0)
 	}
 	return trie
 }
@@ -582,35 +475,35 @@ func BenchmarkHash(b *testing.B) {
 		accounts[i], _ = rlp.EncodeToBytes([]interface{}{nonce, balance, root, code})
 	}
 	// Insert the accounts into the trie and hash it
-	trie := newEmpty()
+	diskdb, trie := newEmpty()
 	for i := 0; i < len(addresses); i++ {
-		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])
+		trie.Update(diskdb, crypto.Keccak256(addresses[i][:]), accounts[i], 0)
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
 	trie.Hash()
 }
 
-func tempDB() (string, *Database) {
+func tempDB() (string, ethdb.Database) {
 	dir, err := ioutil.TempDir("", "trie-bench")
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary directory: %v", err))
 	}
-	diskdb, err := ethdb.NewLDBDatabase(dir, 256, 0)
+	diskdb, err := ethdb.NewLDBDatabase(dir, 256)
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary database: %v", err))
 	}
-	return dir, NewDatabase(diskdb)
+	return dir, diskdb
 }
 
-func getString(trie *Trie, k string) []byte {
-	return trie.Get([]byte(k))
+func getString(trie *Trie, db ethdb.Database, k string) []byte {
+	return trie.Get(db, []byte(k), 0)
 }
 
-func updateString(trie *Trie, k, v string) {
-	trie.Update([]byte(k), []byte(v))
+func updateString(trie *Trie, db ethdb.Database, k, v string) {
+	trie.Update(db, []byte(k), []byte(v), 0)
 }
 
-func deleteString(trie *Trie, k string) {
-	trie.Delete([]byte(k))
+func deleteString(trie *Trie, db ethdb.Database, k string) {
+	trie.Delete(db, []byte(k), 0)
 }

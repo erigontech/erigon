@@ -46,7 +46,6 @@ import (
 	"github.com/ethereum/go-ethereum/eth/gasprice"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/ethstats"
-	"github.com/ethereum/go-ethereum/les"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/metrics"
 	"github.com/ethereum/go-ethereum/metrics/influxdb"
@@ -57,7 +56,6 @@ import (
 	"github.com/ethereum/go-ethereum/p2p/nat"
 	"github.com/ethereum/go-ethereum/p2p/netutil"
 	"github.com/ethereum/go-ethereum/params"
-	whisper "github.com/ethereum/go-ethereum/whisper/whisperv6"
 	cli "gopkg.in/urfave/cli.v1"
 )
 
@@ -619,24 +617,6 @@ var (
 		Usage: "Suggested gas price is the given percentile of a set of recent transaction gas prices",
 		Value: eth.DefaultConfig.GPO.Percentile,
 	}
-	WhisperEnabledFlag = cli.BoolFlag{
-		Name:  "shh",
-		Usage: "Enable Whisper",
-	}
-	WhisperMaxMessageSizeFlag = cli.IntFlag{
-		Name:  "shh.maxmessagesize",
-		Usage: "Max message size accepted",
-		Value: int(whisper.DefaultMaxMessageSize),
-	}
-	WhisperMinPOWFlag = cli.Float64Flag{
-		Name:  "shh.pow",
-		Usage: "Minimum POW accepted",
-		Value: whisper.DefaultMinimumPoW,
-	}
-	WhisperRestrictConnectionBetweenLightClientsFlag = cli.BoolFlag{
-		Name:  "shh.restrict-light",
-		Usage: "Restrict connection between two whisper light clients",
-	}
 
 	// Metrics flags
 	MetricsEnabledFlag = cli.BoolFlag{
@@ -950,10 +930,11 @@ func makeDatabaseHandles() int {
 	if err != nil {
 		Fatalf("Failed to retrieve file descriptor allowance: %v", err)
 	}
-	if err := fdlimit.Raise(uint64(limit)); err != nil {
+	raised, err := fdlimit.Raise(uint64(limit))
+	if err != nil {
 		Fatalf("Failed to raise file descriptor allowance: %v", err)
 	}
-	return limit / 2 // Leave half for networking and other stuff
+	return int(raised / 2) // Leave half for networking and other stuff
 }
 
 // MakeAddress converts an account specified directly as a hex encoded string or
@@ -1202,6 +1183,9 @@ func setEthash(ctx *cli.Context, cfg *eth.Config) {
 	if ctx.GlobalIsSet(EthashDatasetsOnDiskFlag.Name) {
 		cfg.Ethash.DatasetsOnDisk = ctx.GlobalInt(EthashDatasetsOnDiskFlag.Name)
 	}
+	if ctx.GlobalIsSet(FakePoWFlag.Name) {
+		cfg.Ethash.PowMode = ethash.ModeFake
+	}
 }
 
 func setWhitelist(ctx *cli.Context, cfg *eth.Config) {
@@ -1265,19 +1249,6 @@ func checkExclusive(ctx *cli.Context, args ...interface{}) {
 	}
 	if len(set) > 1 {
 		Fatalf("Flags %v can't be used at the same time", strings.Join(set, ", "))
-	}
-}
-
-// SetShhConfig applies shh-related command line flags to the config.
-func SetShhConfig(ctx *cli.Context, stack *node.Node, cfg *whisper.Config) {
-	if ctx.GlobalIsSet(WhisperMaxMessageSizeFlag.Name) {
-		cfg.MaxMessageSize = uint32(ctx.GlobalUint(WhisperMaxMessageSizeFlag.Name))
-	}
-	if ctx.GlobalIsSet(WhisperMinPOWFlag.Name) {
-		cfg.MinimumAcceptedPOW = ctx.GlobalFloat64(WhisperMinPOWFlag.Name)
-	}
-	if ctx.GlobalIsSet(WhisperRestrictConnectionBetweenLightClientsFlag.Name) {
-		cfg.RestrictConnectionBetweenLightClients = true
 	}
 }
 
@@ -1421,7 +1392,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 	// TODO(fjl): move trie cache generations into config
 	if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-		state.MaxTrieCacheGen = uint16(gen)
+		state.MaxTrieCacheGen = uint32(gen)
 	}
 }
 
@@ -1435,20 +1406,10 @@ func SetDashboardConfig(ctx *cli.Context, cfg *dashboard.Config) {
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *eth.Config) {
 	var err error
-	if cfg.SyncMode == downloader.LightSync {
-		err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-			return les.New(ctx, cfg)
-		})
-	} else {
-		err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-			fullNode, err := eth.New(ctx, cfg)
-			if fullNode != nil && cfg.LightServ > 0 {
-				ls, _ := les.NewLesServer(fullNode, cfg)
-				fullNode.AddLesServer(ls)
-			}
-			return fullNode, err
-		})
-	}
+	err = stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
+		fullNode, err := eth.New(ctx, cfg)
+		return fullNode, err
+	})
 	if err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
@@ -1461,15 +1422,6 @@ func RegisterDashboardService(stack *node.Node, cfg *dashboard.Config, commit st
 	})
 }
 
-// RegisterShhService configures Whisper and adds it to the given node.
-func RegisterShhService(stack *node.Node, cfg *whisper.Config) {
-	if err := stack.Register(func(n *node.ServiceContext) (node.Service, error) {
-		return whisper.New(cfg), nil
-	}); err != nil {
-		Fatalf("Failed to register the Whisper service: %v", err)
-	}
-}
-
 // RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
 // the given node.
 func RegisterEthStatsService(stack *node.Node, url string) {
@@ -1478,10 +1430,7 @@ func RegisterEthStatsService(stack *node.Node, url string) {
 		var ethServ *eth.Ethereum
 		ctx.Service(&ethServ)
 
-		var lesServ *les.LightEthereum
-		ctx.Service(&lesServ)
-
-		return ethstats.New(url, ethServ, lesServ)
+		return ethstats.New(url, ethServ)
 	}); err != nil {
 		Fatalf("Failed to register the Ethereum Stats service: %v", err)
 	}
@@ -1527,15 +1476,11 @@ func SplitTagsFlag(tagsFlag string) map[string]string {
 
 // MakeChainDatabase open an LevelDB using the flags passed to the client and will hard crash if it fails.
 func MakeChainDatabase(ctx *cli.Context, stack *node.Node) ethdb.Database {
-	var (
-		cache   = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheDatabaseFlag.Name) / 100
-		handles = makeDatabaseHandles()
-	)
 	name := "chaindata"
 	if ctx.GlobalString(SyncModeFlag.Name) == "light" {
 		name = "lightchaindata"
 	}
-	chainDb, err := stack.OpenDatabase(name, cache, handles)
+	chainDb, err := stack.OpenDatabase(name)
 	if err != nil {
 		Fatalf("Could not open database: %v", err)
 	}
@@ -1561,7 +1506,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chainDb ethdb.Database) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx))
+	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx))
 	if err != nil {
 		Fatalf("%v", err)
 	}

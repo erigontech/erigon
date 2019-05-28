@@ -40,7 +40,7 @@ type Config struct {
 	// JumpTable contains the EVM instruction table. This
 	// may be left uninitialised and will be set to the default
 	// table.
-	JumpTable [256]operation
+	JumpTable *[256]operation
 
 	// Type of the EWASM interpreter
 	EWASMInterpreter string
@@ -98,16 +98,16 @@ func NewEVMInterpreter(evm *EVM, cfg Config) *EVMInterpreter {
 	// We use the STOP instruction whether to see
 	// the jump table was initialised. If it was not
 	// we'll set the default jump table.
-	if !cfg.JumpTable[STOP].valid {
+	if cfg.JumpTable == nil {
 		switch {
 		case evm.ChainConfig().IsConstantinople(evm.BlockNumber):
-			cfg.JumpTable = constantinopleInstructionSet
+			cfg.JumpTable = &constantinopleInstructionSet
 		case evm.ChainConfig().IsByzantium(evm.BlockNumber):
-			cfg.JumpTable = byzantiumInstructionSet
+			cfg.JumpTable = &byzantiumInstructionSet
 		case evm.ChainConfig().IsHomestead(evm.BlockNumber):
-			cfg.JumpTable = homesteadInstructionSet
+			cfg.JumpTable = &homesteadInstructionSet
 		default:
-			cfg.JumpTable = frontierInstructionSet
+			cfg.JumpTable = &frontierInstructionSet
 		}
 	}
 

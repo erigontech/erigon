@@ -78,10 +78,18 @@ type vmExecMarshaling struct {
 	GasPrice *math.HexOrDecimal256
 }
 
-func (t *VMTest) Run(vmconfig vm.Config) error {
-	statedb := MakePreState(ethdb.NewMemDatabase(), t.json.Pre)
+func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
+	db := ethdb.NewMemDatabase()
+	statedb, tds, err := MakePreState(db, t.json.Pre, blockNr)
+	if err != nil {
+		return fmt.Errorf("Error in MakePreState: %v", err)
+	}
 	ret, gasRemaining, err := t.exec(statedb, vmconfig)
+	if err != nil {
+		return fmt.Errorf("Execution error: %v", err)
+	}
 
+	statedb.Finalise(false, tds.TrieStateWriter())
 	if t.json.GasRemaining == nil {
 		if err == nil {
 			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")
@@ -105,9 +113,13 @@ func (t *VMTest) Run(vmconfig vm.Config) error {
 			}
 		}
 	}
-	// if root := statedb.IntermediateRoot(false); root != t.json.PostStateRoot {
+	_, err = tds.IntermediateRoot(statedb, false)
+	if err != nil {
+		return fmt.Errorf("Error calculating state root: %v", err)
+	}
+	//if root != t.json.PostStateRoot {
 	// 	return fmt.Errorf("post state root mismatch, got %x, want %x", root, t.json.PostStateRoot)
-	// }
+	//}
 	if logs := rlpHash(statedb.Logs()); logs != common.Hash(t.json.Logs) {
 		return fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, t.json.Logs)
 	}

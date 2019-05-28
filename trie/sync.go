@@ -35,9 +35,10 @@ var ErrAlreadyProcessed = errors.New("already processed")
 
 // request represents a scheduled or already in-flight state retrieval request.
 type request struct {
-	hash common.Hash // Hash of the node data content to retrieve
-	data []byte      // Data content of the node, cached until all subtrees complete
-	raw  bool        // Whether this is a raw entry (code) or a trie node
+	hash   common.Hash // Hash of the node data content to retrieve
+	bucket []byte      // Database bucket distinguishing between the tries
+	data   []byte      // Data content of the node, cached until all subtrees complete
+	raw    bool        // Whether this is a raw entry (code) or a trie node
 
 	parents []*request // Parent state nodes referencing this entry (notify all upon completion)
 	depth   int        // Depth level within the trie the node is located to prioritise DFS
@@ -56,15 +57,17 @@ type SyncResult struct {
 // syncMemBatch is an in-memory buffer of successfully downloaded but not yet
 // persisted data items.
 type syncMemBatch struct {
-	batch map[common.Hash][]byte // In-memory membatch of recently completed items
-	order []common.Hash          // Order of completion to prevent out-of-order data loss
+	buckets map[common.Hash][]byte // Corresponding buckets
+	batch   map[common.Hash][]byte // In-memory membatch of recently completed items
+	order   []common.Hash          // Order of completion to prevent out-of-order data loss
 }
 
 // newSyncMemBatch allocates a new memory-buffer for not-yet persisted trie nodes.
 func newSyncMemBatch() *syncMemBatch {
 	return &syncMemBatch{
-		batch: make(map[common.Hash][]byte),
-		order: make([]common.Hash, 0, 256),
+		batch:   make(map[common.Hash][]byte),
+		buckets: make(map[common.Hash][]byte),
+		order:   make([]common.Hash, 0, 256),
 	}
 }
 
@@ -79,19 +82,19 @@ type Sync struct {
 }
 
 // NewSync creates a new trie data download scheduler.
-func NewSync(root common.Hash, database DatabaseReader, callback LeafCallback) *Sync {
+func NewSync(bucket []byte, root common.Hash, database DatabaseReader, callback LeafCallback) *Sync {
 	ts := &Sync{
 		database: database,
 		membatch: newSyncMemBatch(),
 		requests: make(map[common.Hash]*request),
 		queue:    prque.New(nil),
 	}
-	ts.AddSubTrie(root, 0, common.Hash{}, callback)
+	ts.AddSubTrie(bucket, root, 0, common.Hash{}, callback)
 	return ts
 }
 
 // AddSubTrie registers a new trie to the sync code, rooted at the designated parent.
-func (s *Sync) AddSubTrie(root common.Hash, depth int, parent common.Hash, callback LeafCallback) {
+func (s *Sync) AddSubTrie(bucket []byte, root common.Hash, depth int, parent common.Hash, callback LeafCallback) {
 	// Short circuit if the trie is empty or already known
 	if root == emptyRoot {
 		return
@@ -100,13 +103,14 @@ func (s *Sync) AddSubTrie(root common.Hash, depth int, parent common.Hash, callb
 		return
 	}
 	key := root.Bytes()
-	blob, _ := s.database.Get(key)
-	if local, err := decodeNode(key, blob, 0); local != nil && err == nil {
+	blob, _ := s.database.Get(bucket, key)
+	if local, err := decodeNode(key, blob); local != nil && err == nil {
 		return
 	}
 	// Assemble the new sub-trie sync request
 	req := &request{
 		hash:     root,
+		bucket:   bucket,
 		depth:    depth,
 		callback: callback,
 	}
@@ -126,7 +130,7 @@ func (s *Sync) AddSubTrie(root common.Hash, depth int, parent common.Hash, callb
 // interpreted as a trie node, but rather accepted and stored into the database
 // as is. This method's goal is to support misc state metadata retrievals (e.g.
 // contract code).
-func (s *Sync) AddRawEntry(hash common.Hash, depth int, parent common.Hash) {
+func (s *Sync) AddRawEntry(bucket []byte, hash common.Hash, depth int, parent common.Hash) {
 	// Short circuit if the entry is empty or already known
 	if hash == emptyState {
 		return
@@ -134,14 +138,15 @@ func (s *Sync) AddRawEntry(hash common.Hash, depth int, parent common.Hash) {
 	if _, ok := s.membatch.batch[hash]; ok {
 		return
 	}
-	if ok, _ := s.database.Has(hash.Bytes()); ok {
+	if ok, _ := s.database.Has(bucket, hash.Bytes()); ok {
 		return
 	}
 	// Assemble the new sub-trie sync request
 	req := &request{
-		hash:  hash,
-		raw:   true,
-		depth: depth,
+		hash:   hash,
+		bucket: bucket,
+		raw:    true,
+		depth:  depth,
 	}
 	// If this sub-trie has a designated parent, link them together
 	if parent != (common.Hash{}) {
@@ -187,7 +192,7 @@ func (s *Sync) Process(results []SyncResult) (bool, int, error) {
 			continue
 		}
 		// Decode the node data content and update the request
-		node, err := decodeNode(item.Hash[:], item.Data, 0)
+		node, err := decodeNode(item.Hash[:], item.Data)
 		if err != nil {
 			return committed, i, err
 		}
@@ -216,7 +221,7 @@ func (s *Sync) Process(results []SyncResult) (bool, int, error) {
 func (s *Sync) Commit(dbw ethdb.Putter) (int, error) {
 	// Dump the membatch into a database dbw
 	for i, key := range s.membatch.order {
-		if err := dbw.Put(key[:], s.membatch.batch[key]); err != nil {
+		if err := dbw.Put(s.membatch.buckets[key], key[:], s.membatch.batch[key]); err != nil {
 			return i, err
 		}
 	}
@@ -292,12 +297,13 @@ func (s *Sync) children(req *request, object node) ([]*request, error) {
 			if _, ok := s.membatch.batch[hash]; ok {
 				continue
 			}
-			if ok, _ := s.database.Has(node); ok {
+			if ok, _ := s.database.Has(req.bucket, node); ok {
 				continue
 			}
 			// Locally unknown node, schedule for retrieval
 			requests = append(requests, &request{
 				hash:     hash,
+				bucket:   req.bucket,
 				parents:  []*request{req},
 				depth:    child.depth,
 				callback: req.callback,
@@ -312,6 +318,7 @@ func (s *Sync) children(req *request, object node) ([]*request, error) {
 // committed themselves.
 func (s *Sync) commit(req *request) (err error) {
 	// Write the node content to the membatch
+	s.membatch.buckets[req.hash] = req.bucket
 	s.membatch.batch[req.hash] = req.data
 	s.membatch.order = append(s.membatch.order, req.hash)
 

@@ -17,12 +17,12 @@
 package core
 
 import (
-	"time"
+	//"time"
 
-	"github.com/ethereum/go-ethereum/common"
+	//"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/mclock"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/log"
+	//"github.com/ethereum/go-ethereum/log"
 )
 
 // insertStats tracks and reports on block insertion.
@@ -35,10 +35,11 @@ type insertStats struct {
 
 // statsReportLimit is the time limit during import and export after which we
 // always print out progress. This avoids the user wondering what's going on.
-const statsReportLimit = 8 * time.Second
+//const statsReportLimit = 8 * time.Second
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
+/*
 func (st *insertStats) report(chain []*types.Block, index int, cache common.StorageSize) {
 	// Fetch the timings for the batch
 	var (
@@ -77,6 +78,7 @@ func (st *insertStats) report(chain []*types.Block, index int, cache common.Stor
 		*st = insertStats{startTime: now, lastIndex: index + 1}
 	}
 }
+*/
 
 // insertIterator is a helper to assist during chain import.
 type insertIterator struct {

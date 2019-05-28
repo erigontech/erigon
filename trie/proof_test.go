@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	//"fmt"
 	crand "crypto/rand"
 	mrand "math/rand"
 	"testing"
@@ -34,21 +35,21 @@ func init() {
 
 // makeProvers creates Merkle trie provers based on different implementations to
 // test all variations.
-func makeProvers(trie *Trie) []func(key []byte) *ethdb.MemDatabase {
-	var provers []func(key []byte) *ethdb.MemDatabase
+func makeProvers(trie *Trie) []func(key []byte) ethdb.Database {
+	var provers []func(key []byte) ethdb.Database
 
 	// Create a direct trie based Merkle prover
-	provers = append(provers, func(key []byte) *ethdb.MemDatabase {
+	provers = append(provers, func(key []byte) ethdb.Database {
 		proof := ethdb.NewMemDatabase()
-		trie.Prove(key, 0, proof)
+		trie.Prove(proof, key, 0, proof, 0)
 		return proof
 	})
 	// Create a leaf iterator based Merkle prover
-	provers = append(provers, func(key []byte) *ethdb.MemDatabase {
+	provers = append(provers, func(key []byte) ethdb.Database {
 		proof := ethdb.NewMemDatabase()
-		if it := NewIterator(trie.NodeIterator(key)); it.Next() && bytes.Equal(key, it.Key) {
+		if it := NewIterator(trie.NodeIterator(proof, key, 0)); it.Next() && bytes.Equal(key, it.Key) {
 			for _, p := range it.Prove() {
-				proof.Put(crypto.Keccak256(p), p)
+				proof.Put(testbucket, crypto.Keccak256(p), p)
 			}
 		}
 		return proof
@@ -76,15 +77,16 @@ func TestProof(t *testing.T) {
 	}
 }
 
-func TestOneElementProof(t *testing.T) {
+func testOneElementProof(t *testing.T) {
 	trie := new(Trie)
-	updateString(trie, "k", "v")
+	db := ethdb.NewMemDatabase()
+	updateString(trie, db, "k", "v")
 	for i, prover := range makeProvers(trie) {
 		proof := prover([]byte("k"))
 		if proof == nil {
 			t.Fatalf("prover %d: nil proof", i)
 		}
-		if proof.Len() != 1 {
+		if proof.Size() != 1 {
 			t.Errorf("prover %d: proof should have one element", i)
 		}
 		val, _, err := VerifyProof(trie.Hash(), []byte("k"), proof)
@@ -106,12 +108,12 @@ func TestBadProof(t *testing.T) {
 			if proof == nil {
 				t.Fatalf("prover %d: nil proof", i)
 			}
-			key := proof.Keys()[mrand.Intn(proof.Len())]
-			val, _ := proof.Get(key)
-			proof.Delete(key)
+			key := proof.(ethdb.Mutation).Keys()[mrand.Intn(proof.Size())/2]
+			val, _ := proof.Get(testbucket, key)
+			proof.Delete(testbucket, key)
 
 			mutateByte(val)
-			proof.Put(crypto.Keccak256(val), val)
+			proof.Put(testbucket, crypto.Keccak256(val), val)
 
 			if _, _, err := VerifyProof(root, kv.k, proof); err == nil {
 				t.Fatalf("prover %d: expected proof to fail for key %x", i, kv.k)
@@ -124,13 +126,14 @@ func TestBadProof(t *testing.T) {
 // entry trie and checks for missing keys both before and after the single entry.
 func TestMissingKeyProof(t *testing.T) {
 	trie := new(Trie)
-	updateString(trie, "k", "v")
+	db := ethdb.NewMemDatabase()
+	updateString(trie, db, "k", "v")
 
 	for i, key := range []string{"a", "j", "l", "z"} {
 		proof := ethdb.NewMemDatabase()
-		trie.Prove([]byte(key), 0, proof)
+		trie.Prove(proof, []byte(key), 0, proof, 0)
 
-		if proof.Len() != 1 {
+		if proof.Size() != 1 {
 			t.Errorf("test %d: proof should have one element", i)
 		}
 		val, _, err := VerifyProof(trie.Hash(), []byte(key), proof)
@@ -154,7 +157,7 @@ func mutateByte(b []byte) {
 	}
 }
 
-func BenchmarkProve(b *testing.B) {
+func benchmarkProve(b *testing.B) {
 	trie, vals := randomTrie(100)
 	var keys []string
 	for k := range vals {
@@ -165,21 +168,21 @@ func BenchmarkProve(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		kv := vals[keys[i%len(keys)]]
 		proofs := ethdb.NewMemDatabase()
-		if trie.Prove(kv.k, 0, proofs); len(proofs.Keys()) == 0 {
+		if trie.Prove(nil, kv.k, 0, proofs, 0); len(proofs.Keys()) == 0 {
 			b.Fatalf("zero length proof for %x", kv.k)
 		}
 	}
 }
 
-func BenchmarkVerifyProof(b *testing.B) {
+func benchmarkVerifyProof(b *testing.B) {
 	trie, vals := randomTrie(100)
 	root := trie.Hash()
 	var keys []string
-	var proofs []*ethdb.MemDatabase
+	var proofs []ethdb.Mutation
 	for k := range vals {
 		keys = append(keys, k)
 		proof := ethdb.NewMemDatabase()
-		trie.Prove([]byte(k), 0, proof)
+		trie.Prove(nil, []byte(k), 0, proof, 0)
 		proofs = append(proofs, proof)
 	}
 
@@ -192,20 +195,23 @@ func BenchmarkVerifyProof(b *testing.B) {
 	}
 }
 
+var testbucket = []byte("B")
+
 func randomTrie(n int) (*Trie, map[string]*kv) {
 	trie := new(Trie)
+	trie.prefix = testbucket
 	vals := make(map[string]*kv)
 	for i := byte(0); i < 100; i++ {
 		value := &kv{common.LeftPadBytes([]byte{i}, 32), []byte{i}, false}
 		value2 := &kv{common.LeftPadBytes([]byte{i + 10}, 32), []byte{i}, false}
-		trie.Update(value.k, value.v)
-		trie.Update(value2.k, value2.v)
+		trie.Update(nil, value.k, value.v, 0)
+		trie.Update(nil, value2.k, value2.v, 0)
 		vals[string(value.k)] = value
 		vals[string(value2.k)] = value2
 	}
 	for i := 0; i < n; i++ {
 		value := &kv{randBytes(32), randBytes(20), false}
-		trie.Update(value.k, value.v)
+		trie.Update(nil, value.k, value.v, 0)
 		vals[string(value.k)] = value
 	}
 	return trie, vals

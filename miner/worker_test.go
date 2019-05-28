@@ -153,7 +153,7 @@ func testPendingStateAndBlock(t *testing.T, chainConfig *params.ChainConfig, eng
 
 	// Ensure snapshot has been updated.
 	time.Sleep(100 * time.Millisecond)
-	block, state := w.pending()
+	block, state, _ := w.pending()
 	if block.NumberU64() != 1 {
 		t.Errorf("block number mismatch: have %d, want %d", block.NumberU64(), 1)
 	}
@@ -164,7 +164,7 @@ func testPendingStateAndBlock(t *testing.T, chainConfig *params.ChainConfig, eng
 
 	// Ensure the new tx events has been processed
 	time.Sleep(100 * time.Millisecond)
-	block, state = w.pending()
+	block, state, _ = w.pending()
 	if balance := state.GetBalance(testUserAddress); balance.Cmp(big.NewInt(2000)) != 0 {
 		t.Errorf("account balance mismatch: have %d, want %d", balance, 2000)
 	}

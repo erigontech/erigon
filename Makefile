@@ -21,6 +21,31 @@ swarm:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/swarm\" to launch swarm."
 
+hack:
+	build/env.sh go run build/ci.go install ./cmd/hack
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/hack\" to launch hack."
+
+tester:
+	build/env.sh go run build/ci.go install ./cmd/tester
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/tester\" to launch tester."
+
+rpctest:
+	build/env.sh go run build/ci.go install ./cmd/rpctest
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/rpctest\" to launch rpctest."
+
+state:
+	build/env.sh go run build/ci.go install ./cmd/state
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/state\" to launch state."
+
+morus:
+	build/env.sh go run build/ci.go install ./cmd/morus
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/morus\" to launch state."
+
 all:
 	build/env.sh go run build/ci.go install
 

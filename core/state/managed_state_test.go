@@ -26,7 +26,9 @@ import (
 var addr = common.BytesToAddress([]byte("test"))
 
 func create() (*ManagedState, *account) {
-	statedb, _ := New(common.Hash{}, NewDatabase(ethdb.NewMemDatabase()))
+	db := ethdb.NewMemDatabase()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 1)
+	statedb := New(tds)
 	ms := ManageState(statedb)
 	ms.StateDB.SetNonce(addr, 100)
 	ms.accounts[addr] = newAccount(ms.StateDB.getStateObject(addr))

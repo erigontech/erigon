@@ -80,7 +80,7 @@ func encodeBlockNumber(number uint64) []byte {
 
 // headerKey = headerPrefix + num (uint64 big endian) + hash
 func headerKey(number uint64, hash common.Hash) []byte {
-	return append(append(headerPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+	return append(encodeBlockNumber(number), hash.Bytes()...)
 }
 
 // headerTDKey = headerPrefix + num (uint64 big endian) + hash + headerTDSuffix
@@ -90,7 +90,7 @@ func headerTDKey(number uint64, hash common.Hash) []byte {
 
 // headerHashKey = headerPrefix + num (uint64 big endian) + headerHashSuffix
 func headerHashKey(number uint64) []byte {
-	return append(append(headerPrefix, encodeBlockNumber(number)...), headerHashSuffix...)
+	return append(encodeBlockNumber(number), headerHashSuffix...)
 }
 
 // headerNumberKey = headerNumberPrefix + hash
@@ -100,12 +100,12 @@ func headerNumberKey(hash common.Hash) []byte {
 
 // blockBodyKey = blockBodyPrefix + num (uint64 big endian) + hash
 func blockBodyKey(number uint64, hash common.Hash) []byte {
-	return append(append(blockBodyPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+	return append(encodeBlockNumber(number), hash.Bytes()...)
 }
 
 // blockReceiptsKey = blockReceiptsPrefix + num (uint64 big endian) + hash
 func blockReceiptsKey(number uint64, hash common.Hash) []byte {
-	return append(append(blockReceiptsPrefix, encodeBlockNumber(number)...), hash.Bytes()...)
+	return append(encodeBlockNumber(number), hash.Bytes()...)
 }
 
 // txLookupKey = txLookupPrefix + hash
@@ -115,10 +115,10 @@ func txLookupKey(hash common.Hash) []byte {
 
 // bloomBitsKey = bloomBitsPrefix + bit (uint16 big endian) + section (uint64 big endian) + hash
 func bloomBitsKey(bit uint, section uint64, hash common.Hash) []byte {
-	key := append(append(bloomBitsPrefix, make([]byte, 10)...), hash.Bytes()...)
+	key := append(make([]byte, 10), hash.Bytes()...)
 
-	binary.BigEndian.PutUint16(key[1:], uint16(bit))
-	binary.BigEndian.PutUint64(key[3:], section)
+	binary.BigEndian.PutUint16(key[0:], uint16(bit))
+	binary.BigEndian.PutUint64(key[2:], section)
 
 	return key
 }

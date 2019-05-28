@@ -28,6 +28,9 @@ import (
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/ethash"
+	"github.com/ethereum/go-ethereum/core"
+	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/ethdb"
 	"github.com/ethereum/go-ethereum/event"
@@ -72,7 +75,7 @@ func newTester() *downloadTester {
 		ownChainTd:  map[common.Hash]*big.Int{testGenesis.Hash(): testGenesis.Difficulty()},
 	}
 	tester.stateDb = ethdb.NewMemDatabase()
-	tester.stateDb.Put(testGenesis.Root().Bytes(), []byte{0x00})
+	tester.stateDb.Put(nil, testGenesis.Root().Bytes(), []byte{0x00})
 	tester.downloader = New(FullSync, tester.stateDb, new(event.TypeMux), tester, nil, tester.dropPeer)
 	return tester
 }
@@ -160,9 +163,7 @@ func (dl *downloadTester) CurrentBlock() *types.Block {
 
 	for i := len(dl.ownHashes) - 1; i >= 0; i-- {
 		if block := dl.ownBlocks[dl.ownHashes[i]]; block != nil {
-			if _, err := dl.stateDb.Get(block.Root().Bytes()); err == nil {
-				return block
-			}
+			return block
 		}
 	}
 	return dl.genesis
@@ -185,7 +186,7 @@ func (dl *downloadTester) CurrentFastBlock() *types.Block {
 func (dl *downloadTester) FastSyncCommitHead(hash common.Hash) error {
 	// For now only check that the state trie is correct
 	if block := dl.GetBlockByHash(hash); block != nil {
-		_, err := trie.NewSecure(block.Root(), trie.NewDatabase(dl.stateDb), 0)
+		_, err := trie.NewSecure(block.Root(), state.AccountsBucket, nil, false)
 		return err
 	}
 	return fmt.Errorf("non existent block: %x", hash[:4])
@@ -234,10 +235,8 @@ func (dl *downloadTester) InsertChain(blocks types.Blocks) (i int, err error) {
 	defer dl.lock.Unlock()
 
 	for i, block := range blocks {
-		if parent, ok := dl.ownBlocks[block.ParentHash()]; !ok {
+		if _, ok := dl.ownBlocks[block.ParentHash()]; !ok {
 			return i, errors.New("unknown parent")
-		} else if _, err := dl.stateDb.Get(parent.Root().Bytes()); err != nil {
-			return i, fmt.Errorf("unknown parent state %x: %v", parent.Root(), err)
 		}
 		if _, ok := dl.ownHeaders[block.Hash()]; !ok {
 			dl.ownHashes = append(dl.ownHashes, block.Hash())
@@ -245,7 +244,7 @@ func (dl *downloadTester) InsertChain(blocks types.Blocks) (i int, err error) {
 		}
 		dl.ownBlocks[block.Hash()] = block
 		dl.ownReceipts[block.Hash()] = make(types.Receipts, 0)
-		dl.stateDb.Put(block.Root().Bytes(), []byte{0x00})
+		dl.stateDb.Put(nil, block.Root().Bytes(), []byte{0x00})
 		dl.ownChainTd[block.Hash()] = new(big.Int).Add(dl.ownChainTd[block.ParentHash()], block.Difficulty())
 	}
 	return len(blocks), nil
@@ -371,13 +370,6 @@ func (dlp *downloadTesterPeer) RequestNodeData(hashes []common.Hash) error {
 	defer dlp.dl.lock.RUnlock()
 
 	results := make([][]byte, 0, len(hashes))
-	for _, hash := range hashes {
-		if data, err := dlp.dl.peerDb.Get(hash.Bytes()); err == nil {
-			if !dlp.missingStates[hash] {
-				results = append(results, data)
-			}
-		}
-	}
 	go dlp.dl.downloader.DeliverNodeData(dlp.id, results)
 	return nil
 }

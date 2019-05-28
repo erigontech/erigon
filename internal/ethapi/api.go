@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"strings"
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
@@ -42,8 +41,6 @@ import (
 	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/rpc"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
 )
 
 const (
@@ -514,52 +511,55 @@ type StorageResult struct {
 
 // GetProof returns the Merkle-proof for a given account and optionally some storage keys.
 func (s *PublicBlockChainAPI) GetProof(ctx context.Context, address common.Address, storageKeys []string, blockNr rpc.BlockNumber) (*AccountResult, error) {
-	state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
-	if state == nil || err != nil {
-		return nil, err
-	}
-
-	storageTrie := state.StorageTrie(address)
-	storageHash := types.EmptyRootHash
-	codeHash := state.GetCodeHash(address)
-	storageProof := make([]StorageResult, len(storageKeys))
-
-	// if we have a storageTrie, (which means the account exists), we can update the storagehash
-	if storageTrie != nil {
-		storageHash = storageTrie.Hash()
-	} else {
-		// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
-		codeHash = crypto.Keccak256Hash(nil)
-	}
-
-	// create the proof for the storageKeys
-	for i, key := range storageKeys {
-		if storageTrie != nil {
-			proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
-			if storageError != nil {
-				return nil, storageError
-			}
-			storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
-		} else {
-			storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+	/*
+		state, _, err := s.b.StateAndHeaderByNumber(ctx, blockNr)
+		if state == nil || err != nil {
+			return nil, err
 		}
-	}
 
-	// create the accountProof
-	accountProof, proofErr := state.GetProof(address)
-	if proofErr != nil {
-		return nil, proofErr
-	}
+		storageTrie := state.StorageTrie(address)
+		storageHash := types.EmptyRootHash
+		codeHash := state.GetCodeHash(address)
+		storageProof := make([]StorageResult, len(storageKeys))
 
-	return &AccountResult{
-		Address:      address,
-		AccountProof: common.ToHexArray(accountProof),
-		Balance:      (*hexutil.Big)(state.GetBalance(address)),
-		CodeHash:     codeHash,
-		Nonce:        hexutil.Uint64(state.GetNonce(address)),
-		StorageHash:  storageHash,
-		StorageProof: storageProof,
-	}, state.Error()
+		// if we have a storageTrie, (which means the account exists), we can update the storagehash
+		if storageTrie != nil {
+			storageHash = storageTrie.Hash()
+		} else {
+			// no storageTrie means the account does not exist, so the codeHash is the hash of an empty bytearray.
+			codeHash = crypto.Keccak256Hash(nil)
+		}
+
+		// create the proof for the storageKeys
+		for i, key := range storageKeys {
+			if storageTrie != nil {
+				proof, storageError := state.GetStorageProof(address, common.HexToHash(key))
+				if storageError != nil {
+					return nil, storageError
+				}
+				storageProof[i] = StorageResult{key, (*hexutil.Big)(state.GetState(address, common.HexToHash(key)).Big()), common.ToHexArray(proof)}
+			} else {
+				storageProof[i] = StorageResult{key, &hexutil.Big{}, []string{}}
+			}
+		}
+
+		// create the accountProof
+		accountProof, proofErr := state.GetProof(address)
+		if proofErr != nil {
+			return nil, proofErr
+		}
+
+		return &AccountResult{
+			Address:      address,
+			AccountProof: common.ToHexArray(accountProof),
+			Balance:      (*hexutil.Big)(state.GetBalance(address)),
+			CodeHash:     codeHash,
+			Nonce:        hexutil.Uint64(state.GetNonce(address)),
+			StorageHash:  storageHash,
+			StorageProof: storageProof,
+		}, state.Error()
+	*/
+	return nil, nil
 }
 
 // GetBlockByNumber returns the requested block. When blockNr is -1 the chain head is returned. When fullTx is true all
@@ -1146,6 +1146,18 @@ func (s *PublicTransactionPoolAPI) GetTransactionReceipt(ctx context.Context, ha
 	}
 	from, _ := types.Sender(signer, tx)
 
+	// Fill in the derived information in the logs
+	if receipt.Logs != nil {
+		for i, log := range receipt.Logs {
+			log.BlockNumber = blockNumber
+			log.TxHash = hash
+			log.TxIndex = uint(index)
+			log.BlockHash = blockHash
+			log.Index = uint(i)
+		}
+	}
+	// Now reconstruct the bloom filter
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 	fields := map[string]interface{}{
 		"blockHash":         blockHash,
 		"blockNumber":       hexutil.Uint64(blockNumber),
@@ -1513,35 +1525,10 @@ func NewPrivateDebugAPI(b Backend) *PrivateDebugAPI {
 
 // ChaindbProperty returns leveldb properties of the chain database.
 func (api *PrivateDebugAPI) ChaindbProperty(property string) (string, error) {
-	ldb, ok := api.b.ChainDb().(interface {
-		LDB() *leveldb.DB
-	})
-	if !ok {
-		return "", fmt.Errorf("chaindbProperty does not work for memory databases")
-	}
-	if property == "" {
-		property = "leveldb.stats"
-	} else if !strings.HasPrefix(property, "leveldb.") {
-		property = "leveldb." + property
-	}
-	return ldb.LDB().GetProperty(property)
+	return "N/A", nil
 }
 
 func (api *PrivateDebugAPI) ChaindbCompact() error {
-	ldb, ok := api.b.ChainDb().(interface {
-		LDB() *leveldb.DB
-	})
-	if !ok {
-		return fmt.Errorf("chaindbCompact does not work for memory databases")
-	}
-	for b := byte(0); b < 255; b++ {
-		log.Info("Compacting chain database", "range", fmt.Sprintf("0x%0.2X-0x%0.2X", b, b+1))
-		err := ldb.LDB().CompactRange(util.Range{Start: []byte{b}, Limit: []byte{b + 1}})
-		if err != nil {
-			log.Error("Database compaction failed", "err", err)
-			return err
-		}
-	}
 	return nil
 }
 

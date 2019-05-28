@@ -22,31 +22,49 @@ const IdealBatchSize = 100 * 1024
 
 // Putter wraps the database write operation supported by both batches and regular databases.
 type Putter interface {
-	Put(key []byte, value []byte) error
+	Put(bucket, key, value []byte) error
+	PutS(hBucket, key, value []byte, timestamp uint64) error
+	DeleteTimestamp(timestamp uint64) error
+}
+
+type Getter interface {
+	Get(bucket, key []byte) ([]byte, error)
+	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
+	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
+	Has(bucket, key []byte) (bool, error)
+	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
+	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
+	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
+	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error
 }
 
 // Deleter wraps the database delete operation supported by both batches and regular databases.
 type Deleter interface {
-	Delete(key []byte) error
+	Delete(bucket, key []byte) error
+}
+
+type GetterPutter interface {
+	Getter
+	Putter
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
+	Getter
 	Putter
 	Deleter
-	Get(key []byte) ([]byte, error)
-	Has(key []byte) (bool, error)
+	MultiPut(tuples ...[]byte) (uint64, error)
+	RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error
 	Close()
-	NewBatch() Batch
+	NewBatch() Mutation
+	Size() int
 }
 
-// Batch is a write-only database that commits changes to its host database
-// when Write is called. Batch cannot be used concurrently.
-type Batch interface {
-	Putter
-	Deleter
-	ValueSize() int // amount of data in the batch
-	Write() error
-	// Reset resets the batch for reuse
-	Reset()
+// Extended version of the Batch, with read capabilites
+type Mutation interface {
+	Database
+	Commit() (uint64, error)
+	Rollback()
+	Keys() [][]byte
+	BatchSize() int
 }

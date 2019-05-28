@@ -118,7 +118,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
-	chainConfig, genesisHash, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.ConstantinopleOverride)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.ConstantinopleOverride)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -179,8 +179,8 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 
-	eth.miner = miner.New(eth, eth.chainConfig, eth.EventMux(), eth.engine, config.MinerRecommit, config.MinerGasFloor, config.MinerGasCeil, eth.isLocalBlock)
-	eth.miner.SetExtra(makeExtraData(config.MinerExtraData))
+	//eth.miner = miner.New(eth, eth.chainConfig, eth.EventMux(), eth.engine, config.MinerRecommit, config.MinerGasFloor, config.MinerGasCeil, eth.isLocalBlock)
+	//eth.miner.SetExtra(makeExtraData(config.MinerExtraData))
 
 	eth.APIBackend = &EthAPIBackend{eth, nil}
 	gpoParams := config.GPO
@@ -211,12 +211,9 @@ func makeExtraData(extra []byte) []byte {
 
 // CreateDB creates the chain database.
 func CreateDB(ctx *node.ServiceContext, config *Config, name string) (ethdb.Database, error) {
-	db, err := ctx.OpenDatabase(name, config.DatabaseCache, config.DatabaseHandles)
+	db, err := ctx.OpenDatabase(name)
 	if err != nil {
 		return nil, err
-	}
-	if db, ok := db.(*ethdb.LDBDatabase); ok {
-		db.Meter("eth/db/chaindata/")
 	}
 	return db, nil
 }
@@ -278,11 +275,13 @@ func (s *Ethereum) APIs() []rpc.API {
 			Service:   downloader.NewPublicDownloaderAPI(s.protocolManager.downloader, s.eventMux),
 			Public:    true,
 		}, {
-			Namespace: "miner",
-			Version:   "1.0",
-			Service:   NewPrivateMinerAPI(s),
-			Public:    false,
-		}, {
+			/*
+					Namespace: "miner",
+					Version:   "1.0",
+					Service:   NewPrivateMinerAPI(s),
+					Public:    false,
+				}, {
+			*/
 			Namespace: "eth",
 			Version:   "1.0",
 			Service:   filters.NewPublicFilterAPI(s.APIBackend, false),
@@ -396,7 +395,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.etherbase = etherbase
 	s.lock.Unlock()
 
-	s.miner.SetEtherbase(etherbase)
+	//s.miner.SetEtherbase(etherbase)
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
@@ -440,7 +439,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		go s.miner.Start(eb)
+		//go s.miner.Start(eb)
 	}
 	return nil
 }
@@ -456,11 +455,11 @@ func (s *Ethereum) StopMining() {
 		th.SetThreads(-1)
 	}
 	// Stop the block creating itself
-	s.miner.Stop()
+	//s.miner.Stop()
 }
 
-func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
-func (s *Ethereum) Miner() *miner.Miner { return s.miner }
+func (s *Ethereum) IsMining() bool      { return /*s.miner.Mining()*/ false }
+func (s *Ethereum) Miner() *miner.Miner { return /*s.miner*/ nil }
 
 func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
@@ -518,7 +517,7 @@ func (s *Ethereum) Stop() error {
 		s.lesServer.Stop()
 	}
 	s.txPool.Stop()
-	s.miner.Stop()
+	//s.miner.Stop()
 	s.eventMux.Stop()
 
 	s.chainDb.Close()

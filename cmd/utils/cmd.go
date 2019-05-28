@@ -301,12 +301,14 @@ func ExportPreimages(db *ethdb.LDBDatabase, fn string) error {
 		defer writer.(*gzip.Writer).Close()
 	}
 	// Iterate over the preimages and export them
-	it := db.NewIteratorWithPrefix([]byte("secure-key-"))
-	for it.Next() {
-		if err := rlp.Encode(writer, it.Value()); err != nil {
-			return err
+	/*
+		it := db.NewIteratorWithPrefix([]byte("secure-key-"))
+		for it.Next() {
+			if err := rlp.Encode(writer, it.Value()); err != nil {
+				return err
+			}
 		}
-	}
+	*/
 	log.Info("Exported preimages", "file", fn)
 	return nil
 }

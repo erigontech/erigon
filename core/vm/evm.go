@@ -203,13 +203,16 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 		}
 		if precompiles[addr] == nil && evm.ChainConfig().IsEIP158(evm.BlockNumber) && value.Sign() == 0 {
 			// Calling a non existing account, don't do anything, but ping the tracer
-			if evm.vmConfig.Debug && evm.depth == 0 {
-				evm.vmConfig.Tracer.CaptureStart(caller.Address(), addr, false, input, gas, value)
-				evm.vmConfig.Tracer.CaptureEnd(ret, 0, 0, nil)
+			if evm.vmConfig.Debug {
+				evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value)
+				evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, 0, 0, nil)
 			}
 			return nil, gas, nil
 		}
-		evm.StateDB.CreateAccount(addr)
+		if evm.vmConfig.Debug {
+			evm.vmConfig.Tracer.CaptureCreate(caller.Address(), addr)
+		}
+		evm.StateDB.CreateAccount(addr, false)
 	}
 	evm.Transfer(evm.StateDB, caller.Address(), to.Address(), value)
 	// Initialise a new contract and set the code that is to be used by the EVM.
@@ -221,11 +224,11 @@ func (evm *EVM) Call(caller ContractRef, addr common.Address, input []byte, gas 
 	start := time.Now()
 
 	// Capture the tracer start/end events in debug mode
-	if evm.vmConfig.Debug && evm.depth == 0 {
-		evm.vmConfig.Tracer.CaptureStart(caller.Address(), addr, false, input, gas, value)
+	if evm.vmConfig.Debug {
+		evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), addr, false, input, gas, value)
 
 		defer func() { // Lazy evaluation of the parameters
-			evm.vmConfig.Tracer.CaptureEnd(ret, gas-contract.Gas, time.Since(start), err)
+			evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
 		}()
 	}
 	ret, err = run(evm, contract, input, false)
@@ -390,7 +393,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	}
 	// Create a new account on the state
 	snapshot := evm.StateDB.Snapshot()
-	evm.StateDB.CreateAccount(address)
+	evm.StateDB.CreateAccount(address, true)
 	if evm.ChainConfig().IsEIP158(evm.BlockNumber) {
 		evm.StateDB.SetNonce(address, 1)
 	}
@@ -406,8 +409,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 		return nil, address, gas, nil
 	}
 
-	if evm.vmConfig.Debug && evm.depth == 0 {
-		evm.vmConfig.Tracer.CaptureStart(caller.Address(), address, true, codeAndHash.code, gas, value)
+	if evm.vmConfig.Debug {
+		evm.vmConfig.Tracer.CaptureStart(evm.depth, caller.Address(), address, true, codeAndHash.code, gas, value)
 	}
 	start := time.Now()
 
@@ -441,8 +444,8 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	if maxCodeSizeExceeded && err == nil {
 		err = errMaxCodeSizeExceeded
 	}
-	if evm.vmConfig.Debug && evm.depth == 0 {
-		evm.vmConfig.Tracer.CaptureEnd(ret, gas-contract.Gas, time.Since(start), err)
+	if evm.vmConfig.Debug {
+		evm.vmConfig.Tracer.CaptureEnd(evm.depth, ret, gas-contract.Gas, time.Since(start), err)
 	}
 	return ret, address, contract.Gas, err
 
@@ -451,6 +454,9 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 // Create creates a new contract using code as deployment code.
 func (evm *EVM) Create(caller ContractRef, code []byte, gas uint64, value *big.Int) (ret []byte, contractAddr common.Address, leftOverGas uint64, err error) {
 	contractAddr = crypto.CreateAddress(caller.Address(), evm.StateDB.GetNonce(caller.Address()))
+	if evm.vmConfig.Debug {
+		evm.vmConfig.Tracer.CaptureCreate(caller.Address(), contractAddr)
+	}
 	return evm.create(caller, &codeAndHash{code: code}, gas, value, contractAddr)
 }
 
