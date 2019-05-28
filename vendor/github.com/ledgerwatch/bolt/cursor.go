@@ -18,6 +18,7 @@ import (
 type Cursor struct {
 	bucket *Bucket
 	stack  []elemRef
+	idx    uint64
 }
 
 // Bucket returns the bucket that this cursor was created from.
@@ -33,6 +34,7 @@ func (c *Cursor) First() (key []byte, value []byte) {
 	c.stack = c.stack[:0]
 	p, n := c.bucket.pageNode(c.bucket.root)
 	c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
+	c.idx = 0
 	c.first()
 
 	// If we land on an empty page then move to the next value.
@@ -58,6 +60,15 @@ func (c *Cursor) Last() (key []byte, value []byte) {
 	p, n := c.bucket.pageNode(c.bucket.root)
 	ref := elemRef{page: p, node: n}
 	ref.index = ref.count() - 1
+	if c.bucket.enum {
+		var idx uint64
+		e := elemRef{page: p, node: n}
+		for i, cnt := 0, ref.count(); i < cnt; i++ {
+			e.index = i
+			idx += e.size()
+		}
+		c.idx = idx - 1
+	}
 	c.stack = append(c.stack, ref)
 	c.last()
 	k, v, flags := c.keyValue()
@@ -143,7 +154,7 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
 	} else if (flags & uint32(bucketLeafFlag)) != 0 {
 		return k, nil
 	}
-	return k, v	
+	return k, v
 }
 
 // Delete removes the current key/value under the cursor from the bucket.
@@ -172,6 +183,7 @@ func (c *Cursor) seek(seek []byte) (key []byte, value []byte, flags uint32) {
 
 	// Start from root page/node and traverse to correct page.
 	c.stack = c.stack[:0]
+	c.idx = 0
 	c.search(seek, c.bucket.root)
 	ref := &c.stack[len(c.stack)-1]
 
@@ -186,7 +198,7 @@ func (c *Cursor) seek(seek []byte) (key []byte, value []byte, flags uint32) {
 
 // seekTo moves the cursor from the current position to a given key and return it
 // This is different from seek that always start seeking from the root
-func (c *Cursor) seekTo(seek []byte) (key []byte, value[]byte, flags uint32) {
+func (c *Cursor) seekTo(seek []byte) (key []byte, value []byte, flags uint32) {
 	_assert(c.bucket.tx.db != nil, "tx closed")
 
 	// Move up the stack until we find the level at which we need to move forward
@@ -212,11 +224,25 @@ func (c *Cursor) seekTo(seek []byte) (key []byte, value[]byte, flags uint32) {
 			if elem.isLeaf() {
 				lastkey = append(p.keyPrefix(), p.leafPageElement(p.count-1).key()...)
 			} else {
-				lastkey = append(p.keyPrefix(), p.branchPageElement(p.count-1).key()...)
+				if c.bucket.enum {
+					lastkey = append(p.keyPrefix(), p.branchPageElementX(p.count-1).key()...)
+				} else {
+					lastkey = append(p.keyPrefix(), p.branchPageElement(p.count-1).key()...)
+				}
 			}
 		}
 		if bytes.Compare(seek, lastkey) <= 0 {
 			break
+		} else {
+			if c.bucket.enum {
+				var idx uint64
+				e := elemRef{node: elem.node, page: elem.page}
+				for i, cnt := elem.index, e.count(); i < cnt; i++ {
+					e.index = i
+					idx += e.size()
+				}
+				c.idx += idx
+			}
 		}
 	}
 
@@ -256,7 +282,11 @@ func (c *Cursor) first() {
 		if ref.node != nil {
 			pgid = ref.node.inodes[ref.index].pgid
 		} else {
-			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			if c.bucket.enum {
+				pgid = ref.page.branchPageElementX(uint16(ref.index)).pgid
+			} else {
+				pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			}
 		}
 		p, n := c.bucket.pageNode(pgid)
 		c.stack = append(c.stack, elemRef{page: p, node: n, index: 0})
@@ -277,7 +307,11 @@ func (c *Cursor) last() {
 		if ref.node != nil {
 			pgid = ref.node.inodes[ref.index].pgid
 		} else {
-			pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			if c.bucket.enum {
+				pgid = ref.page.branchPageElementX(uint16(ref.index)).pgid
+			} else {
+				pgid = ref.page.branchPageElement(uint16(ref.index)).pgid
+			}
 		}
 		p, n := c.bucket.pageNode(pgid)
 
@@ -298,6 +332,7 @@ func (c *Cursor) next() (key []byte, value []byte, flags uint32) {
 			elem := &c.stack[i]
 			if elem.index < elem.count()-1 {
 				elem.index++
+				c.idx++
 				break
 			}
 		}
@@ -366,11 +401,20 @@ func (c *Cursor) search(key []byte, pgid pgid) {
 func (c *Cursor) searchNode(key []byte, n *node) {
 	offset := c.stack[len(c.stack)-1].index
 	count := len(n.inodes) - offset
-	index := offset+(count-1)-sort.Search(count, func(i int) bool {
+	index := offset + (count - 1) - sort.Search(count, func(i int) bool {
 		return bytes.Compare(n.inodes[offset+(count-1)-i].key, key) != 1
 	})
 	if index < offset {
 		index = offset
+	}
+	if c.bucket.enum {
+		var idx uint64
+		e := elemRef{node: n}
+		for i, cnt := offset, index; i < cnt; i++ {
+			e.index = i
+			idx += e.size()
+		}
+		c.idx += idx
 	}
 	c.stack[len(c.stack)-1].index = index
 
@@ -380,7 +424,13 @@ func (c *Cursor) searchNode(key []byte, n *node) {
 
 func (c *Cursor) searchPage(key []byte, p *page) {
 	// Binary search for the correct range.
-	inodes := p.branchPageElements()
+	var inodes []branchPageElement
+	var inodesX []branchPageElementX
+	if c.bucket.enum {
+		inodesX = p.branchPageElementsX()
+	} else {
+		inodes = p.branchPageElements()
+	}
 	pagePrefix := p.keyPrefix()
 	keyPrefix := key
 	if len(key) > len(pagePrefix) {
@@ -391,22 +441,39 @@ func (c *Cursor) searchPage(key []byte, p *page) {
 	var index int
 	switch bytes.Compare(pagePrefix, keyPrefix) {
 	case -1:
-		index = offset+count-1
+		index = offset + count - 1
 	case 1:
-		index = offset-1
+		index = offset - 1
 	case 0:
 		shortKey := key[len(pagePrefix):]
-		index = offset+(count-1)-sort.Search(count, func(i int) bool {
-			return bytes.Compare(inodes[offset+(count-1)-i].key(), shortKey) != 1
+		index = offset + (count - 1) - sort.Search(count, func(i int) bool {
+			if c.bucket.enum {
+				return bytes.Compare(inodesX[offset+(count-1)-i].key(), shortKey) != 1
+			} else {
+				return bytes.Compare(inodes[offset+(count-1)-i].key(), shortKey) != 1
+			}
 		})
 	}
 	if index < offset {
 		index = offset
 	}
+	if c.bucket.enum {
+		var idx uint64
+		e := elemRef{page: p}
+		for i, cnt := offset, index; i < cnt; i++ {
+			e.index = i
+			idx += e.size()
+		}
+		c.idx += idx
+	}
 	c.stack[len(c.stack)-1].index = index
 
 	// Recursively search to the next page.
-	c.search(key, inodes[index].pgid)
+	if c.bucket.enum {
+		c.search(key, inodesX[index].pgid)
+	} else {
+		c.search(key, inodes[index].pgid)
+	}
 }
 
 // nsearch searches the leaf node on the top of the stack for a key.
@@ -422,6 +489,9 @@ func (c *Cursor) nsearch(key []byte) {
 			return bytes.Compare(n.inodes[offset+i].key, key) != -1
 		})
 		e.index = offset + index
+		if c.bucket.enum {
+			c.idx += uint64(index)
+		}
 		return
 	}
 
@@ -435,6 +505,9 @@ func (c *Cursor) nsearch(key []byte) {
 	switch bytes.Compare(pagePrefix, keyPrefix) {
 	case -1:
 		e.index = int(p.count)
+		if c.bucket.enum {
+			c.idx += uint64(e.index - offset)
+		}
 	case 1:
 		// e.index does not change
 	case 0:
@@ -444,6 +517,9 @@ func (c *Cursor) nsearch(key []byte) {
 			return bytes.Compare(inodes[offset+i].key(), shortKey) != -1
 		})
 		e.index = offset + index
+		if c.bucket.enum {
+			c.idx += uint64(index)
+		}
 	}
 }
 
@@ -508,4 +584,15 @@ func (r *elemRef) count() int {
 		return len(r.node.inodes)
 	}
 	return int(r.page.count)
+}
+
+// Assumes that the enum is turned on
+func (r *elemRef) size() uint64 {
+	if r.node != nil {
+		return r.node.inodes[r.index].size
+	}
+	if (r.page.flags & branchPageFlag) == 0 {
+		return 1
+	}
+	return uint64(r.page.branchPageElementX(uint16(r.index)).size) + r.page.minsize
 }

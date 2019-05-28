@@ -32,7 +32,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/ethereum/go-ethereum/rlp"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 )
 
 var (
@@ -103,7 +103,7 @@ func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error)
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b != nil {
-			if v := b.Get([]byte(nodeDBVersionKey)); v != nil {
+			if v, _ := b.Get([]byte(nodeDBVersionKey)); v != nil {
 				// v only lives during transaction tx
 				blob = make([]byte, len(v))
 				copy(blob, v)
@@ -112,7 +112,7 @@ func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error)
 		}
 		if b == nil {
 			var err error
-			b, err = tx.CreateBucketIfNotExists([]byte(dbbucket))
+			b, err = tx.CreateBucketIfNotExists([]byte(dbbucket), false)
 			if err != nil {
 				return err
 			}
@@ -167,7 +167,7 @@ func (db *nodeDB) fetchInt64(key []byte) int64 {
 		if b == nil {
 			return nil
 		}
-		blob := b.Get(key)
+		blob, _ := b.Get(key)
 		if blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
@@ -186,7 +186,7 @@ func (db *nodeDB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket), false)
 		if err != nil {
 			return err
 		}
@@ -200,7 +200,7 @@ func (db *nodeDB) storeRLP(key []byte, val interface{}) error {
 		return err
 	}
 	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket), false)
 		if err != nil {
 			return err
 		}
@@ -215,7 +215,7 @@ func (db *nodeDB) fetchRLP(key []byte, val interface{}) error {
 		if b == nil {
 			return nil
 		}
-		if v := b.Get(key); v != nil {
+		if v, _ := b.Get(key); v != nil {
 			blob = make([]byte, len(v))
 			copy(blob, v)
 		}
@@ -442,7 +442,7 @@ func (db *nodeDB) fetchTopicRegTickets(id NodeID) (issued, used uint32) {
 		if b == nil {
 			return nil
 		}
-		if v := b.Get(key); v != nil {
+		if v, _ := b.Get(key); v != nil {
 			blob = make([]byte, len(v))
 			copy(blob, v)
 		}
@@ -462,7 +462,7 @@ func (db *nodeDB) updateTopicRegTickets(id NodeID, issued, used uint32) error {
 	binary.BigEndian.PutUint32(blob[0:4], issued)
 	binary.BigEndian.PutUint32(blob[4:8], used)
 	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(dbbucket), false)
 		if err != nil {
 			return err
 		}

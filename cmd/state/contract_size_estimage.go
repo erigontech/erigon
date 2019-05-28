@@ -7,7 +7,7 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/state"
@@ -37,7 +37,7 @@ func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 		if b == nil {
 			return fmt.Errorf("Could not find accounts bucket")
 		}
-		enc := b.Get(crypto.Keccak256(contract[:]))
+		enc, _ := b.Get(crypto.Keccak256(contract[:]))
 		if enc == nil {
 			return fmt.Errorf("Could find account %x\n", contract)
 		}
@@ -314,7 +314,8 @@ func estimate() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				del = a.Get(crypto.Keccak256(addr[:])) == nil
+				v, _ := a.Get(crypto.Keccak256(addr[:]))
+				del = v == nil
 				deleted[addr] = del
 				if del {
 					numDeleted++

@@ -17,7 +17,7 @@
 package ethdb
 
 import (
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 
 	"github.com/ethereum/go-ethereum/log"
 )

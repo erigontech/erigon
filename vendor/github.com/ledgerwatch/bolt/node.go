@@ -50,12 +50,13 @@ func (n *node) size() int {
 				l = len(item.key)
 			}
 			var j int
-			for j = 0; j < l && prefix[j] == item.key[j]; j++ {}
+			for j = 0; j < l && prefix[j] == item.key[j]; j++ {
+			}
 			prefix = prefix[:j]
 		}
 		sz += elsz + len(item.key) + len(item.value)
 	}
-	sz -= len(prefix)*(len(n.inodes)-1) // Prefix is only included once4
+	sz -= len(prefix) * (len(n.inodes) - 1) // Prefix is only included once4
 	return sz
 }
 
@@ -75,11 +76,12 @@ func (n *node) sizeLessThan(v int) bool {
 				l = len(item.key)
 			}
 			var j int
-			for j = 0; j < l && prefix[j] == item.key[j]; j++ {}
+			for j = 0; j < l && prefix[j] == item.key[j]; j++ {
+			}
 			prefix = prefix[:j]
 		}
 		sz += elsz + len(item.key) + len(item.value)
-		if sz - len(prefix)*i >= v {
+		if sz-len(prefix)*i >= v {
 			return false
 		}
 	}
@@ -91,7 +93,11 @@ func (n *node) pageElementSize() int {
 	if n.isLeaf {
 		return leafPageElementSize
 	}
-	return branchPageElementSize
+	if n.bucket.enum {
+		return branchPageElementSizeX
+	} else {
+		return branchPageElementSize
+	}
 }
 
 // childAt returns the child node at a given index.
@@ -138,7 +144,8 @@ func (n *node) prevSibling() *node {
 }
 
 // put inserts a key/value.
-func (n *node) put(oldKey, newKey, value []byte, pgid pgid, flags uint32) {
+// returns true if a new entry has been created
+func (n *node) put(oldKey, newKey, value []byte, pgid pgid, flags uint32, size uint64) bool {
 	if pgid >= n.bucket.tx.meta.pgid {
 		panic(fmt.Sprintf("pgid (%d) above high water mark (%d)", pgid, n.bucket.tx.meta.pgid))
 	} else if len(oldKey) <= 0 {
@@ -162,17 +169,22 @@ func (n *node) put(oldKey, newKey, value []byte, pgid pgid, flags uint32) {
 	inode.key = newKey
 	inode.value = value
 	inode.pgid = pgid
+	if n.bucket.enum && !n.isLeaf {
+		inode.size = size
+	}
 	_assert(len(inode.key) > 0, "put: zero-length inode key")
+	return !exact
 }
 
 // del removes a key from the node.
-func (n *node) del(key []byte) {
+// returns true if an entry has been deleted
+func (n *node) del(key []byte) bool {
 	// Find index of key.
 	index := sort.Search(len(n.inodes), func(i int) bool { return bytes.Compare(n.inodes[i].key, key) != -1 })
 
 	// Exit if the key isn't found.
 	if index >= len(n.inodes) || !bytes.Equal(n.inodes[index].key, key) {
-		return
+		return false
 	}
 
 	// Delete inode from the node.
@@ -180,6 +192,7 @@ func (n *node) del(key []byte) {
 
 	// Mark the node as needing rebalancing.
 	n.unbalanced = true
+	return true
 }
 
 // read initializes the node from a page.
@@ -188,6 +201,8 @@ func (n *node) read(p *page) {
 	n.isLeaf = ((p.flags & leafPageFlag) != 0)
 	n.inodes = make(inodes, int(p.count))
 	prefix := p.keyPrefix()
+	minSize := p.minsize
+	enum := n.bucket != nil && n.bucket.enum
 
 	for i := 0; i < int(p.count); i++ {
 		inode := &n.inodes[i]
@@ -197,9 +212,16 @@ func (n *node) read(p *page) {
 			inode.key = append(prefix, elem.key()...)
 			inode.value = elem.value()
 		} else {
-			elem := p.branchPageElement(uint16(i))
-			inode.pgid = elem.pgid
-			inode.key = append(prefix, elem.key()...)
+			if enum {
+				elem := p.branchPageElementX(uint16(i))
+				inode.pgid = elem.pgid
+				inode.key = append(prefix, elem.key()...)
+				inode.size = minSize + uint64(elem.size)
+			} else {
+				elem := p.branchPageElement(uint16(i))
+				inode.pgid = elem.pgid
+				inode.key = append(prefix, elem.key()...)
+			}
 		}
 		_assert(len(inode.key) > 0, "read: zero-length inode key")
 	}
@@ -232,8 +254,10 @@ func (n *node) write(p *page) {
 		return
 	}
 
-	// Calculate common prefix
+	// Calculate common prefix and minSize
 	var prefix []byte
+	enum := n.bucket.enum
+	var minSize uint64 = 0
 	for _, item := range n.inodes {
 		if prefix == nil {
 			prefix = item.key
@@ -243,13 +267,18 @@ func (n *node) write(p *page) {
 				l = len(item.key)
 			}
 			var j int
-			for j = 0; j < l && prefix[j] == item.key[j]; j++ {}
+			for j = 0; j < l && prefix[j] == item.key[j]; j++ {
+			}
 			prefix = prefix[:j]
+		}
+		if enum && (minSize == 0 || item.size < minSize) {
+			minSize = item.size
 		}
 	}
 	plen := len(prefix)
-	p.prefixpos = uint32(n.pageElementSize()*len(n.inodes))
+	p.prefixpos = uint32(n.pageElementSize() * len(n.inodes))
 	p.prefixsize = uint32(plen)
+	p.minsize = minSize
 	b := (*[maxAllocSize]byte)(unsafe.Pointer(&p.ptr))[n.pageElementSize()*len(n.inodes):]
 	// Write prefix
 	if len(b) < plen {
@@ -269,18 +298,27 @@ func (n *node) write(p *page) {
 			elem.ksize = uint32(len(item.key) - plen)
 			elem.vsize = uint32(len(item.value))
 		} else {
-			elem := p.branchPageElement(uint16(i))
-			elem.pos = uint32(uintptr(unsafe.Pointer(&b[0])) - uintptr(unsafe.Pointer(elem)))
-			elem.ksize = uint32(len(item.key) - plen)
-			elem.pgid = item.pgid
-			_assert(elem.pgid != p.id, "write: circular dependency occurred")
+			if enum {
+				elem := p.branchPageElementX(uint16(i))
+				elem.pos = uint32(uintptr(unsafe.Pointer(&b[0])) - uintptr(unsafe.Pointer(elem)))
+				elem.ksize = uint32(len(item.key) - plen)
+				elem.pgid = item.pgid
+				elem.size = uint32(item.size - minSize)
+				_assert(elem.pgid != p.id, "write: circular dependency occurred")
+			} else {
+				elem := p.branchPageElement(uint16(i))
+				elem.pos = uint32(uintptr(unsafe.Pointer(&b[0])) - uintptr(unsafe.Pointer(elem)))
+				elem.ksize = uint32(len(item.key) - plen)
+				elem.pgid = item.pgid
+				_assert(elem.pgid != p.id, "write: circular dependency occurred")
+			}
 		}
 
 		// If the length of key+value is larger than the max allocation size
 		// then we need to reallocate the byte array pointer.
 		//
 		// See: https://github.com/boltdb/bolt/pull/335
-		klen, vlen := len(item.key) - plen, len(item.value)
+		klen, vlen := len(item.key)-plen, len(item.value)
 		if len(b) < klen+vlen {
 			b = (*[maxAllocSize]byte)(unsafe.Pointer(&b[0]))[:]
 		}
@@ -297,14 +335,16 @@ func (n *node) write(p *page) {
 
 // split breaks up a node into multiple smaller nodes, if appropriate.
 // This should only be called from the spill() function.
-func (n *node) split(pageSize int) []*node {
+func (n *node) split(pageSize int) ([]*node, []uint64) {
 	var nodes []*node
+	var sizes []uint64
 
 	node := n
 	for {
 		// Split node into two.
-		a, b := node.splitTwo(pageSize)
+		a, aSize, b := node.splitTwo(pageSize)
 		nodes = append(nodes, a)
+		sizes = append(sizes, aSize)
 
 		// If we can't split then exit the loop.
 		if b == nil {
@@ -315,16 +355,20 @@ func (n *node) split(pageSize int) []*node {
 		node = b
 	}
 
-	return nodes
+	return nodes, sizes
 }
 
 // splitTwo breaks up a node into two smaller nodes, if appropriate.
 // This should only be called from the split() function.
-func (n *node) splitTwo(pageSize int) (*node, *node) {
+func (n *node) splitTwo(pageSize int) (*node, uint64, *node) {
 	// Ignore the split if the page doesn't have at least enough nodes for
 	// two pages or if the nodes can fit in a single page.
 	if len(n.inodes) <= (minKeysPerPage*2) || n.sizeLessThan(pageSize) {
-		return n, nil
+		var size uint64
+		for _, inode := range n.inodes {
+			size += inode.size
+		}
+		return n, size, nil
 	}
 
 	// Determine the threshold before starting a new node.
@@ -352,11 +396,15 @@ func (n *node) splitTwo(pageSize int) (*node, *node) {
 	// Split inodes across two nodes.
 	next.inodes = n.inodes[splitIndex:]
 	n.inodes = n.inodes[:splitIndex]
+	var size uint64
+	for _, inode := range n.inodes {
+		size += inode.size
+	}
 
 	// Update the statistics.
 	n.bucket.tx.stats.Split++
 
-	return n, next
+	return n, size, next
 }
 
 // splitIndex finds the position where a page will fill a given threshold.
@@ -378,14 +426,15 @@ func (n *node) splitIndex(threshold int) (index, sz int) {
 				l = len(inode.key)
 			}
 			var j int
-			for j = 0; j < l && prefix[j] == inode.key[j]; j++ {}
+			for j = 0; j < l && prefix[j] == inode.key[j]; j++ {
+			}
 			prefix = prefix[:j]
 		}
 		elsize := n.pageElementSize() + len(inode.key) + len(inode.value)
 
 		// If we have at least the minimum number of keys and adding another
 		// node would put us over the threshold then exit and return.
-		if i >= minKeysPerPage && sz+elsize - len(prefix)*i > threshold {
+		if i >= minKeysPerPage && sz+elsize-len(prefix)*i > threshold {
 			break
 		}
 
@@ -418,8 +467,8 @@ func (n *node) spill() error {
 	n.children = nil
 
 	// Split nodes into appropriate sizes. The first node will always be n.
-	var nodes = n.split(tx.db.pageSize)
-	for _, node := range nodes {
+	var nodes, sizes = n.split(tx.db.pageSize)
+	for i, node := range nodes {
 		// Add node's page to the freelist if it's not new.
 		if node.pgid > 0 {
 			tx.db.freelist.free(tx.meta.txid, tx.page(node.pgid))
@@ -447,7 +496,7 @@ func (n *node) spill() error {
 				key = node.inodes[0].key
 			}
 
-			node.parent.put(key, node.inodes[0].key, nil, node.pgid, 0)
+			node.parent.put(key, node.inodes[0].key, nil, node.pgid, 0, sizes[i])
 			node.key = node.inodes[0].key
 			_assert(len(node.key) > 0, "spill: zero-length node key")
 		}
@@ -523,11 +572,15 @@ func (n *node) rebalance() {
 
 	// Destination node is right sibling if idx == 0, otherwise left sibling.
 	var target *node
-	var useNextSibling = (n.parent.childIndex(n) == 0)
+	nIndex := n.parent.childIndex(n)
+	var useNextSibling = (nIndex == 0)
+	var targetIndex int
 	if useNextSibling {
 		target = n.nextSibling()
+		targetIndex = nIndex + 1
 	} else {
 		target = n.prevSibling()
+		targetIndex = nIndex - 1
 	}
 
 	// If both this node and the target node are too small then merge them.
@@ -543,6 +596,7 @@ func (n *node) rebalance() {
 
 		// Copy over inodes from target and remove target.
 		n.inodes = append(n.inodes, target.inodes...)
+		n.parent.inodes[nIndex].size += n.parent.inodes[targetIndex].size
 		n.parent.del(target.key)
 		n.parent.removeChild(target)
 		delete(n.bucket.nodes, target.pgid)
@@ -559,6 +613,7 @@ func (n *node) rebalance() {
 
 		// Copy over inodes to target and remove node.
 		target.inodes = append(target.inodes, n.inodes...)
+		n.parent.inodes[targetIndex].size += n.parent.inodes[nIndex].size
 		n.parent.del(n.key)
 		n.parent.removeChild(n)
 		delete(n.bucket.nodes, n.pgid)
@@ -661,6 +716,7 @@ type inode struct {
 	pgid  pgid
 	key   []byte
 	value []byte
+	size  uint64
 }
 
 type inodes []inode

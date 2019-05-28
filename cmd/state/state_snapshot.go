@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -30,9 +30,9 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 	check(err)
 	txDisk, err := diskDb.Begin(true)
 	check(err)
-	b, err := tx.CreateBucket(state.AccountsBucket)
+	b, err := tx.CreateBucket(state.AccountsBucket, true)
 	check(err)
-	bDisk, err := txDisk.CreateBucket(state.AccountsBucket)
+	bDisk, err := txDisk.CreateBucket(state.AccountsBucket, true)
 	check(err)
 	count := 0
 	err = ethDb.WalkAsOf(state.AccountsBucket, state.AccountsHistoryBucket, startKey[:], 0, blockNum+1,
@@ -80,9 +80,9 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 	txDisk, err = diskDb.Begin(true)
 	check(err)
 	b = tx.Bucket(state.AccountsBucket)
-	sb, err := tx.CreateBucket(state.StorageBucket)
+	sb, err := tx.CreateBucket(state.StorageBucket, true)
 	check(err)
-	sbDisk, err := txDisk.CreateBucket(state.StorageBucket)
+	sbDisk, err := txDisk.CreateBucket(state.StorageBucket, true)
 	check(err)
 	count = 0
 	var address common.Address
@@ -100,7 +100,8 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 					return true, nil
 				}
 			} else {
-				exist[address] = (b.Get(crypto.Keccak256(address[:])) != nil)
+				v, _ := b.Get(crypto.Keccak256(address[:]))
+				exist[address] = v != nil
 			}
 			if err := sb.Put(key, value); err != nil {
 				return false, err
@@ -147,9 +148,9 @@ func save_snapshot(db *bolt.DB, filename string) {
 	defer diskDb.Close()
 	diskTx, err := diskDb.Begin(true)
 	check(err)
-	bDisk, err := diskTx.CreateBucket(state.AccountsBucket)
+	bDisk, err := diskTx.CreateBucket(state.AccountsBucket, true)
 	check(err)
-	sbDisk, err := diskTx.CreateBucket(state.StorageBucket)
+	sbDisk, err := diskTx.CreateBucket(state.StorageBucket, true)
 	check(err)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
@@ -201,8 +202,8 @@ func load_snapshot(db *bolt.DB, filename string) {
 	defer diskDb.Close()
 	tx, err := db.Begin(true)
 	check(err)
-	b, err := tx.CreateBucket(state.AccountsBucket)
-	sb, err := tx.CreateBucket(state.StorageBucket)
+	b, err := tx.CreateBucket(state.AccountsBucket, true)
+	sb, err := tx.CreateBucket(state.StorageBucket, true)
 	check(err)
 	count := 0
 	err = diskDb.View(func(txDisk *bolt.Tx) error {
@@ -259,7 +260,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 func load_codes(db *bolt.DB, codeDb ethdb.Database) {
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
-		cb, err := tx.CreateBucket(state.CodeBucket)
+		cb, err := tx.CreateBucket(state.CodeBucket, true)
 		if err != nil {
 			return err
 		}
@@ -295,8 +296,8 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			bDisk := txDisk.Bucket(state.AccountsBucket)
 			cDisk := bDisk.Cursor()
 			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-				vv := b.Get(k)
-				p := preimage.Get(k)
+				vv, _ := b.Get(k)
+				p, _ := preimage.Get(k)
 				if !bytes.Equal(v, vv) {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, v, vv)
 				}
@@ -309,7 +310,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			count = 0
 			cDisk = sbDisk.Cursor()
 			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-				vv := sb.Get(k)
+				vv, _ := sb.Get(k)
 				if !bytes.Equal(v, vv) {
 					fmt.Printf("Diff for %x: disk: %x, mem: %x\n", k, v, vv)
 				}
@@ -321,8 +322,8 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			count = 0
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
-				vv := bDisk.Get(k)
-				p := preimage.Get(k)
+				vv, _ := bDisk.Get(k)
+				p, _ := preimage.Get(k)
 				if len(vv) == 0 {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, vv, v)
 				}
@@ -333,8 +334,8 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 			}
 			c = sb.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
-				vv := sbDisk.Get(k)
-				p := preimage.Get(k)
+				vv, _ := sbDisk.Get(k)
+				p, _ := preimage.Get(k)
 				if len(vv) == 0 {
 					fmt.Printf("Diff for %x (%x): disk: %x, mem: %x\n", k, p, vv, v)
 				}
@@ -375,7 +376,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			copy(address[:], k[:20])
 			if _, ok := roots[address]; !ok {
-				if enc := b.Get(crypto.Keccak256(address[:])); enc == nil {
+				if enc, _ := b.Get(crypto.Keccak256(address[:])); enc == nil {
 					roots[address] = common.Hash{}
 				} else {
 					account, err := encodingToAccount(enc)

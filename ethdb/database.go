@@ -30,7 +30,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -79,7 +79,7 @@ func (db *LDBDatabase) Path() string {
 // Put puts the given key / value to the queue
 func (db *LDBDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucket)
+		b, err := tx.CreateBucketIfNotExists(bucket, true)
 		if err != nil {
 			return err
 		}
@@ -109,18 +109,18 @@ func (db *LDBDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error 
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		hb, err := tx.CreateBucketIfNotExists(hBucket)
+		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 		if err != nil {
 			return err
 		}
 		if err = hb.Put(composite, value); err != nil {
 			return err
 		}
-		sb, err := tx.CreateBucketIfNotExists(SuffixBucket)
+		sb, err := tx.CreateBucketIfNotExists(SuffixBucket, true)
 		if err != nil {
 			return err
 		}
-		dat := sb.Get(suffixkey)
+		dat, _ := sb.Get(suffixkey)
 		var l int
 		if dat == nil {
 			l = 4
@@ -144,7 +144,7 @@ func (db *LDBDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			bucketEnd := bucketStart
 			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
 			}
-			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart])
+			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart], false)
 			if err != nil {
 				return err
 			}
@@ -175,7 +175,8 @@ func (db *LDBDatabase) Has(bucket, key []byte) (bool, error) {
 		if b == nil {
 			has = false
 		} else {
-			has = b.Get(key) != nil
+			v, _ := b.Get(key)
+			has = v != nil
 		}
 		return nil
 	})
@@ -193,7 +194,7 @@ func (db *LDBDatabase) Get(bucket, key []byte) ([]byte, error) {
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b != nil {
-			v := b.Get(key)
+			v, _ := b.Get(key)
 			if v != nil {
 				dat = make([]byte, len(v))
 				copy(dat, v)
@@ -551,10 +552,10 @@ func (db *LDBDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte,
 			} else {
 				if hKFit && bytes.Equal(hK[l:], suffix) && timestamp == 3436035 {
 					if l == 32 {
-						addr := pre.Get(hK[:l])
+						addr, _ := pre.Get(hK[:l])
 						fmt.Printf("h %x (%x): %x\n", hK[:l], addr, hV)
 					} else {
-						item := pre.Get(hK[20:52])
+						item, _ := pre.Get(hK[20:52])
 						fmt.Printf("h %x (%x): %x\n", hK[:l], item, hV)
 					}
 				}

@@ -28,7 +28,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/rlp"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 )
 
 // Keys in the node database.
@@ -101,7 +101,7 @@ func newPersistentDB(path string) (*DB, error) {
 	if err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(bucket))
 		if b != nil {
-			if v := b.Get([]byte(dbVersionKey)); v != nil {
+			if v, _ := b.Get([]byte(dbVersionKey)); v != nil {
 				// v only lives during transaction tx
 				blob = make([]byte, len(v))
 				copy(blob, v)
@@ -110,7 +110,7 @@ func newPersistentDB(path string) (*DB, error) {
 		}
 		if b == nil {
 			var err error
-			b, err = tx.CreateBucketIfNotExists([]byte(bucket))
+			b, err = tx.CreateBucketIfNotExists([]byte(bucket), false)
 			if err != nil {
 				return err
 			}
@@ -191,7 +191,7 @@ func (db *DB) fetchInt64(key []byte) int64 {
 		if b == nil {
 			return nil
 		}
-		blob := b.Get(key)
+		blob, _ := b.Get(key)
 		if blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
@@ -209,7 +209,7 @@ func (db *DB) storeInt64(key []byte, n int64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutVarint(blob, n)]
 	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
 		if err != nil {
 			return err
 		}
@@ -225,7 +225,7 @@ func (db *DB) fetchUint64(key []byte) uint64 {
 		if b == nil {
 			return nil
 		}
-		blob := b.Get(key)
+		blob, _ := b.Get(key)
 		if blob != nil {
 			val, _ = binary.Uvarint(blob)
 		}
@@ -241,7 +241,7 @@ func (db *DB) storeUint64(key []byte, n uint64) error {
 	blob := make([]byte, binary.MaxVarintLen64)
 	blob = blob[:binary.PutUvarint(blob, n)]
 	return db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
 		if err != nil {
 			return err
 		}
@@ -257,7 +257,7 @@ func (db *DB) Node(id ID) *Node {
 		if b == nil {
 			return nil
 		}
-		if v := b.Get(nodeKey(id)); v != nil {
+		if v, _ := b.Get(nodeKey(id)); v != nil {
 			blob = make([]byte, len(v))
 			copy(blob, v)
 		}
@@ -291,7 +291,7 @@ func (db *DB) UpdateNode(node *Node) error {
 		return err
 	}
 	if err := db.lvl.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte(bucket))
+		b, err := tx.CreateBucketIfNotExists([]byte(bucket), false)
 		if err != nil {
 			return err
 		}

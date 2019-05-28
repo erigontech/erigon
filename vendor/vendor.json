@@ -296,6 +296,12 @@
 			"tree": true
 		},
 		{
+			"checksumSHA1": "4PsPRNmYeBKZ57Ujq4kDILge9ro=",
+			"path": "github.com/ledgerwatch/bolt",
+			"revision": "cb534ec88a0b6c480b89693ab9d6c362e27e5bdf",
+			"revisionTime": "2019-04-24T12:24:41Z"
+		},
+		{
 			"checksumSHA1": "RYGi8pXDlNvFoorRhQG4mvgaKN8=",
 			"path": "github.com/llgcode/draw2d",
 			"revision": "f52c8a71aff06ab8df41843d33ab167b36c971cd",
@@ -918,5 +924,5 @@
 			"revisionTime": "2017-08-11T01:42:03Z"
 		}
 	],
-	"rootPath": "github.com/ethereum/go-ethereum"
+	"rootPath": "github.com/ledgerwatch/turbo-geth"
 }

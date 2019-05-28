@@ -812,7 +812,13 @@ func safelyCall(fn func(*Tx) error, tx *Tx) (err error) {
 //
 // This is not necessary under normal operation, however, if you use NoSync
 // then it allows you to force the database file to sync against the disk.
-func (db *DB) Sync() error { if !db.memOnly { return fdatasync(db) } else { return nil } }
+func (db *DB) Sync() error {
+	if !db.memOnly {
+		return fdatasync(db)
+	} else {
+		return nil
+	}
+}
 
 // Stats retrieves ongoing performance stats for the database.
 // This is only updated when a transaction closes.

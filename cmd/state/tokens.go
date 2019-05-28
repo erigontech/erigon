@@ -13,7 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/ethash"
@@ -288,7 +288,7 @@ func makeTokenBalances() {
 					if b == nil {
 						return nil
 					}
-					preimage = b.Get(key)
+					preimage, _ = b.Get(key)
 					if preimage != nil {
 						preimage = common.CopyBytes(preimage)
 					}
@@ -530,10 +530,10 @@ func makeTokenAllowances() {
 					if b == nil {
 						return nil
 					}
-					preimage = b.Get(key)
+					preimage, _ = b.Get(key)
 					if preimage != nil && len(preimage) == 64 {
 						copy(index2[:], preimage[:32])
-						preimage = b.Get(preimage[32:])
+						preimage, _ = b.Get(preimage[32:])
 					}
 					return nil
 				})

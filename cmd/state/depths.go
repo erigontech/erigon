@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 
 	"github.com/ethereum/go-ethereum/core/state"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -131,7 +131,8 @@ func countStorageDepths() {
 			sameAddr := bytes.Equal(addr, prevAddr[:])
 			if !sameAddr {
 				copy(prevAddr[:], addr)
-				accountExists = ab.Get(crypto.Keccak256(addr[:])) != nil
+				v, _ := ab.Get(crypto.Keccak256(addr[:]))
+				accountExists = v != nil
 				if !accountExists {
 					filtered++
 				}

@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
@@ -1451,7 +1451,7 @@ func repairCurrent() {
 		if err := tx.DeleteBucket(state.StorageBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(state.StorageBucket)
+		newB, err := tx.CreateBucket(state.StorageBucket, true)
 		if err != nil {
 			return err
 		}
@@ -1479,7 +1479,7 @@ func testMemBolt() {
 	check(err)
 	defer db.Close()
 	err = db.Update(func(tx *bolt.Tx) error {
-		bucket, err := tx.CreateBucketIfNotExists([]byte("B"))
+		bucket, err := tx.CreateBucketIfNotExists([]byte("B"), false)
 		if err != nil {
 			return fmt.Errorf("Bucket creation: %v", err)
 		}

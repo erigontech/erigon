@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"github.com/ledgerwatch/bolt"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	util "github.com/wcharczuk/go-chart/util"
@@ -157,7 +157,7 @@ func stateGrowth1() {
 			// First 32 bytes is the hash of the address, then timestamp encoding
 			copy(addrHash[:], k[:32])
 			// Figure out the addrees via preimage
-			addr := pre.Get(addrHash[:])
+			addr, _ := pre.Get(addrHash[:])
 			copy(address[:], addr)
 			creator := creators[address]
 			timestamp, _ := decodeTimestamp(k[32:])
@@ -201,7 +201,7 @@ func stateGrowth1() {
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], k[:32])
 			// Figure out the addrees via preimage
-			addr := pre.Get(addrHash[:])
+			addr, _ := pre.Get(addrHash[:])
 			copy(address[:], addr)
 			lastTimestamps[address] = maxTimestamp
 			count++
@@ -1107,7 +1107,8 @@ func storageUsage() {
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				del = a.Get(crypto.Keccak256(addr[:])) == nil
+				vv, _ := a.Get(crypto.Keccak256(addr[:]))
+				del = vv == nil
 				deleted[addr] = del
 				if del {
 					numDeleted++
@@ -1635,7 +1636,7 @@ func makeSha3Preimages() {
 	if err != nil {
 		panic(err)
 	}
-	b, err := tx.CreateBucketIfNotExists(bucket)
+	b, err := tx.CreateBucketIfNotExists(bucket, false)
 	if err != nil {
 		panic(err)
 	}
@@ -1660,7 +1661,7 @@ func makeSha3Preimages() {
 		pi := statedb.Preimages()
 		for hash, preimage := range pi {
 			var found bool
-			v := b.Get(hash[:])
+			v, _ := b.Get(hash[:])
 			if v != nil {
 				found = true
 			}
@@ -1680,7 +1681,7 @@ func makeSha3Preimages() {
 			if err != nil {
 				panic(err)
 			}
-			b, err = tx.CreateBucketIfNotExists(bucket)
+			b, err = tx.CreateBucketIfNotExists(bucket, false)
 			if err != nil {
 				panic(err)
 			}
