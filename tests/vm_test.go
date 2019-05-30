@@ -17,7 +17,7 @@
 package tests
 
 import (
-	"github.com/ethereum/go-ethereum/core/vm"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"testing"
 )
 

@@ -19,7 +19,7 @@ package ethdb
 import (
 	"github.com/ledgerwatch/bolt"
 
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func NewMemDatabase() *LDBDatabase {

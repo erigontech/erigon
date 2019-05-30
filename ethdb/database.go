@@ -27,8 +27,8 @@ import (
 	"path"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/log"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/petar/GoLLRB/llrb"

@@ -21,7 +21,7 @@ import (
 	"hash"
 	"math/big"
 
-	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"golang.org/x/crypto/sha3"
 )
 
