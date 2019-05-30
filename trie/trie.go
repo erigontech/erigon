@@ -481,7 +481,7 @@ func (t *Trie) AmmendProofs(
 	return maskIdx, hashIdx, shortIdx, valueIdx, aMasks_, aShortKeys_, aValues_, aHashes_
 }
 
-func applyFullNode(ctime uint64, n node,
+func applyFullNode(h *hasher, ctime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -545,7 +545,7 @@ func applyFullNode(ctime uint64, n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, child %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			fn := applyFullNode(ctime, child, pos+1, masks, shortKeys, values, hashes,
+			fn := applyFullNode(h, ctime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			f.Children[nibble] = fn
 		} else if (shortnodemask & (uint16(1) << nibble)) != 0 {
@@ -553,16 +553,20 @@ func applyFullNode(ctime uint64, n node,
 				fmt.Printf("%sIn the loop at pos: %d, hashes: %16b, fullnodes: %16b, shortnodes: %16b, nibble %x, child %T\n",
 					strings.Repeat(" ", pos), pos, hashmask, fullnodemask, shortnodemask, nibble, child)
 			}
-			sn := applyShortNode(ctime, child, pos+1, masks, shortKeys, values, hashes,
+			sn := applyShortNode(h, ctime, child, pos+1, masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 			f.Children[nibble] = sn
 		}
 	}
 	f.adjustTod(ctime)
+	if f.flags.dirty {
+		var hn common.Hash
+		h.hash(f, pos == 0, hn[:])
+	}
 	return f
 }
 
-func applyShortNode(ctime uint64, n node,
+func applyShortNode(h *hasher, ctime uint64, n node,
 	pos int,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -614,7 +618,7 @@ func applyShortNode(ctime uint64, n node,
 			(*valueIdx)++
 			s.Val = valueNode(value)
 		} else {
-			s.Val = applyFullNode(ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+			s.Val = applyFullNode(h, ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
 				maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 	case 2:
@@ -634,13 +638,17 @@ func applyShortNode(ctime uint64, n node,
 			fmt.Printf("%spos = %d, len(nKey) = %d, nKey = %x\n", strings.Repeat(" ", pos), pos, len(nKey), nKey)
 		}
 	case 6:
-		s.Val = applyFullNode(ctime, nil, pos+len(nKey), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(h, ctime, nil, pos+len(nKey), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	case 7:
-		s.Val = applyFullNode(ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(h, ctime, s.Val, pos+len(nKey), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
 	s.adjustTod(ctime)
+	if s.flags.dirty {
+		var hn common.Hash
+		h.hash(s, pos == 0, hn[:])
+	}
 	return s
 }
 
@@ -661,11 +669,13 @@ func (t *Trie) ApplyProof(
 	if len(masks) == 1 {
 		return maskIdx, hashIdx, shortIdx, valueIdx
 	}
+	h := newHasher(t.encodeToBytes)
+	defer returnHasherToPool(h)
 	if firstMask == 0 {
-		t.root = applyFullNode(ctime, t.root, 0, masks, shortKeys, values, hashes,
+		t.root = applyFullNode(h, ctime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	} else {
-		t.root = applyShortNode(ctime, t.root, 0, masks, shortKeys, values, hashes,
+		t.root = applyShortNode(h, ctime, t.root, 0, masks, shortKeys, values, hashes,
 			&maskIdx, &shortIdx, &valueIdx, &hashIdx, trace)
 	}
 	return maskIdx, hashIdx, shortIdx, valueIdx
@@ -766,7 +776,6 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		}
 		return n, true
 	case *shortNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var adjust bool
 		nKey := compactToHex(n.Key)
 		var shortAdded bool = false
@@ -1165,7 +1174,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 	}
 	switch n := origNode.(type) {
 	case *shortNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		nKey := compactToHex(n.Key)
 		var shortAdded bool = false
 		if t.resolveReads {
@@ -1554,7 +1562,6 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuation, blockNr uint64) bool {
 	switch n := origNode.(type) {
 	case *shortNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		var done bool
 		nKey := compactToHex(n.Key)
 		if t.resolveReads {
