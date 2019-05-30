@@ -64,7 +64,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	emptyHash := common.Hash{}
 	min := &storageItem{seckey: common.BytesToHash(start)}
 	if t, ok := dbs.storage[addr]; ok {
-		t.AscendGreaterOrEqual1(min, func(i llrb.Item) bool {
+		t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 			item := i.(*storageItem)
 			st.ReplaceOrInsert(item)
 			if item.value != emptyHash {
@@ -100,7 +100,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		return st.Len() < maxResults+overrideCounter+numDeletes, nil
 	})
 	results := 0
-	st.AscendGreaterOrEqual1(min, func(i llrb.Item) bool {
+	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*storageItem)
 		if item.value != emptyHash {
 			// Skip if value == 0

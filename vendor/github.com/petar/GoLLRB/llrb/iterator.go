@@ -33,12 +33,6 @@ func (t *LLRB) ascendRange(h *Node, inf, sup Item, iterator ItemIterator) bool {
 // AscendGreaterOrEqual will call iterator once for each element greater or equal to
 // pivot in ascending order. It will stop whenever the iterator returns false.
 func (t *LLRB) AscendGreaterOrEqual(pivot Item, iterator ItemIterator) {
-	t.ascendGreaterOrEqual(t.root, pivot, iterator)
-}
-
-// AscendGreaterOrEqual will call iterator once for each element greater or equal to
-// pivot in ascending order. It will stop whenever the iterator returns false.
-func (t *LLRB) AscendGreaterOrEqual1(pivot Item, iterator ItemIterator) {
 	// Estimate the depth of the tree to allocate the stack
 	var stack [32]*Node
 	var noLeft bool

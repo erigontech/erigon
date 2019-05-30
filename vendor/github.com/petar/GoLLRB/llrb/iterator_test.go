@@ -40,41 +40,6 @@ func TestAscendGreaterOrEqual(t *testing.T) {
 	}
 }
 
-func TestAscendGreaterOrEqual1(t *testing.T) {
-	tree := New()
-	tree.InsertNoReplace(Int(4))
-	tree.InsertNoReplace(Int(6))
-	tree.InsertNoReplace(Int(1))
-	tree.InsertNoReplace(Int(3))
-	var ary []Item
-	tree.AscendGreaterOrEqual(Int(-1), func(i Item) bool {
-		ary = append(ary, i)
-		return true
-	})
-	expected := []Item{Int(1), Int(3), Int(4), Int(6)}
-	if !reflect.DeepEqual(ary, expected) {
-		t.Errorf("expected %v but got %v", expected, ary)
-	}
-	ary = nil
-	tree.AscendGreaterOrEqual1(Int(3), func(i Item) bool {
-		ary = append(ary, i)
-		return true
-	})
-	expected = []Item{Int(3), Int(4), Int(6)}
-	if !reflect.DeepEqual(ary, expected) {
-		t.Errorf("expected %v but got %v", expected, ary)
-	}
-	ary = nil
-	tree.AscendGreaterOrEqual1(Int(2), func(i Item) bool {
-		ary = append(ary, i)
-		return true
-	})
-	expected = []Item{Int(3), Int(4), Int(6)}
-	if !reflect.DeepEqual(ary, expected) {
-		t.Errorf("expected %v but got %v", expected, ary)
-	}
-}
-
 func TestDescendLessOrEqual(t *testing.T) {
 	tree := New()
 	tree.InsertNoReplace(Int(4))
