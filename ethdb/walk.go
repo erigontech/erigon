@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	//"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -129,7 +130,7 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	if min == nil {
 		return accounts, nil
 	}
-	t.AscendGreaterOrEqual1(min, func(i llrb.Item) bool {
+	t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*PutItem)
 		value, err := db.Get([]byte("secure-key-"), item.key)
 		if err != nil {
