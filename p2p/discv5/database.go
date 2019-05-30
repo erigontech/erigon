@@ -419,7 +419,14 @@ func (db *nodeDB) querySeeds(n int, maxAge time.Duration) []*Node {
 			if n.ID == db.self {
 				continue
 			}
-			if now.Sub(db.lastPong(n.ID)) > maxAge {
+			pongKey := makeKey(n.ID, nodeDBDiscoverPong)
+			var lastPong int64
+			if blob, _ := b.Get(pongKey); blob != nil {
+				if v, read := binary.Varint(blob); read > 0 {
+					lastPong = v
+				}
+			}
+			if now.Sub(time.Unix(lastPong, 0)) > maxAge {
 				continue
 			}
 			for i := range nodes {

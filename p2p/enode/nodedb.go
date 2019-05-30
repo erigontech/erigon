@@ -191,8 +191,7 @@ func (db *DB) fetchInt64(key []byte) int64 {
 		if b == nil {
 			return nil
 		}
-		blob, _ := b.Get(key)
-		if blob != nil {
+		if blob, _ := b.Get(key); blob != nil {
 			if v, read := binary.Varint(blob); read > 0 {
 				val = v
 			}
@@ -493,7 +492,15 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 				id[0] = 0
 				continue // iterator exhausted
 			}
-			if now.Sub(db.LastPongReceived(n.ID(), n.IP())) > maxAge {
+			db.ensureExpirer()
+			pongKey := nodeItemKey(n.ID(), n.IP(), dbNodePong)
+			var lastPongReceived int64
+			if blob, _ := b.Get(pongKey); blob != nil {
+				if v, read := binary.Varint(blob); read > 0 {
+					lastPongReceived = v
+				}
+			}
+			if now.Sub(time.Unix(lastPongReceived, 0)) > maxAge {
 				continue
 			}
 			for i := range nodes {
