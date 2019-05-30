@@ -7,8 +7,8 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 
-	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func countDepths() {

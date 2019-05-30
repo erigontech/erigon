@@ -22,7 +22,7 @@ import (
 	"fmt"
 	//"sort"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/petar/GoLLRB/llrb"
 )
 

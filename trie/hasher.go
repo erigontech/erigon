@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
 
