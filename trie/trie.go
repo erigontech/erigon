@@ -1924,100 +1924,52 @@ func (t *Trie) Hash() common.Hash {
 }
 
 func (t *Trie) UnloadOlderThan(gen uint64, trace bool) bool {
-	h := newHasher(t.encodeToBytes)
-	defer returnHasherToPool(h)
-	hn, unloaded := unloadOlderThan(nil, t.root, gen, h, true, trace)
-	if unloaded {
+	if hn, unloaded := unloadOlderThan(t.root, gen); unloaded {
 		t.root = hn
 		return true
 	}
 	return false
 }
 
-func unloadOlderThan(key []byte, n node, gen uint64, h *hasher, isRoot bool, trace bool) (hashNode, bool) {
+func unloadOlderThan(n node, gen uint64) (hashNode, bool) {
 	if n == nil {
 		return nil, false
 	}
 	switch n := (n).(type) {
 	case *shortNode:
 		if n.flags.tod < gen {
-			var nextKey []byte
-			if trace {
-				nKey := compactToHex(n.Key)
-				nextKey = make([]byte, len(key)+len(nKey))
-				copy(nextKey, key)
-				copy(nextKey[len(key):], nKey)
-			}
-			if hn, unloaded := unloadOlderThan(nextKey, n.Val, gen, h, false, trace); unloaded {
+			if hn, unloaded := unloadOlderThan(n.Val, gen); unloaded {
 				n.Val = hn
 			}
 		}
 	case *duoNode:
 		if n.flags.t < gen {
 			if n.flags.dirty {
-				var hn common.Hash
-				if h.hash(n, isRoot, hn[:]) == 32 {
-					if trace {
-						fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
-					}
-					return hashNode(hn[:]), true
-				} else {
-					// Embedded node does not have a hash and cannot be unloaded
-					return nil, false
-				}
-			}
-			if trace {
-				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+				panic(fmt.Sprintf("duoNode dirty: %s", n))
 			}
 			return hashNode(common.CopyBytes(n.hash())), true
 		}
 		if n.flags.tod < gen {
-			var nextKey1, nextKey2 []byte
-			if trace {
-				i1, i2 := n.childrenIdx()
-				nextKey1 = make([]byte, len(key)+1)
-				copy(nextKey1, key)
-				nextKey1[len(key)] = i1
-				nextKey2 = make([]byte, len(key)+1)
-				copy(nextKey2, key)
-				nextKey2[len(key)] = i2
-			}
-			if hn, unloaded := unloadOlderThan(nextKey1, n.child1, gen, h, false, trace); unloaded {
+			if hn, unloaded := unloadOlderThan(n.child1, gen); unloaded {
 				n.child1 = hn
 			}
-			if hn, unloaded := unloadOlderThan(nextKey2, n.child2, gen, h, false, trace); unloaded {
+			if hn, unloaded := unloadOlderThan(n.child2, gen); unloaded {
 				n.child2 = hn
 			}
 		}
 	case *fullNode:
 		if n.flags.t < gen {
 			if n.flags.dirty {
-				var hn common.Hash
-				if h.hash(n, isRoot, hn[:]) == 32 {
-					if trace {
-						fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
-					}
-					return hashNode(hn[:]), true
-				} else {
-					// Embedded node does not have a hash and cannot be unloaded
-					return nil, false
-				}
-			}
-			if trace {
-				fmt.Printf("unloaded key %x, t=%d, gen=%d\n", key, n.flags.t, gen)
+				panic(fmt.Sprintf("fullNode dirty: %s", n))
 			}
 			return hashNode(common.CopyBytes(n.hash())), true
 		}
-		for i, child := range n.Children {
-			if child != nil {
-				var nextKey []byte
-				if trace {
-					nextKey = make([]byte, len(key)+1)
-					copy(nextKey, key)
-					nextKey[len(key)] = byte(i)
-				}
-				if hn, unloaded := unloadOlderThan(nextKey, child, gen, h, false, trace); unloaded {
-					n.Children[i] = hn
+		if n.flags.tod < gen {
+			for i, child := range &n.Children {
+				if child != nil {
+					if hn, unloaded := unloadOlderThan(child, gen); unloaded {
+						n.Children[i] = hn
+					}
 				}
 			}
 		}

@@ -549,8 +549,10 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 }
 
 func (s *Stateless) Prune(oldest uint64, trace bool) {
+	s.t.Hash()
 	s.t.UnloadOlderThan(oldest, trace)
 	for addrHash, st := range s.storageTries {
+		st.Hash()
 		empty := st.UnloadOlderThan(oldest, trace)
 		if empty {
 			delete(s.storageTries, addrHash)
