@@ -29,12 +29,12 @@ import (
 	"testing"
 )
 
-func newTestLDB() (*LDBDatabase, func()) {
+func newTestLDB() (*BoltDatabase, func()) {
 	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
 	if err != nil {
 		panic("failed to create test file: " + err.Error())
 	}
-	db, err := NewLDBDatabase(path.Join(dirname, "db"))
+	db, err := NewBoltDatabase(path.Join(dirname, "db"))
 	if err != nil {
 		panic("failed to create test database: " + err.Error())
 	}

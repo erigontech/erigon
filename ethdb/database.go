@@ -40,7 +40,7 @@ var SuffixBucket = []byte("SUFFIX")
 
 const HeapSize = 512 * 1024 * 1024
 
-type LDBDatabase struct {
+type BoltDatabase struct {
 	fn string   // filename for reporting
 	db *bolt.DB // BoltDB instance
 
@@ -50,8 +50,8 @@ type LDBDatabase struct {
 	log log.Logger // Contextual logger tracking the database path
 }
 
-// NewLDBDatabase returns a LevelDB wrapped object.
-func NewLDBDatabase(file string) (*LDBDatabase, error) {
+// NewBoltDatabase returns a LevelDB wrapped object.
+func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	logger := log.New("database", file)
 
 	// Create necessary directories
@@ -64,7 +64,7 @@ func NewLDBDatabase(file string) (*LDBDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &LDBDatabase{
+	return &BoltDatabase{
 		fn:  file,
 		db:  db,
 		log: logger,
@@ -72,12 +72,12 @@ func NewLDBDatabase(file string) (*LDBDatabase, error) {
 }
 
 // Path returns the path to the database directory.
-func (db *LDBDatabase) Path() string {
+func (db *BoltDatabase) Path() string {
 	return db.fn
 }
 
 // Put puts the given key / value to the queue
-func (db *LDBDatabase) Put(bucket, key []byte, value []byte) error {
+func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucket, true)
 		if err != nil {
@@ -104,7 +104,7 @@ func historyBucket(bucket []byte) []byte {
 }
 
 // Put puts the given key / value to the queue
-func (db *LDBDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
+func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
 	composite, suffix := compositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
@@ -137,7 +137,7 @@ func (db *LDBDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error 
 	return err
 }
 
-func (db *LDBDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
+func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	var savedTx *bolt.Tx
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
@@ -168,7 +168,7 @@ func (db *LDBDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	return uint64(savedTx.Stats().Write), nil
 }
 
-func (db *LDBDatabase) Has(bucket, key []byte) (bool, error) {
+func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -183,12 +183,12 @@ func (db *LDBDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *LDBDatabase) Size() int {
+func (db *BoltDatabase) Size() int {
 	return db.db.Size()
 }
 
 // Get returns the given key if it's present.
-func (db *LDBDatabase) Get(bucket, key []byte) ([]byte, error) {
+func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -208,14 +208,14 @@ func (db *LDBDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-func (db *LDBDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := compositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
 }
 
 // GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
 // if there are not such (k, v)
-func (db *LDBDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := compositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -260,7 +260,7 @@ func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
 	return fixedbytes, mask
 }
 
-func (db *LDBDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -284,7 +284,7 @@ func (db *LDBDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func
 	return err
 }
 
-func (db *LDBDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -356,7 +356,7 @@ func (db *LDBDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []
 	return nil
 }
 
-func (db *LDBDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	fixedbytes, mask := bytesmask(fixedbits)
 	suffix := encodeTimestamp(timestamp)
 	l := len(startkey)
@@ -430,7 +430,7 @@ func (db *LDBDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint
 	return err
 }
 
-func (db *LDBDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -585,12 +585,12 @@ func (db *LDBDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte,
 	return nil
 }
 
-func (db *LDBDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
 	return rewindData(db, timestampSrc, timestampDst, df)
 }
 
 // Delete deletes the key from the queue and database
-func (db *LDBDatabase) Delete(bucket, key []byte) error {
+func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	// Execute the actual operation
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -604,7 +604,7 @@ func (db *LDBDatabase) Delete(bucket, key []byte) error {
 }
 
 // Deletes all keys with specified suffix from all the buckets
-func (db *LDBDatabase) DeleteTimestamp(timestamp uint64) error {
+func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	suffix := encodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(SuffixBucket)
@@ -642,7 +642,7 @@ func (db *LDBDatabase) DeleteTimestamp(timestamp uint64) error {
 	return err
 }
 
-func (db *LDBDatabase) DeleteBucket(bucket []byte) error {
+func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if err := tx.DeleteBucket(bucket); err != nil {
 			return err
@@ -652,7 +652,7 @@ func (db *LDBDatabase) DeleteBucket(bucket []byte) error {
 	return err
 }
 
-func (db *LDBDatabase) Close() {
+func (db *BoltDatabase) Close() {
 	// Stop the metrics collection to avoid internal database races
 	db.quitLock.Lock()
 	defer db.quitLock.Unlock()
@@ -688,7 +688,7 @@ type mutation struct {
 	db         Database
 }
 
-func (db *LDBDatabase) NewBatch() Mutation {
+func (db *BoltDatabase) NewBatch() Mutation {
 	m := &mutation{
 		db:         db,
 		puts:       make(map[string]*llrb.LLRB),

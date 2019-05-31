@@ -300,7 +300,7 @@ func importPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.LDBDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
 	start := time.Now()
 
 	if err := utils.ImportPreimages(diskdb, ctx.Args().First()); err != nil {
@@ -318,7 +318,7 @@ func exportPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.LDBDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
 	start := time.Now()
 
 	if err := utils.ExportPreimages(diskdb, ctx.Args().First()); err != nil {
@@ -342,7 +342,7 @@ func copyDb(ctx *cli.Context) error {
 	dl := downloader.New(syncmode, chainDb, new(event.TypeMux), chain, nil, nil)
 
 	// Create a source peer to satisfy downloader requests from
-	db, err := ethdb.NewLDBDatabase(ctx.Args().First())
+	db, err := ethdb.NewBoltDatabase(ctx.Args().First())
 	if err != nil {
 		return err
 	}

@@ -24,45 +24,45 @@ import (
 
 var errNotSupported = errors.New("ethdb: not supported")
 
-type LDBDatabase struct {
+type BoltDatabase struct {
 }
 
-// NewLDBDatabase returns a LevelDB wrapped object.
-func NewLDBDatabase(file string, cache int, handles int) (*LDBDatabase, error) {
+// NewBoltDatabase returns a LevelDB wrapped object.
+func NewBoltDatabase(file string, cache int, handles int) (*BoltDatabase, error) {
 	return nil, errNotSupported
 }
 
 // Path returns the path to the database directory.
-func (db *LDBDatabase) Path() string {
+func (db *BoltDatabase) Path() string {
 	return ""
 }
 
 // Put puts the given key / value to the queue
-func (db *LDBDatabase) Put(key []byte, value []byte) error {
+func (db *BoltDatabase) Put(key []byte, value []byte) error {
 	return errNotSupported
 }
 
-func (db *LDBDatabase) Has(key []byte) (bool, error) {
+func (db *BoltDatabase) Has(key []byte) (bool, error) {
 	return false, errNotSupported
 }
 
 // Get returns the given key if it's present.
-func (db *LDBDatabase) Get(key []byte) ([]byte, error) {
+func (db *BoltDatabase) Get(key []byte) ([]byte, error) {
 	return nil, errNotSupported
 }
 
 // Delete deletes the key from the queue and database
-func (db *LDBDatabase) Delete(key []byte) error {
+func (db *BoltDatabase) Delete(key []byte) error {
 	return errNotSupported
 }
 
-func (db *LDBDatabase) Close() {
+func (db *BoltDatabase) Close() {
 }
 
 // Meter configures the database metrics collectors and
-func (db *LDBDatabase) Meter(prefix string) {
+func (db *BoltDatabase) Meter(prefix string) {
 }
 
-func (db *LDBDatabase) NewBatch() Batch {
+func (db *BoltDatabase) NewBatch() Batch {
 	return nil
 }

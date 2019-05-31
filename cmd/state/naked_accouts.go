@@ -81,7 +81,7 @@ func accountsReadWrites() {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth-10/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
