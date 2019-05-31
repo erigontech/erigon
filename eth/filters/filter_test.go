@@ -103,14 +103,8 @@ func BenchmarkFilters(b *testing.B) {
 }
 
 func TestFilters(t *testing.T) {
-	dir, err := ioutil.TempDir("", "filtertest")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
 	var (
-		db, _      = ethdb.NewBoltDatabase(dir)
+		db         = ethdb.NewMemDatabase()
 		mux        = new(event.TypeMux)
 		txFeed     = new(event.Feed)
 		rmLogsFeed = new(event.Feed)
