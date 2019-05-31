@@ -433,7 +433,7 @@ func benchGet(b *testing.B, commit bool) {
 	b.StopTimer()
 
 	if commit {
-		ldb := tmpdb.(*ethdb.LDBDatabase)
+		ldb := tmpdb.(*ethdb.BoltDatabase)
 		ldb.Close()
 		os.RemoveAll(ldb.Path())
 	}
@@ -489,7 +489,7 @@ func tempDB() (string, ethdb.Database) {
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary directory: %v", err))
 	}
-	diskdb, err := ethdb.NewLDBDatabase(dir, 256)
+	diskdb, err := ethdb.NewBoltDatabase(dir, 256)
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary database: %v", err))
 	}

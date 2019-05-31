@@ -22,4 +22,4 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-var _ ethdb.Database = &ethdb.LDBDatabase{}
+var _ ethdb.Database = &ethdb.BoltDatabase{}

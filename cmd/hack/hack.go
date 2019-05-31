@@ -404,8 +404,8 @@ func printOccupancies(t *trie.Trie, db ethdb.Database, blockNr uint64) {
 }
 
 func trieStats() {
-	//db, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	db, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//db, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	db, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	if err != nil {
 		panic(err)
 	}
@@ -679,15 +679,15 @@ func trieChart() {
 }
 
 func execToBlock(block int) {
-	blockDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	blockDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	defer blockDb.Close()
 	os.Remove("statedb")
 	os.Remove("statedb.hash")
-	stateDb, err := ethdb.NewLDBDatabase("statedb")
+	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
 	_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultTestnetGenesisBlock())
@@ -722,7 +722,7 @@ func execToBlock(block int) {
 }
 
 func extractTrie(block int) {
-	stateDb, err := ethdb.NewLDBDatabase("statedb")
+	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer stateDb.Close()
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -746,9 +746,9 @@ func extractTrie(block int) {
 }
 
 func testRewind(block, rewind int) {
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -814,8 +814,8 @@ func testRewind(block, rewind int) {
 
 func testStartup() {
 	startTime := time.Now()
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -839,9 +839,9 @@ func testStartup() {
 
 func testResolve() {
 	startTime := time.Now()
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("statedb")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer ethDb.Close()
 	//treePrefix := common.FromHex("1194e966965418c7d73a42cceeb254d875860356")
@@ -950,7 +950,7 @@ func testDifficulty() {
 }
 
 func testBlockHashes() {
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	hash := rawdb.ReadCanonicalHash(ethDb, 823144)
 	fmt.Printf("Canonical hash: %x\n", hash)
@@ -960,7 +960,7 @@ func testBlockHashes() {
 }
 
 func printTxHashes() {
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
@@ -997,8 +997,8 @@ func relayoutKeys() {
 }
 
 func upgradeBlocks() {
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	start := []byte{}
@@ -1069,9 +1069,9 @@ func invTree(wrong, right, diff string, block int, encodeToBytes bool) {
 }
 
 func preimage() {
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x2a23229958e691340d70ce446e3f3986df5f5289bbe763257e9c2321f7404f87"))
@@ -1109,9 +1109,9 @@ func decodeTimestamp(suffix []byte) (uint64, []byte) {
 }
 
 func loadAccount() {
-	ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	blockNr := uint64(*block)
@@ -1290,8 +1290,8 @@ func loadAccount() {
 }
 
 func printBranches(block uint64) {
-	ethDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	fmt.Printf("All headers at the same height %d\n", block)
@@ -1357,11 +1357,11 @@ func repair() {
 		interruptCh <- true
 	}()
 
-	//historyDb, err := ethdb.NewLDBDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	historyDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//historyDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//historyDb, err := ethdb.NewLDBDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//historyDb, err := ethdb.NewLDBDatabase("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
+	//historyDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	historyDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	//historyDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//historyDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//historyDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
 	check(err)
 	defer historyDb.Close()
 	//if *block == 1 {
@@ -1432,7 +1432,7 @@ func repair() {
 }
 
 func readAccount() {
-	ethDb, err := ethdb.NewLDBDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)

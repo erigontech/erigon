@@ -605,7 +605,7 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	if n.config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
-	return ethdb.NewLDBDatabase(n.config.ResolvePath(name))
+	return ethdb.NewBoltDatabase(n.config.ResolvePath(name))
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

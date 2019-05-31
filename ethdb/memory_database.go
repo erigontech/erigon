@@ -22,7 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-func NewMemDatabase() *LDBDatabase {
+func NewMemDatabase() *BoltDatabase {
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
@@ -30,14 +30,14 @@ func NewMemDatabase() *LDBDatabase {
 	if err != nil {
 		panic(err)
 	}
-	return &LDBDatabase{
+	return &BoltDatabase{
 		fn:  "in-memory",
 		db:  db,
 		log: logger,
 	}
 }
 
-func NewMemDatabase2() (*LDBDatabase, *bolt.DB) {
+func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
@@ -45,7 +45,7 @@ func NewMemDatabase2() (*LDBDatabase, *bolt.DB) {
 	if err != nil {
 		panic(err)
 	}
-	return &LDBDatabase{
+	return &BoltDatabase{
 		fn:  "in-memory",
 		db:  db,
 		log: logger,
