@@ -191,8 +191,8 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	tds.SetBlockNr(blockNr + 1)
 	statedb.Finalise(false, tds.TrieStateWriter())
+	tds.SetBlockNr(blockNr + 1)
 	statedb.Commit(false, tds.DbStateWriter())
 	root, err := tds.IntermediateRoot(statedb, false)
 	if err != nil {

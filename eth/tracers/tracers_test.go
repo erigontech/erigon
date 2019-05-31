@@ -167,7 +167,10 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb := tests.MakePreState(ethdb.NewMemDatabase(), alloc)
+	statedb, _, err := tests.MakePreState(ethdb.NewMemDatabase(), alloc, 0)
+	if err != nil {
+		t.Errorf("Could not make prestate: %v", err)
+	}
 	// Create the tracer, the EVM environment and run it
 	tracer, err := New("prestateTracer")
 	if err != nil {
@@ -241,7 +244,10 @@ func TestCallTracer(t *testing.T) {
 				GasPrice:    tx.GasPrice(),
 			}
 			db := ethdb.NewMemDatabase()
-			statedb, _ := tests.MakePreState(db, test.Genesis.Alloc, 0)
+			statedb, _, err := tests.MakePreState(db, test.Genesis.Alloc, 0)
+			if err != nil {
+				t.Errorf("Could not make prestate: %v", err)
+			}
 
 			// Create the tracer, the EVM environment and run it
 			tracer, err := New("callTracer")
