@@ -53,7 +53,7 @@ func TestStorageRangeAt(t *testing.T) {
 	}
 	tds.IntermediateRoot(statedb, false)
 	tds.SetBlockNr(1)
-	statedb.Finalise(false, tds.DbStateWriter())
+	statedb.Commit(false, tds.DbStateWriter())
 
 	// Check a few combinations of limit and start/end.
 	tests := []struct {

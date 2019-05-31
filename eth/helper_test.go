@@ -53,17 +53,28 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	var (
 		evmux  = new(event.TypeMux)
 		engine = ethash.NewFaker()
-		db     = ethdb.NewMemDatabase()
 		gspec  = &core.Genesis{
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{testBank: {Balance: big.NewInt(1000000)}},
 		}
-		genesis       = gspec.MustCommit(db)
-		blockchain, _ = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
 	)
-	chain, _ := core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db, blocks, generator)
+	var chain []*types.Block
+	{
+		db_gen := ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+		genesis := gspec.MustCommit(db_gen)
+		chain, _ = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db_gen, blocks, generator)
+	}
+	// Fresh database
+	db := ethdb.NewMemDatabase()
+	// Regenerate genesis block in the fresh database
+	gspec.MustCommit(db)
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	blockchain.EnableReceipts(true)
 	if _, err := blockchain.InsertChain(chain); err != nil {
-		panic(err)
+		return nil, nil, err
 	}
 
 	pm, err := NewProtocolManager(gspec.Config, mode, DefaultConfig.NetworkId, evmux, &testTxPool{added: newtx}, engine, blockchain, db, nil)
