@@ -16,7 +16,7 @@
 
 // +build !js
 
-package ethdb_test
+package ethdb
 
 import (
 	"bytes"
@@ -29,7 +29,7 @@ import (
 	"testing"
 )
 
-func newTestLDB() (*BoltDatabase, func()) {
+func newTestDB() (*BoltDatabase, func()) {
 	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
 	if err != nil {
 		panic("failed to create test file: " + err.Error())
@@ -48,8 +48,8 @@ func newTestLDB() (*BoltDatabase, func()) {
 var bucket = []byte("TestBucket")
 var test_values = []string{"a", "1251", "\x00123\x00"}
 
-func TestLDB_PutGet(t *testing.T) {
-	db, remove := newTestLDB()
+func TestDB_PutGet(t *testing.T) {
+	db, remove := newTestDB()
 	defer remove()
 	testPutGet(db, t)
 }
@@ -148,7 +148,7 @@ func testPutGet(db Database, t *testing.T) {
 }
 
 func TestLDB_ParallelPutGet(t *testing.T) {
-	db, remove := newTestLDB()
+	db, remove := newTestDB()
 	defer remove()
 	testParallelPutGet(db, t)
 }
