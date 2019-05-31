@@ -117,8 +117,9 @@ func (tc *testChain) copy(newlen int) *testChain {
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
 	// start := time.Now()
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
-
-	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), testDB, n, func(i int, block *core.BlockGen) {
+	db := ethdb.NewMemDatabase()
+	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
+	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 		// If a heavy chain is requested, delay blocks to raise difficulty
 		if heavy {
