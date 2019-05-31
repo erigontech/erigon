@@ -34,12 +34,12 @@ import (
 var (
 	testKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddress = crypto.PubkeyToAddress(testKey.PublicKey)
-	testDB      = ethdb.NewMemDatabase()
-	testGenesis = core.GenesisBlockForTesting(testDB, testAddress, big.NewInt(1000000000))
+	testDb      = ethdb.NewMemDatabase()
+	testGenesis = core.GenesisBlockForTesting(testDb, testAddress, big.NewInt(1000000000))
 )
 
 // The common prefix of all test chains:
-var testChainBase = newTestChain(blockCacheItems+200, testGenesis)
+var testChainBase = newTestChain(blockCacheItems+200, testDb, testGenesis)
 
 // Different forks on top of the base chain:
 var testChainForkLightA, testChainForkLightB, testChainForkHeavy *testChain
@@ -55,6 +55,7 @@ func init() {
 }
 
 type testChain struct {
+	db       *ethdb.BoltDatabase
 	genesis  *types.Block
 	chain    []common.Hash
 	headerm  map[common.Hash]*types.Header
@@ -64,8 +65,9 @@ type testChain struct {
 }
 
 // newTestChain creates a blockchain of the given length.
-func newTestChain(length int, genesis *types.Block) *testChain {
+func newTestChain(length int, db *ethdb.BoltDatabase, genesis *types.Block) *testChain {
 	tc := new(testChain).copy(length)
+	tc.db = db
 	tc.genesis = genesis
 	tc.chain = append(tc.chain, genesis.Hash())
 	tc.headerm[tc.genesis.Hash()] = tc.genesis.Header()
@@ -99,6 +101,9 @@ func (tc *testChain) copy(newlen int) *testChain {
 		receiptm: make(map[common.Hash][]*types.Receipt, newlen),
 		tdm:      make(map[common.Hash]*big.Int, newlen),
 	}
+	if tc.db != nil {
+		cpy.db = tc.db.MemCopy()
+	}
 	for i := 0; i < len(tc.chain) && i < newlen; i++ {
 		hash := tc.chain[i]
 		cpy.chain = append(cpy.chain, tc.chain[i])
@@ -117,9 +122,7 @@ func (tc *testChain) copy(newlen int) *testChain {
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
 	// start := time.Now()
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
-	db := ethdb.NewMemDatabase()
-	core.GenesisBlockForTesting(db, testAddress, big.NewInt(1000000000))
-	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), db, n, func(i int, block *core.BlockGen) {
+	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 		// If a heavy chain is requested, delay blocks to raise difficulty
 		if heavy {
