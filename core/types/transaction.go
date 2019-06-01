@@ -230,6 +230,9 @@ func (tx *Transaction) AsMessage(s Signer) (Message, error) {
 
 	var err error
 	msg.from, err = Sender(s, tx)
+	if tx.Protected() && tx.ChainId().Cmp(s.ChainId()) != 0 {
+		return msg, ErrInvalidChainId
+	}
 	return msg, err
 }
 
