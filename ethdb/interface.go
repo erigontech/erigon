@@ -58,6 +58,7 @@ type Database interface {
 	Close()
 	NewBatch() Mutation
 	Size() int
+	Keys() [][]byte
 }
 
 // Extended version of the Batch, with read capabilites
@@ -65,6 +66,5 @@ type Mutation interface {
 	Database
 	Commit() (uint64, error)
 	Rollback()
-	Keys() [][]byte
 	BatchSize() int
 }

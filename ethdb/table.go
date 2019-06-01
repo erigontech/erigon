@@ -97,3 +97,7 @@ func (dt *table) NewBatch() Mutation {
 func (dt *table) Size() int {
 	return dt.db.Size()
 }
+
+func (dt *table) Keys() [][]byte {
+	panic("Not supported")
+}

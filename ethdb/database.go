@@ -672,6 +672,23 @@ func (db *BoltDatabase) Close() {
 	}
 }
 
+func (db *BoltDatabase) Keys() [][]byte {
+	var keys [][]byte
+	db.db.View(func(tx *bolt.Tx) error {
+		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			var nameCopy = make([]byte, len(name))
+			copy(nameCopy, name)
+			return b.ForEach(func(k, _ []byte) error {
+				var kCopy = make([]byte, len(k))
+				copy(kCopy, k)
+				keys = append(append(keys, nameCopy), kCopy)
+				return nil
+			})
+		})
+	})
+	return keys
+}
+
 type PutItem struct {
 	key, value []byte
 }
