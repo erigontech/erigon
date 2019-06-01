@@ -26,7 +26,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 
 	"github.com/petar/GoLLRB/llrb"
@@ -50,6 +49,11 @@ type proofList [][]byte
 func (n *proofList) Put(key []byte, value []byte) error {
 	*n = append(*n, value)
 	return nil
+}
+
+type StateTracer interface {
+	CaptureAccountRead(account common.Address) error
+	CaptureAccountWrite(account common.Address) error
 }
 
 // StateDBs within the ethereum protocol are used to store anything
@@ -88,7 +92,7 @@ type StateDB struct {
 	journal        *journal
 	validRevisions []revision
 	nextRevisionId int
-	tracer         vm.Tracer
+	tracer         StateTracer
 	trace          bool
 }
 
@@ -105,7 +109,7 @@ func New(stateReader StateReader) *StateDB {
 	}
 }
 
-func (self *StateDB) SetTracer(tracer vm.Tracer) {
+func (self *StateDB) SetTracer(tracer StateTracer) {
 	self.tracer = tracer
 }
 
