@@ -153,12 +153,13 @@ func BenchmarkCall(b *testing.B) {
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	var (
-		statedb, _ = state.New(common.Hash{}, state.NewDatabase(ethdb.NewMemDatabase()))
-		sender     = common.BytesToAddress([]byte("sender"))
-		receiver   = common.BytesToAddress([]byte("receiver"))
+		tds, _   = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		statedb  = state.New(tds)
+		sender   = common.BytesToAddress([]byte("sender"))
+		receiver = common.BytesToAddress([]byte("receiver"))
 	)
 
-	statedb.CreateAccount(sender)
+	statedb.CreateAccount(sender, true)
 	statedb.SetCode(receiver, common.FromHex(code))
 	runtimeConfig := Config{
 		Origin:      sender,
