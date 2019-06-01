@@ -138,7 +138,7 @@ func TestMissingKeyProof(t *testing.T) {
 		}
 		val, _, err := VerifyProof(trie.Hash(), []byte(key), proof)
 		if err != nil {
-			t.Fatalf("test %d: failed to verify proof: %v\nraw proof: %x", i, err, proof)
+			t.Fatalf("test %d: failed to verify proof: %v", i, err)
 		}
 		if val != nil {
 			t.Fatalf("test %d: verified value mismatch: have %x, want nil", i, val)
@@ -178,7 +178,7 @@ func benchmarkVerifyProof(b *testing.B) {
 	trie, vals := randomTrie(100)
 	root := trie.Hash()
 	var keys []string
-	var proofs []ethdb.Mutation
+	var proofs []ethdb.Database
 	for k := range vals {
 		keys = append(keys, k)
 		proof := ethdb.NewMemDatabase()

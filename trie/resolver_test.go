@@ -14,10 +14,7 @@ func TestRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := []byte("AT")
-	writeBlockNr := uint64(0)
-	tr := New(common.Hash{}, bucket, false)
-	l := NewList()
-	tr.MakeListed(l)
+	tr := New(common.Hash{}, bucket, nil, false)
 
 	keys := []string{
 		"FIRSTFIRSTFIRSTFIRSTFIRSTFIRSTFI",
@@ -49,19 +46,16 @@ func TestRebuild(t *testing.T) {
 		if err != nil {
 			t.Errorf("Could not encode value: %v", err)
 		}
-		db.PutS(bucket, key, v1, writeBlockNr)
-		db.Commit()
-		t1 := New(common.BytesToHash(root1), bucket, false)
-		t1.MakeListed(l)
+		db.Put(bucket, key, v1)
+		t1 := New(common.BytesToHash(root1), bucket, nil, false)
 		t1.Rebuild(db, 0)
-		//fmt.Printf("\n\n")
 	}
 }
 
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1Embedded(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
+	tr := New(common.Hash{}, testbucket, nil, false)
 	db.PutS(testbucket, []byte("abcdefghijklmnopqrstuvwxyz012345"), []byte("a"), 0)
 	tc := &TrieContinuation{
 		t:           tr,
@@ -73,9 +67,8 @@ func TestResolve1Embedded(t *testing.T) {
 		resolveHash: nil,
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	r := tr.NewResolver(db, false)
+	r := NewResolver(db, false, false)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -85,8 +78,8 @@ func TestResolve1Embedded(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
-	db.PutS(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	tr := New(common.Hash{}, testbucket, nil, false)
+	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
 		action:      TrieActionDelete,
@@ -97,9 +90,8 @@ func TestResolve1(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("741326629cbf4ba5d5afebd56dd714ba4a531ddb6b07b829aa85dee4d97d34a4").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	r := tr.NewResolver(db, false)
+	r := NewResolver(db, false, false)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -109,9 +101,9 @@ func TestResolve1(t *testing.T) {
 
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
-	db.PutS(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	tr := New(common.Hash{}, testbucket, nil, false)
+	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
 		action:      TrieActionDelete,
@@ -122,9 +114,8 @@ func TestResolve2(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	r := tr.NewResolver(db, false)
+	r := NewResolver(db, false, false)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -134,9 +125,9 @@ func TestResolve2(t *testing.T) {
 
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
-	db.PutS(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	tr := New(common.Hash{}, testbucket, nil, false)
+	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
 		action:      TrieActionDelete,
@@ -147,9 +138,8 @@ func TestResolve2Keep(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	r := tr.NewResolver(db, false)
+	r := NewResolver(db, false, false)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -159,10 +149,10 @@ func TestResolve2Keep(t *testing.T) {
 
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
-	db.PutS(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	tr := New(common.Hash{}, testbucket, nil, false)
+	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
 		action:      TrieActionDelete,
@@ -173,9 +163,8 @@ func TestResolve3Keep(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("03e27bd9cc47c0a03a8480035f765a4ba242c40ae4badfd1628af5a1ca5fd57a").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	r := tr.NewResolver(db, false)
+	r := NewResolver(db, false, false)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -185,15 +174,15 @@ func TestResolve3Keep(t *testing.T) {
 
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
-	db.PutS(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	tr := New(common.Hash{}, testbucket, nil, false)
+	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 
-	db.PutS(testbucket, []byte("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
-	db.PutS(testbucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"), 0)
+	db.Put(testbucket, []byte("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	db.Put(testbucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc1 := &TrieContinuation{
 		t:           tr,
 		action:      TrieActionDelete,
@@ -204,7 +193,6 @@ func TestTrieResolver(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
 	tc2 := &TrieContinuation{
 		t:           tr,
@@ -216,7 +204,6 @@ func TestTrieResolver(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
 	tc3 := &TrieContinuation{
 		t:           tr,
@@ -228,9 +215,8 @@ func TestTrieResolver(t *testing.T) {
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
 		n:           nil,
-		touched:     []Touch{},
 	}
-	resolver := tr.NewResolver(db, false)
+	resolver := NewResolver(db, false, false)
 	resolver.AddContinuation(tc3)
 	resolver.AddContinuation(tc2)
 	resolver.AddContinuation(tc1)

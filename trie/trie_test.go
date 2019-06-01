@@ -43,7 +43,7 @@ func init() {
 // Used for testing
 func newEmpty() (ethdb.Database, *Trie) {
 	diskdb := ethdb.NewMemDatabase()
-	trie := New(common.Hash{}, testbucket, false)
+	trie := New(common.Hash{}, testbucket, nil, false)
 	return diskdb, trie
 }
 
@@ -72,32 +72,32 @@ func testMissingNodeMemonly(t *testing.T) { testMissingNode(t, true) }
 func testMissingNode(t *testing.T, memonly bool) {
 	diskdb := ethdb.NewMemDatabase()
 
-	trie := New(common.Hash{}, testbucket, false)
+	trie := New(common.Hash{}, testbucket, nil, false)
 	updateString(trie, diskdb, "120000", "qwerqwerqwerqwerqwerqwerqwerqwer")
 	updateString(trie, diskdb, "123456", "asdfasdfasdfasdfasdfasdfasdfasdf")
 	root := trie.Hash()
 
-	trie = New(root, testbucket, false)
-	_, _, err := trie.TryGet(diskdb, []byte("120000"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err := trie.TryGet(diskdb, []byte("120000"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie = New(root, testbucket, false)
-	_, _, err = trie.TryGet(diskdb, []byte("120099"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err = trie.TryGet(diskdb, []byte("120099"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie = New(root, testbucket, false)
-	_, _, err = trie.TryGet(diskdb, []byte("123456"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err = trie.TryGet(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie = New(root, testbucket, false)
+	trie = New(root, testbucket, nil, false)
 	err = trie.TryUpdate(diskdb, []byte("120099"), []byte("zxcvzxcvzxcvzxcvzxcvzxcvzxcvzxcv"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie = New(root, testbucket, false)
+	trie = New(root, testbucket, nil, false)
 	err = trie.TryDelete(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
@@ -108,27 +108,27 @@ func testMissingNode(t *testing.T, memonly bool) {
 		diskdb.Delete(testbucket, hash[:])
 	}
 
-	trie = New(root, testbucket, false)
-	_, _, err = trie.TryGet(diskdb, []byte("120000"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err = trie.TryGet(diskdb, []byte("120000"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie = New(root, testbucket, false)
-	_, _, err = trie.TryGet(diskdb, []byte("120099"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err = trie.TryGet(diskdb, []byte("120099"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie = New(root, testbucket, false)
-	_, _, err = trie.TryGet(diskdb, []byte("123456"), 0)
+	trie = New(root, testbucket, nil, false)
+	_, err = trie.TryGet(diskdb, []byte("123456"), 0)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	trie = New(root, testbucket, false)
+	trie = New(root, testbucket, nil, false)
 	err = trie.TryUpdate(diskdb, []byte("120099"), []byte("zxcv"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
 	}
-	trie = New(root, testbucket, false)
+	trie = New(root, testbucket, nil, false)
 	err = trie.TryDelete(diskdb, []byte("123456"), 0)
 	if _, ok := err.(*MissingNodeError); !ok {
 		t.Errorf("Wrong error: %v", err)
@@ -250,7 +250,7 @@ func testReplication(t *testing.T) {
 	exp := trie.Hash()
 
 	// create a new trie on top of the database and check that lookups work.
-	trie2 := New(exp, testbucket, false)
+	trie2 := New(exp, testbucket, nil, false)
 	for _, kv := range vals {
 		if string(getString(trie2, diskdb, kv.k)) != kv.v {
 			t.Errorf("trie2 doesn't have %q => %q", kv.k, kv.v)
@@ -353,7 +353,7 @@ func (randTest) Generate(r *rand.Rand, size int) reflect.Value {
 
 func runRandTest(rt randTest) bool {
 	diskdb := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, false)
+	tr := New(common.Hash{}, testbucket, nil, false)
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
@@ -375,10 +375,10 @@ func runRandTest(rt randTest) bool {
 			tr.Hash()
 		case opReset:
 			hash := tr.Hash()
-			newtr := New(hash, testbucket, false)
+			newtr := New(hash, testbucket, nil, false)
 			tr = newtr
 		case opItercheckhash:
-			checktr := New(common.Hash{}, testbucket, false)
+			checktr := New(common.Hash{}, testbucket, nil, false)
 			it := NewIterator(tr.NodeIterator(diskdb, nil, 0))
 			for it.Next() {
 				checktr.Update(diskdb, it.Key, it.Value, 0)
@@ -417,7 +417,7 @@ func benchGet(b *testing.B, commit bool) {
 	var tmpdb ethdb.Database
 	if commit {
 		_, tmpdb = tempDB()
-		trie = New(common.Hash{}, testbucket, false)
+		trie = New(common.Hash{}, testbucket, nil, false)
 	}
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {
@@ -489,7 +489,7 @@ func tempDB() (string, ethdb.Database) {
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary directory: %v", err))
 	}
-	diskdb, err := ethdb.NewBoltDatabase(dir, 256)
+	diskdb, err := ethdb.NewBoltDatabase(dir)
 	if err != nil {
 		panic(fmt.Sprintf("can't create temporary database: %v", err))
 	}
