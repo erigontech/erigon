@@ -228,6 +228,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	if err != nil {
 		panic(err)
 	}
+	tds.Rebuild()
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
 		err = db.DeleteTimestamp(parent.NumberU64() + 1)

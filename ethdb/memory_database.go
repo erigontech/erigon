@@ -52,7 +52,7 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 	}, db
 }
 
-func (db *BoltDatabase) MemCopy() *BoltDatabase {
+func (db *BoltDatabase) MemCopy() Database {
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
