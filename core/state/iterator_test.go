@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 // Tests that the node iterator indeed walks over the entire database contents.
@@ -41,7 +40,7 @@ func TestNodeIteratorCoverage(t *testing.T) {
 		}
 	}
 
-	for keys, i := db.(ethdb.Mutation).Keys(), 0; i < len(keys); i += 2 {
+	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
 		if bytes.Equal(keys[i], []byte("secure-key-")) {
 			continue
 		}

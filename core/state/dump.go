@@ -22,7 +22,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type DumpAccount struct {
@@ -45,11 +44,10 @@ func (self *TrieDbState) RawDump() Dump {
 		Accounts: make(map[string]DumpAccount),
 	}
 	var prefix [32]byte
-	err := self.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, prefix[:], 0, self.blockNr, func(k, v []byte) (bool, error) {
+	err := self.db.Walk(AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
-		var data Account
-		var err error
-		if err = rlp.DecodeBytes(v, &data); err != nil {
+		data, err := encodingToAccount(v)
+		if err != nil {
 			return false, err
 		}
 		var code []byte
@@ -66,7 +64,7 @@ func (self *TrieDbState) RawDump() Dump {
 			Code:     common.Bytes2Hex(code),
 			Storage:  make(map[string]string),
 		}
-		err = self.db.WalkAsOf(StorageBucket, StorageHistoryBucket, addr, uint(len(addr)*8), self.blockNr, func(ks, vs []byte) (bool, error) {
+		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
 			account.Storage[common.Bytes2Hex(self.GetKey(ks))] = common.Bytes2Hex(vs)
 			return true, nil
 		})
