@@ -101,3 +101,7 @@ func (dt *table) Size() int {
 func (dt *table) Keys() [][]byte {
 	panic("Not supported")
 }
+
+func (dt *table) MemCopy() Database {
+	panic("Not implemented")
+}

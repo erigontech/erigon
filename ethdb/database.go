@@ -1153,3 +1153,7 @@ func (m *mutation) NewBatch() Mutation {
 	}
 	return mm
 }
+
+func (m *mutation) MemCopy() Database {
+	panic("Not implemented")
+}

@@ -59,6 +59,7 @@ type Database interface {
 	NewBatch() Mutation
 	Size() int
 	Keys() [][]byte
+	MemCopy() Database
 }
 
 // Extended version of the Batch, with read capabilites

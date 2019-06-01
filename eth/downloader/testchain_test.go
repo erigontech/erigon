@@ -55,7 +55,7 @@ func init() {
 }
 
 type testChain struct {
-	db       *ethdb.BoltDatabase
+	db       ethdb.Database
 	genesis  *types.Block
 	chain    []common.Hash
 	headerm  map[common.Hash]*types.Header
