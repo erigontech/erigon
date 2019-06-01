@@ -95,32 +95,31 @@ func testFork(t *testing.T, blockchain *BlockChain, i, n int, full bool, compara
 		blockChainB  []*types.Block
 		headerChainB []*types.Header
 	)
+	var tdPre, tdPost *big.Int
 	if full {
 		blockChainB = makeBlockChain(blockchain2.CurrentBlock(), n, ethash.NewFaker(), db.MemCopy(), forkSeed)
+		tdPre = blockchain.GetTdByHash(blockchain.CurrentBlock().Hash())
 		if _, err := blockchain.InsertChain(blockChainB); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
+		tdPost = blockchain.GetTdByHash(blockChainB[len(blockChainB)-1].Hash())
 	} else {
 		headerChainB = makeHeaderChain(blockchain2.CurrentHeader(), n, ethash.NewFaker(), db.MemCopy(), forkSeed)
+		tdPre = blockchain.GetTdByHash(blockchain.CurrentHeader().Hash())
 		if _, err := blockchain.InsertHeaderChain(headerChainB, 1); err != nil {
 			t.Fatalf("failed to insert forking chain: %v", err)
 		}
+		tdPost = blockchain.GetTdByHash(headerChainB[len(headerChainB)-1].Hash())
 	}
 	// Sanity check that the forked chain can be imported into the original
-	var tdPre, tdPost *big.Int
-
 	if full {
-		tdPre = blockchain2.GetTdByHash(blockchain2.CurrentBlock().Hash())
 		if err := testBlockChainImport(blockChainB, blockchain2); err != nil {
 			t.Fatalf("failed to import forked block chain: %v", err)
 		}
-		tdPost = blockchain2.GetTdByHash(blockChainB[len(blockChainB)-1].Hash())
 	} else {
-		tdPre = blockchain2.GetTdByHash(blockchain2.CurrentHeader().Hash())
 		if err := testHeaderChainImport(headerChainB, blockchain2); err != nil {
 			t.Fatalf("failed to import forked header chain: %v", err)
 		}
-		tdPost = blockchain2.GetTdByHash(headerChainB[len(headerChainB)-1].Hash())
 	}
 	// Compare the total difficulties of the chains
 	comparator(tdPre, tdPost)
@@ -308,10 +307,10 @@ func testLongerFork(t *testing.T, full bool) {
 	// Sum of numbers must be greater than `length` for this to be a longer fork
 	testFork(t, processor, 5, 6, full, better)
 	testFork(t, processor, 5, 8, full, better)
-	testFork(t, processor, 1, 10, full, better)
-	testFork(t, processor, 1, 12, full, better)
-	testFork(t, processor, 0, 11, full, better)
-	testFork(t, processor, 0, 15, full, better)
+	testFork(t, processor, 1, 13, full, better)
+	testFork(t, processor, 1, 14, full, better)
+	testFork(t, processor, 0, 16, full, better)
+	testFork(t, processor, 0, 17, full, better)
 }
 
 // Tests that given a starting canonical chain of a given size, creating equal
@@ -914,6 +913,7 @@ func TestLogReorgs(t *testing.T) {
 	)
 
 	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
 	rmLogsCh := make(chan RemovedLogsEvent)
@@ -1174,7 +1174,7 @@ func TestEIP155Transition(t *testing.T) {
 	})
 	_, err := blockchain.InsertChain(blocks)
 	if err != types.ErrInvalidChainId {
-		t.Error("expected error:", types.ErrInvalidChainId)
+		t.Errorf("expected error: %v, got %v", types.ErrInvalidChainId, err)
 	}
 }
 
@@ -1256,21 +1256,23 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 
 	db := ethdb.NewMemDatabase()
 	genesis := new(Genesis).MustCommit(db)
-	genesisDb := db.MemCopy()
-	blocks, _ := GenerateChain(params.TestChainConfig, genesis, engine, genesisDb.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+	//genesisDb := db.MemCopy()
+	blocks, _ := GenerateChain(params.TestChainConfig, genesis, engine, db.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*types.Block, len(blocks))
-	for i := len(forks) - 1; i >= 0; i-- {
+	for i := 0; i < len(forks); i++ {
 		parent := genesis
 		if i > 0 {
 			parent = blocks[i-1]
 		}
-		fork, _ := GenerateChain(params.TestChainConfig, parent, engine, db, 1, func(i int, b *BlockGen) {
+		fork, _ := GenerateChain(params.TestChainConfig, parent, engine, db.MemCopy(), 1, func(i int, b *BlockGen) {
 			b.SetCoinbase(common.Address{2})
 			b.OffsetTime(-2) // By reducing time, we increase difficulty of the fork, so that it can overwrite the canonical chain
 		})
 		forks[i] = fork[0]
+		// Move db forward by 1 block
+		GenerateChain(params.TestChainConfig, parent, engine, db, 1, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
@@ -1309,8 +1311,8 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	genesis := new(Genesis).MustCommit(db)
 
 	shared, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
-	original, _ := GenerateChain(params.TestChainConfig, shared[len(shared)-1], engine, db, 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
-	competitor, _ := GenerateChain(params.TestChainConfig, shared[len(shared)-1], engine, db, 2*triesInMemory+1, func(i int, b *BlockGen) {
+	original, _ := GenerateChain(params.TestChainConfig, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
+	competitor, _ := GenerateChain(params.TestChainConfig, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory+1, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{3})
 		b.OffsetTime(-2)
 	})

@@ -86,6 +86,8 @@ type Signer interface {
 	Hash(tx *Transaction) common.Hash
 	// Equal returns true if the given signer is the same as the receiver.
 	Equal(Signer) bool
+	// Return 0 for pre-EIP155 signers
+	ChainId() *big.Int
 }
 
 // EIP155Transaction implements Signer using the EIP155 rules.
@@ -150,6 +152,10 @@ func (s EIP155Signer) Hash(tx *Transaction) common.Hash {
 	})
 }
 
+func (s EIP155Signer) ChainId() *big.Int {
+	return s.chainId
+}
+
 // HomesteadTransaction implements TransactionInterface using the
 // homestead rules.
 type HomesteadSigner struct{ FrontierSigner }
@@ -203,6 +209,10 @@ func (fs FrontierSigner) Hash(tx *Transaction) common.Hash {
 
 func (fs FrontierSigner) Sender(tx *Transaction) (common.Address, error) {
 	return recoverPlain(fs.Hash(tx), tx.data.R, tx.data.S, tx.data.V, false)
+}
+
+func (fs FrontierSigner) ChainId() *big.Int {
+	return big.NewInt(0)
 }
 
 func recoverPlain(sighash common.Hash, R, S, Vb *big.Int, homestead bool) (common.Address, error) {

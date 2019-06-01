@@ -215,6 +215,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			}
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
+			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
 			err = statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter())
 			if err != nil {
@@ -236,7 +237,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			panic(err)
 		}
 		block, receipt := genblock(i, parent, statedb, tds)
-		tds.SetBlockNr(block.NumberU64())
+		//tds.SetBlockNr(block.NumberU64())
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block
