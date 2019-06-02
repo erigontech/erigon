@@ -120,9 +120,9 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -151,7 +151,7 @@ func stateless(genLag, consLag int) {
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
-		load_snapshot(db, fmt.Sprintf("state_%d", blockNum-1))
+		load_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum-1))
 		load_codes(db, ethDb)
 		block := bcb.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
@@ -162,6 +162,9 @@ func stateless(genLag, consLag int) {
 	batch := stateDb.NewBatch()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
+	if blockNum > 1 {
+		tds.Rebuild()
+	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
@@ -235,7 +238,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 		if (blockNum%500000 == 0) || (blockNum > 5600000 && blockNum%100000 == 0) {
-			//save_snapshot(db, fmt.Sprintf("state_%d", blockNum))
+			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			blockProof := tds.ExtractProofs(trace)
