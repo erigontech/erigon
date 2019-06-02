@@ -29,7 +29,6 @@ devp2p subprotocols by abstracting away code standardly shared by protocols.
 package protocols
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"fmt"
@@ -42,9 +41,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/swarm/spancontext"
-	"github.com/ledgerwatch/turbo-geth/swarm/tracing"
-	opentracing "github.com/opentracing/opentracing-go"
 )
 
 // error codes used by this  protocol scheme
@@ -256,25 +252,6 @@ func (p *Peer) Send(ctx context.Context, msg interface{}) error {
 	metrics.GetOrRegisterCounter("peer.send", nil).Inc(1)
 
 	var b bytes.Buffer
-	if tracing.Enabled {
-		writer := bufio.NewWriter(&b)
-
-		tracer := opentracing.GlobalTracer()
-
-		sctx := spancontext.FromContext(ctx)
-
-		if sctx != nil {
-			err := tracer.Inject(
-				sctx,
-				opentracing.Binary,
-				writer)
-			if err != nil {
-				return err
-			}
-		}
-
-		writer.Flush()
-	}
 
 	r, err := rlp.EncodeToBytes(msg)
 	if err != nil {
@@ -332,23 +309,6 @@ func (p *Peer) handleIncoming(handle func(ctx context.Context, msg interface{}) 
 	}
 
 	ctx := context.Background()
-
-	// if tracing is enabled and the context coming within the request is
-	// not empty, try to unmarshal it
-	if tracing.Enabled && len(wmsg.Context) > 0 {
-		var sctx opentracing.SpanContext
-
-		tracer := opentracing.GlobalTracer()
-		sctx, err = tracer.Extract(
-			opentracing.Binary,
-			bytes.NewReader(wmsg.Context))
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-
-		ctx = spancontext.WithContext(ctx, sctx)
-	}
 
 	val, ok := p.spec.NewMsg(msg.Code)
 	if !ok {

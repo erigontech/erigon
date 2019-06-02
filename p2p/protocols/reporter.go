@@ -23,8 +23,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 
-	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/ledgerwatch/bolt"
 )
+
+var bucket = []byte("b")
 
 //AccountMetrics abstracts away the metrics DB and
 //the reporter to persist metrics
@@ -51,7 +53,7 @@ func (am *AccountingMetrics) Close() {
 type reporter struct {
 	reg      metrics.Registry //the registry for these metrics (independent of other metrics)
 	interval time.Duration    //duration at which the reporter will persist metrics
-	db       *leveldb.DB      //the actual DB
+	db       *bolt.DB         //the actual DB
 	quit     chan struct{}    //quit the reporter loop
 	done     chan struct{}    //signal that reporter loop is done
 }
@@ -63,7 +65,7 @@ func NewAccountingMetrics(r metrics.Registry, d time.Duration, path string) *Acc
 	var err error
 
 	//Create the LevelDB
-	db, err := leveldb.OpenFile(path, nil)
+	db, err := bolt.Open(path, 0600, &bolt.Options{})
 	if err != nil {
 		log.Error(err.Error())
 		return nil
@@ -82,17 +84,24 @@ func NewAccountingMetrics(r metrics.Registry, d time.Duration, path string) *Acc
 		"account.peerdrops":      mPeerDrops,
 		"account.selfdrops":      mSelfDrops,
 	}
-	//iterate the map and get the values
-	for key, metric := range metricsMap {
-		val, err = db.Get([]byte(key), nil)
-		//until the first time a value is being written,
-		//this will return an error.
-		//it could be beneficial though to log errors later,
-		//but that would require a different logic
-		if err == nil {
-			metric.Inc(int64(binary.BigEndian.Uint64(val)))
+	db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return nil
 		}
-	}
+		//iterate the map and get the values
+		for key, metric := range metricsMap {
+			val, _ = b.Get([]byte(key))
+			//until the first time a value is being written,
+			//this will return an error.
+			//it could be beneficial though to log errors later,
+			//but that would require a different logic
+			if val != nil {
+				metric.Inc(int64(binary.BigEndian.Uint64(val)))
+			}
+		}
+		return nil
+	})
 
 	//create the reporter
 	rep := &reporter{
@@ -143,20 +152,24 @@ func (r *reporter) run() {
 
 //send the metrics to the DB
 func (r *reporter) save() error {
-	//create a LevelDB Batch
-	batch := leveldb.Batch{}
-	//for each metric in the registry (which is independent)...
-	r.reg.Each(func(name string, i interface{}) {
-		metric, ok := i.(metrics.Counter)
-		if ok {
-			//assuming every metric here to be a Counter (separate registry)
-			//...create a snapshot...
-			ms := metric.Snapshot()
-			byteVal := make([]byte, 8)
-			binary.BigEndian.PutUint64(byteVal, uint64(ms.Count()))
-			//...and save the value to the DB
-			batch.Put([]byte(name), byteVal)
+	return r.db.Update(func(tx *bolt.Tx) error {
+		b, err := tx.CreateBucketIfNotExists(bucket, false)
+		if err != nil {
+			return err
 		}
+		//for each metric in the registry (which is independent)...
+		r.reg.Each(func(name string, i interface{}) {
+			metric, ok := i.(metrics.Counter)
+			if ok {
+				//assuming every metric here to be a Counter (separate registry)
+				//...create a snapshot...
+				ms := metric.Snapshot()
+				byteVal := make([]byte, 8)
+				binary.BigEndian.PutUint64(byteVal, uint64(ms.Count()))
+				//...and save the value to the DB
+				b.Put([]byte(name), byteVal)
+			}
+		})
+		return nil
 	})
-	return r.db.Write(&batch, nil)
 }
