@@ -56,16 +56,6 @@ func TestEmptyTrie(t *testing.T) {
 	}
 }
 
-func TestNull(t *testing.T) {
-	var trie Trie
-	key := make([]byte, 32)
-	value := []byte("test")
-	trie.Update(nil, key, value, 0)
-	if !bytes.Equal(trie.Get(nil, key, 0), value) {
-		t.Fatal("wrong value")
-	}
-}
-
 func testMissingNodeDisk(t *testing.T)    { testMissingNode(t, false) }
 func testMissingNodeMemonly(t *testing.T) { testMissingNode(t, true) }
 
@@ -135,7 +125,7 @@ func testMissingNode(t *testing.T, memonly bool) {
 	}
 }
 
-func TestInsert(t *testing.T) {
+func testInsert(t *testing.T) {
 	diskdb, trie := newEmpty()
 
 	updateString(trie, diskdb, "doe", "reindeer")
@@ -182,7 +172,7 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestDelete(t *testing.T) {
+func testDelete(t *testing.T) {
 	diskdb, trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
@@ -209,7 +199,7 @@ func TestDelete(t *testing.T) {
 	}
 }
 
-func TestEmptyValues(t *testing.T) {
+func testEmptyValues(t *testing.T) {
 	diskdb, trie := newEmpty()
 
 	vals := []struct{ k, v string }{

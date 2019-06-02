@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func TestRebuild(t *testing.T) {
+func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := []byte("AT")

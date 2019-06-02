@@ -106,7 +106,7 @@ func TestNodeIteratorCoverage(t *testing.T) {
 			hashes[it.Hash()] = struct{}{}
 		}
 	}
-	for keys, i := db.(ethdb.Mutation).Keys(), 0; i < len(keys); i += 2 {
+	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
 		if _, ok := hashes[common.BytesToHash(keys[i+1])]; !ok {
 			t.Errorf("state entry not reported %x", keys[i+1])
 		}
@@ -259,9 +259,9 @@ func TestUnionIterator(t *testing.T) {
 }
 
 func TestIteratorNoDups(t *testing.T) {
-	var tr Trie
+	diskdb, tr := newEmpty()
 	for _, val := range testdata1 {
-		tr.Update(nil, []byte(val.k), []byte(val.v), 0)
+		tr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
 	}
 	checkIteratorNoDups(t, tr.NodeIterator(nil, nil, 0), nil)
 }
