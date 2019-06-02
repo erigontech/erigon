@@ -21,7 +21,7 @@ import (
 	"testing"
 )
 
-func TestVM(t *testing.T) {
+func testVM(t *testing.T) {
 	t.Parallel()
 	vmt := new(testMatcher)
 	vmt.slow("^vmPerformance")
