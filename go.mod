@@ -34,7 +34,7 @@ require (
 	github.com/julienschmidt/httprouter v0.0.0-20170430222011-975b5c4c7c21
 	github.com/jung-kurt/gofpdf v1.0.0
 	github.com/karalabe/hid v0.0.0-20181128192157-d815e0c1a2e2
-	github.com/ledgerwatch/bolt v1.4.0
+	github.com/ledgerwatch/bolt v1.4.1
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/llgcode/ps v0.0.0-20150911083025-f1443b32eedb
 	github.com/maruel/panicparse v0.0.0-20160720141634-ad661195ed0e
