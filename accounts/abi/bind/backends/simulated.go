@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/bloombits"
@@ -51,13 +52,18 @@ var errGasEstimationFailed = errors.New("gas required exceeds allowance or alway
 // SimulatedBackend implements bind.ContractBackend, simulating a blockchain in
 // the background. Its main purpose is to allow easily testing contract bindings.
 type SimulatedBackend struct {
-	database   ethdb.Database   // In memory database to store our testing data
+	prependDb  ethdb.Database
+	database   ethdb.Database // In memory database to store our testing data
+	engine     consensus.Engine
 	blockchain *core.BlockChain // Ethereum blockchain to handle the consensus
 
-	mu           sync.Mutex
-	pendingBlock *types.Block // Currently pending block that will be imported on request
-	pendingTds   *state.TrieDbState
-	pendingState *state.StateDB // Currently pending state that will be the active on on request
+	mu            sync.Mutex
+	prependBlock  *types.Block
+	pendingHeader *types.Header
+	gasPool       *core.GasPool
+	pendingBlock  *types.Block // Currently pending block that will be imported on request
+	pendingTds    *state.TrieDbState
+	pendingState  *state.StateDB // Currently pending state that will be the active on on request
 
 	events *filters.EventSystem // Event system for filtering log events live
 
@@ -70,22 +76,23 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 	database := ethdb.NewMemDatabase()
 	genesis := core.Genesis{Config: params.AllEthashProtocolChanges, GasLimit: gasLimit, Alloc: alloc}
 	genesisBlock := genesis.MustCommit(database)
-	blocks, _ := core.GenerateChain(genesis.Config, genesisBlock, ethash.NewFaker(), database.MemCopy(), 1, func(int, *core.BlockGen) {})
-	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, ethash.NewFaker(), vm.Config{}, nil)
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
 	if err != nil {
 		panic(fmt.Sprintf("%v", err))
 	}
 	blockchain.EnableReceipts(true)
 
 	backend := &SimulatedBackend{
-		database:   database,
-		blockchain: blockchain,
-		config:     genesis.Config,
-		events:     filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
+		prependBlock: genesisBlock,
+		prependDb:    database.MemCopy(),
+		database:     database,
+		engine:       engine,
+		blockchain:   blockchain,
+		config:       genesis.Config,
+		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
 	}
-	backend.pendingBlock = blocks[0]
-	backend.pendingTds = blockchain.GetTrieDbState()
-	backend.pendingState = state.New(backend.pendingTds)
+	backend.emptyPendingBlock()
 	return backend
 }
 
@@ -94,11 +101,12 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 func (b *SimulatedBackend) Commit() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
 	if _, err := b.blockchain.InsertChain([]*types.Block{b.pendingBlock}); err != nil {
-		panic(err) // This cannot happen unless the simulator is wrong, fail in that case
+		panic(err)
 	}
-	b.rollback()
+	b.prependDb = b.database
+	b.prependBlock = b.pendingBlock
+	b.emptyPendingBlock()
 }
 
 // Rollback aborts all pending transactions, reverting to the last committed state.
@@ -106,15 +114,24 @@ func (b *SimulatedBackend) Rollback() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	b.rollback()
+	b.emptyPendingBlock()
 }
 
-func (b *SimulatedBackend) rollback() {
-	blocks, _ := core.GenerateChain(b.config, b.blockchain.CurrentBlock(), ethash.NewFaker(), b.database.MemCopy(), 1, func(int, *core.BlockGen) {})
-
+func (b *SimulatedBackend) emptyPendingBlock() {
+	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(int, *core.BlockGen) {})
 	b.pendingBlock = blocks[0]
-	b.pendingTds = b.blockchain.GetTrieDbState()
+	b.pendingHeader = b.pendingBlock.Header()
+	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
+	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
+}
+
+func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {
+	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	if err != nil {
+		return nil, err
+	}
+	return state.New(tds), nil
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -125,7 +142,10 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	statedb, _, _ := b.blockchain.State()
+	statedb, err := b.prependingState()
+	if err != nil {
+		return nil, err
+	}
 	return statedb.GetCode(contract), nil
 }
 
@@ -137,7 +157,10 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	statedb, _, _ := b.blockchain.State()
+	statedb, err := b.prependingState()
+	if err != nil {
+		return nil, err
+	}
 	return statedb.GetBalance(contract), nil
 }
 
@@ -149,7 +172,10 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return 0, errBlockNumberUnsupported
 	}
-	statedb, _, _ := b.blockchain.State()
+	statedb, err := b.prependingState()
+	if err != nil {
+		return 0, err
+	}
 	return statedb.GetNonce(contract), nil
 }
 
@@ -161,7 +187,10 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	statedb, _, _ := b.blockchain.State()
+	statedb, err := b.prependingState()
+	if err != nil {
+		return nil, err
+	}
 	val := statedb.GetState(contract, key)
 	return val[:], nil
 }
@@ -188,11 +217,11 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	state, _, err := b.blockchain.State()
+	statedb, err := b.prependingState()
 	if err != nil {
 		return nil, err
 	}
-	rval, _, _, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), state)
+	rval, _, _, err := b.callContract(ctx, call, b.blockchain.CurrentBlock(), statedb)
 	return rval, err
 }
 
@@ -307,23 +336,30 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 
 	sender, err := types.Sender(types.HomesteadSigner{}, tx)
 	if err != nil {
-		panic(fmt.Errorf("invalid transaction: %v", err))
+		return fmt.Errorf("invalid transaction: %v", err)
 	}
 	nonce := b.pendingState.GetNonce(sender)
 	if tx.Nonce() != nonce {
-		panic(fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.Nonce(), nonce))
+		return fmt.Errorf("invalid transaction nonce: got %d, want %d", tx.Nonce(), nonce)
 	}
 
-	blocks, _ := core.GenerateChain(b.config, b.blockchain.CurrentBlock(), ethash.NewFaker(), b.database.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	b.pendingState.Prepare(tx.Hash(), common.Hash{}, len(b.pendingBlock.Transactions()))
+	if _, _, err := core.ApplyTransaction(
+		b.config, b.blockchain,
+		&b.pendingHeader.Coinbase, b.gasPool,
+		b.pendingState, b.pendingTds.TrieStateWriter(),
+		b.pendingHeader, tx,
+		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
+		return err
+	}
+	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTx(tx)
+			block.AddTxWithChain(b.blockchain, tx)
 		}
-		block.AddTx(tx)
+		block.AddTxWithChain(b.blockchain, tx)
 	})
-
 	b.pendingBlock = blocks[0]
-	b.pendingTds = b.blockchain.GetTrieDbState()
-	b.pendingState = state.New(b.pendingTds)
+	b.pendingHeader = b.pendingBlock.Header()
 	return nil
 }
 
@@ -399,17 +435,14 @@ func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethere
 func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	blocks, _ := core.GenerateChain(b.config, b.blockchain.CurrentBlock(), ethash.NewFaker(), b.database.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
-			block.AddTx(tx)
+			block.AddTxWithChain(b.blockchain, tx)
 		}
 		block.OffsetTime(int64(adjustment.Seconds()))
 	})
-
 	b.pendingBlock = blocks[0]
-	b.pendingTds = b.blockchain.GetTrieDbState()
-	b.pendingState = state.New(b.pendingTds)
-
+	b.pendingHeader = b.pendingBlock.Header()
 	return nil
 }
 
