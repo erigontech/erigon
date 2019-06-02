@@ -30,7 +30,7 @@ import (
 func newEmptySecure() (ethdb.Database, *SecureTrie) {
 	diskdb := ethdb.NewMemDatabase()
 
-	trie, _ := NewSecure(common.Hash{}, testbucket, false)
+	trie, _ := NewSecure(common.Hash{}, testbucket, nil, false)
 	return diskdb, trie
 }
 
@@ -39,7 +39,7 @@ func makeTestSecureTrie() (ethdb.Database, *SecureTrie, map[string][]byte) {
 	// Create an empty trie
 	diskdb := ethdb.NewMemDatabase()
 
-	trie, _ := NewSecure(common.Hash{}, testbucket, false)
+	trie, _ := NewSecure(common.Hash{}, testbucket, nil, false)
 
 	// Fill it with some arbitrary data
 	content := make(map[string][]byte)

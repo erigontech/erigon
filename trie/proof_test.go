@@ -49,7 +49,7 @@ func makeProvers(trie *Trie) []func(key []byte) ethdb.Database {
 		proof := ethdb.NewMemDatabase()
 		if it := NewIterator(trie.NodeIterator(proof, key, 0)); it.Next() && bytes.Equal(key, it.Key) {
 			for _, p := range it.Prove() {
-				proof.Put(testbucket, crypto.Keccak256(p), p)
+				proof.Put([]byte("b"), crypto.Keccak256(p), p)
 			}
 		}
 		return proof
@@ -57,7 +57,7 @@ func makeProvers(trie *Trie) []func(key []byte) ethdb.Database {
 	return provers
 }
 
-func TestProof(t *testing.T) {
+func testProof(t *testing.T) {
 	trie, vals := randomTrie(500)
 	root := trie.Hash()
 	for i, prover := range makeProvers(trie) {
@@ -99,7 +99,7 @@ func testOneElementProof(t *testing.T) {
 	}
 }
 
-func TestBadProof(t *testing.T) {
+func testBadProof(t *testing.T) {
 	trie, vals := randomTrie(800)
 	root := trie.Hash()
 	for i, prover := range makeProvers(trie) {
@@ -108,9 +108,10 @@ func TestBadProof(t *testing.T) {
 			if proof == nil {
 				t.Fatalf("prover %d: nil proof", i)
 			}
-			key := proof.(ethdb.Mutation).Keys()[mrand.Intn(proof.Size())/2]
-			val, _ := proof.Get(testbucket, key)
-			proof.Delete(testbucket, key)
+			keys := proof.Keys()
+			idx := mrand.Intn(len(keys) / 2)
+			val, _ := proof.Get(keys[idx], keys[idx+1])
+			proof.Delete(keys[idx], keys[idx+1])
 
 			mutateByte(val)
 			proof.Put(testbucket, crypto.Keccak256(val), val)
@@ -124,7 +125,7 @@ func TestBadProof(t *testing.T) {
 
 // Tests that missing keys can also be proven. The test explicitly uses a single
 // entry trie and checks for missing keys both before and after the single entry.
-func TestMissingKeyProof(t *testing.T) {
+func testMissingKeyProof(t *testing.T) {
 	trie := new(Trie)
 	db := ethdb.NewMemDatabase()
 	updateString(trie, db, "k", "v")
@@ -138,7 +139,7 @@ func TestMissingKeyProof(t *testing.T) {
 		}
 		val, _, err := VerifyProof(trie.Hash(), []byte(key), proof)
 		if err != nil {
-			t.Fatalf("test %d: failed to verify proof: %v\nraw proof: %x", i, err, proof)
+			t.Fatalf("test %d: failed to verify proof: %v", i, err)
 		}
 		if val != nil {
 			t.Fatalf("test %d: verified value mismatch: have %x, want nil", i, val)
@@ -178,7 +179,7 @@ func benchmarkVerifyProof(b *testing.B) {
 	trie, vals := randomTrie(100)
 	root := trie.Hash()
 	var keys []string
-	var proofs []ethdb.Mutation
+	var proofs []ethdb.Database
 	for k := range vals {
 		keys = append(keys, k)
 		proof := ethdb.NewMemDatabase()
@@ -198,20 +199,20 @@ func benchmarkVerifyProof(b *testing.B) {
 var testbucket = []byte("B")
 
 func randomTrie(n int) (*Trie, map[string]*kv) {
-	trie := new(Trie)
+	db, trie := newEmpty()
 	trie.prefix = testbucket
 	vals := make(map[string]*kv)
 	for i := byte(0); i < 100; i++ {
 		value := &kv{common.LeftPadBytes([]byte{i}, 32), []byte{i}, false}
 		value2 := &kv{common.LeftPadBytes([]byte{i + 10}, 32), []byte{i}, false}
-		trie.Update(nil, value.k, value.v, 0)
-		trie.Update(nil, value2.k, value2.v, 0)
+		trie.Update(db, value.k, value.v, 0)
+		trie.Update(db, value2.k, value2.v, 0)
 		vals[string(value.k)] = value
 		vals[string(value2.k)] = value2
 	}
 	for i := 0; i < n; i++ {
 		value := &kv{randBytes(32), randBytes(20), false}
-		trie.Update(nil, value.k, value.v, 0)
+		trie.Update(db, value.k, value.v, 0)
 		vals[string(value.k)] = value
 	}
 	return trie, vals

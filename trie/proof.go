@@ -51,6 +51,18 @@ func (t *Trie) Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethd
 				pos += len(n.Key)
 			}
 			nodes = append(nodes, n)
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch key[pos] {
+			case i1:
+				tn = n.child1
+			case i2:
+				tn = n.child2
+			default:
+				tn = nil
+			}
+			pos++
+			nodes = append(nodes, n)
 		case *fullNode:
 			tn = n.Children[key[pos]]
 			pos++
@@ -85,7 +97,7 @@ func (t *Trie) Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethd
 				if hashLen < 32 {
 					hash = crypto.Keccak256(enc)
 				}
-				proofDb.Put([]byte{}, hash, enc)
+				proofDb.Put([]byte("b"), hash, enc)
 			}
 		}
 	}
@@ -110,13 +122,13 @@ func VerifyProof(rootHash common.Hash, key []byte, proofDb DatabaseReader) (valu
 	key = keybytesToHex(key)
 	wantHash := rootHash
 	for i := 0; ; i++ {
-		buf, _ := proofDb.Get([]byte{}, wantHash[:])
+		buf, _ := proofDb.Get([]byte("b"), wantHash[:])
 		if buf == nil {
 			return nil, i, fmt.Errorf("proof node %d (hash %064x) missing", i, wantHash)
 		}
-		n, err := decodeNode(wantHash[:], buf)
+		n, _, err := decodeRef(buf)
 		if err != nil {
-			return nil, i, fmt.Errorf("bad proof node %d: %v", i, err)
+			return nil, i, fmt.Errorf("bad proof node %d (%x): %v", i, buf, err)
 		}
 		keyrest, cld := get(n, key)
 		switch cld := cld.(type) {

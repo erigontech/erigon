@@ -498,7 +498,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
-		return fmt.Errorf("Unexpected resolution: %s at %s", b, debug.Stack())
+		return fmt.Errorf("Unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 	if tr.accounts {
 		if tr.historical {
