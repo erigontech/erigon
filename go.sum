@@ -47,8 +47,8 @@ github.com/jung-kurt/gofpdf v0.0.0-20190309125859-24315acbbda5/go.mod h1:7Id9E/u
 github.com/jung-kurt/gofpdf v1.0.0/go.mod h1:7Id9E/uU8ce6rXgefFLlgrJj/GYY22cpxn+r32jIOes=
 github.com/karalabe/hid v0.0.0-20181128192157-d815e0c1a2e2 h1:BkkpZxPVs3gIf+3Tejt8lWzuo2P29N1ChGUMEpuSJ8U=
 github.com/karalabe/hid v0.0.0-20181128192157-d815e0c1a2e2/go.mod h1:YvbcH+3Wo6XPs9nkgTY3u19KXLauXW+J5nB7hEHuX0A=
-github.com/ledgerwatch/bolt v1.4.0 h1:1saTkWSRE8d3Kk3DRLJx4QyCBTd70zl5+QzGex9/d9w=
-github.com/ledgerwatch/bolt v1.4.0/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
+github.com/ledgerwatch/bolt v1.4.1 h1:yQz1erm+SHuNpeG20I4wyDe1DBoH4oHlacIPNRaqMRo=
+github.com/ledgerwatch/bolt v1.4.1/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
 github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0/go.mod h1:mVa0dA29Db2S4LVqDYLlsePDzRJLDfdhVZiI15uY0FA=
 github.com/llgcode/ps v0.0.0-20150911083025-f1443b32eedb/go.mod h1:1l8ky+Ew27CMX29uG+a2hNOKpeNYEQjjtiALiBlFQbY=
 github.com/maruel/panicparse v0.0.0-20160720141634-ad661195ed0e/go.mod h1:nty42YY5QByNC5MM7q/nj938VbgPU7avs45z6NClpxI=
