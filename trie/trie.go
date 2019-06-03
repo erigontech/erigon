@@ -1151,6 +1151,51 @@ func (tc *TrieContinuation) String() string {
 	return fmt.Sprintf("tc{t:%x/%x,action:%d,key:%x,resolveKey:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.action, tc.key, tc.resolveKey, tc.resolvePos)
 }
 
+func (t *Trie) NeedResolution(key []byte) (bool, []byte, int) {
+	var nd node = t.root
+	hex := keybytesToHex(key)
+	pos := 0
+	for {
+		switch n := nd.(type) {
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hex[pos:], nKey)
+			if matchlen == len(nKey) {
+				nd = n.Val
+				pos += matchlen
+			} else {
+				return false, nil, 0
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return false, nil, 0
+			}
+		case *fullNode:
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return false, nil, 0
+			} else {
+				nd = child
+				pos++
+			}
+		case valueNode:
+			return false, nil, 0
+		case hashNode:
+			return true, hex, pos
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+}
+
 func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieContinuation, blockNr uint64) bool {
 	if len(key) == pos {
 		if v, ok := origNode.(valueNode); ok {
