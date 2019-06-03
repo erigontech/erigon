@@ -1,6 +1,8 @@
 ## Turbo-Geth
 
-Derivative of Go Ethereum
+Faster derivative of Go Ethereum.
+
+[![CircleCI](https://circleci.com/gh/ledgerwatch/turbo-geth.svg?style=svg)](https://circleci.com/gh/ledgerwatch/turbo-geth)
 
 ## Go Ethereum
 
