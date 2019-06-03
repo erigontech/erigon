@@ -1438,7 +1438,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 		// We've hit a part of the trie that isn't loaded yet. Load
 		// the node and insert into it. This leaves all child nodes on
 		// the path to the value in the trie.
-		if c.resolved == nil || !bytes.Equal(key, c.resolveKey) || pos != c.resolvePos {
+		if c.resolved == nil {
 			c.resolved = nil
 			c.resolveKey = key
 			c.resolvePos = pos
@@ -1495,7 +1495,7 @@ func (t *Trie) DeleteAction(key []byte) *TrieContinuation {
 	return &tc
 }
 
-func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint, c *TrieContinuation, blockNr uint64, done bool) bool {
+func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint, c *TrieContinuation, blockNr uint64, done bool) {
 	cnode := child
 	if pos != 16 {
 		// If the remaining entry is a short node, it replaces
@@ -1538,7 +1538,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 					t.addSoleHash(t.prefix, proofKey, keyStart+1+len(cnodeKey), common.BytesToHash(short.Val.hash()))
 				}
 			}
-			return done
+			return
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
@@ -1553,7 +1553,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	newshort.adjustTod(blockNr)
 	c.updated = true
 	c.n = newshort
-	return done
+	return
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -1661,7 +1661,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 						c.updated = true
 						done = true
 					} else {
-						done = t.convertToShortNode(key, keyStart, n.child2, uint(i2), c, blockNr, done)
+						t.convertToShortNode(key, keyStart, n.child2, uint(i2), c, blockNr, done)
 					}
 				}
 				if nn != nil || (nn == nil && !done) {
@@ -1687,7 +1687,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 						c.updated = true
 						done = true
 					} else {
-						done = t.convertToShortNode(key, keyStart, n.child1, uint(i1), c, blockNr, done)
+						t.convertToShortNode(key, keyStart, n.child1, uint(i1), c, blockNr, done)
 					}
 				}
 				if nn != nil || (nn == nil && !done) {
@@ -1731,7 +1731,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		done := t.delete(child, key, keyStart+1, c, blockNr)
 		if !c.updated && !done {
 			c.n = n
-			done = false
 		} else {
 			nn := c.n
 			n.Children[key[keyStart]] = nn
@@ -1766,7 +1765,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 				c.updated = true
 				done = true
 			} else if count == 1 {
-				done = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1), c, blockNr, done)
+				t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1), c, blockNr, done)
 			} else if count == 2 {
 				duo := &duoNode{}
 				if pos1 == int(key[keyStart]) {
@@ -1815,8 +1814,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		// We've hit a part of the trie that isn't loaded yet. Load
 		// the node and delete from it. This leaves all child nodes on
 		// the path to the value in the trie.
-		if c.resolved == nil || !bytes.Equal(key, c.resolveKey) || keyStart != c.resolvePos {
-			// It is either unresolved, or resolved by other request
+		if c.resolved == nil {
 			c.resolved = nil
 			c.resolveKey = key
 			c.resolvePos = keyStart

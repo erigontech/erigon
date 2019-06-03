@@ -25,12 +25,12 @@ import (
 	"runtime"
 	"sort"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -598,7 +598,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
 		it++
 	}
-	if it > 3 {
+	if it > 2 {
 		fmt.Printf("Resolved storage in %d iterations\n", it)
 	}
 	oldContinuations = []*trie.TrieContinuation{}
@@ -665,7 +665,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
 		it++
 	}
-	if it > 3 {
+	if it > 2 {
 		fmt.Printf("Resolved in %d iterations\n", it)
 	}
 	hash := tds.t.Hash()
