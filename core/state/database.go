@@ -538,13 +538,38 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	if len(tds.storageUpdates) == 0 && len(tds.accountUpdates) == 0 {
 		return tds.t.Hash(), nil
 	}
-	//for address, account := range tds.accountUpdates {
-	//	fmt.Printf("%x %d %x %x\n", address[:], account.Balance, account.CodeHash, account.Root[:])
-	//}
-	//fmt.Printf("=================\n")
+	// Perform resolutions first
+	var resolver *trie.TrieResolver
+	for address, m := range tds.storageUpdates {
+		addrHash, err := tds.HashAddress(&address, false /*save*/)
+		if err != nil {
+			return common.Hash{}, nil
+		}
+		if _, ok := tds.deleted[addrHash]; ok {
+			continue
+		}
+		storageTrie, err := tds.getStorageTrie(address, addrHash, true)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		for keyHash, _ := range m {
+			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
+				if resolver == nil {
+					resolver = trie.NewResolver(tds.db, false, false)
+					resolver.SetHistorical(tds.historical)
+				}
+				resolver.AddContinuation(c)
+			}
+		}
+	}
+	if resolver != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+			return common.Hash{}, err
+		}
+		resolver = nil
+	}
 	oldContinuations := []*trie.TrieContinuation{}
 	newContinuations := []*trie.TrieContinuation{}
-	// Updates before deletes
 	for address, m := range tds.storageUpdates {
 		addrHash, err := tds.HashAddress(&address, false /*save*/)
 		if err != nil {
@@ -566,13 +591,10 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
 			v := m[keyHash]
-			var c *trie.TrieContinuation
 			if len(v) > 0 {
-				c = storageTrie.UpdateAction(keyHash[:], v)
-				oldContinuations = append(oldContinuations, c)
+				storageTrie.Update(nil, keyHash[:], v, tds.blockNr)
 			} else {
-				c = storageTrie.DeleteAction(keyHash[:])
-				oldContinuations = append(oldContinuations, c)
+				storageTrie.Delete(nil, keyHash[:], tds.blockNr)
 			}
 		}
 	}
@@ -598,7 +620,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
 		it++
 	}
-	if it > 2 {
+	if it > 1 {
 		fmt.Printf("Resolved storage in %d iterations\n", it)
 	}
 	oldContinuations = []*trie.TrieContinuation{}
@@ -606,13 +628,25 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	addrs := make(Hashes, len(tds.accountUpdates))
 	i := 0
 	for addrHash, _ := range tds.accountUpdates {
+		if need, c := tds.t.NeedResolution(addrHash[:]); need {
+			if resolver == nil {
+				resolver = trie.NewResolver(tds.db, false, true)
+				resolver.SetHistorical(tds.historical)
+			}
+			resolver.AddContinuation(c)
+		}
 		addrs[i] = addrHash
 		i++
+	}
+	if resolver != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+			return common.Hash{}, err
+		}
+		resolver = nil
 	}
 	sort.Sort(addrs)
 	for _, addrHash := range addrs {
 		account := tds.accountUpdates[addrHash]
-		var c *trie.TrieContinuation
 		// first argument to getStorageTrie is not used unless the last one == true
 		storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
 		if err != nil {
@@ -631,12 +665,9 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			if err != nil {
 				return common.Hash{}, err
 			}
-			c = tds.t.UpdateAction(addrHash[:], data)
-			oldContinuations = append(oldContinuations, c)
+			tds.t.Update(nil, addrHash[:], data, tds.blockNr)
 		} else {
-			deleteStorageTrie = true
-			c = tds.t.DeleteAction(addrHash[:])
-			oldContinuations = append(oldContinuations, c)
+			tds.t.Delete(nil, addrHash[:], tds.blockNr)
 		}
 		if deleteStorageTrie && storageTrie != nil {
 			delete(tds.storageTries, addrHash)
@@ -665,7 +696,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
 		it++
 	}
-	if it > 2 {
+	if it > 1 {
 		fmt.Printf("Resolved in %d iterations\n", it)
 	}
 	hash := tds.t.Hash()

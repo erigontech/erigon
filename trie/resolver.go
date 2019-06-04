@@ -145,10 +145,6 @@ func (tr *TrieResolver) Print() {
 	}
 }
 
-var resolvedTotal uint32
-var resolvedLevel0, resolvedLevel1, resolvedLevel2, resolvedLevel3, resolvedLevel4, resolvedLevel5, resolvedLevel6, resolvedLevel7, resolvedLevel8 uint32
-var resolvedLevelS0, resolvedLevelS1, resolvedLevelS2, resolvedLevelS3, resolvedLevelS4, resolvedLevelS5, resolvedLevelS6, resolvedLevelS7, resolvedLevelS8 uint32
-
 // Prepares information for the MultiWalk
 func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove continuations strictly contained in the preceeding ones
@@ -180,79 +176,6 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 			c.extResolvePos = c.resolvePos + 2*pLen
 			fixedbits = append(fixedbits, uint(4*c.extResolvePos))
 			prevC = c
-			//c.Print()
-			/*
-				if !tr.accounts {
-					switch c.resolvePos {
-						case 0:
-							atomic.AddUint32(&resolvedLevelS0, 1)
-						case 1:
-							atomic.AddUint32(&resolvedLevelS1, 1)
-						case 2:
-							atomic.AddUint32(&resolvedLevelS2, 1)
-						case 3:
-							atomic.AddUint32(&resolvedLevelS3, 1)
-						case 4:
-							atomic.AddUint32(&resolvedLevelS4, 1)
-						case 5:
-							atomic.AddUint32(&resolvedLevelS5, 1)
-						case 6:
-							atomic.AddUint32(&resolvedLevelS6, 1)
-						case 7:
-							atomic.AddUint32(&resolvedLevelS7, 1)
-						case 8:
-							atomic.AddUint32(&resolvedLevelS8, 1)
-					}
-				} else {
-					switch c.resolvePos {
-						case 0:
-							atomic.AddUint32(&resolvedLevel0, 1)
-						case 1:
-							atomic.AddUint32(&resolvedLevel1, 1)
-						case 2:
-							atomic.AddUint32(&resolvedLevel2, 1)
-						case 3:
-							atomic.AddUint32(&resolvedLevel3, 1)
-						case 4:
-							atomic.AddUint32(&resolvedLevel4, 1)
-						case 5:
-							atomic.AddUint32(&resolvedLevel5, 1)
-						case 6:
-							atomic.AddUint32(&resolvedLevel6, 1)
-						case 7:
-							atomic.AddUint32(&resolvedLevel7, 1)
-						case 8:
-							atomic.AddUint32(&resolvedLevel8, 1)
-					}
-				}
-				total := atomic.AddUint32(&resolvedTotal, 1)
-				print := total % 50000 == 0
-				if print {
-					fmt.Printf("total: %d, 0:%d, 1:%d, 2:%d, 3:%d, 4:%d, 5:%d, 6:%d, 7:%d, 8:%d\n",
-						total,
-						atomic.AddUint32(&resolvedLevel0, 0),
-						atomic.AddUint32(&resolvedLevel1, 0),
-						atomic.AddUint32(&resolvedLevel2, 0),
-						atomic.AddUint32(&resolvedLevel3, 0),
-						atomic.AddUint32(&resolvedLevel4, 0),
-						atomic.AddUint32(&resolvedLevel5, 0),
-						atomic.AddUint32(&resolvedLevel6, 0),
-						atomic.AddUint32(&resolvedLevel7, 0),
-						atomic.AddUint32(&resolvedLevel8, 0),
-					)
-					fmt.Printf("S0:%d, S1:%d, S2:%d, S3:%d, S4:%d, S5:%d, S6:%d, S7:%d, S8:%d\n",
-						atomic.AddUint32(&resolvedLevelS0, 0),
-						atomic.AddUint32(&resolvedLevelS1, 0),
-						atomic.AddUint32(&resolvedLevelS2, 0),
-						atomic.AddUint32(&resolvedLevelS3, 0),
-						atomic.AddUint32(&resolvedLevelS4, 0),
-						atomic.AddUint32(&resolvedLevelS5, 0),
-						atomic.AddUint32(&resolvedLevelS6, 0),
-						atomic.AddUint32(&resolvedLevelS7, 0),
-						atomic.AddUint32(&resolvedLevelS8, 0),
-					)
-				}
-			*/
 		}
 	}
 	tr.startLevel = tr.continuations[0].extResolvePos
@@ -410,6 +333,33 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			}
 			tr.vertical[i].flags.dirty = true
 			tr.fillCount[i] = 0
+		}
+		switch parent := tc.resolveParent.(type) {
+		case nil:
+			if _, ok := tc.t.root.(hashNode); ok {
+				tc.t.root = root
+			}
+		case *shortNode:
+			if _, ok := parent.Val.(hashNode); ok {
+				parent.Val = root
+			}
+		case *duoNode:
+			i1, i2 := parent.childrenIdx()
+			switch tc.resolveKey[tc.resolvePos-1] {
+			case i1:
+				if _, ok := parent.child1.(hashNode); ok {
+					parent.child1 = root
+				}
+			case i2:
+				if _, ok := parent.child2.(hashNode); ok {
+					parent.child2 = root
+				}
+			}
+		case *fullNode:
+			idx := tc.resolveKey[tc.resolvePos-1]
+			if _, ok := parent.Children[idx].(hashNode); ok {
+				parent.Children[idx] = root
+			}
 		}
 	}
 	return nil

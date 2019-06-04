@@ -896,8 +896,21 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
 func (t *Trie) Update(db ethdb.Database, key, value []byte, blockNr uint64) {
-	if err := t.TryUpdate(db, key, value, blockNr); err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
+	if t.root == nil {
+		if t.resolveReads {
+			t.createShort(t.prefix, keybytesToHex(key), 0)
+		}
+		newnode := &shortNode{Key: hexToCompact(key), Val: valueNode(value)}
+		newnode.flags.dirty = true
+		newnode.flags.t = blockNr
+		newnode.adjustTod(blockNr)
+		t.joinGeneration(blockNr)
+	} else {
+		c := &TrieContinuation{}
+		t.insert(t.root, keybytesToHex(key), 0, valueNode(value), c, blockNr)
+		if c.updated {
+			t.root = c.n
+		}
 	}
 }
 
@@ -1141,6 +1154,7 @@ type TrieContinuation struct {
 	resolved      node     // Node that has been resolved via Database access
 	n             node     // Returned node after the operation is complete
 	updated       bool     // Whether the trie was updated
+	resolveParent node     // Parent node of the one needs to be resolved. nil if the root needs to be resolved
 }
 
 func (t *Trie) NewContinuation(key []byte, pos int, resolveHash []byte) *TrieContinuation {
@@ -1151,45 +1165,54 @@ func (tc *TrieContinuation) String() string {
 	return fmt.Sprintf("tc{t:%x/%x,action:%d,key:%x,resolveKey:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.action, tc.key, tc.resolveKey, tc.resolvePos)
 }
 
-func (t *Trie) NeedResolution(key []byte) (bool, []byte, int) {
+func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
 	var nd node = t.root
+	var parent node = nil
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
 		switch n := nd.(type) {
+		case nil:
+			return false, nil
 		case *shortNode:
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
 			if matchlen == len(nKey) {
+				parent = nd
 				nd = n.Val
 				pos += matchlen
 			} else {
-				return false, nil, 0
+				return false, nil
 			}
 		case *duoNode:
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
+				parent = nd
 				nd = n.child1
 				pos++
 			case i2:
+				parent = nd
 				nd = n.child2
 				pos++
 			default:
-				return false, nil, 0
+				return false, nil
 			}
 		case *fullNode:
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return false, nil, 0
+				return false, nil
 			} else {
+				parent = nd
 				nd = child
 				pos++
 			}
 		case valueNode:
-			return false, nil, 0
+			return false, nil
 		case hashNode:
-			return true, hex, pos
+			c := t.NewContinuation(hex, pos, n)
+			c.resolveParent = parent
+			return true, c
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
@@ -1513,8 +1536,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 
 // Delete removes any existing value for key from the trie.
 func (t *Trie) Delete(db ethdb.Database, key []byte, blockNr uint64) {
-	if err := t.TryDelete(db, key, blockNr); err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
+	c := &TrieContinuation{}
+	t.delete(t.root, keybytesToHex(key), 0, c, blockNr)
+	if c.updated {
+		t.root = c.n
 	}
 }
 
