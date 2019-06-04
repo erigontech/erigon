@@ -896,18 +896,23 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
 func (t *Trie) Update(db ethdb.Database, key, value []byte, blockNr uint64) {
+	hex := keybytesToHex(key)
 	if t.root == nil {
 		if t.resolveReads {
-			t.createShort(t.prefix, keybytesToHex(key), 0)
+			t.createShort(t.prefix, hex, 0)
 		}
-		newnode := &shortNode{Key: hexToCompact(key), Val: valueNode(value)}
+		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		newnode.flags.dirty = true
 		newnode.flags.t = blockNr
 		newnode.adjustTod(blockNr)
 		t.joinGeneration(blockNr)
+		t.root = newnode
 	} else {
 		c := &TrieContinuation{}
-		t.insert(t.root, keybytesToHex(key), 0, valueNode(value), c, blockNr)
+		t.insert(t.root, hex, 0, valueNode(value), c, blockNr)
+		if c.resolveKey != nil {
+			panic("")
+		}
 		if c.updated {
 			t.root = c.n
 		}
@@ -1536,8 +1541,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 
 // Delete removes any existing value for key from the trie.
 func (t *Trie) Delete(db ethdb.Database, key []byte, blockNr uint64) {
+	hex := keybytesToHex(key)
 	c := &TrieContinuation{}
-	t.delete(t.root, keybytesToHex(key), 0, c, blockNr)
+	t.delete(t.root, hex, 0, c, blockNr)
+	if c.resolveKey != nil {
+		panic("")
+	}
 	if c.updated {
 		t.root = c.n
 	}

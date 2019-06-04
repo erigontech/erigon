@@ -552,7 +552,14 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		if err != nil {
 			return common.Hash{}, err
 		}
+		hashes := make(Hashes, len(m))
+		i := 0
 		for keyHash, _ := range m {
+			hashes[i] = keyHash
+			i++
+		}
+		sort.Sort(hashes)
+		for _, keyHash := range hashes {
 			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(tds.db, false, false)
@@ -568,8 +575,6 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		}
 		resolver = nil
 	}
-	oldContinuations := []*trie.TrieContinuation{}
-	newContinuations := []*trie.TrieContinuation{}
 	for address, m := range tds.storageUpdates {
 		addrHash, err := tds.HashAddress(&address, false /*save*/)
 		if err != nil {
@@ -598,36 +603,15 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			}
 		}
 	}
-	it := 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, false)
-					resolver.SetHistorical(tds.historical)
-				}
-				resolver.AddContinuation(c)
-			}
-		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
-			}
-			resolver = nil
-		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
-	}
-	if it > 1 {
-		fmt.Printf("Resolved storage in %d iterations\n", it)
-	}
-	oldContinuations = []*trie.TrieContinuation{}
-	newContinuations = []*trie.TrieContinuation{}
 	addrs := make(Hashes, len(tds.accountUpdates))
 	i := 0
+	resolver = nil
 	for addrHash, _ := range tds.accountUpdates {
+		addrs[i] = addrHash
+		i++
+	}
+	sort.Sort(addrs)
+	for _, addrHash := range addrs {
 		if need, c := tds.t.NeedResolution(addrHash[:]); need {
 			if resolver == nil {
 				resolver = trie.NewResolver(tds.db, false, true)
@@ -635,8 +619,6 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			}
 			resolver.AddContinuation(c)
 		}
-		addrs[i] = addrHash
-		i++
 	}
 	if resolver != nil {
 		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
@@ -644,7 +626,6 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		}
 		resolver = nil
 	}
-	sort.Sort(addrs)
 	for _, addrHash := range addrs {
 		account := tds.accountUpdates[addrHash]
 		// first argument to getStorageTrie is not used unless the last one == true
@@ -667,37 +648,13 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			}
 			tds.t.Update(nil, addrHash[:], data, tds.blockNr)
 		} else {
+			deleteStorageTrie = true
 			tds.t.Delete(nil, addrHash[:], tds.blockNr)
 		}
 		if deleteStorageTrie && storageTrie != nil {
 			delete(tds.storageTries, addrHash)
 			storageTrie.PrepareToRemove()
 		}
-	}
-	it = 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, true)
-					resolver.SetHistorical(tds.historical)
-				}
-				resolver.AddContinuation(c)
-			}
-		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
-			}
-			resolver = nil
-		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
-	}
-	if it > 1 {
-		fmt.Printf("Resolved in %d iterations\n", it)
 	}
 	hash := tds.t.Hash()
 	return hash, nil

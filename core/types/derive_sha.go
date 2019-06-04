@@ -39,15 +39,3 @@ func DeriveSha(list DerivableList) common.Hash {
 	}
 	return trie.Hash()
 }
-
-func DeriveSha1(list DerivableList) common.Hash {
-	keybuf := new(bytes.Buffer)
-	t := new(trie.Trie)
-	for i := 0; i < list.Len(); i++ {
-		keybuf.Reset()
-		rlp.Encode(keybuf, uint(i))
-		t.Update(nil, keybuf.Bytes(), list.GetRlp(i), 0)
-	}
-	t.PrintTrie()
-	return t.Hash()
-}
