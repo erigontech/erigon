@@ -102,11 +102,14 @@ type ExtAccount struct {
 	Balance *big.Int
 }
 type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+	StorageSize uint64
 }
+
+const HugeNumber = 2<<63
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, data, original Account) *stateObject {
@@ -115,6 +118,9 @@ func newObject(db *StateDB, address common.Address, data, original Account) *sta
 	}
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
+		if data.StorageSize == 0 {
+			data.StorageSize = HugeNumber
+		}
 	}
 	return &stateObject{
 		db:                 db,
@@ -322,6 +328,18 @@ func (self *stateObject) SetNonce(nonce uint64) {
 
 func (self *stateObject) setNonce(nonce uint64) {
 	self.data.Nonce = nonce
+}
+
+func (self *stateObject) SetStorageSize(size uint64) {
+	self.db.journal.append(storageSizeChange{
+		account:     &self.address,
+		prevsize:    self.data.StorageSize,
+	})
+	self.setStorageSize(size)
+}
+
+func (self *stateObject) setStorageSize(size uint64) {
+	self.data.StorageSize = size
 }
 
 func (self *stateObject) CodeHash() []byte {

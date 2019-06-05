@@ -115,6 +115,10 @@ type (
 		account            *common.Address
 		prevcode, prevhash []byte
 	}
+	storageSizeChange struct {
+		account     *common.Address
+		prevsize    uint64
+	}
 
 	// Changes to other state values.
 	refundChange struct {
@@ -184,6 +188,14 @@ func (ch nonceChange) revert(s *StateDB) {
 }
 
 func (ch nonceChange) dirtied() *common.Address {
+	return ch.account
+}
+
+func (ch storageSizeChange) revert(s *StateDB) {
+	s.getStateObject(*ch.account).setStorageSize(ch.prevsize)
+}
+
+func (ch storageSizeChange) dirtied() *common.Address {
 	return ch.account
 }
 

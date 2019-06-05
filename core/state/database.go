@@ -813,6 +813,9 @@ func accountToEncoding(account *Account) ([]byte, error) {
 		if a.Root == (common.Hash{}) {
 			a.Root = emptyRoot
 		}
+		if a.StorageSize == 0 {
+			a.StorageSize = HugeNumber
+		}
 		data, err = rlp.EncodeToBytes(a)
 		if err != nil {
 			return nil, err
