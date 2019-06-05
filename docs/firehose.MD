@@ -2,18 +2,17 @@
 
 Jason Carver, Brian Cloutier, Andrew Ashikhmin
 
-v0.3
+**v0.3**
 
-:::info
-See [Firehose Sync v0.1](/eXnqtO_vQquzrFDPHjuaFQ) for goals, background, and summaries of similar proposals.
-:::
+---
+See [Firehose Sync v0.1](https://notes.ethereum.org/eXnqtO_vQquzrFDPHjuaFQ) for goals, background, and summaries of similar proposals.
 
-Some goals of the change:
-- Enable responses from a different state root hash
-- Return a hint of available state roots, if the client asks for an unavailable root
-- Split `GetNodeData` into `GetBytecode`, `GetStateNodeData`, and `GetStorageNodeData` per [this request](https://ethereum-magicians.org/t/forming-a-ring-eth-v64-wire-protocol-ring/2857/10?u=carver)
-- Include Account hash with request for storage data, to speed up duplicated storage lookups
-- Move prefix-length disambiguating data to end of key prefix
+See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for the previous revision.
+
+---
+
+Changes in this revision:
+- Dropped "fuzzy" flag
 
 ## Casual Examples of Firehose Sync
 
@@ -81,10 +80,6 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ## Command Specification for Firehose Sync
 
-:::warning
-TODO: drop "fuzzy" flag
-:::
-
 ### `GetStateData` Request
 
 The requester asks for data defined by a given state root hash and key prefix. This command exclusively deals with retrieving the account RLPs.
@@ -99,9 +94,6 @@ TODO: limit to single state root
 {
     # A request id is supplied, to match against the response
     "id": int,
-    
-    # Whether the client accepts data from a different state root than requested
-    "fuzzy": boolean,
     
     # Requests are batched in a list under the single key: prefixes
     "prefixes": [
@@ -147,9 +139,6 @@ Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0
 ```
 {
     "id": 1,
-    
-    # This client would rather get no result than a result at a different root
-    "fuzzy": 0,
     
     "prefixes": [
         (
@@ -312,10 +301,7 @@ TODO: add single account state root
 {
     # A request id is supplied, to match against the response
     "id": int,
-    
-    # Whether the client accepts data from a different state root than requested
-    "fuzzy": boolean,
-    
+
     # Requests are batched in a list under the single key: prefixes
     "prefixes": [
     
@@ -341,9 +327,6 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
 ```
 {
     "id": 1,
-    
-    # This client would rather get no result than a result at a different root
-    "fuzzy": 0,
     
     "prefixes": [
         (
