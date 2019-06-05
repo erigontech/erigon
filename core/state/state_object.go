@@ -330,6 +330,10 @@ func (self *stateObject) setNonce(nonce uint64) {
 	self.data.Nonce = nonce
 }
 
+func (self *stateObject) StorageSize() uint64 {
+	return self.data.StorageSize
+}
+
 func (self *stateObject) SetStorageSize(size uint64) {
 	self.db.journal.append(storageSizeChange{
 		account:     &self.address,
