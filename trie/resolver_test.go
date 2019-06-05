@@ -59,16 +59,14 @@ func TestResolve1Embedded(t *testing.T) {
 	db.PutS(testbucket, []byte("abcdefghijklmnopqrstuvwxyz012345"), []byte("a"), 0)
 	tc := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("abcdefghijklmnopqrstuvwxyz012345")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("abcdefghijklmnopqrstuvwxyz012345")),
+		resolveHex:  keybytesToHex([]byte("abcdefghijklmnopqrstuvwxyz012345")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: nil,
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false, 0)
+	r := NewResolver(false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -82,16 +80,14 @@ func TestResolve1(t *testing.T) {
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
+		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("741326629cbf4ba5d5afebd56dd714ba4a531ddb6b07b829aa85dee4d97d34a4").Bytes()),
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false, 0)
+	r := NewResolver(false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -106,16 +102,14 @@ func TestResolve2(t *testing.T) {
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
+		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false, 0)
+	r := NewResolver(false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -130,16 +124,14 @@ func TestResolve2Keep(t *testing.T) {
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false, 0)
+	r := NewResolver(false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -155,16 +147,14 @@ func TestResolve3Keep(t *testing.T) {
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("03e27bd9cc47c0a03a8480035f765a4ba242c40ae4badfd1628af5a1ca5fd57a").Bytes()),
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false, 0)
+	r := NewResolver(false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -185,10 +175,8 @@ func TestTrieResolver(t *testing.T) {
 	db.Put(testbucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc1 := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
@@ -196,10 +184,8 @@ func TestTrieResolver(t *testing.T) {
 	}
 	tc2 := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 2 bytes is 4 nibbles
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
@@ -207,16 +193,14 @@ func TestTrieResolver(t *testing.T) {
 	}
 	tc3 := &TrieContinuation{
 		t:           tr,
-		action:      TrieActionDelete,
-		key:         keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		value:       nil,
-		resolveKey:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 3 bytes is 6 nibbles
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
 		n:           nil,
 	}
-	resolver := NewResolver(db, false, false, 0)
+	resolver := NewResolver(false, false, 0)
 	resolver.AddContinuation(tc3)
 	resolver.AddContinuation(tc2)
 	resolver.AddContinuation(tc1)

@@ -910,9 +910,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	} else {
 		c := &TrieContinuation{}
 		t.insert(t.root, hex, 0, valueNode(value), c, blockNr)
-		if c.resolveKey != nil {
-			panic("")
-		}
 		if c.updated {
 			t.root = c.n
 		}
@@ -1078,49 +1075,11 @@ func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
 	printDiff(t.root, t2.root, w, "", "0x")
 }
 
-func (tc *TrieContinuation) RunWithDb(db ethdb.Database, blockNr uint64) bool {
-	var done bool
-	tc.updated = false
-	switch tc.action {
-	case TrieActionInsert:
-		if tc.t.root == nil {
-			if tc.t.resolveReads {
-				tc.t.createShort(tc.t.prefix, tc.key, 0)
-			}
-			newnode := &shortNode{Key: hexToCompact(tc.key), Val: tc.value}
-			newnode.flags.dirty = true
-			newnode.flags.t = blockNr
-			newnode.adjustTod(blockNr)
-			tc.t.joinGeneration(blockNr)
-			tc.n = newnode
-			tc.updated = true
-			done = true
-		} else {
-			done = tc.t.insert(tc.t.root, tc.key, 0, tc.value, tc, blockNr)
-		}
-	case TrieActionDelete:
-		done = tc.t.delete(tc.t.root, tc.key, 0, tc, blockNr)
-	}
-	if tc.updated {
-		tc.t.root = tc.n
-	}
-	return done
-}
-
-type TrieAction int
-
-const (
-	TrieActionInsert = iota
-	TrieActionDelete
-)
-
 type TrieContinuation struct {
-	t             *Trie      // trie to act upon
-	action        TrieAction // insert of delete
-	key           []byte     // original key being inserted or deleted
-	value         node       // original value being inserted or deleted
-	resolveKey    []byte     // Key for which the resolution is requested
-	resolvePos    int        // Position in the key for which resolution is requested
+	t             *Trie  // trie to act upon
+	value         node   // original value being inserted or deleted
+	resolveHex    []byte // Key for which the resolution is requested
+	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
 	resolved      node     // Node that has been resolved via Database access
@@ -1129,12 +1088,12 @@ type TrieContinuation struct {
 	resolveParent node     // Parent node of the one needs to be resolved. nil if the root needs to be resolved
 }
 
-func (t *Trie) NewContinuation(key []byte, pos int, resolveHash []byte) *TrieContinuation {
-	return &TrieContinuation{t: t, key: key, resolveKey: key, resolvePos: pos, resolveHash: hashNode(resolveHash)}
+func (t *Trie) NewContinuation(hex []byte, pos int, resolveHash []byte) *TrieContinuation {
+	return &TrieContinuation{t: t, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
 }
 
 func (tc *TrieContinuation) String() string {
-	return fmt.Sprintf("tc{t:%x/%x,action:%d,key:%x,resolveKey:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.action, tc.key, tc.resolveKey, tc.resolvePos)
+	return fmt.Sprintf("tc{t:%x/%x,resolveHex:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.resolveHex, tc.resolvePos)
 }
 
 func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
@@ -1473,35 +1432,8 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 			n.adjustTod(blockNr)
 		}
 		return done
-	case hashNode:
-		var done bool
-		// We've hit a part of the trie that isn't loaded yet. Load
-		// the node and insert into it. This leaves all child nodes on
-		// the path to the value in the trie.
-		if c.resolved == nil {
-			c.resolved = nil
-			c.resolveKey = key
-			c.resolvePos = pos
-			c.resolveHash = common.CopyBytes(n)
-			c.updated = false
-			done = false // Need resolution
-		} else {
-			rn := c.resolved
-			t.timestampSubTree(rn, blockNr)
-			c.resolved = nil
-			c.resolveKey = nil
-			c.resolvePos = 0
-			done = t.insert(rn, key, pos, value, c, blockNr)
-			if !c.updated {
-				c.updated = true // Substitution of the hashNode with resolved node is an update
-				c.n = rn
-			}
-		}
-		return done
-
 	default:
 		fmt.Printf("Key: %s, Prefix: %s\n", hex.EncodeToString(key[pos:]), hex.EncodeToString(key[:pos]))
-		t.PrintTrie()
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
 	}
 }
@@ -1511,9 +1443,6 @@ func (t *Trie) Delete(key []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	c := &TrieContinuation{}
 	t.delete(t.root, hex, 0, c, blockNr)
-	if c.resolveKey != nil {
-		panic("")
-	}
 	if c.updated {
 		t.root = c.n
 	}
@@ -1832,32 +1761,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, c *TrieContinuati
 		c.updated = false
 		c.n = nil
 		return true
-
-	case hashNode:
-		var done bool
-		// We've hit a part of the trie that isn't loaded yet. Load
-		// the node and delete from it. This leaves all child nodes on
-		// the path to the value in the trie.
-		if c.resolved == nil {
-			c.resolved = nil
-			c.resolveKey = key
-			c.resolvePos = keyStart
-			c.resolveHash = common.CopyBytes(n)
-			c.updated = false
-			done = false // Need resolution
-		} else {
-			rn := c.resolved
-			t.timestampSubTree(rn, blockNr)
-			c.resolved = nil
-			c.resolveKey = nil
-			c.resolvePos = 0
-			done = t.delete(rn, key, keyStart, c, blockNr)
-			if !c.updated {
-				c.updated = true // Substitution is an update
-				c.n = rn
-			}
-		}
-		return done
 
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))

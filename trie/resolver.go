@@ -58,8 +58,7 @@ func (rh ResolveHexes) Swap(i, j int) {
 
 /* One resolver per trie (prefix) */
 type TrieResolver struct {
-	accounts      bool         // Is this a resolver for accounts or for storage
-	dbw           ethdb.Putter // For updating hashes
+	accounts      bool // Is this a resolver for accounts or for storage
 	hashes        bool
 	continuations []*TrieContinuation
 	resolveHexes  ResolveHexes
@@ -82,10 +81,9 @@ type TrieResolver struct {
 	blockNr     uint64
 }
 
-func NewResolver(dbw ethdb.Putter, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:      accounts,
-		dbw:           dbw,
 		hashes:        hashes,
 		continuations: []*TrieContinuation{},
 		resolveHexes:  [][]byte{},
@@ -121,7 +119,7 @@ func (tr *TrieResolver) Less(i, j int) bool {
 	if c != 0 {
 		return c < 0
 	}
-	c = bytes.Compare(ci.resolveKey[:m], cj.resolveKey[:m])
+	c = bytes.Compare(ci.resolveHex[:m], cj.resolveHex[:m])
 	if c != 0 {
 		return c < 0
 	}
@@ -135,9 +133,9 @@ func (tr *TrieResolver) Swap(i, j int) {
 func (tr *TrieResolver) AddContinuation(c *TrieContinuation) {
 	tr.continuations = append(tr.continuations, c)
 	if c.t.prefix == nil {
-		tr.resolveHexes = append(tr.resolveHexes, c.resolveKey)
+		tr.resolveHexes = append(tr.resolveHexes, c.resolveHex)
 	} else {
-		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.t.prefix)[:40], c.resolveKey...))
+		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.t.prefix)[:40], c.resolveHex...))
 	}
 }
 
@@ -168,12 +166,12 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	for i, c := range tr.continuations {
 		if prevC == nil || c.resolvePos < prevC.resolvePos ||
 			!bytes.Equal(c.t.prefix, prevC.t.prefix) ||
-			!bytes.HasPrefix(c.resolveKey[:c.resolvePos], prevC.resolveKey[:prevC.resolvePos]) {
+			!bytes.HasPrefix(c.resolveHex[:c.resolvePos], prevC.resolveHex[:prevC.resolvePos]) {
 			tr.contIndices = append(tr.contIndices, i)
 			pLen := len(c.t.prefix)
 			key := make([]byte, pLen+32)
 			copy(key[:], c.t.prefix)
-			decodeNibbles(c.resolveKey[:c.resolvePos], key[pLen:])
+			decodeNibbles(c.resolveHex[:c.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
 			c.extResolvePos = c.resolvePos + 2*pLen
 			fixedbits = append(fixedbits, uint(4*c.extResolvePos))
@@ -226,7 +224,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	}
 	for level := startLevel; level >= stopLevel; level-- {
 		keynibble := hex[level]
-		onResolvingPath := level <= rhPrefixLen // <= instead of < to be able to resolve deletes in one go
+		onResolvingPath := level < rhPrefixLen
 		if tr.fillCount[level+1] == 1 {
 			// Short node, needs to be promoted to the level above
 			short := &tr.nodeStack[level+1]
@@ -311,7 +309,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
 				return fmt.Errorf("Resolving wrong hash for prefix %x, key %x, pos %d, \nexpected %s, got %s\n",
 					tc.t.prefix,
-					tc.resolveKey,
+					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash,
 					hashNode(gotHash[:]),
@@ -320,7 +318,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		} else {
 			if tc.resolveHash != nil {
 				return fmt.Errorf("Resolving wrong hash for key %x, pos %d\nexpected %s, got embedded node\n",
-					tc.resolveKey,
+					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash)
 			}
@@ -348,7 +346,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			}
 		case *duoNode:
 			i1, i2 := parent.childrenIdx()
-			switch tc.resolveKey[tc.resolvePos-1] {
+			switch tc.resolveHex[tc.resolvePos-1] {
 			case i1:
 				if _, ok := parent.child1.(hashNode); ok {
 					parent.child1 = root
@@ -359,7 +357,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 				}
 			}
 		case *fullNode:
-			idx := tc.resolveKey[tc.resolvePos-1]
+			idx := tc.resolveHex[tc.resolvePos-1]
 			if _, ok := parent.Children[idx].(hashNode); ok {
 				parent.Children[idx] = root
 			}
@@ -471,7 +469,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
 	tc := t.NewContinuation(key, pos, expected)
-	r := NewResolver(db, true, accounts, blockNr)
+	r := NewResolver(true, accounts, blockNr)
 	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {

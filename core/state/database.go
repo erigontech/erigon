@@ -562,7 +562,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		for _, keyHash := range hashes {
 			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, false, tds.blockNr)
+					resolver = trie.NewResolver(false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddContinuation(c)
@@ -614,7 +614,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	for _, addrHash := range addrs {
 		if need, c := tds.t.NeedResolution(addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(tds.db, false, true, tds.blockNr)
+				resolver = trie.NewResolver(false, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddContinuation(c)

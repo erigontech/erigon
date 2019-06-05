@@ -825,7 +825,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{}, state.AccountsBucket, nil, false)
-	r := trie.NewResolver(ethDb, false, true, currentBlockNr)
+	r := trie.NewResolver(false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	tc := t.NewContinuation(key, 0, rootHash[:])
@@ -846,7 +846,7 @@ func testResolve() {
 	defer ethDb.Close()
 	//treePrefix := common.FromHex("1194e966965418c7d73a42cceeb254d875860356")
 	t := trie.New(common.Hash{}, state.AccountsBucket, nil, true)
-	r := trie.NewResolver(ethDb, false, true, 1828653)
+	r := trie.NewResolver(false, true, 1828653)
 	key := common.FromHex("0803040c01")
 	resolveHash := common.FromHex("f123ef56888702971ba0604b51d0e229979f8e0b9f719cd18699e1238ab7bb4c")
 	tc := t.NewContinuation(key, 5, resolveHash)
