@@ -1031,12 +1031,12 @@ func invTree(wrong, right, diff string, block int, encodeToBytes bool) {
 }
 
 func preimage() {
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x2a23229958e691340d70ce446e3f3986df5f5289bbe763257e9c2321f7404f87"))
+	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x1c65b0ce81d408e9d99fa990df5bdf129bfc8ddb4458b5ae111a3241e6425a5e"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1374,10 +1374,10 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	invTree("root", "right", "diff", *block, false)
+	//invTree("root", "right", "diff", *block, false)
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
-	//preimage()
+	preimage()
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)

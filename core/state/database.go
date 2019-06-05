@@ -630,19 +630,30 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	deleted := tds.aggregateBuffer.deleted
 	storageTouches := make(map[common.Address]Hashes)
 	for address, m := range storageUpdates {
+		addrHash, err := tds.HashAddress(&address, false /*save*/)
+		if err != nil {
+			return nil, err
+		}
+		var hashes Hashes
 		mRead := storageReads[address]
-		hashes := make(Hashes, len(m)+len(mRead))
 		i := 0
-		for keyHash := range m {
-			hashes[i] = keyHash
-			i++
+		if _, ok := deleted[addrHash]; ok {
+			hashes = make(Hashes, len(mRead))
+		} else {
+			hashes = make(Hashes, len(m)+len(mRead))
+			for keyHash := range m {
+				hashes[i] = keyHash
+				i++
+			}
 		}
 		for keyHash := range mRead {
 			hashes[i] = keyHash
 			i++
 		}
-		sort.Sort(hashes)
-		storageTouches[address] = hashes
+		if len(hashes) > 0 {
+			sort.Sort(hashes)
+			storageTouches[address] = hashes
+		}
 	}
 	for address, m := range storageReads {
 		if _, ok := storageUpdates[address]; ok {

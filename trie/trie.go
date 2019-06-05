@@ -1231,7 +1231,7 @@ func (t *Trie) PopulateBlockProofData(key []byte) {
 				pos++
 			}
 		case valueNode:
-			t.addValue(t.prefix, hex, pos, n)
+			t.addValue(t.prefix, hex, pos, common.CopyBytes(n))
 			return
 		case hashNode:
 			t.addSoleHash(t.prefix, hex, pos, common.BytesToHash(n))
