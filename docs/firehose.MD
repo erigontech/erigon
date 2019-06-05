@@ -1,4 +1,8 @@
-# Firehose Sync v0.2
+# Firehose Sync
+
+Jason Carver, Brian Cloutier, Andrew Ashikhmin
+
+v0.3
 
 :::info
 See [Firehose Sync v0.1](/eXnqtO_vQquzrFDPHjuaFQ) for goals, background, and summaries of similar proposals.
@@ -13,7 +17,7 @@ Some goals of the change:
 
 ## Casual Examples of Firehose Sync
 
-The following aimes to give intuition of different options for how you might use Firehose, but skips the gritty details. Navigate down to [Commands Spec](#Command-Specification-for-Firehose-Sync) if you hate intuition.
+The following aims to give intuition of different options for how you might use Firehose, but skips the gritty details. Navigate down to [Commands Spec](#Command-Specification-for-Firehose-Sync) if you hate intuition.
 
 In the following examples, `client` means the node that is trying to sync up, and `server` is the node that is providing the sync data to the `client`.
 
@@ -24,7 +28,7 @@ In this example, a client would like to run as a full node and execute transacti
 1. Extract the sender of the 1st transaction, check for available balance
 3. There is no local state, so the storage errors out
 4. Request the chunk of accounts near the sender, and re-execute the transaction
-5. Look up the account of the receipient, it was not in the chunk from 3, so it errors
+5. Look up the account of the recipient, it was not in the chunk from 3, so it errors
 6. Request the chunk of accounts near the recipient, and re-execute the transaction
 8. Repeat for every transaction, including EVM execution. Pause & request every time the EVM is missing data.
 9. Keep all requested and written data, to request less and less data in each block
