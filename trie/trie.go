@@ -895,7 +895,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 //
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
-func (t *Trie) Update(db ethdb.Database, key, value []byte, blockNr uint64) {
+func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	if t.root == nil {
 		if t.resolveReads {
@@ -917,39 +917,6 @@ func (t *Trie) Update(db ethdb.Database, key, value []byte, blockNr uint64) {
 			t.root = c.n
 		}
 	}
-}
-
-// TryUpdate associates key with value in the trie. Subsequent calls to
-// Get will return value. If value has length zero, any existing value
-// is deleted from the trie and calls to Get will return nil.
-//
-// The value bytes must not be modified by the caller while they are
-// stored in the trie.
-//
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryUpdate(db ethdb.Database, key, value []byte, blockNr uint64) error {
-	tc := t.UpdateAction(key, value)
-	for !tc.RunWithDb(db, blockNr) {
-		r := NewResolver(db, false, t.accounts)
-		r.AddContinuation(tc)
-		if err := r.ResolveWithDb(db, blockNr); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (t *Trie) UpdateAction(key, value []byte) *TrieContinuation {
-	var tc TrieContinuation
-	tc.t = t
-	tc.key = keybytesToHex(key)
-	if len(value) != 0 {
-		tc.action = TrieActionInsert
-		tc.value = valueNode(value)
-	} else {
-		tc.action = TrieActionDelete
-	}
-	return &tc
 }
 
 func (t *Trie) Print(w io.Writer) {
@@ -1540,7 +1507,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 }
 
 // Delete removes any existing value for key from the trie.
-func (t *Trie) Delete(db ethdb.Database, key []byte, blockNr uint64) {
+func (t *Trie) Delete(key []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	c := &TrieContinuation{}
 	t.delete(t.root, hex, 0, c, blockNr)
@@ -1550,28 +1517,6 @@ func (t *Trie) Delete(db ethdb.Database, key []byte, blockNr uint64) {
 	if c.updated {
 		t.root = c.n
 	}
-}
-
-// TryDelete removes any existing value for key from the trie.
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryDelete(db ethdb.Database, key []byte, blockNr uint64) error {
-	tc := t.DeleteAction(key)
-	for !tc.RunWithDb(db, blockNr) {
-		r := NewResolver(db, false, t.accounts)
-		r.AddContinuation(tc)
-		if err := r.ResolveWithDb(db, blockNr); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (t *Trie) DeleteAction(key []byte) *TrieContinuation {
-	var tc TrieContinuation
-	tc.t = t
-	tc.key = keybytesToHex(key)
-	tc.action = TrieActionDelete
-	return &tc
 }
 
 func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint, c *TrieContinuation, blockNr uint64, done bool) {

@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -42,8 +43,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/hashicorp/golang-lru"
 )
 
 var (
@@ -116,12 +115,11 @@ type BlockChain struct {
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
 	trieDbState   *state.TrieDbState
-	stateCache    state.Database // State database to reuse between imports (contains state cache)
-	bodyCache     *lru.Cache     // Cache for the most recent block bodies
-	bodyRLPCache  *lru.Cache     // Cache for the most recent block bodies in RLP encoded format
-	receiptsCache *lru.Cache     // Cache for the most recent receipts per block
-	blockCache    *lru.Cache     // Cache for the most recent entire blocks
-	futureBlocks  *lru.Cache     // future blocks are blocks added for later processing
+	bodyCache     *lru.Cache // Cache for the most recent block bodies
+	bodyRLPCache  *lru.Cache // Cache for the most recent block bodies in RLP encoded format
+	receiptsCache *lru.Cache // Cache for the most recent receipts per block
+	blockCache    *lru.Cache // Cache for the most recent entire blocks
+	futureBlocks  *lru.Cache // future blocks are blocks added for later processing
 
 	quit    chan struct{} // blockchain quit channel
 	running int32         // running must be called atomically
@@ -165,7 +163,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		cacheConfig:   cacheConfig,
 		db:            cdb,
 		triegc:        prque.New(nil),
-		stateCache:    state.NewDatabase(cdb),
 		quit:          make(chan struct{}),
 		bodyCache:     bodyCache,
 		bodyRLPCache:  bodyRLPCache,
@@ -362,9 +359,6 @@ func (bc *BlockChain) FastSyncCommitHead(hash common.Hash) error {
 	if block == nil {
 		return fmt.Errorf("non existent block [%x…]", hash[:4])
 	}
-	if _, err := trie.NewSecure(block.Root(), state.AccountsBucket, nil, false); err != nil {
-		return err
-	}
 	// If all checks out, manually set the head block
 	bc.chainmu.Lock()
 	bc.currentBlock.Store(block)
@@ -431,11 +425,6 @@ func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.StateDB,
 		return nil, nil, err
 	}
 	return state.New(tds), tds, nil
-}
-
-// StateCache returns the caching database underpinning the blockchain instance.
-func (bc *BlockChain) StateCache() state.Database {
-	return bc.stateCache
 }
 
 // Reset purges the entire blockchain, restoring it to its genesis state.
@@ -591,12 +580,6 @@ func (bc *BlockChain) HasFastBlock(hash common.Hash, number uint64) bool {
 	return rawdb.HasReceipts(bc.db, hash, number)
 }
 
-// HasState checks if state trie is fully present in the database or not.
-func (bc *BlockChain) HasState(hash common.Hash) bool {
-	_, err := bc.stateCache.OpenTrie(hash)
-	return err == nil
-}
-
 // HasBlockAndState checks if a block and associated state trie is fully present
 // in the database or not, caching it if present.
 func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
@@ -605,7 +588,7 @@ func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
 	if block == nil {
 		return false
 	}
-	return bc.HasState(block.Root())
+	return true
 }
 
 // GetBlock retrieves a block from the database by hash and number,

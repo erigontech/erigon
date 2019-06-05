@@ -38,7 +38,7 @@ func testRebuild(t *testing.T) {
 		if err != nil {
 			t.Errorf("Could not encode value: %v", err)
 		}
-		tr.TryUpdate(db, key, v1, 0)
+		tr.Update(key, v1, 0)
 		tr.PrintTrie()
 		root1 := tr.Root()
 		//fmt.Printf("Root1: %x\n", tr.Root())
@@ -68,7 +68,7 @@ func TestResolve1Embedded(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false)
+	r := NewResolver(db, false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -91,7 +91,7 @@ func TestResolve1(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false)
+	r := NewResolver(db, false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -115,7 +115,7 @@ func TestResolve2(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false)
+	r := NewResolver(db, false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -139,7 +139,7 @@ func TestResolve2Keep(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false)
+	r := NewResolver(db, false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -164,7 +164,7 @@ func TestResolve3Keep(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	r := NewResolver(db, false, false)
+	r := NewResolver(db, false, false, 0)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -216,7 +216,7 @@ func TestTrieResolver(t *testing.T) {
 		resolved:    nil,
 		n:           nil,
 	}
-	resolver := NewResolver(db, false, false)
+	resolver := NewResolver(db, false, false, 0)
 	resolver.AddContinuation(tc3)
 	resolver.AddContinuation(tc2)
 	resolver.AddContinuation(tc1)

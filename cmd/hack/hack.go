@@ -825,7 +825,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{}, state.AccountsBucket, nil, false)
-	r := trie.NewResolver(ethDb, false, true)
+	r := trie.NewResolver(ethDb, false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	tc := t.NewContinuation(key, 0, rootHash[:])
@@ -846,7 +846,7 @@ func testResolve() {
 	defer ethDb.Close()
 	//treePrefix := common.FromHex("1194e966965418c7d73a42cceeb254d875860356")
 	t := trie.New(common.Hash{}, state.AccountsBucket, nil, true)
-	r := trie.NewResolver(ethDb, false, true)
+	r := trie.NewResolver(ethDb, false, true, 1828653)
 	key := common.FromHex("0803040c01")
 	resolveHash := common.FromHex("f123ef56888702971ba0604b51d0e229979f8e0b9f719cd18699e1238ab7bb4c")
 	tc := t.NewContinuation(key, 5, resolveHash)
@@ -879,40 +879,6 @@ func hashFile() {
 			w.WriteString(line)
 			w.WriteString("\n")
 		}
-	}
-	fmt.Printf("%d lines scanned\n", count)
-}
-
-func buildHashFromFile() {
-	treePrefix := common.FromHex("2a0c0dbecc7e4d658f48e01e3fa353f44050c208")
-	t := trie.New(common.Hash{}, state.StorageBucket, treePrefix, false)
-	r := trie.NewResolver(nil, false, false)
-	key := common.FromHex("010d04080f0e060e08000d09040800040f0f0f020c04060109090d0c020c090a010d0609070a0905020e0904000808030c020f060c0709060107080f0209020210")
-	resolveHash := common.FromHex("9edde1605e84902c450fdf275a6c9ef00fc67691d2ed62b4de35ef8c8bf1b20")
-	tc := t.NewContinuation(key, 0, resolveHash)
-	r.AddContinuation(tc)
-	f, err := os.Open("/Users/alexeyakhunov/mygit/go-ethereum/geth_read.log")
-	check(err)
-	defer f.Close()
-	r.PrepareResolveParams()
-	scanner := bufio.NewScanner(f)
-	count := 0
-	for scanner.Scan() {
-		terms := strings.Split(scanner.Text(), " ")
-		idx, _ := strconv.Atoi(terms[0])
-		key := common.FromHex(terms[1])
-		if len(key) == 0 {
-			key = nil
-		}
-		value := common.FromHex(terms[2])
-		if len(value) == 0 {
-			value = nil
-		}
-		_, err := r.Walker(idx, key, value)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-		count++
 	}
 	fmt.Printf("%d lines scanned\n", count)
 }
@@ -1128,10 +1094,7 @@ func loadAccount() {
 	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
-		err := t.TryUpdate(ethDb, key, v, blockNr)
-		if err != nil {
-			return false, err
-		}
+		t.Update(key, v, blockNr)
 		count++
 		return true, nil
 	}); err != nil {
@@ -1162,131 +1125,14 @@ func loadAccount() {
 		key := ([]byte(k))[len(accountBytes):]
 		if len(v) > 0 {
 			fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-			err := t.TryUpdate(ethDb, key, v, blockNr)
+			t.Update(key, v, blockNr)
 			check(err)
 		} else {
 			fmt.Printf("Deleted %x from %x\n", key, v_orig)
-			err := t.TryDelete(ethDb, key, blockNr)
-			check(err)
+			t.Delete(key, blockNr)
 		}
 	}
 	fmt.Printf("Updated storage root: %x\n", t.Hash())
-	/*
-		maxBits := uint64(1) << uint(len(keys))
-		for bits := uint64(0); bits < maxBits; bits++ {
-			undo := make(map[string][]byte)
-			count = 0
-			for i, k := range keys {
-				if (bits & (uint64(1) << uint(i))) == 0 {
-					continue
-				}
-				v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				v_orig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				key := ([]byte(k))[len(accountBytes):]
-				undo[string(key)] = common.CopyBytes(v_orig)
-				if len(v) > 0 {
-					fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-					err := t.TryUpdate(ethDb, key, v, blockNr)
-					check(err)
-				} else {
-					fmt.Printf("Deleted %x from %x\n", key, v_orig)
-					err := t.TryDelete(ethDb, key, blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Updated storage root: %x\n", t.Hash())
-			// Undo the changes
-			for key, v := range undo {
-				if len(v) > 0 {
-					err := t.TryUpdate(ethDb, []byte(key), v, blockNr)
-					check(err)
-				} else {
-					err := t.TryDelete(ethDb, []byte(key), blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Storage root after undo: %x\n--------------------------\n", t.Hash())
-		}
-		// Now try all permutations
-		p := make([]int, len(keys))
-		for i := 0; i < len(p); i++ {
-			p[i] = i
-		}
-		for {
-			undo := make(map[string][]byte)
-			count = 0
-			for _, pi := range p {
-				k := keys[pi]
-				v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				v_orig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				key := ([]byte(k))[len(accountBytes):]
-				undo[string(key)] = common.CopyBytes(v_orig)
-				if len(v) > 0 {
-					fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-					err := t.TryUpdate(ethDb, key, v, blockNr)
-					check(err)
-				} else {
-					fmt.Printf("Deleted %x from %x\n", key, v_orig)
-					err := t.TryDelete(ethDb, key, blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Updated storage root: %x\n", t.Hash())
-			// Undo the changes
-			for key, v := range undo {
-				if len(v) > 0 {
-					err := t.TryUpdate(ethDb, []byte(key), v, blockNr)
-					check(err)
-				} else {
-					err := t.TryDelete(ethDb, []byte(key), blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Storage root after undo: %x\n--------------------------\n", t.Hash())
-			count := len(p)
-	        if count <= 1 {
-	            break
-	        }
-
-	        // L2: Find last j such that self[j] <= self[j+1]. Terminate if no such j
-	        // exists.
-	        j := count - 2
-	        for j >= 0 && p[j] > p[j+1] {
-	            j--
-	        }
-	        if j == -1 {
-	            break
-	        }
-
-	        // L3: Find last l such that self[j] <= self[l], then exchange elements j and l:
-	        l := count - 1
-	        for p[j] > p[l] {
-	            l--
-	        }
-	        p[j], p[l] = p[l], p[j]
-
-	        // L4: Reverse elements j+1 ... count-1:
-	        lo := j + 1
-	        hi := count - 1
-	        for lo < hi {
-	        	p[lo], p[hi] = p[hi], p[lo]
-	            lo++
-	            hi--
-	        }
-		}
-	*/
 }
 
 func printBranches(block uint64) {

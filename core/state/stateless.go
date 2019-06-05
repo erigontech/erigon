@@ -437,14 +437,10 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
 			v := m[keyHash]
-			var c *trie.TrieContinuation
 			if len(v) != 0 {
-				c = t.UpdateAction(keyHash[:], v)
+				t.Update(keyHash[:], v, s.blockNr-1)
 			} else {
-				c = t.DeleteAction(keyHash[:])
-			}
-			if !c.RunWithDb(nil, s.blockNr-1) {
-				return fmt.Errorf("Unexpected resolution: %s\n", c.String())
+				t.Delete(keyHash[:], s.blockNr-1)
 			}
 		}
 	}
@@ -458,7 +454,6 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		deleteStorageTrie := false
-		var c *trie.TrieContinuation
 		if account != nil {
 			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
 			if err != nil {
@@ -475,13 +470,10 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 			if err != nil {
 				return err
 			}
-			c = s.t.UpdateAction(addrHash[:], data)
+			s.t.Update(addrHash[:], data, s.blockNr-1)
 		} else {
 			deleteStorageTrie = true
-			c = s.t.DeleteAction(addrHash[:])
-		}
-		if !c.RunWithDb(nil, s.blockNr-1) {
-			return fmt.Errorf("Unexpected resolution: %s\n", c.String())
+			s.t.Delete(addrHash[:], s.blockNr-1)
 		}
 		if deleteStorageTrie {
 			delete(s.storageTries, addrHash)

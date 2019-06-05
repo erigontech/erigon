@@ -104,17 +104,6 @@ func (t *Trie) Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethd
 	return nil
 }
 
-// Prove constructs a merkle proof for key. The result contains all encoded nodes
-// on the path to the value at key. The value itself is also included in the last
-// node and can be retrieved by verifying the proof.
-//
-// If the trie does not contain a value for key, the returned proof contains all
-// nodes of the longest existing prefix of the key (at least the root node), ending
-// with the node that proves the absence of the key.
-func (t *SecureTrie) Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethdb.Putter, blockNr uint64) error {
-	return t.trie.Prove(db, key, fromLevel, proofDb, blockNr)
-}
-
 // VerifyProof checks merkle proofs. The given proof must contain the value for
 // key in a trie with the given root hash. VerifyProof returns an error if the
 // proof contains invalid trie nodes or the wrong value.

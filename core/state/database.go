@@ -562,7 +562,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		for _, keyHash := range hashes {
 			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, false)
+					resolver = trie.NewResolver(tds.db, false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddContinuation(c)
@@ -597,9 +597,9 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 		for _, keyHash := range hashes {
 			v := m[keyHash]
 			if len(v) > 0 {
-				storageTrie.Update(nil, keyHash[:], v, tds.blockNr)
+				storageTrie.Update(keyHash[:], v, tds.blockNr)
 			} else {
-				storageTrie.Delete(nil, keyHash[:], tds.blockNr)
+				storageTrie.Delete(keyHash[:], tds.blockNr)
 			}
 		}
 	}
@@ -614,7 +614,7 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 	for _, addrHash := range addrs {
 		if need, c := tds.t.NeedResolution(addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(tds.db, false, true)
+				resolver = trie.NewResolver(tds.db, false, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddContinuation(c)
@@ -646,10 +646,10 @@ func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
 			if err != nil {
 				return common.Hash{}, err
 			}
-			tds.t.Update(nil, addrHash[:], data, tds.blockNr)
+			tds.t.Update(addrHash[:], data, tds.blockNr)
 		} else {
 			deleteStorageTrie = true
-			tds.t.Delete(nil, addrHash[:], tds.blockNr)
+			tds.t.Delete(addrHash[:], tds.blockNr)
 		}
 		if deleteStorageTrie && storageTrie != nil {
 			delete(tds.storageTries, addrHash)
@@ -1470,102 +1470,4 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, origi
 	oo := make([]byte, len(o))
 	copy(oo, o)
 	return dsw.tds.db.PutS(StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
-}
-
-// Database wraps access to tries and contract code.
-type Database interface {
-	// OpenTrie opens the main account trie.
-	OpenTrie(root common.Hash) (Trie, error)
-
-	// OpenStorageTrie opens the storage trie of an account.
-	OpenStorageTrie(addrHash, root common.Hash) (Trie, error)
-
-	// CopyTrie returns an independent copy of the given trie.
-	CopyTrie(Trie) Trie
-
-	// ContractCode retrieves a particular contract's code.
-	ContractCode(addrHash, codeHash common.Hash) ([]byte, error)
-
-	// ContractCodeSize retrieves a particular contracts code's size.
-	ContractCodeSize(addrHash, codeHash common.Hash) (int, error)
-
-	// TrieDB retrieves the low level trie database used for data storage.
-	TrieDB() ethdb.Database
-}
-
-// Trie is a Ethereum Merkle Trie.
-type Trie interface {
-	Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethdb.Putter, blockNr uint64) error
-	TryGet(db ethdb.Database, key []byte, blockNr uint64) ([]byte, error)
-	TryUpdate(db ethdb.Database, key, value []byte, blockNr uint64) error
-	TryDelete(db ethdb.Database, key []byte, blockNr uint64) error
-	Hash() common.Hash
-	NodeIterator(db ethdb.Database, startKey []byte, blockNr uint64) trie.NodeIterator
-	GetKey(trie.DatabaseReader, []byte) []byte // TODO(fjl): remove this when SecureTrie is removed
-}
-
-// NewDatabase creates a backing store for state. The returned database is safe for
-// concurrent use and retains a few recent expanded trie nodes in memory. To keep
-// more historical state in memory, use the NewDatabaseWithCache constructor.
-func NewDatabase(db ethdb.Database) Database {
-	return NewDatabaseWithCache(db, 0)
-}
-
-// NewDatabase creates a backing store for state. The returned database is safe for
-// concurrent use and retains both a few recent expanded trie nodes in memory, as
-// well as a lot of collapsed RLP trie nodes in a large memory cache.
-func NewDatabaseWithCache(db ethdb.Database, cache int) Database {
-	csc, _ := lru.New(codeSizeCacheSize)
-	return &cachingDB{
-		db:            db,
-		codeSizeCache: csc,
-	}
-}
-
-type cachingDB struct {
-	db            ethdb.Database
-	codeSizeCache *lru.Cache
-}
-
-// OpenTrie opens the main account trie.
-func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
-	return trie.NewSecure(root, AccountsBucket, nil, false)
-}
-
-// OpenStorageTrie opens the storage trie of an account.
-func (db *cachingDB) OpenStorageTrie(addrHash, root common.Hash) (Trie, error) {
-	return trie.NewSecure(root, StorageBucket, addrHash[:], true)
-}
-
-// CopyTrie returns an independent copy of the given trie.
-func (db *cachingDB) CopyTrie(t Trie) Trie {
-	switch t := t.(type) {
-	case *trie.SecureTrie:
-		return t.Copy()
-	default:
-		panic(fmt.Errorf("unknown trie type %T", t))
-	}
-}
-
-// ContractCode retrieves a particular contract's code.
-func (db *cachingDB) ContractCode(addrHash, codeHash common.Hash) ([]byte, error) {
-	code, err := db.db.Get(CodeBucket, codeHash[:])
-	if err == nil {
-		db.codeSizeCache.Add(codeHash, len(code))
-	}
-	return code, err
-}
-
-// ContractCodeSize retrieves a particular contracts code's size.
-func (db *cachingDB) ContractCodeSize(addrHash, codeHash common.Hash) (int, error) {
-	if cached, ok := db.codeSizeCache.Get(codeHash); ok {
-		return cached.(int), nil
-	}
-	code, err := db.ContractCode(addrHash, codeHash)
-	return len(code), err
-}
-
-// TrieDB retrieves any intermediate trie-node caching layer.
-func (db *cachingDB) TrieDB() ethdb.Database {
-	return db.db
 }

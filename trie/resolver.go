@@ -79,9 +79,10 @@ type TrieResolver struct {
 	keyIdx      int
 	h           *hasher
 	historical  bool
+	blockNr     uint64
 }
 
-func NewResolver(dbw ethdb.Putter, hashes bool, accounts bool) *TrieResolver {
+func NewResolver(dbw ethdb.Putter, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:      accounts,
 		dbw:           dbw,
@@ -91,6 +92,7 @@ func NewResolver(dbw ethdb.Putter, hashes bool, accounts bool) *TrieResolver {
 		rhIndexLte:    -1,
 		rhIndexGt:     0,
 		contIndices:   []int{},
+		blockNr:       blockNr,
 	}
 	return &tr
 }
@@ -334,6 +336,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.vertical[i].flags.dirty = true
 			tr.fillCount[i] = 0
 		}
+		tc.t.timestampSubTree(root, tr.blockNr)
 		switch parent := tc.resolveParent.(type) {
 		case nil:
 			if _, ok := tc.t.root.(hashNode); ok {
@@ -468,7 +471,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
 	tc := t.NewContinuation(key, pos, expected)
-	r := NewResolver(db, true, accounts)
+	r := NewResolver(db, true, accounts, blockNr)
 	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {
