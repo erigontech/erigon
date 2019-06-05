@@ -638,6 +638,15 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
+	// todo all the ifs should live here:
+	/*
+	If previous value of the [location] is 0, and value is not 0, increment storagesize (semantics of increment described below)
+	If previous value of the [location] is not 0, and value is 0, decrement storagesize (semantics of decrement described below)
+	As with other state changes, changes of storagesize get reverted when the execution frame reverts, i.e. it needs to use the same techniques as storage values, like journalling (in Geth), and substates (in Parity). Value of storagesize is not observable from contracts at this point.
+	*/
+	storageSize := interpreter.evm.StateDB.StorageSize(contract.Address())
+	interpreter.evm.StateDB.SetStorageSize(contract.Address(), storageSize+1)
+
 	interpreter.intPool.put(val)
 	return nil, nil
 }
