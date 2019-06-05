@@ -1193,10 +1193,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 			}
 			bc.trieDbState.Rebuild()
 		}
-		root, err = bc.trieDbState.TrieRoot()
-		if err != nil {
-			return k, events, coalescedLogs, err
-		}
+		root = bc.trieDbState.LastRoot()
 		var parentRoot common.Hash
 		if parent != nil {
 			parentRoot = parent.Root()
@@ -1214,12 +1211,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			root, err := bc.trieDbState.TrieRoot()
-			if err != nil {
-				bc.db.Rollback()
-				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
-			}
+			root := bc.trieDbState.LastRoot()
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()

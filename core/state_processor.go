@@ -123,28 +123,36 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds
 		misc.ApplyDAOHardFork(statedb)
 	}
 	// Iterate over and process the individual transactions
+	tds.StartNewBuffer()
 	for i, tx := range block.Transactions() {
 		statedb.Prepare(tx.Hash(), block.Hash(), i)
 		receipt, _, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, cfg)
 		if err != nil {
 			return nil, nil, 0, err
 		}
-		if !p.config.IsByzantium(header.Number) {
-			rootHash, err := tds.TrieRoot()
-			if err != nil {
-				return nil, nil, 0, err
-			}
-			receipt.PostState = rootHash.Bytes()
-		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
+		if !p.config.IsByzantium(header.Number) {
+			tds.StartNewBuffer()
+		}
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	_, err := p.engine.Finalize(p.config, header, statedb, block.Transactions(), block.Uncles(), receipts)
+	if _, err := p.engine.Finalize(p.config, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
+		return receipts, allLogs, *usedGas, err
+	}
+	if err := statedb.Finalise(p.config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+		return receipts, allLogs, *usedGas, err
+	}
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
-	header.Root, err = tds.IntermediateRoot(statedb, p.config.IsEIP158(header.Number))
+	if !p.config.IsByzantium(header.Number) {
+		for i, receipt := range receipts {
+			receipt.PostState = roots[i].Bytes()
+		}
+	}
+	header.Root = roots[len(roots)-1]
 	return receipts, allLogs, *usedGas, err
 }
 
@@ -168,7 +176,9 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		return nil, 0, err
 	}
 	// Update the state with pending changes
-	statedb.Finalise(config.IsEIP158(header.Number), stateWriter)
+	if err := statedb.Finalise(config.IsEIP158(header.Number), stateWriter); err != nil {
+		return nil, 0, err
+	}
 
 	*usedGas += gas
 

@@ -120,8 +120,8 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
@@ -192,6 +192,7 @@ func stateless(genLag, consLag int) {
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
 		header := block.Header()
+		tds.StartNewBuffer()
 		var receipts types.Receipts
 		if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
 			misc.ApplyDAOHardFork(statedb)
@@ -204,25 +205,30 @@ func stateless(genLag, consLag int) {
 				return
 			}
 			if !chainConfig.IsByzantium(header.Number) {
-				//rootHash, err := tds.TrieRoot()
-				//if err != nil {
-				//	panic(fmt.Errorf("tx %d, %x failed: %v", i, tx.Hash(), err))
-				//}
-				//receipt.PostState = rootHash.Bytes()
+				tds.StartNewBuffer()
 			}
 			receipts = append(receipts, receipt)
 		}
 		// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-		_, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts)
-		if err != nil {
+		if _, err = engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
 			fmt.Printf("Finalize of block %d failed: %v\n", blockNum, err)
 			return
 		}
-		nextRoot, err := tds.IntermediateRoot(statedb, chainConfig.IsEIP158(header.Number))
+		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
+			return
+		}
+		roots, err := tds.ComputeTrieRoots()
 		if err != nil {
 			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
+		if !chainConfig.IsByzantium(header.Number) {
+			for i, receipt := range receipts {
+				receipt.PostState = roots[i].Bytes()
+			}
+		}
+		nextRoot := roots[len(roots)-1]
 		//fmt.Printf("Next root %x\n", nextRoot)
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
@@ -238,7 +244,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 		if (blockNum%500000 == 0) || (blockNum > 5600000 && blockNum%100000 == 0) {
-			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
+			//save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			blockProof := tds.ExtractProofs(trace)

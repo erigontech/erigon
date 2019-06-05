@@ -1150,6 +1150,98 @@ func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
 	}
 }
 
+func (t *Trie) PopulateBlockProofData(key []byte) {
+	var nd node = t.root
+	hex := keybytesToHex(key)
+	pos := 0
+	for {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			t.addShort(t.prefix, hex, pos, nKey)
+			matchlen := prefixLen(hex[pos:], nKey)
+			if matchlen == len(nKey) {
+				nd = n.Val
+				pos += matchlen
+			} else {
+				proofKey := make([]byte, pos+len(nKey))
+				copy(proofKey, hex[:pos])
+				copy(proofKey[pos:], nKey)
+				if v, ok := n.Val.(valueNode); ok {
+					t.addValue(t.prefix, proofKey, pos+len(nKey), common.CopyBytes(v))
+				} else {
+					t.addSoleHash(t.prefix, proofKey, pos+len(nKey), common.BytesToHash(n.Val.hash()))
+				}
+				return
+			}
+		case *duoNode:
+			mask, hashes, m := n.hashesExcept(hex[pos])
+			t.addProof(t.prefix, hex, pos, mask, hashes)
+			if m != nil {
+				for idx, s := range m {
+					nKey := compactToHex(s.Key)
+					proofKey := make([]byte, pos+1+len(nKey))
+					copy(proofKey, hex[:pos])
+					proofKey[pos] = idx
+					copy(proofKey[pos+1:], nKey)
+					t.addShort(t.prefix, proofKey, pos+1, nKey)
+					if v, ok := s.Val.(valueNode); ok {
+						t.addValue(t.prefix, proofKey, pos+1+len(nKey), common.CopyBytes(v))
+					} else {
+						t.addSoleHash(t.prefix, proofKey, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+					}
+				}
+			}
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			mask, hashes, m := n.hashesExcept(hex[pos])
+			t.addProof(t.prefix, hex, pos, mask, hashes)
+			if m != nil {
+				for idx, s := range m {
+					nKey := compactToHex(s.Key)
+					proofKey := make([]byte, pos+1+len(nKey))
+					copy(proofKey, hex[:pos])
+					proofKey[pos] = idx
+					copy(proofKey[pos+1:], nKey)
+					t.addShort(t.prefix, proofKey, pos+1, nKey)
+					if v, ok := s.Val.(valueNode); ok {
+						t.addValue(t.prefix, proofKey, pos+1+len(nKey), common.CopyBytes(v))
+					} else {
+						t.addSoleHash(t.prefix, proofKey, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+					}
+				}
+			}
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			} else {
+				nd = child
+				pos++
+			}
+		case valueNode:
+			t.addValue(t.prefix, hex, pos, n)
+			return
+		case hashNode:
+			t.addSoleHash(t.prefix, hex, pos, common.BytesToHash(n))
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+}
+
 func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieContinuation, blockNr uint64) bool {
 	if len(key) == pos {
 		if v, ok := origNode.(valueNode); ok {
