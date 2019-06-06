@@ -27,19 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-type BlockProof struct {
-	Contracts  []common.Address
-	CMasks     []uint16
-	CHashes    []common.Hash
-	CShortKeys [][]byte
-	CValues    [][]byte
-	Codes      [][]byte
-	Masks      []uint16
-	Hashes     []common.Hash
-	ShortKeys  [][]byte
-	Values     [][]byte
-}
-
 /* Proof Of Concept for verification of Stateless client proofs */
 type CodeTime struct {
 	bytecode []byte
@@ -59,7 +46,7 @@ type Stateless struct {
 }
 
 func NewStateless(stateRoot common.Hash,
-	blockProof BlockProof,
+	blockProof trie.BlockProof,
 	blockNr uint64,
 	trace bool,
 ) (*Stateless, error) {
@@ -149,7 +136,7 @@ func NewStateless(stateRoot common.Hash,
 	}, nil
 }
 
-func (s *Stateless) ThinProof(blockProof BlockProof, blockNr uint64, cuttime uint64, trace bool) BlockProof {
+func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttime uint64, trace bool) trie.BlockProof {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
@@ -222,7 +209,7 @@ func (s *Stateless) ThinProof(blockProof BlockProof, blockNr uint64, cuttime uin
 			aCodes = append(aCodes, code)
 		}
 	}
-	return BlockProof{aContracts, acMasks, acHashes, acShortKeys, acValues, aCodes, aMasks, aHashes, aShortKeys, aValues}
+	return trie.BlockProof{aContracts, acMasks, acHashes, acShortKeys, acValues, aCodes, aMasks, aHashes, aShortKeys, aValues}
 }
 
 func (s *Stateless) touchCodeHash(codeHash common.Hash, code []byte, blockNr uint64) {
@@ -243,7 +230,7 @@ func (s *Stateless) touchCodeHash(codeHash common.Hash, code []byte, blockNr uin
 	}
 }
 
-func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof BlockProof,
+func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof,
 	blockNr uint64,
 	trace bool,
 ) error {

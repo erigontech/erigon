@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var chartColors = []drawing.Color{
@@ -75,7 +76,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	return nil
 }
 
-func writeStats(w io.Writer, blockNum uint64, blockProof state.BlockProof) {
+func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 	var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
 	for _, short := range blockProof.CShortKeys {
 		l := len(short)
