@@ -37,24 +37,6 @@ This has the significant benefit that the client is asking the server for data t
 
 Drilling in: what does it look like to request a chunk of addresses near the one you are interested in?
 
-### Requesting Account Data
-
-In Firehose Sync, the client asks for the full set of values at a key prefix. If the set is too large, the server provides proofs for smaller buckets as a hint for which prefixes to ask for next. 
-
-Instead of requesting a particular account, you always request buckets, so you end up with nearby results for each request.
-
-That looks something like:
-
-1) **Client** Give me recent addresses and RLPs of every account at state root `0xa1b2`...
-2) **Server** Nope, that is way too many. Here is the root node and all of its children.
-3) **Client** Looks like those nodes match the root hash :+1:, how about accounts with address hashes starting with `0x00`, also at state root `0xa1b2`?
-5) **Server** Nope, still way too big. Here is the node at prefix `0x00`, and all its children
-6) **Client** Great, can I have all the accounts whose hashes start with prefix `0x0000`?
-8) **Server** No problem! Here are all the account RLPs whose address hashes start with `0x0000`, and the last 30 bytes of the hash of their addresses
-9) **Client** Hooray! I can validate all the accounts by building them into a subtrie and comparing it to a hash received in #4
-
-The protocol is almost exactly the same on storage tries, but requests include the account hash that owns the storage root.
-
 ### Bulk Download
 
 Instead of Beam Sync, the client could request all account data up front before executing transactions. Like current Fast Sync, it would wait until all data is available before starting to execute transactions.
