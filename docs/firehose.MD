@@ -197,10 +197,10 @@ A response to the example request above might look like:
             # This is the list of the keys and values under 0x0ddba11
             (
                 # First key/value pair
-                (0x09876..., 0x111...),
+                (0x0ddba119876..., 0x111...),
                 
                 # Second key/value pair
-                (0x0a1b..., 0x1a2...),
+                (0x0ddba11a1b..., 0x1a2...),
             ),
     ),
     
