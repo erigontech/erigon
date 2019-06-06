@@ -141,7 +141,7 @@ For each requested prefix the responder has the option of returning either:
                 # A single key/value pair
                 (
                     # The prefix is NOT omitted from the key
-                    key,
+                    key, # array of 32 bytes
                     
                     # The RLP-encoded value stored in the trie
                     value
@@ -201,7 +201,8 @@ A response to the example request above might look like:
                 
                 # Second key/value pair
                 (0x0ddba11a1b5..., 0x1a2...),
-            ),
+            )
+        ),
     ),
     
     # this is empty, because the server had data for the requested block
