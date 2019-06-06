@@ -15,6 +15,9 @@ Changes in this revision:
 - Dropped "fuzzy" flag
 - Renamed GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes
 - Prefix encoding changed to the Yellow Paper's
+- Single block hash per request as opposed to multiple state roots per request
+- StateData & StorageData may only have all subtrie leaves or nothing, not intermediate nodes
+- Prefixes are not omitted from returned leaf keys
 
 ## Casual Examples of Firehose Sync
 
@@ -66,33 +69,25 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ### `GetStateData` Request
 
-The requester asks for data defined by a given state root hash and key prefix. This command exclusively deals with retrieving the account RLPs.
+The requester asks for data defined by a key prefix as of a given block.
+This command exclusively deals with retrieving the account RLPs.
 
-The requests can be batched so that multiple prefixes and multiple root hashes may be requested.
-
-:::warning
-TODO: limit to single state root
-:::
+The requests can be batched so that multiple prefixes may be requested.
 
 ```
-{
+(
     # A request id is supplied, to match against the response
-    "id": int,
+    id, # integer
     
-    # Requests are batched in a list under the single key: prefixes
-    "prefixes": [
-    
-        # Each list item is a two-element tuple
-        (
-            # The first element is the root hash being requested
-            root_hash,
-        
-            # The second element is a list of prefixes being requested
-            [key_prefix, ...]
-        ),
+    # The block hash as of which we request the data
+    block_hash, # array of 32 bytes
+
+    # A list of prefixes being requested
+    (
+        key_prefix_0, # integer; see below re. prefix encoding
         ...
-    ]
-}
+    )
+)
 ```
 
 #### Key Prefixes Note
@@ -101,156 +96,117 @@ We use the same prefix encoding as described in Appendix C of the [Yellow Paper]
 (no additional flags are utilized).
 
 #### Example
-Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at state root 0xaaa...aaa. Additionally, you want all the values in the state trie with root 0xbbb...bbb. Your request would look like:
+Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block 0xaaa...aaa.
+Your request would look like:
 ```
-{
-    "id": 1,
+(
+    1, #id
+
+    0xaaa...aaa, # block_hash
     
-    "prefixes": [
-        (
-            # state root hash
-            0xaaa...aaa,
-            
-            # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0x00beef, 0x10ddba11]
-        ),
-        (
-            # second state root hash
-            0xbbb...bbb,
-            
-            # ask for all values by requesting the empty prefix
-            [0x]
-        )
-    ]
-}
+    # even-length 0xbeef and odd-length 0x0ddba11, encoded
+    (
+        0x00beef,
+        0x10ddba11
+    )
+)
 ```
 
 
 ### `StateData` Response
 
 
-The responder has the option of returning either:
-1) Some nodes in the subtrie starting at the requested prefix (with some flexibility on which nodes to return), OR
-2) **All** the keys & values that are stored in that key prefix range
-
+For each requested prefix the responder has the option of returning either:
+1) **All** the keys & values that are stored in that key prefix range, OR
+2) An error status code
 
 
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id, # integer
     
     # The response data, in the same ordering of the request
-    "data": [
+    (
+        # There is one 2-tuple for every prefix requested
+        (
+            # 0 – success
+            # 1 – no data as of the requested block, available blocks should be populated
+            # 2 – too many leaves matching the prefix
+            status_code,
 
-        # there is one element in this outer list for each state root requested
-        [
-        
-            # There is one 2-tuple for every prefix requested
+            # If success, return the key/value pairs.
+            # Otherwise, return an empty list.
             (
-            
-                # The responder may choose to reply with a list of trie nodes
-                [node, ...],
-                
-                # OR, the responder may reply with the keys & values
-                [
-                    # A single key/value pair
-                    (
-                        # The prefix is omitted from the key
-                        key_suffix,
-                        
-                        # The RLP-encoded value stored in the trie
-                        value
-                    ),
-                    ...
-                ]
-            ),
-            ...
-        ],
+                # A single key/value pair
+                (
+                    # The prefix is NOT omitted from the key
+                    key,
+                    
+                    # The RLP-encoded value stored in the trie
+                    value
+                ),
+                ...
+            )
+        ),
         ...
-    ],
+    ),
 
-    # If an old state root was requested, return the available roots.
+    # If an old block was requested, return the available blocks.
     # Otherwise, return an empty list.
-    "available_roots": [
-    
-        # include an entry for every state root hash that the server supports
-        state_root_hash,
+    (
+        # include the hash of every block that the server has the data for
+        available_block_0, # array of 32 bytes
         ...
-    ]
-}
+    )
+)
 ```
-<!--
--->
-
-The response must reuse the same ordering of root hashes and prefixes as used for the request. For each prefix, the responder chooses to send exactly one of: node data, or key/value data, or neither.
-
-If the suffix is odd-length (in nibbles), then left-pad with 0's to the nearest full byte. That means that a suffix length-4 of `0x0987` and suffix length-3 `0x987` are sent as the same bytes in a response. It's up to the requestor to recall the prefix length, so they can infer the suffix length.
 
 #### Response Constraints
 
-Some constraints on the response:
-- For responses with nodes
-    1) Response **must not** return any child nodes without also returning their parents. For example, if exactly one node is returned to a request for the empty prefix, it must be the root node.
-    2) Response **must** return parent nodes before any child nodes. Child nodes may be in any order.
-- For responses with keys & values
-    1) Response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root
+The response must reuse the same ordering of prefixes as used for the request.
+
+For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root.
+
+TODO [yperbasis] does the order of returned key/value pairs matter?
 
 #### Example
 A response to the example request above might look like:
 
 
 ```
-{
-    "id": 1,
+(
+    1, # id
     
     # This is a list of two elements, matching the `prefixes` request example
-    "data": [
-    
-        # All values in this first list correspond to
-        # state root hash: 0xaaa...aaa
-        [
-            # This 2-tuple is for the 0xbeef prefix
-            (
-                # Node data is not empty: the prefix was too short
-                [0xabc..., 0xdef...],
-                
-                # The second element must be empty if the first is not
-                []
-            ),
+    (
+        # This 2-tuple is for the 0xbeef prefix
+        (
+            # the prefix was too short
+            2, # status code
             
-            # This 2-tuple is for the 0x0ddba11 prefix
-            (
-                # Node data is empty: the prefix was long enough to get values
-                [],
-                
-                # This is the list of the key suffixes and values under 0x0ddba11
-                [
-                    # This is a single key suffix and value pair
-                    (0x09876..., 0x111...),
-                    
-                    # Here, all keys start with 0x0, because they are odd-length
-                    
-                    # Each key suffix must be 57 nibbles long, which
-                    # rounds out to 29 bytes
-                    (0x0a1b..., 0x1a2...),
-                ]),
-        ],
+            # empty since not success
+            ()
+        ),
         
-        # All values in this second list correspond to
-        # state root hash: 0xbbb...bbb
-        [
-            # The first (only) element in this list is for the empty prefix
+        # This 2-tuple is for the 0x0ddba11 prefix
+        (
+            # success
+            0, # status code
             
-            # The responder returned nothing, perhaps it hit an internal timeout.
-            # An empty tuple is a valid response, as is ([], [])
-            (),
-        ]
-    ],
+            # This is the list of the keys and values under 0x0ddba11
+            (
+                # First key/value pair
+                (0x09876..., 0x111...),
+                
+                # Second key/value pair
+                (0x0a1b..., 0x1a2...),
+            ),
+    ),
     
-    # this is empty, because the server had data for the requested state root
-    "available_roots": []
-}
+    # this is empty, because the server had data for the requested block
+    () # available blocks
+)
 ```
 
 ### `GetStorageData` Request
@@ -313,7 +269,7 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
             0xddd...ddd,
             
             # ask for all values by requesting the empty prefix
-            [0x]
+            [0x00]
         )
     ]
 }
