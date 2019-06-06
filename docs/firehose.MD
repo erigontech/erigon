@@ -13,6 +13,7 @@ See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for 
 
 Changes in this revision:
 - Dropped "fuzzy" flag
+- Renamed GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes
 
 ## Casual Examples of Firehose Sync
 
@@ -455,7 +456,7 @@ A response to the example request above might look like:
 Note that the request is keyed on storage root hashes, but if `available_roots` is returned, they are still for **state roots**, not storage root hashes for the requested account.
 :::
 
-### `GetStateNodeData` Request
+### `GetStateNodes` Request
 
 
 Just like `GetStateData`, except the response will be constrained to:
@@ -484,7 +485,7 @@ Just like `GetStateData`, except the response will be constrained to:
 }
 ```
 
-### `StateNodeData` Response
+### `StateNodes` Response
 
 
 ```
@@ -520,7 +521,7 @@ Just like `GetStateData`, except the response will be constrained to:
 Node position in the response list must correspond to the prefix position in the request list. Empty node responses are permitted if the server declines to include it. The list may be short or empty, if any trailing nodes are omitted.
 
 
-### `GetStorageNodeData` Request
+### `GetStorageNodes` Request
 
 
 Just like `GetStorageData`, except the response will be constrained to:
@@ -551,7 +552,7 @@ Just like `GetStorageData`, except the response will be constrained to:
 }
 ```
 
-### `StorageNodeData` Response
+### `StorageNodes` Response
 
 
 ```
