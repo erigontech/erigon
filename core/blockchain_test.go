@@ -169,9 +169,10 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			return err
 		}
 		blockchain.chainmu.Lock()
-		tds.TrieRoot()
 		tds.SetBlockNr(block.NumberU64())
-		statedb.Commit(false, tds.DbStateWriter())
+		if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+			return err
+		}
 		if _, err := blockchain.db.Commit(); err != nil {
 			return err
 		}

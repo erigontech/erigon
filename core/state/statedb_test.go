@@ -46,6 +46,7 @@ func TestUpdateLeaks(t *testing.T) {
 
 	// Update it with some accounts
 	for i := byte(0); i < 255; i++ {
+		tds.StartNewBuffer()
 		addr := common.BytesToAddress([]byte{i})
 		state.AddBalance(addr, big.NewInt(int64(11*i)))
 		state.SetNonce(addr, uint64(42*i))
@@ -55,8 +56,9 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		tds.IntermediateRoot(state, false)
+		state.Finalise(false, tds.TrieStateWriter())
 	}
+	tds.ComputeTrieRoots()
 	// Ensure that no data was leaked into the database
 	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
 		if bytes.Equal(keys[i], trie.SecureKeyPrefix) {
@@ -75,8 +77,10 @@ func TestIntermediateLeaks(t *testing.T) {
 	finalDb := ethdb.NewMemDatabase()
 	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0)
 	transState := New(transTds)
+	transTds.StartNewBuffer()
 	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0)
 	finalState := New(finalTds)
+	finalTds.StartNewBuffer()
 
 	modify := func(state *StateDB, addr common.Address, i, tweak byte) {
 		state.SetBalance(addr, big.NewInt(int64(11*i)+int64(tweak)))
@@ -95,7 +99,8 @@ func TestIntermediateLeaks(t *testing.T) {
 		modify(transState, common.Address{byte(i)}, i, 0)
 	}
 	// Write modifications to trie.
-	transTds.IntermediateRoot(transState, false)
+	transState.Finalise(false, transTds.TrieStateWriter())
+	transTds.StartNewBuffer()
 
 	// Overwrite all the data with new values in the transient database.
 	for i := byte(0); i < 255; i++ {
@@ -104,14 +109,16 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	transTds.IntermediateRoot(transState, false)
+	transState.Finalise(false, transTds.TrieStateWriter())
+	transTds.ComputeTrieRoots()
 	transTds.SetBlockNr(1)
-	if err := transState.Finalise(false, transTds.DbStateWriter()); err != nil {
+	if err := transState.Commit(false, transTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit transition state: %v", err)
 	}
 	finalState.Finalise(false, finalTds.TrieStateWriter())
+	finalTds.ComputeTrieRoots()
 	finalTds.SetBlockNr(1)
-	if err := finalState.Finalise(false, finalTds.DbStateWriter()); err != nil {
+	if err := finalState.Commit(false, finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
@@ -136,12 +143,13 @@ func TestIntermediateLeaks(t *testing.T) {
 
 // TestCopy tests that copying a statedb object indeed makes the original and
 // the copy independent of each other. This test is a regression test against
-// https://github.com/ledgerwatch/turbo-geth/pull/15549.
+// https://github.com/ethereum/go-ethereum/pull/15549.
 func TestCopy(t *testing.T) {
 	// Create a random state test to copy and modify "independently"
 	db := ethdb.NewMemDatabase()
 	origTds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	orig := New(origTds)
+	origTds.StartNewBuffer()
 
 	for i := byte(0); i < 255; i++ {
 		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
@@ -149,11 +157,15 @@ func TestCopy(t *testing.T) {
 		origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(Account))
 	}
 	orig.Finalise(false, origTds.TrieStateWriter())
+	origTds.ComputeTrieRoots()
 	origTds.SetBlockNr(1)
+	orig.Commit(false, origTds.DbStateWriter())
 
 	// Copy the state, modify both in-memory
 	copy := orig.Copy()
 	copyTds := origTds.Copy()
+	origTds.StartNewBuffer()
+	copyTds.StartNewBuffer()
 
 	for i := byte(0); i < 255; i++ {
 		origObj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
@@ -169,11 +181,15 @@ func TestCopy(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		orig.Finalise(true, origTds.TrieStateWriter())
+		origTds.ComputeTrieRoots()
 		origTds.SetBlockNr(2)
+		orig.Commit(true, origTds.DbStateWriter())
 		close(done)
 	}()
 	copy.Finalise(true, copyTds.TrieStateWriter())
+	copyTds.ComputeTrieRoots()
 	copyTds.SetBlockNr(2)
+	copy.Commit(true, copyTds.DbStateWriter())
 	<-done
 
 	// Verify that the two states have been updated independently
@@ -441,9 +457,10 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
-	s.tds.IntermediateRoot(s.state, false)
+	s.state.Finalise(false, s.tds.TrieStateWriter())
+	s.tds.ComputeTrieRoots()
 	s.tds.SetBlockNr(1)
-	s.state.Finalise(false, s.tds.DbStateWriter())
+	s.state.Commit(false, s.tds.DbStateWriter())
 
 	s.state.Reset()
 
@@ -465,6 +482,7 @@ func TestCopyOfCopy(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	sdbTds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	sdb := New(sdbTds)
+	sdbTds.StartNewBuffer()
 	addr := common.HexToAddress("aaaa")
 	sdb.SetBalance(addr, big.NewInt(42))
 

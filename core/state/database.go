@@ -327,6 +327,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	storageReads := tds.aggregateBuffer.storageReads
 	accountUpdates := tds.aggregateBuffer.accountUpdates
 	accountReads := tds.aggregateBuffer.accountReads
+	deleted := tds.aggregateBuffer.deleted
 	storageTouches := make(map[common.Address]Hashes)
 	for address, m := range storageUpdates {
 		var hashes Hashes
@@ -393,6 +394,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			addrHash, err := tds.HashAddress(&address, false /*save*/)
 			if err != nil {
 				return nil, err
+			}
+			if _, ok := deleted[addrHash]; ok && len(storageReads[address]) == 0 {
+				// We can only skip the proof of storage entirely if
+				// there were no reads before writes and account got deleted
+				continue
 			}
 			storageTrie, err := tds.getStorageTrie(address, addrHash, true)
 			if err != nil {

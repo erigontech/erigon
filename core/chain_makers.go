@@ -97,17 +97,12 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 		b.SetCoinbase(common.Address{})
 	}
 	b.statedb.Prepare(tx.Hash(), common.Hash{}, len(b.txs))
-	b.triedbstate.StartNewBuffer()
 	receipt, _, err := ApplyTransaction(b.config, bc, &b.header.Coinbase, b.gasPool, b.statedb, b.triedbstate.TrieStateWriter(), b.header, tx, &b.header.GasUsed, vm.Config{})
 	if err != nil {
 		panic(err)
 	}
-	roots, err := b.triedbstate.ComputeTrieRoots()
-	if err != nil {
-		panic(err)
-	}
 	if !b.config.IsByzantium(b.header.Number) {
-		receipt.PostState = roots[0].Bytes()
+		b.triedbstate.StartNewBuffer()
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -206,7 +201,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			tds.StartNewBuffer()
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
@@ -216,6 +210,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			roots, err := tds.ComputeTrieRoots()
 			if err != nil {
 				panic(err)
+			}
+			if !b.config.IsByzantium(b.header.Number) {
+				for i, receipt := range b.receipts {
+					receipt.PostState = roots[i].Bytes()
+				}
 			}
 			b.header.Root = roots[len(roots)-1]
 			// Recreating block to make sure Root makes it into the header
