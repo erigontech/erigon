@@ -338,8 +338,10 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			i++
 		}
 		for keyHash := range mRead {
-			hashes[i] = keyHash
-			i++
+			if _, ok := m[keyHash]; !ok {
+				hashes[i] = keyHash
+				i++
+			}
 		}
 		if len(hashes) > 0 {
 			sort.Sort(hashes)
@@ -409,8 +411,10 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		i++
 	}
 	for addrHash := range accountReads {
-		addrs[i] = addrHash
-		i++
+		if _, ok := accountUpdates[addrHash]; !ok {
+			addrs[i] = addrHash
+			i++
+		}
 	}
 	sort.Sort(addrs)
 	for _, addrHash := range addrs {
@@ -442,10 +446,10 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				return nil, err
 			}
 			if _, ok := b.deleted[addrHash]; ok {
-				if account, ok := b.accountUpdates[addrHash]; ok {
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					account.Root = emptyRoot
 				}
-				if account, ok := accountUpdates[addrHash]; ok {
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = emptyRoot
 				}
 				storageTrie, err := tds.getStorageTrie(address, addrHash, false)
@@ -917,9 +921,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 		return err
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
-	if tsw.tds.resolveReads {
-		delete(tsw.tds.currentBuffer.accountReads, addrHash)
-	}
 	return nil
 }
 
@@ -1017,11 +1018,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 		m[seckey] = common.CopyBytes(v)
 	} else {
 		m[seckey] = nil
-	}
-	if tsw.tds.resolveReads {
-		if mReads, ok := tsw.tds.currentBuffer.storageReads[address]; ok {
-			delete(mReads, seckey)
-		}
 	}
 	return nil
 }
