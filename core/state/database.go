@@ -749,6 +749,20 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				return nil, err
 			}
 			if _, ok := b.deleted[addrHash]; ok {
+				if account, ok := b.accountUpdates[addrHash]; ok {
+					account.Root = emptyRoot
+				}
+				if account, ok := accountUpdates[addrHash]; ok {
+					account.Root = emptyRoot
+				}
+				storageTrie, err := tds.getStorageTrie(address, addrHash, false)
+				if err != nil {
+					return nil, err
+				}
+				if storageTrie != nil {
+					delete(tds.storageTries, addrHash)
+					storageTrie.PrepareToRemove()
+				}
 				continue
 			}
 			storageTrie, err := tds.getStorageTrie(address, addrHash, true)
@@ -762,55 +776,28 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					storageTrie.Delete(keyHash[:], tds.blockNr)
 				}
 			}
+			if forward {
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					account.Root = storageTrie.Hash()
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					account.Root = storageTrie.Hash()
+				}
+			}
 		}
 
 		for addrHash, account := range b.accountUpdates {
-			// first argument to getStorageTrie is not used unless the last one == true
-			storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
-			if err != nil {
-				return nil, err
-			}
-			deleteStorageTrie := false
 			if account != nil {
-				if _, ok := b.deleted[addrHash]; ok {
-					deleteStorageTrie = true
-					account.Root = emptyRoot
-				} else if storageTrie != nil && forward {
-					account.Root = storageTrie.Hash()
-				}
-				//fmt.Printf("Set root %x %x\n", address[:], account.Root[:])
 				data, err := rlp.EncodeToBytes(account)
 				if err != nil {
 					return nil, err
 				}
 				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
-				deleteStorageTrie = true
 				tds.t.Delete(addrHash[:], tds.blockNr)
-			}
-			if deleteStorageTrie && storageTrie != nil {
-				delete(tds.storageTries, addrHash)
-				storageTrie.PrepareToRemove()
 			}
 		}
 		roots[i] = tds.t.Hash()
-	}
-	// Update storage roots for the aggregated accounts
-	for addrHash, account := range accountUpdates {
-		if account != nil {
-			if _, ok := deleted[addrHash]; ok {
-				account.Root = emptyRoot
-			} else if forward {
-				// first argument to getStorageTrie is not used unless the last one == true
-				storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
-				if err != nil {
-					return nil, err
-				}
-				if storageTrie != nil {
-					account.Root = storageTrie.Hash()
-				}
-			}
-		}
 	}
 	return roots, nil
 }

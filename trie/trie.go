@@ -757,6 +757,9 @@ func (t *Trie) tryGet(dbr DatabaseReader, origNode node, key []byte, pos int, bl
 	if t.historical {
 		value, err = dbr.GetAsOf(t.bucket[1:], t.bucket, append(t.prefix, key...), blockNr)
 	} else {
+		if dbr == nil {
+			return nil, fmt.Errorf("dbr == nil when querying %x", key)
+		}
 		value, err = dbr.Get(t.bucket, append(t.prefix, key...))
 	}
 	if err != nil || value == nil {
@@ -771,7 +774,6 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		return nil, true
 	case valueNode:
 		if t.resolveReads {
-			//fmt.Printf("addValue from tryGet1 1: %x: %x\n", key[:pos], n)
 			t.addValue(t.prefix, key, pos, []byte(n))
 		}
 		return n, true
@@ -780,7 +782,6 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		nKey := compactToHex(n.Key)
 		var shortAdded bool = false
 		if t.resolveReads {
-			//fmt.Printf("addShort from tryGet1: %x, %x\n", key[:pos], nKey)
 			shortAdded = t.addShort(t.prefix, key, pos, nKey)
 		}
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
@@ -789,7 +790,6 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 				copy(proofKey, key[:pos])
 				copy(proofKey[pos:], nKey)
 				if v, ok := n.Val.(valueNode); ok {
-					//fmt.Printf("addValue from tryGet1 2: %x: %x\n", key[:pos], []byte(v))
 					t.addValue(t.prefix, proofKey, pos+len(nKey), []byte(v))
 				} else {
 					t.addSoleHash(t.prefix, proofKey, pos+len(nKey), common.BytesToHash(n.Val.hash()))
@@ -1358,6 +1358,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, c *TrieCon
 				n.Val = branch
 				t.joinGeneration(blockNr) // new branch node joins the generation
 				n.flags.dirty = true
+				n.flags.t = blockNr
 				c.n = n
 				n.adjustTod(blockNr)
 			}
