@@ -109,6 +109,7 @@ type Account struct {
 	StorageSize uint64
 }
 
+// huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
 const HugeNumber = 1<<63
 
 // newObject creates a state object.
