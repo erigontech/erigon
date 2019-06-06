@@ -333,6 +333,18 @@ func (self *StateDB) HasSuicided(addr common.Address) bool {
 	return false
 }
 
+func (self *StateDB) StorageSize(addr common.Address) uint64 {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountRead(addr)
+	}
+	stateObject := self.getStateObject(addr)
+	if stateObject != nil {
+		return stateObject.StorageSize()
+	}
+
+	return 0
+}
+
 /*
  * SETTERS
  */
@@ -425,6 +437,16 @@ func (self *StateDB) Suicide(addr common.Address) bool {
 	stateObject.data.Balance = new(big.Int)
 
 	return true
+}
+
+func (self *StateDB) SetStorageSize(addr common.Address, size uint64) {
+	if self.tracer != nil {
+		self.tracer.CaptureAccountWrite(addr)
+	}
+	stateObject := self.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.SetStorageSize(size)
+	}
 }
 
 // Retrieve a state object given my the address. Returns nil if not found.

@@ -633,6 +633,10 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 	return nil, nil
 }
 
+// todo check is it correct 0 location value
+var NullLocation = common.Hash{}
+var NullValue = common.Big0
+
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
@@ -645,7 +649,18 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	As with other state changes, changes of storagesize get reverted when the execution frame reverts, i.e. it needs to use the same techniques as storage values, like journalling (in Geth), and substates (in Parity). Value of storagesize is not observable from contracts at this point.
 	*/
 	storageSize := interpreter.evm.StateDB.StorageSize(contract.Address())
-	interpreter.evm.StateDB.SetStorageSize(contract.Address(), storageSize+1)
+	storageSizeChanged := false
+	if loc == NullLocation && val == NullValue {
+		storageSize++
+		storageSizeChanged = true
+	}
+	if loc != NullLocation && val == NullValue {
+		storageSize--
+		storageSizeChanged = true
+	}
+	if storageSizeChanged {
+		interpreter.evm.StateDB.SetStorageSize(contract.Address(), storageSize)
+	}
 
 	interpreter.intPool.put(val)
 	return nil, nil

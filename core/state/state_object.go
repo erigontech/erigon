@@ -109,7 +109,7 @@ type Account struct {
 	StorageSize uint64
 }
 
-const HugeNumber = 2<<63
+const HugeNumber = 1<<63
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, data, original Account) *stateObject {
