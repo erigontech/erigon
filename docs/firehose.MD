@@ -77,14 +77,14 @@ The requests can be batched so that multiple prefixes may be requested.
 ```
 (
     # A request id is supplied, to match against the response
-    id, # integer
+    id, # int
     
     # The block hash as of which we request the data
     block_hash, # array of 32 bytes
 
     # A list of prefixes being requested
     (
-        key_prefix_0, # integer; see below re. prefix encoding
+        key_prefix_0, # int; see below re. prefix encoding
         ...
     )
 )
@@ -96,7 +96,7 @@ We use the same prefix encoding as described in Appendix C of the [Yellow Paper]
 (no additional flags are utilized).
 
 #### Example
-Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block 0xaaa...aaa.
+Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block `0xaaa...aaa`.
 Your request would look like:
 ```
 (
@@ -124,7 +124,7 @@ For each requested prefix the responder has the option of returning either:
 ```
 (
     # The ID to be used by the requestor to match the response
-    id, # integer
+    id, # int
     
     # The response data, in the same ordering of the request
     (
