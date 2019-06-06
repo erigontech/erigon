@@ -2,7 +2,7 @@
 
 Jason Carver, Brian Cloutier, Andrew Ashikhmin
 
-**v0.3**
+**v0.3** (WIP)
 
 ---
 See [Firehose Sync v0.1](https://notes.ethereum.org/eXnqtO_vQquzrFDPHjuaFQ) for goals, background, and summaries of similar proposals.
@@ -112,7 +112,7 @@ Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0
             0xaaa...aaa,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0xbeef00, 0x0ddba111]
+            [0x00beef, 0x20ddba11]
         ),
         (
             # second state root hash
@@ -303,7 +303,7 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
             0xbbb...bbb,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0xbeef00, 0x0ddba111]
+            [0x00beef, 0x20ddba11]
         ),
         (
             # second account address hash
@@ -775,4 +775,4 @@ In order to rebuild the structure of the trie, we need the full suffix of the ke
 
 ## References
 
-[Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://github.com/ethereum/yellowpaper](https://github.com/ethereum/yellowpaper)
+[Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://ethereum.github.io/yellowpaper](https://ethereum.github.io/yellowpaper)
