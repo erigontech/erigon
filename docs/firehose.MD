@@ -14,6 +14,7 @@ See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for 
 Changes in this revision:
 - Dropped "fuzzy" flag
 - Renamed GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes
+- Prefix encoding changed to the Yellow Paper's
 
 ## Casual Examples of Firehose Sync
 
@@ -96,26 +97,8 @@ TODO: limit to single state root
 
 #### Key Prefixes Note
 
-A naive encoding of key prefixes would be ambiguous between an even-length prefix starting with the `0x0` nibble and an odd-length prefix that gets right-padded with `0x0` to the next full byte.
-
-So an `0x1` nibble is appended to the end of each odd-length key prefix to disambiguate. An `0x00` byte is appended to the end of each even-length key prefix. The prefix can be empty, in which case no nibble is added.
-
-Some valid prefixes encodings:
-
-- `0x` -- The empty (null) prefix means a request for all values in the trie
-- `0x01` -- The odd prefix `0x0`
-- `0xF1` -- The odd prefix `0xF`
-- `0x0000` -- The even prefix `0x00`
-- `0xFF00` -- The even prefix `0xFF`
-- `0x0001` -- The odd prefix `0x000`
-- `0xFFF1` -- The odd prefix `0xFFF`
-
-Some invalid prefix encodings:
-- `0x10` -- Must end with `0x00` or `0x1`
-- `0xF0` -- Also not marked as odd or even
-
-*This encoding works, but feels naive. Is there anything better out there?*
-
+We use the same prefix encoding as described in Appendix C of the [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf#appendix.C)
+(no additional flags are utilized).
 
 #### Example
 Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at state root 0xaaa...aaa. Additionally, you want all the values in the state trie with root 0xbbb...bbb. Your request would look like:
@@ -788,3 +771,8 @@ Additionally, it is convenient for bucket sizes to be able to adjust up and down
 ### Returning leaf nodes instead of key/rlp pairs
 
 In order to rebuild the structure of the trie, we need the full suffix of the key (everything beyond the requested prefix). The leaf node of the trie only includes the suffix of the key from the immediate parent node. Once you include the full suffix, re-including part of the suffix in the leaf node is a waste of bandwidth.
+
+
+## References
+
+[Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://github.com/ethereum/yellowpaper](https://github.com/ethereum/yellowpaper)
