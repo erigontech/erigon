@@ -697,12 +697,14 @@ func (s *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) error
 // IntermediateRoot computes the current root hash of the state trie.
 // It is called in between transactions to get the root hash that
 // goes into transaction receipts.
+/*
 func (tds *TrieDbState) IntermediateRoot(s *StateDB, deleteEmptyObjects bool) (common.Hash, error) {
 	if err := s.Finalise(deleteEmptyObjects, tds.TrieStateWriter()); err != nil {
 		return common.Hash{}, err
 	}
 	return tds.TrieRoot()
 }
+*/
 
 // Prepare sets the current transaction hash and index and block hash which is
 // used when the EVM emits new state logs.

@@ -58,8 +58,7 @@ func (rh ResolveHexes) Swap(i, j int) {
 
 /* One resolver per trie (prefix) */
 type TrieResolver struct {
-	accounts      bool         // Is this a resolver for accounts or for storage
-	dbw           ethdb.Putter // For updating hashes
+	accounts      bool // Is this a resolver for accounts or for storage
 	hashes        bool
 	continuations []*TrieContinuation
 	resolveHexes  ResolveHexes
@@ -79,18 +78,19 @@ type TrieResolver struct {
 	keyIdx      int
 	h           *hasher
 	historical  bool
+	blockNr     uint64
 }
 
-func NewResolver(dbw ethdb.Putter, hashes bool, accounts bool) *TrieResolver {
+func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:      accounts,
-		dbw:           dbw,
 		hashes:        hashes,
 		continuations: []*TrieContinuation{},
 		resolveHexes:  [][]byte{},
 		rhIndexLte:    -1,
 		rhIndexGt:     0,
 		contIndices:   []int{},
+		blockNr:       blockNr,
 	}
 	return &tr
 }
@@ -119,7 +119,7 @@ func (tr *TrieResolver) Less(i, j int) bool {
 	if c != 0 {
 		return c < 0
 	}
-	c = bytes.Compare(ci.resolveKey[:m], cj.resolveKey[:m])
+	c = bytes.Compare(ci.resolveHex[:m], cj.resolveHex[:m])
 	if c != 0 {
 		return c < 0
 	}
@@ -133,9 +133,9 @@ func (tr *TrieResolver) Swap(i, j int) {
 func (tr *TrieResolver) AddContinuation(c *TrieContinuation) {
 	tr.continuations = append(tr.continuations, c)
 	if c.t.prefix == nil {
-		tr.resolveHexes = append(tr.resolveHexes, c.resolveKey)
+		tr.resolveHexes = append(tr.resolveHexes, c.resolveHex)
 	} else {
-		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.t.prefix)[:40], c.resolveKey...))
+		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.t.prefix)[:40], c.resolveHex...))
 	}
 }
 
@@ -144,10 +144,6 @@ func (tr *TrieResolver) Print() {
 		fmt.Printf("%s\n", c.String())
 	}
 }
-
-var resolvedTotal uint32
-var resolvedLevel0, resolvedLevel1, resolvedLevel2, resolvedLevel3, resolvedLevel4, resolvedLevel5, resolvedLevel6, resolvedLevel7, resolvedLevel8 uint32
-var resolvedLevelS0, resolvedLevelS1, resolvedLevelS2, resolvedLevelS3, resolvedLevelS4, resolvedLevelS5, resolvedLevelS6, resolvedLevelS7, resolvedLevelS8 uint32
 
 // Prepares information for the MultiWalk
 func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
@@ -170,89 +166,16 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	for i, c := range tr.continuations {
 		if prevC == nil || c.resolvePos < prevC.resolvePos ||
 			!bytes.Equal(c.t.prefix, prevC.t.prefix) ||
-			!bytes.HasPrefix(c.resolveKey[:c.resolvePos], prevC.resolveKey[:prevC.resolvePos]) {
+			!bytes.HasPrefix(c.resolveHex[:c.resolvePos], prevC.resolveHex[:prevC.resolvePos]) {
 			tr.contIndices = append(tr.contIndices, i)
 			pLen := len(c.t.prefix)
 			key := make([]byte, pLen+32)
 			copy(key[:], c.t.prefix)
-			decodeNibbles(c.resolveKey[:c.resolvePos], key[pLen:])
+			decodeNibbles(c.resolveHex[:c.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
 			c.extResolvePos = c.resolvePos + 2*pLen
 			fixedbits = append(fixedbits, uint(4*c.extResolvePos))
 			prevC = c
-			//c.Print()
-			/*
-				if !tr.accounts {
-					switch c.resolvePos {
-						case 0:
-							atomic.AddUint32(&resolvedLevelS0, 1)
-						case 1:
-							atomic.AddUint32(&resolvedLevelS1, 1)
-						case 2:
-							atomic.AddUint32(&resolvedLevelS2, 1)
-						case 3:
-							atomic.AddUint32(&resolvedLevelS3, 1)
-						case 4:
-							atomic.AddUint32(&resolvedLevelS4, 1)
-						case 5:
-							atomic.AddUint32(&resolvedLevelS5, 1)
-						case 6:
-							atomic.AddUint32(&resolvedLevelS6, 1)
-						case 7:
-							atomic.AddUint32(&resolvedLevelS7, 1)
-						case 8:
-							atomic.AddUint32(&resolvedLevelS8, 1)
-					}
-				} else {
-					switch c.resolvePos {
-						case 0:
-							atomic.AddUint32(&resolvedLevel0, 1)
-						case 1:
-							atomic.AddUint32(&resolvedLevel1, 1)
-						case 2:
-							atomic.AddUint32(&resolvedLevel2, 1)
-						case 3:
-							atomic.AddUint32(&resolvedLevel3, 1)
-						case 4:
-							atomic.AddUint32(&resolvedLevel4, 1)
-						case 5:
-							atomic.AddUint32(&resolvedLevel5, 1)
-						case 6:
-							atomic.AddUint32(&resolvedLevel6, 1)
-						case 7:
-							atomic.AddUint32(&resolvedLevel7, 1)
-						case 8:
-							atomic.AddUint32(&resolvedLevel8, 1)
-					}
-				}
-				total := atomic.AddUint32(&resolvedTotal, 1)
-				print := total % 50000 == 0
-				if print {
-					fmt.Printf("total: %d, 0:%d, 1:%d, 2:%d, 3:%d, 4:%d, 5:%d, 6:%d, 7:%d, 8:%d\n",
-						total,
-						atomic.AddUint32(&resolvedLevel0, 0),
-						atomic.AddUint32(&resolvedLevel1, 0),
-						atomic.AddUint32(&resolvedLevel2, 0),
-						atomic.AddUint32(&resolvedLevel3, 0),
-						atomic.AddUint32(&resolvedLevel4, 0),
-						atomic.AddUint32(&resolvedLevel5, 0),
-						atomic.AddUint32(&resolvedLevel6, 0),
-						atomic.AddUint32(&resolvedLevel7, 0),
-						atomic.AddUint32(&resolvedLevel8, 0),
-					)
-					fmt.Printf("S0:%d, S1:%d, S2:%d, S3:%d, S4:%d, S5:%d, S6:%d, S7:%d, S8:%d\n",
-						atomic.AddUint32(&resolvedLevelS0, 0),
-						atomic.AddUint32(&resolvedLevelS1, 0),
-						atomic.AddUint32(&resolvedLevelS2, 0),
-						atomic.AddUint32(&resolvedLevelS3, 0),
-						atomic.AddUint32(&resolvedLevelS4, 0),
-						atomic.AddUint32(&resolvedLevelS5, 0),
-						atomic.AddUint32(&resolvedLevelS6, 0),
-						atomic.AddUint32(&resolvedLevelS7, 0),
-						atomic.AddUint32(&resolvedLevelS8, 0),
-					)
-				}
-			*/
 		}
 	}
 	tr.startLevel = tr.continuations[0].extResolvePos
@@ -301,7 +224,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	}
 	for level := startLevel; level >= stopLevel; level-- {
 		keynibble := hex[level]
-		onResolvingPath := level <= rhPrefixLen // <= instead of < to be able to resolve deletes in one go
+		onResolvingPath := level < rhPrefixLen
 		if tr.fillCount[level+1] == 1 {
 			// Short node, needs to be promoted to the level above
 			short := &tr.nodeStack[level+1]
@@ -386,7 +309,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
 				return fmt.Errorf("Resolving wrong hash for prefix %x, key %x, pos %d, \nexpected %s, got %s\n",
 					tc.t.prefix,
-					tc.resolveKey,
+					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash,
 					hashNode(gotHash[:]),
@@ -395,7 +318,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		} else {
 			if tc.resolveHash != nil {
 				return fmt.Errorf("Resolving wrong hash for key %x, pos %d\nexpected %s, got embedded node\n",
-					tc.resolveKey,
+					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash)
 			}
@@ -410,6 +333,34 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			}
 			tr.vertical[i].flags.dirty = true
 			tr.fillCount[i] = 0
+		}
+		tc.t.timestampSubTree(root, tr.blockNr)
+		switch parent := tc.resolveParent.(type) {
+		case nil:
+			if _, ok := tc.t.root.(hashNode); ok {
+				tc.t.root = root
+			}
+		case *shortNode:
+			if _, ok := parent.Val.(hashNode); ok {
+				parent.Val = root
+			}
+		case *duoNode:
+			i1, i2 := parent.childrenIdx()
+			switch tc.resolveHex[tc.resolvePos-1] {
+			case i1:
+				if _, ok := parent.child1.(hashNode); ok {
+					parent.child1 = root
+				}
+			case i2:
+				if _, ok := parent.child2.(hashNode); ok {
+					parent.child2 = root
+				}
+			}
+		case *fullNode:
+			idx := tc.resolveHex[tc.resolvePos-1]
+			if _, ok := parent.Children[idx].(hashNode); ok {
+				parent.Children[idx] = root
+			}
 		}
 	}
 	return nil
@@ -518,7 +469,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
 	tc := t.NewContinuation(key, pos, expected)
-	r := NewResolver(db, true, accounts)
+	r := NewResolver(true, accounts, blockNr)
 	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {

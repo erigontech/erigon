@@ -701,11 +701,7 @@ func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Addres
 		return nil, err
 	}
 	if !w.config.IsByzantium(w.current.header.Number) {
-		rootHash, err := w.current.tds.TrieRoot()
-		if err != nil {
-			return nil, err
-		}
-		receipt.PostState = rootHash.Bytes()
+		w.current.tds.StartNewBuffer()
 	}
 	w.current.txs = append(w.current.txs, tx)
 	w.current.receipts = append(w.current.receipts, receipt)
@@ -723,6 +719,7 @@ func (w *worker) commitTransactions(txs *types.TransactionsByPriceAndNonce, coin
 		w.current.gasPool = new(core.GasPool).AddGas(w.current.header.GasLimit)
 	}
 
+	w.current.tds.StartNewBuffer()
 	var coalescedLogs []*types.Log
 
 	for {
@@ -968,10 +965,17 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	if err != nil {
 		return err
 	}
-	w.current.header.Root, err = tds.IntermediateRoot(s, w.chain.Config().IsEIP158(w.current.header.Number))
+	if err := s.Finalise(w.chain.Config().IsEIP158(w.current.header.Number), w.current.tds.TrieStateWriter()); err != nil {
+		return err
+	}
+	roots, err := w.current.tds.ComputeTrieRoots()
 	if err != nil {
 		return err
 	}
+	for i, receipt := range w.current.receipts {
+		receipt.PostState = roots[i].Bytes()
+	}
+	w.current.header.Root = roots[len(roots)-1]
 	if w.isRunning() {
 		if interval != nil {
 			interval()

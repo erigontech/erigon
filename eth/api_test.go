@@ -48,10 +48,12 @@ func TestStorageRangeAt(t *testing.T) {
 			keys[3]: {Key: &common.Hash{0x03}, Value: common.Hash{0x04}},
 		}
 	)
+	tds.StartNewBuffer()
 	for _, entry := range storage {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
-	tds.IntermediateRoot(statedb, false)
+	statedb.Finalise(false, tds.TrieStateWriter())
+	tds.ComputeTrieRoots()
 	tds.SetBlockNr(1)
 	statedb.Commit(false, tds.DbStateWriter())
 

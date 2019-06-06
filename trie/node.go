@@ -129,16 +129,11 @@ func (n *fullNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shor
 		if child != nil && i != int(idx) {
 			short := false
 			if s, ok := child.(*shortNode); ok {
-				if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
-					e, _ := rlp.EncodeToBytes(s)
-					if len(e) < 32 {
-						if m == nil {
-							m = make(map[byte]*shortNode)
-						}
-						m[byte(i)] = s
-						short = true
-					}
+				if m == nil {
+					m = make(map[byte]*shortNode)
 				}
+				m[byte(i)] = s
+				short = true
 			}
 			if !short {
 				mask |= (uint32(1) << uint(i))
@@ -195,12 +190,7 @@ func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*short
 	var short1, short2 *shortNode
 	if n.child1 != nil {
 		if s, ok := n.child1.(*shortNode); ok {
-			if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
-				e, _ := rlp.EncodeToBytes(s)
-				if len(e) < 32 {
-					short1 = s
-				}
-			}
+			short1 = s
 		}
 		if short1 == nil {
 			hash1 = common.BytesToHash(n.child1.hash())
@@ -208,12 +198,7 @@ func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*short
 	}
 	if n.child2 != nil {
 		if s, ok := n.child2.(*shortNode); ok {
-			if v, isVal := s.Val.(valueNode); isVal && len(v) < 32 {
-				e, _ := rlp.EncodeToBytes(s)
-				if len(e) < 32 {
-					short2 = s
-				}
-			}
+			short2 = s
 		}
 		if short2 == nil {
 			hash2 = common.BytesToHash(n.child2.hash())
@@ -566,6 +551,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 				fmt.Fprintf(w, "\n")
 			} else {
 				fmt.Fprintf(w, "%x:(/%x)", compactToHex(n1.Key), compactToHex(n.Key))
+				fmt.Fprintf(w, "\n:LEFT\n")
+				printDiffSide(n1, w, ind, key)
+				fmt.Fprintf(w, "\nRIGHT\n")
 				printDiffSide(n2, w, ind, key)
 			}
 		} else {
