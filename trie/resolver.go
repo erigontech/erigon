@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"math/big"
 	"runtime/debug"
@@ -378,13 +379,13 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			root = tr.vertical[tc.extResolvePos].copy()
 		}
 		if root == nil {
-			return fmt.Errorf("Resolve returned nil root")
+			return errors.New("Resolve returned nil root")
 		}
 		var gotHash common.Hash
 		hashLen := tr.h.hash(root, tc.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for prefix %x, key %x, pos %d, \nexpected %s, got %s\n",
+				return fmt.Errorf("Resolving wrong hash for prefix trie %x, key %x, pos %d, \nexpected %s, got %s\n",
 					tc.t.prefix,
 					tc.resolveKey,
 					tc.resolvePos,
