@@ -173,7 +173,7 @@ func stateless(genLag, consLag int) {
 	var proofGen *state.Stateless  // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs
 	for !interrupt {
-		trace := false //blockNum == 51921
+		trace := false //blockNum == 318335
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
