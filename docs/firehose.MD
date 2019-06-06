@@ -112,7 +112,7 @@ Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0
             0xaaa...aaa,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0x00beef, 0x20ddba11]
+            [0x00beef, 0x10ddba11]
         ),
         (
             # second state root hash
@@ -303,7 +303,7 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
             0xbbb...bbb,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0x00beef, 0x20ddba11]
+            [0x00beef, 0x10ddba11]
         ),
         (
             # second account address hash
