@@ -80,7 +80,7 @@ The requests can be batched so that multiple prefixes may be requested.
     id, # int
     
     # The block hash as of which we request the data
-    block_hash, # array of 32 bytes
+    block_hash, # 32 bytes
 
     # A list of prefixes being requested
     (
@@ -94,7 +94,7 @@ The requests can be batched so that multiple prefixes may be requested.
 
 We use the same prefix encoding as described in Appendix C of the [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf#appendix.C),
 also known as the compact encoding.
-No additional flags are utilized.
+No additional flags are utilized (ie~ `t == 0` always).
 
 #### Example
 Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block `0xaaa...aaa`.
@@ -132,7 +132,7 @@ For each requested prefix the responder has the option of returning either:
         # There is one 2-tuple for every prefix requested
         (
             # 0 – success
-            # 1 – no data as of the requested block, available blocks should be populated
+            # 1 – no data as of the requested block, the final entry of the response should be non-empty
             # 2 – too many leaves matching the prefix
             status_code,
 
@@ -142,7 +142,7 @@ For each requested prefix the responder has the option of returning either:
                 # A single key/value pair
                 (
                     # The prefix is NOT omitted from the key
-                    key, # array of 32 bytes
+                    key, # 32 bytes
                     
                     # The RLP-encoded value stored in the trie
                     value
@@ -157,7 +157,7 @@ For each requested prefix the responder has the option of returning either:
     # Otherwise, return an empty list.
     (
         # include the hash of every block that the server has the data for
-        available_block_0, # array of 32 bytes
+        available_block_0, # 32 bytes
         ...
     )
 )
@@ -169,7 +169,7 @@ The response must reuse the same ordering of prefixes as used for the request.
 
 For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root.
 
-TODO [yperbasis] does the order of returned key/value pairs matter?
+The keys and values within a prefix may be returned in any order.
 
 #### Example
 A response to the example request above might look like:
@@ -210,6 +210,47 @@ A response to the example request above might look like:
     () # available blocks
 )
 ```
+
+If the server does not have any data at the requested block hash, then it will return status code 1 for every prefix requested, and a list of available block hashes, like:
+
+```
+(
+    1, # id
+
+    # This is a list of two elements, matching the `prefixes` request example
+    (
+        # This 2-tuple is for the 0xbeef prefix
+        (
+            # the block hash is unavailable
+            1, # status code
+
+            # empty since not success
+            ()
+        ),
+
+        # This 2-tuple is for the 0x0ddba11 prefix
+        (
+            # the block hash is unavailable
+            1, # status code
+
+            # empty since not success
+            ()
+        ),
+    ),
+
+    # this should be populated, because the server did not have data for the requested block
+    (
+        # one available block hash
+        0x1a2b3c4d...,
+        # another available block hash
+        0x11223344...,
+    ) # available blocks
+)
+```
+
+The only reason a server might return status code 1 and an empty list of available blocks is if it has not synced state data yet.
+
+It *is* possible for a server to return status code 1 for one prefix and status code 0 (or 2) for another prefix on the same block. It might do this if the server is in the middle of syncing data.
 
 ### `GetStorageData` Request
 
