@@ -13,10 +13,10 @@ See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for 
 
 Changes in this revision:
 - Dropped "fuzzy" flag
-- Renamed GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes
+- Renamed GetStateData -> GetStateRanges, GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes, GetStorageData -> GetStorageRanges
 - Prefix encoding changed to the Yellow Paper's
 - Single block hash per request as opposed to multiple state roots per request
-- StateData & StorageData may only have all subtrie leaves or nothing, not intermediate nodes
+- StateRanges & StorageRanges may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
 
 ## Casual Examples of Firehose Sync
@@ -67,7 +67,7 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ## Command Specification for Firehose Sync
 
-### `GetStateData` Request
+### `GetStateRanges` Request
 
 The requester asks for data defined by a key prefix as of a given block.
 This command exclusively deals with retrieving the account RLPs.
@@ -116,7 +116,7 @@ Your request would look like:
 ```
 
 
-### `StateData` Response
+### `StateRanges` Response
 
 
 For each requested prefix the responder has the option of returning either:
@@ -254,9 +254,9 @@ The only reason a server might return status code 1 and an empty list of availab
 
 It *is* possible for a server to return status code 1 for one prefix and status code 0 (or 2) for another prefix on the same block. It might do this if the server is in the middle of syncing data.
 
-### `GetStorageData` Request
+### `GetStorageRanges` Request
 
-Very similar to `GetStateData`: request storage by storage root hash, and key prefix. Also include account hash for clients that find this helpful for indexing. This command exclusively deals with retrieving the storage values.
+Very similar to `GetStateRanges`: request storage by storage root hash, and key prefix. Also include account hash for clients that find this helpful for indexing. This command exclusively deals with retrieving the storage values.
 
 The requests can be batched so that multiple prefixes and multiple root hashes may be requested.
 
@@ -323,14 +323,14 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
 Note that the syncing client can (and probably should!) skip over storage tries with duplicate roots. There is no need to request an identical storage root twice for two different accounts. This could save you about [480MB of downloads](https://notes.ethereum.org/c/r1ESS_oLE/%2FGCePmXL9TZGzZ_Cm26qxAQ) in the current mainnet.
 
 
-### `StorageData` Response
+### `StorageRanges` Response
 
 
 The responder has the option of returning either:
 1) Some nodes in the subtrie starting at the requested prefix (with some flexibility on which nodes to return), OR
 2) **All** the keys & values that are stored in that key prefix range
 
-This looks just like the `StateData` response
+This looks just like the `StateRanges` response
 
 ```
 {
@@ -443,10 +443,7 @@ Note that the request is keyed on storage root hashes, but if `available_roots` 
 ### `GetStateNodes` Request
 
 
-Just like `GetStateData`, except the response will be constrained to:
-1. Return at most one node per requested prefix
-2. Never returns buckets of values
-
+**TODO** description
 
 ```
 {
@@ -508,9 +505,7 @@ Node position in the response list must correspond to the prefix position in the
 ### `GetStorageNodes` Request
 
 
-Just like `GetStorageData`, except the response will be constrained to:
-1. Return at most one node per requested prefix
-2. Never returns buckets of values
+**TODO** description
 
 ```
 {
