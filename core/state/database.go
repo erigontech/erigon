@@ -234,7 +234,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 
 func (tds *TrieDbState) SetHistorical(h bool) {
 	tds.historical = h
-	tds.t.SetHistorical(h)
 }
 
 func (tds *TrieDbState) SetResolveReads(rr bool) {
@@ -801,7 +800,6 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 		} else {
 			t = trie.New(account.Root, true)
 		}
-		t.SetHistorical(tds.historical)
 		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
 		tds.storageTries[address] = t
 	}

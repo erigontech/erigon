@@ -54,7 +54,6 @@ type Trie struct {
 
 	encodeToBytes bool
 
-	historical     bool
 	joinGeneration func(gen uint64)
 	leftGeneration func(gen uint64)
 }
@@ -650,10 +649,6 @@ func (t *Trie) AsProof(trace bool) (
 	hashes []common.Hash,
 ) {
 	return
-}
-
-func (t *Trie) SetHistorical(h bool) {
-	t.historical = h
 }
 
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func(gen uint64)) {

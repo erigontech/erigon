@@ -308,13 +308,12 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		hashLen := tr.h.hash(root, tc.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for contract %x, key %x, pos %d, \nexpected %s, got %s, accounts: %b\n",
+				return fmt.Errorf("Resolving wrong hash for contract %x, key %x, pos %d, \nexpected %s, got %s\n",
 					tc.contract,
 					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash,
 					hashNode(gotHash[:]),
-					tr.accounts,
 				)
 			}
 		} else {
@@ -478,7 +477,6 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
 	tc := t.NewContinuation(nil, key, pos, expected)
 	r := NewResolver(true, accounts, blockNr)
-	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {
 		return nil, nil, err
