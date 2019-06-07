@@ -23,14 +23,11 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"runtime/debug"
 	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -56,10 +53,6 @@ type Trie struct {
 	root         node
 	originalRoot common.Hash
 
-	// Bucket for the database access
-	bucket []byte
-	// Prefix to form database key (for storage)
-	prefix        []byte
 	encodeToBytes bool
 	accounts      bool
 
@@ -82,13 +75,10 @@ func (t *Trie) PrintTrie() {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-func New(root common.Hash, bucket []byte, prefix []byte, encodeToBytes bool) *Trie {
+func New(root common.Hash, encodeToBytes bool) *Trie {
 	trie := &Trie{
 		originalRoot:   root,
-		bucket:         bucket,
-		prefix:         prefix,
 		encodeToBytes:  encodeToBytes,
-		accounts:       bytes.Equal(bucket, []byte("AT")),
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 	}
@@ -221,8 +211,7 @@ func constructShortNode(ctime uint64, pos int,
 	return s
 }
 
-func NewFromProofs(ctime uint64, bucket []byte,
-	prefix []byte,
+func NewFromProofs(ctime uint64,
 	encodeToBytes bool,
 	masks []uint16,
 	shortKeys [][]byte,
@@ -231,10 +220,7 @@ func NewFromProofs(ctime uint64, bucket []byte,
 	trace bool,
 ) (t *Trie, mIdx, hIdx, sIdx, vIdx int) {
 	t = &Trie{
-		bucket:         bucket,
-		prefix:         prefix,
 		encodeToBytes:  encodeToBytes,
-		accounts:       bytes.Equal(bucket, []byte("AT")),
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 	}
@@ -673,9 +659,6 @@ func (t *Trie) AsProof(trace bool) (
 
 func (t *Trie) SetHistorical(h bool) {
 	t.historical = h
-	if h && !bytes.HasPrefix(t.bucket, []byte("h")) {
-		t.bucket = append([]byte("h"), t.bucket...)
-	}
 }
 
 func (t *Trie) MakeListed(joinGeneration, leftGeneration func(gen uint64)) {
@@ -683,53 +666,13 @@ func (t *Trie) MakeListed(joinGeneration, leftGeneration func(gen uint64)) {
 	t.leftGeneration = leftGeneration
 }
 
-// NodeIterator returns an iterator that returns nodes of the trie. Iteration starts at
-// the key after the given start key.
-func (t *Trie) NodeIterator(db ethdb.Database, start []byte, blockNr uint64) NodeIterator {
-	return newNodeIterator(db, t, start, blockNr)
-}
-
-// Get returns the value for key stored in the trie.
-// The value bytes must not be modified by the caller.
-func (t *Trie) Get(db ethdb.Database, key []byte, blockNr uint64) []byte {
-	res, err := t.TryGet(db, key, blockNr)
-	if err != nil {
-		log.Error(fmt.Sprintf("Unhandled trie error: %v", err))
-	}
-	return res
-}
-
 // TryGet returns the value for key stored in the trie.
-// The value bytes must not be modified by the caller.
-// If a node was not found in the database, a MissingNodeError is returned.
-func (t *Trie) TryGet(db ethdb.Database, key []byte, blockNr uint64) (value []byte, err error) {
-	k := keybytesToHex(key)
-	value, gotValue := t.tryGet1(db, t.root, k, 0, blockNr)
-	if !gotValue {
-		if db == nil {
-			fmt.Printf("TryGet(db) %x\n", key)
-		}
-		value, err = t.tryGet(db, t.root, key, 0, blockNr)
-	}
-	return value, err
+func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
+	hex := keybytesToHex(key)
+	return t.get(t.root, hex, 0, blockNr)
 }
 
-func (t *Trie) tryGet(dbr DatabaseReader, origNode node, key []byte, pos int, blockNr uint64) (value []byte, err error) {
-	if t.historical {
-		value, err = dbr.GetAsOf(t.bucket[1:], t.bucket, append(t.prefix, key...), blockNr)
-	} else {
-		if dbr == nil {
-			return nil, fmt.Errorf("dbr == nil when querying %x", key)
-		}
-		value, err = dbr.Get(t.bucket, append(t.prefix, key...))
-	}
-	if err != nil || value == nil {
-		return nil, nil
-	}
-	return
-}
-
-func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
+func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -746,7 +689,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
 			} else {
-				value, gotValue = t.tryGet1(db, n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
 			}
 		}
 		if adjust {
@@ -760,10 +703,10 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		switch key[pos] {
 		case i1:
 			adjust = n.tod(blockNr) == n.child1.tod(blockNr)
-			value, gotValue = t.tryGet1(db, n.child1, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child1, key, pos+1, blockNr)
 		case i2:
 			adjust = n.tod(blockNr) == n.child2.tod(blockNr)
-			value, gotValue = t.tryGet1(db, n.child2, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child2, key, pos+1, blockNr)
 		default:
 			adjust = false
 			value, gotValue = nil, true
@@ -776,7 +719,7 @@ func (t *Trie) tryGet1(db ethdb.Database, origNode node, key []byte, pos int, bl
 		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[pos]]
 		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
-		value, gotValue = t.tryGet1(db, child, key, pos+1, blockNr)
+		value, gotValue = t.get(child, key, pos+1, blockNr)
 		if adjust {
 			n.adjustTod(blockNr)
 		}
@@ -813,9 +756,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 }
 
 func (t *Trie) Print(w io.Writer) {
-	if t.prefix != nil {
-		fmt.Fprintf(w, "%x:", t.prefix)
-	}
 	if t.root != nil {
 		t.root.print(w)
 	}
@@ -973,6 +913,7 @@ func (t *Trie) PrintDiff(t2 *Trie, w io.Writer) {
 
 type TrieContinuation struct {
 	t             *Trie  // trie to act upon
+	contract      []byte // contract address or nil, if the trie is the main trie
 	value         node   // original value being inserted or deleted
 	resolveHex    []byte // Key for which the resolution is requested
 	resolvePos    int    // Position in the key for which resolution is requested
@@ -984,15 +925,15 @@ type TrieContinuation struct {
 	resolveParent node     // Parent node of the one needs to be resolved. nil if the root needs to be resolved
 }
 
-func (t *Trie) NewContinuation(hex []byte, pos int, resolveHash []byte) *TrieContinuation {
-	return &TrieContinuation{t: t, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
+func (t *Trie) NewContinuation(contract []byte, hex []byte, pos int, resolveHash []byte) *TrieContinuation {
+	return &TrieContinuation{t: t, contract: contract, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
 }
 
 func (tc *TrieContinuation) String() string {
-	return fmt.Sprintf("tc{t:%x/%x,resolveHex:%x,resolvePos:%d}", tc.t.bucket, tc.t.prefix, tc.resolveHex, tc.resolvePos)
+	return fmt.Sprintf("tc{t:%x,resolveHex:%x,resolvePos:%d}", tc.contract, tc.resolveHex, tc.resolvePos)
 }
 
-func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
+func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *TrieContinuation) {
 	var nd node = t.root
 	var parent node = nil
 	hex := keybytesToHex(key)
@@ -1037,7 +978,7 @@ func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
 		case valueNode:
 			return false, nil
 		case hashNode:
-			c := t.NewContinuation(hex, pos, n)
+			c := t.NewContinuation(contract, hex, pos, n)
 			c.resolveParent = parent
 			return true, c
 		default:
@@ -1046,7 +987,7 @@ func (t *Trie) NeedResolution(key []byte) (bool, *TrieContinuation) {
 	}
 }
 
-func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
+func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
 	var nd node = t.root
 	hex := keybytesToHex(key)
 	pos := 0
@@ -1056,7 +997,7 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 			return
 		case *shortNode:
 			nKey := compactToHex(n.Key)
-			pg.addShort(t.prefix, hex, pos, nKey)
+			pg.addShort(contract, hex, pos, nKey)
 			matchlen := prefixLen(hex[pos:], nKey)
 			if matchlen == len(nKey) {
 				nd = n.Val
@@ -1066,15 +1007,15 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 				copy(proofHex, hex[:pos])
 				copy(proofHex[pos:], nKey)
 				if v, ok := n.Val.(valueNode); ok {
-					pg.addValue(t.prefix, proofHex, pos+len(nKey), common.CopyBytes(v))
+					pg.addValue(contract, proofHex, pos+len(nKey), common.CopyBytes(v))
 				} else {
-					pg.addSoleHash(t.prefix, proofHex, pos+len(nKey), common.BytesToHash(n.Val.hash()))
+					pg.addSoleHash(contract, proofHex, pos+len(nKey), common.BytesToHash(n.Val.hash()))
 				}
 				return
 			}
 		case *duoNode:
 			mask, hashes, m := n.hashesExcept(hex[pos])
-			pg.addProof(t.prefix, hex, pos, mask, hashes)
+			pg.addProof(contract, hex, pos, mask, hashes)
 			if m != nil {
 				for idx, s := range m {
 					nKey := compactToHex(s.Key)
@@ -1082,11 +1023,11 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 					copy(proofHex, hex[:pos])
 					proofHex[pos] = idx
 					copy(proofHex[pos+1:], nKey)
-					pg.addShort(t.prefix, proofHex, pos+1, nKey)
+					pg.addShort(contract, proofHex, pos+1, nKey)
 					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(t.prefix, proofHex, pos+1+len(nKey), common.CopyBytes(v))
+						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
 					} else {
-						pg.addSoleHash(t.prefix, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
 					}
 				}
 			}
@@ -1103,7 +1044,7 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 			}
 		case *fullNode:
 			mask, hashes, m := n.hashesExcept(hex[pos])
-			pg.addProof(t.prefix, hex, pos, mask, hashes)
+			pg.addProof(contract, hex, pos, mask, hashes)
 			if m != nil {
 				for idx, s := range m {
 					nKey := compactToHex(s.Key)
@@ -1111,11 +1052,11 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 					copy(proofHex, hex[:pos])
 					proofHex[pos] = idx
 					copy(proofHex[pos+1:], nKey)
-					pg.addShort(t.prefix, proofHex, pos+1, nKey)
+					pg.addShort(contract, proofHex, pos+1, nKey)
 					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(t.prefix, proofHex, pos+1+len(nKey), common.CopyBytes(v))
+						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
 					} else {
-						pg.addSoleHash(t.prefix, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
 					}
 				}
 			}
@@ -1127,10 +1068,10 @@ func (t *Trie) PopulateBlockProofData(key []byte, pg *ProofGenerator) {
 				pos++
 			}
 		case valueNode:
-			pg.addValue(t.prefix, hex, pos, common.CopyBytes(n))
+			pg.addValue(contract, hex, pos, common.CopyBytes(n))
 			return
 		case hashNode:
-			pg.addSoleHash(t.prefix, hex, pos, common.BytesToHash(n))
+			pg.addSoleHash(contract, hex, pos, common.BytesToHash(n))
 			return
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
@@ -1673,21 +1614,6 @@ func concat(s1 []byte, s2 ...byte) []byte {
 	return r
 }
 
-func (t *Trie) resolveHash(db ethdb.Database, n hashNode, key []byte, pos int, blockNr uint64) (node, error) {
-	root, gotHash, err := t.rebuildHashes(db, key, pos, blockNr, t.accounts, n)
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(n, gotHash) {
-		fmt.Printf("Resolving wrong hash for prefix %x, bucket %x prefix %x block %d\n", key[:pos], t.bucket, t.prefix, blockNr)
-		fmt.Printf("Expected hash %s\n", n)
-		fmt.Printf("Got hash %s\n", hashNode(gotHash))
-		fmt.Printf("Stack: %s\n", debug.Stack())
-		return nil, &MissingNodeError{NodeHash: common.BytesToHash(n), Path: key[:pos]}
-	}
-	return root, err
-}
-
 // Root returns the root hash of the trie.
 // Deprecated: use Hash instead.
 func (t *Trie) Root() []byte { return t.Hash().Bytes() }
@@ -1751,82 +1677,6 @@ func unloadOlderThan(n node, gen uint64) (hashNode, bool) {
 		}
 	}
 	return nil, false
-}
-
-func (t *Trie) CountNodes(m map[uint64]int) int {
-	return countNodes(t.root, m)
-}
-
-func countNodes(n node, m map[uint64]int) int {
-	if n == nil {
-		return 0
-	}
-	switch n := (n).(type) {
-	case *shortNode:
-		c := countNodes(n.Val, m)
-		m[n.flags.t]++
-		return 1 + c
-	case *duoNode:
-		c1 := countNodes(n.child1, m)
-		c2 := countNodes(n.child2, m)
-		m[n.flags.t]++
-		return 1 + c1 + c2
-	case *fullNode:
-		count := 1
-		for _, child := range n.Children {
-			if child != nil {
-				count += countNodes(child, m)
-			}
-		}
-		m[n.flags.t]++
-		return count
-	}
-	return 0
-}
-
-func (t *Trie) CountOccupancies(db ethdb.Database, blockNr uint64, o map[int]map[int]int) {
-	if hn, ok := t.root.(hashNode); ok {
-		n, err := t.resolveHash(db, hn, []byte{}, 0, blockNr)
-		if err != nil {
-			panic(err)
-		}
-		t.root = n
-	}
-	t.countOccupancies(t.root, 0, o)
-}
-
-func (t *Trie) countOccupancies(n node, level int, o map[int]map[int]int) {
-	if n == nil {
-		return
-	}
-	switch n := (n).(type) {
-	case *shortNode:
-		t.countOccupancies(n.Val, level+1, o)
-		if _, exists := o[level]; !exists {
-			o[level] = make(map[int]int)
-		}
-		o[level][18] = o[level][18] + 1
-	case *duoNode:
-		t.countOccupancies(n.child1, level+1, o)
-		t.countOccupancies(n.child2, level+1, o)
-		if _, exists := o[level]; !exists {
-			o[level] = make(map[int]int)
-		}
-		o[level][2] = o[level][2] + 1
-	case *fullNode:
-		count := 0
-		for i := 0; i <= 16; i++ {
-			if n.Children[i] != nil {
-				count++
-				t.countOccupancies(n.Children[i], level+1, o)
-			}
-		}
-		if _, exists := o[level]; !exists {
-			o[level] = make(map[int]int)
-		}
-		o[level][count] = o[level][count] + 1
-	}
-	return
 }
 
 func (t *Trie) hashRoot() (node, error) {

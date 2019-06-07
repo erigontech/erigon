@@ -10,11 +10,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+var testbucket = []byte("test")
+
 func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := []byte("AT")
-	tr := New(common.Hash{}, bucket, nil, false)
+	tr := New(common.Hash{}, false)
 
 	keys := []string{
 		"FIRSTFIRSTFIRSTFIRSTFIRSTFIRSTFI",
@@ -47,7 +49,7 @@ func testRebuild(t *testing.T) {
 			t.Errorf("Could not encode value: %v", err)
 		}
 		db.Put(bucket, key, v1)
-		t1 := New(common.BytesToHash(root1), bucket, nil, false)
+		t1 := New(common.BytesToHash(root1), false)
 		t1.Rebuild(db, 0)
 	}
 }
@@ -55,7 +57,7 @@ func testRebuild(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1Embedded(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.PutS(testbucket, []byte("abcdefghijklmnopqrstuvwxyz012345"), []byte("a"), 0)
 	tc := &TrieContinuation{
 		t:           tr,
@@ -76,7 +78,7 @@ func TestResolve1Embedded(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
 		t:           tr,
@@ -97,7 +99,7 @@ func TestResolve1(t *testing.T) {
 
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
@@ -119,7 +121,7 @@ func TestResolve2(t *testing.T) {
 
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	tc := &TrieContinuation{
@@ -141,7 +143,7 @@ func TestResolve2Keep(t *testing.T) {
 
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
@@ -164,7 +166,7 @@ func TestResolve3Keep(t *testing.T) {
 
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 

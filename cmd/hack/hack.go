@@ -392,78 +392,6 @@ func bucketStats(db *bolt.DB) {
 		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 }
 
-func printOccupancies(t *trie.Trie, db ethdb.Database, blockNr uint64) {
-	o := make(map[int]map[int]int)
-	t.CountOccupancies(db, blockNr, o)
-	for level, lo := range o {
-		for i, count := range lo {
-			fmt.Printf("[%d %d]:%d ", level, i, count)
-		}
-	}
-	fmt.Printf("\n")
-}
-
-func trieStats() {
-	//db, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	db, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-	lastHash := rawdb.ReadHeadHeaderHash(db)
-	lastNumber := rawdb.ReadHeaderNumber(db, lastHash)
-	lastHeader := rawdb.ReadHeader(db, lastHash, *lastNumber)
-	tds, err := state.NewTrieDbState(lastHeader.Root, db, *lastNumber)
-	if err != nil {
-		panic(err)
-	}
-	t := tds.AccountTrie()
-	printOccupancies(t, db, *lastNumber)
-	/*
-		statedb := state.New(triedbst)
-		t := statedb.GetTrie()
-		for i := 0; i < 1; i++ {
-			//h1 := t.ResolveRoot(db, lastHeader.Root, lastNumber, i)
-			//fmt.Printf("Resolved hash for %d: %s\n", i, h1)
-			startTime := time.Now()
-			h2 := t.Rebuild(db, lastNumber, i)
-			fmt.Printf("Rebuding took %s\n", time.Since(startTime))
-			fmt.Printf("Rebult to %s, actual root %x\n", h2, lastHeader.Root)
-			fmt.Printf("\n\n")
-			//if !bytes.Equal(h1, h2) || !matched {
-			//	fmt.Printf("DIFFERENT ROOTS: %d %s %s\n", i, h1, h2)
-			//	break
-			//}
-		}
-		statedb.PrintOccupancies()
-
-		fmt.Printf("%x %x\n", lastHeader.Root, statedb.IntermediateRoot(true))
-		triedb, tree, err := statedb.EnumerateAccounts()
-		if err != nil {
-			panic(err)
-		}
-		sectrie, _ := triedb.(*trie.SecureTrie)
-		t := sectrie.GetTrie()
-		printOccupancies(t, db, lastNumber)
-		nextThreshold := big.NewInt(0)
-		step := big.NewInt(1)
-		tree.AscendGreaterOrEqual(&state.AccountItem{SecKey: nil, Balance: big.NewInt(0)}, func(i llrb.Item) bool {
-			item := i.(*state.AccountItem)
-			if item.Balance.Cmp(nextThreshold) != -1 {
-				fmt.Printf("Threshold: %s | ", nextThreshold.String())
-				printOccupancies(t, db, lastNumber)
-				for ; item.Balance.Cmp(nextThreshold) != -1; {
-					nextThreshold = nextThreshold.Add(nextThreshold, step)
-				}
-			}
-			t.TryDelete(db, item.SecKey, lastNumber)
-			return true
-		})
-		fmt.Printf("Final check | ")
-		printOccupancies(t, db, lastNumber)
-	*/
-}
-
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -820,11 +748,11 @@ func testStartup() {
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	t := trie.New(common.Hash{}, state.AccountsBucket, nil, false)
+	t := trie.New(common.Hash{}, false)
 	r := trie.NewResolver(false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
-	tc := t.NewContinuation(key, 0, rootHash[:])
+	tc := t.NewContinuation(nil, key, 0, rootHash[:])
 	r.AddContinuation(tc)
 	err = r.ResolveWithDb(ethDb, currentBlockNr)
 	if err != nil {
@@ -841,11 +769,11 @@ func testResolve() {
 	check(err)
 	defer ethDb.Close()
 	//treePrefix := common.FromHex("1194e966965418c7d73a42cceeb254d875860356")
-	t := trie.New(common.Hash{}, state.AccountsBucket, nil, true)
+	t := trie.New(common.Hash{}, true)
 	r := trie.NewResolver(false, true, 1828653)
 	key := common.FromHex("0803040c01")
 	resolveHash := common.FromHex("f123ef56888702971ba0604b51d0e229979f8e0b9f719cd18699e1238ab7bb4c")
-	tc := t.NewContinuation(key, 5, resolveHash)
+	tc := t.NewContinuation(nil, key, 5, resolveHash)
 	r.AddContinuation(tc)
 	err = r.ResolveWithDb(ethDb, 1828653)
 	if err != nil {
@@ -1085,7 +1013,7 @@ func loadAccount() {
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
-	t := trie.New(common.Hash{}, state.StorageBucket, accountBytes[:], true)
+	t := trie.New(common.Hash{}, true)
 	count := 0
 	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]

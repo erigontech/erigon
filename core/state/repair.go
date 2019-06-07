@@ -231,9 +231,9 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 			return nil, err
 		}
 		if account == nil {
-			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
+			t = trie.New(common.Hash{}, true)
 		} else {
-			t = trie.New(account.Root, StorageBucket, address[:], true)
+			t = trie.New(account.Root, true)
 		}
 		t.MakeListed(rds.joinGeneration, rds.leftGeneration)
 		rds.storageTries[address] = t
@@ -259,7 +259,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		}
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
-			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
+			if need, c := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(false, false, rds.blockNr)
 				}

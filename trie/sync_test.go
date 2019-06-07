@@ -25,7 +25,7 @@ import (
 func makeTestTrie() (ethdb.Database, *Trie, map[string][]byte) {
 	// Create an empty trie
 	diskdb := ethdb.NewMemDatabase()
-	trie := New(common.Hash{}, testbucket, nil, false)
+	trie := New(common.Hash{}, false)
 
 	// Fill it with some arbitrary data
 	content := make(map[string][]byte)

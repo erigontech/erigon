@@ -216,7 +216,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	if err != nil {
 		return nil, err
 	}
-	t := trie.New(root, AccountsBucket, nil, false)
+	t := trie.New(root, false)
 	tds := TrieDbState{
 		t:             t,
 		db:            db,
@@ -374,7 +374,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			return nil, err
 		}
 		for _, keyHash := range hashes {
-			if need, c := storageTrie.NeedResolution(keyHash[:]); need {
+			if need, c := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
@@ -405,7 +405,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				return nil, err
 			}
 			for _, keyHash := range hashes {
-				storageTrie.PopulateBlockProofData(keyHash[:], tds.pg)
+				storageTrie.PopulateBlockProofData(address[:], keyHash[:], tds.pg)
 			}
 		}
 	}
@@ -424,7 +424,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	}
 	sort.Sort(addrs)
 	for _, addrHash := range addrs {
-		if need, c := tds.t.NeedResolution(addrHash[:]); need {
+		if need, c := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
 				resolver = trie.NewResolver(false, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
@@ -440,7 +440,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	}
 	if tds.resolveReads {
 		for _, addrHash := range addrs {
-			tds.t.PopulateBlockProofData(addrHash[:], tds.pg)
+			tds.t.PopulateBlockProofData(nil, addrHash[:], tds.pg)
 		}
 	}
 	// Actual updates
@@ -698,9 +698,14 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error
 			tds.currentBuffer.accountReads[buf] = struct{}{}
 		}
 	}
-	enc, err := tds.t.TryGet(tds.db, buf[:], tds.blockNr)
-	if err != nil {
-		return nil, err
+	enc, ok := tds.t.Get(buf[:], tds.blockNr)
+	if !ok {
+		// Not present in the trie, try the database
+		if tds.historical {
+			enc, _ = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr)
+		} else {
+			enc, _ = tds.db.Get(AccountsBucket, buf[:])
+		}
 	}
 	return encodingToAccount(enc)
 }
@@ -745,14 +750,11 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.H
 			return nil, err
 		}
 		if account == nil {
-			//fmt.Printf("Creating storage trie for address %x with empty storage root\n", address)
-			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
+			t = trie.New(common.Hash{}, true)
 		} else {
-			//fmt.Printf("Creating storage trie for address %x with storage root %x\n", address, account.Root)
-			t = trie.New(account.Root, StorageBucket, address[:], true)
+			t = trie.New(account.Root, true)
 		}
 		t.SetHistorical(tds.historical)
-		//t.SetResolveReads(tds.resolveReads)
 		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
 		tds.storageTries[addrHash] = t
 	}
@@ -790,9 +792,17 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 			m[seckey] = struct{}{}
 		}
 	}
-	enc, err := t.TryGet(tds.db, seckey[:], tds.blockNr)
-	if err != nil {
-		return nil, err
+	enc, ok := t.Get(seckey[:], tds.blockNr)
+	if !ok {
+		// Not present in the trie, try database
+		cKey := make([]byte, len(address)+len(seckey))
+		copy(cKey, address[:])
+		copy(cKey[len(address):], seckey[:])
+		if tds.historical {
+			enc, _ = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
+		} else {
+			enc, _ = tds.db.Get(StorageBucket, cKey)
+		}
 	}
 	return enc, nil
 }

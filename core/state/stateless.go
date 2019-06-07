@@ -55,7 +55,7 @@ func NewStateless(stateRoot common.Hash,
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
-	t, _, _, _, _ := trie.NewFromProofs(blockNr, AccountsBucket, nil, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+	t, _, _, _, _ := trie.NewFromProofs(blockNr, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
 	if stateRoot != t.Hash() {
 		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
@@ -71,16 +71,16 @@ func NewStateless(stateRoot common.Hash,
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(blockNr, StorageBucket, nil, true,
+		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(blockNr, true,
 			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		h.sha.Reset()
 		h.sha.Write(contract[:])
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
 		storageTries[addrHash] = st
-		enc, err := t.TryGet(nil, addrHash[:], blockNr)
-		if err != nil {
-			return nil, err
+		enc, ok := t.Get(addrHash[:], blockNr)
+		if !ok {
+			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		account, err := encodingToAccount(enc)
 		if err != nil {
@@ -162,7 +162,7 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, StorageBucket, nil, true,
+			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			if mIdx > 0 {
 				acMasks = append(acMasks, blockProof.CMasks[maskIdx:maskIdx+mIdx]...)
@@ -264,15 +264,15 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[addrHash]; !ok {
-			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, StorageBucket, nil, true,
+			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			s.storageTries[addrHash] = st
 		} else {
 			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockNr, blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
-		enc, err := s.t.TryGet(nil, addrHash[:], blockNr)
-		if err != nil {
-			return err
+		enc, ok := s.t.Get(addrHash[:], blockNr)
+		if !ok {
+			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		account, err := encodingToAccount(enc)
 		if err != nil {
@@ -313,9 +313,9 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	enc, err := s.t.TryGet(nil, addrHash[:], s.blockNr)
-	if err != nil {
-		return nil, err
+	enc, ok := s.t.Get(addrHash[:], s.blockNr)
+	if !ok {
+		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
 	return encodingToAccount(enc)
 }
@@ -323,7 +323,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 func (s *Stateless) getStorageTrie(address common.Address, addrHash common.Hash, create bool) (*trie.Trie, error) {
 	t, ok := s.storageTries[addrHash]
 	if !ok && create {
-		t = trie.New(common.Hash{}, StorageBucket, address[:], true)
+		t = trie.New(common.Hash{}, true)
 		s.storageTries[addrHash] = t
 	}
 	return t, nil
@@ -348,7 +348,10 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 	h.sha.Write((*key)[:])
 	var secKey common.Hash
 	h.sha.Read(secKey[:])
-	enc, err := t.TryGet(nil, secKey[:], s.blockNr)
+	enc, ok := t.Get(secKey[:], s.blockNr)
+	if !ok {
+		return nil, fmt.Errorf("Storage of %x (key %x, hash %x) is not present in the proof", address, (*key), secKey)
+	}
 	if err != nil {
 		return nil, err
 	}

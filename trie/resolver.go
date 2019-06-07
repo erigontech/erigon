@@ -115,7 +115,7 @@ func (tr *TrieResolver) Less(i, j int) bool {
 	ci := tr.continuations[i]
 	cj := tr.continuations[j]
 	m := min(ci.resolvePos, cj.resolvePos)
-	c := bytes.Compare(ci.t.prefix, cj.t.prefix)
+	c := bytes.Compare(ci.contract, cj.contract)
 	if c != 0 {
 		return c < 0
 	}
@@ -132,10 +132,10 @@ func (tr *TrieResolver) Swap(i, j int) {
 
 func (tr *TrieResolver) AddContinuation(c *TrieContinuation) {
 	tr.continuations = append(tr.continuations, c)
-	if c.t.prefix == nil {
+	if c.contract == nil {
 		tr.resolveHexes = append(tr.resolveHexes, c.resolveHex)
 	} else {
-		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.t.prefix)[:40], c.resolveHex...))
+		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.contract)[:40], c.resolveHex...))
 	}
 }
 
@@ -165,12 +165,12 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	var prevC *TrieContinuation
 	for i, c := range tr.continuations {
 		if prevC == nil || c.resolvePos < prevC.resolvePos ||
-			!bytes.Equal(c.t.prefix, prevC.t.prefix) ||
+			!bytes.Equal(c.contract, prevC.contract) ||
 			!bytes.HasPrefix(c.resolveHex[:c.resolvePos], prevC.resolveHex[:prevC.resolvePos]) {
 			tr.contIndices = append(tr.contIndices, i)
-			pLen := len(c.t.prefix)
+			pLen := len(c.contract)
 			key := make([]byte, pLen+32)
-			copy(key[:], c.t.prefix)
+			copy(key[:], c.contract)
 			decodeNibbles(c.resolveHex[:c.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
 			c.extResolvePos = c.resolvePos + 2*pLen
@@ -307,8 +307,8 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		hashLen := tr.h.hash(root, tc.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for prefix %x, key %x, pos %d, \nexpected %s, got %s\n",
-					tc.t.prefix,
+				return fmt.Errorf("Resolving wrong hash for contract %x, key %x, pos %d, \nexpected %s, got %s\n",
+					tc.contract,
 					tc.resolveHex,
 					tc.resolvePos,
 					tc.resolveHash,
@@ -468,7 +468,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
-	tc := t.NewContinuation(key, pos, expected)
+	tc := t.NewContinuation(nil, key, pos, expected)
 	r := NewResolver(true, accounts, blockNr)
 	r.SetHistorical(t.historical)
 	r.AddContinuation(tc)
