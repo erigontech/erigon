@@ -221,8 +221,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
-			err = statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter())
-			if err != nil {
+			if err := statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
@@ -236,12 +235,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	tds.Rebuild()
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
-		err = db.DeleteTimestamp(parent.NumberU64() + 1)
-		if err != nil {
-			panic(err)
-		}
 		block, receipt := genblock(i, parent, statedb, tds)
-		//tds.SetBlockNr(block.NumberU64())
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block

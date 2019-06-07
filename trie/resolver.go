@@ -335,31 +335,37 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.fillCount[i] = 0
 		}
 		tc.t.timestampSubTree(root, tr.blockNr)
-		switch parent := tc.resolveParent.(type) {
-		case nil:
+		if tc.resolveParent == nil {
 			if _, ok := tc.t.root.(hashNode); ok {
 				tc.t.root = root
 			}
-		case *shortNode:
-			if _, ok := parent.Val.(hashNode); ok {
-				parent.Val = root
-			}
-		case *duoNode:
-			i1, i2 := parent.childrenIdx()
-			switch tc.resolveHex[tc.resolvePos-1] {
-			case i1:
-				if _, ok := parent.child1.(hashNode); ok {
-					parent.child1 = root
+		} else {
+			switch parent := tc.resolveParent.(type) {
+			case nil:
+				if _, ok := tc.t.root.(hashNode); ok {
+					tc.t.root = root
 				}
-			case i2:
-				if _, ok := parent.child2.(hashNode); ok {
-					parent.child2 = root
+			case *shortNode:
+				if _, ok := parent.Val.(hashNode); ok {
+					parent.Val = root
 				}
-			}
-		case *fullNode:
-			idx := tc.resolveHex[tc.resolvePos-1]
-			if _, ok := parent.Children[idx].(hashNode); ok {
-				parent.Children[idx] = root
+			case *duoNode:
+				i1, i2 := parent.childrenIdx()
+				switch tc.resolveHex[tc.resolvePos-1] {
+				case i1:
+					if _, ok := parent.child1.(hashNode); ok {
+						parent.child1 = root
+					}
+				case i2:
+					if _, ok := parent.child2.(hashNode); ok {
+						parent.child2 = root
+					}
+				}
+			case *fullNode:
+				idx := tc.resolveHex[tc.resolvePos-1]
+				if _, ok := parent.Children[idx].(hashNode); ok {
+					parent.Children[idx] = root
+				}
 			}
 		}
 	}
