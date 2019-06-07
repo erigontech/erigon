@@ -94,7 +94,9 @@ The requests can be batched so that multiple prefixes may be requested.
 
 We use the same prefix encoding as described in Appendix C of the [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf#appendix.C),
 also known as the compact encoding.
-No additional flags are utilized (ie~ `t == 0` always).
+No additional flags are utilized (ie `t == 0` always).
+
+**[TODO]** What if a prefix is in the middle of a Patricia extension?
 
 #### Example
 Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block `0xaaa...aaa`.
