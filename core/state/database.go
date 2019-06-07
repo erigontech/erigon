@@ -455,7 +455,6 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			tds.aggregateBuffer.initialise()
 		}
 		tds.aggregateBuffer.merge(tds.currentBuffer)
-		tds.currentBuffer.detachAccounts()
 	}
 	if tds.aggregateBuffer == nil {
 		return nil, nil
