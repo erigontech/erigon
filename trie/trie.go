@@ -54,7 +54,6 @@ type Trie struct {
 	originalRoot common.Hash
 
 	encodeToBytes bool
-	accounts      bool
 
 	historical     bool
 	joinGeneration func(gen uint64)

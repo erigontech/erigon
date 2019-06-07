@@ -36,7 +36,7 @@ type CodeTime struct {
 type Stateless struct {
 	blockNr        uint64
 	t              *trie.Trie
-	storageTries   map[common.Hash]*trie.Trie
+	storageTries   map[common.Address]*trie.Trie
 	codeMap        map[common.Hash]CodeTime
 	timeToCodeHash map[uint64]map[common.Hash]struct{}
 	trace          bool
@@ -65,7 +65,7 @@ func NewStateless(stateRoot common.Hash,
 		}
 		return nil, fmt.Errorf("Expected root: %x, Constructed root: %x", stateRoot, t.Hash())
 	}
-	storageTries := make(map[common.Hash]*trie.Trie)
+	storageTries := make(map[common.Address]*trie.Trie)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	for _, contract := range blockProof.Contracts {
 		if trace {
@@ -77,7 +77,7 @@ func NewStateless(stateRoot common.Hash,
 		h.sha.Write(contract[:])
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
-		storageTries[addrHash] = st
+		storageTries[contract] = st
 		enc, ok := t.Get(addrHash[:], blockNr)
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
@@ -161,7 +161,7 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 		var st *trie.Trie
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
-		if st, ok = s.storageTries[addrHash]; !ok {
+		if st, ok = s.storageTries[contract]; !ok {
 			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			if mIdx > 0 {
@@ -263,10 +263,10 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		var st *trie.Trie
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
-		if st, ok = s.storageTries[addrHash]; !ok {
+		if st, ok = s.storageTries[contract]; !ok {
 			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
-			s.storageTries[addrHash] = st
+			s.storageTries[contract] = st
 		} else {
 			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockNr, blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
@@ -320,11 +320,11 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 	return encodingToAccount(enc)
 }
 
-func (s *Stateless) getStorageTrie(address common.Address, addrHash common.Hash, create bool) (*trie.Trie, error) {
-	t, ok := s.storageTries[addrHash]
+func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
+	t, ok := s.storageTries[address]
 	if !ok && create {
 		t = trie.New(common.Hash{}, true)
-		s.storageTries[addrHash] = t
+		s.storageTries[address] = t
 	}
 	return t, nil
 }
@@ -333,11 +333,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 	//fmt.Printf("ReadAccountStorage\n")
 	h := newHasher()
 	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
-	t, err := s.getStorageTrie(address, addrHash, false)
+	t, err := s.getStorageTrie(address, false)
 	if err != nil {
 		return nil, err
 	}
@@ -412,9 +408,20 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
 		if _, ok := s.deleted[addrHash]; ok {
+			if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
+				account.Root = emptyRoot
+			}
+			storageTrie, err := s.getStorageTrie(address, false)
+			if err != nil {
+				return err
+			}
+			if storageTrie != nil {
+				delete(s.storageTries, address)
+				storageTrie.PrepareToRemove()
+			}
 			continue
 		}
-		t, err := s.getStorageTrie(address, addrHash, true)
+		storageTrie, err := s.getStorageTrie(address, true)
 		if err != nil {
 			return err
 		}
@@ -428,10 +435,13 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		for _, keyHash := range hashes {
 			v := m[keyHash]
 			if len(v) != 0 {
-				t.Update(keyHash[:], v, s.blockNr-1)
+				storageTrie.Update(keyHash[:], v, s.blockNr-1)
 			} else {
-				t.Delete(keyHash[:], s.blockNr-1)
+				storageTrie.Delete(keyHash[:], s.blockNr-1)
 			}
+		}
+		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
+			account.Root = storageTrie.Hash()
 		}
 	}
 	addrs := make(Hashes, len(s.accountUpdates))
@@ -443,30 +453,14 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	sort.Sort(addrs)
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
-		deleteStorageTrie := false
 		if account != nil {
-			storageTrie, err := s.getStorageTrie(common.Address{}, addrHash, false)
-			if err != nil {
-				return err
-			}
-			if _, ok := s.deleted[addrHash]; ok {
-				account.Root = emptyRoot
-				deleteStorageTrie = true
-			} else if storageTrie != nil {
-				//fmt.Printf("Updating account.Root of %x with %x, emptyRoot: %x\n", address, storageTrie.Hash(), emptyRoot)
-				account.Root = storageTrie.Hash()
-			}
 			data, err := rlp.EncodeToBytes(account)
 			if err != nil {
 				return err
 			}
 			s.t.Update(addrHash[:], data, s.blockNr-1)
 		} else {
-			deleteStorageTrie = true
 			s.t.Delete(addrHash[:], s.blockNr-1)
-		}
-		if deleteStorageTrie {
-			delete(s.storageTries, addrHash)
 		}
 	}
 	if check {
