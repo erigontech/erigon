@@ -243,6 +243,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	tds.StartNewBuffer()
 	statedb := state.New(tds)
 	for addr, account := range g.Alloc {
 		statedb.AddBalance(addr, account.Balance)
@@ -256,10 +257,11 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	root, err := tds.IntermediateRoot(statedb, false)
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	root := roots[len(roots)-1]
 	head := &types.Header{
 		Number:     new(big.Int).SetUint64(g.Number),
 		Nonce:      types.EncodeNonce(g.Nonce),

@@ -199,20 +199,20 @@ func benchmarkVerifyProof(b *testing.B) {
 var testbucket = []byte("B")
 
 func randomTrie(n int) (*Trie, map[string]*kv) {
-	db, trie := newEmpty()
+	_, trie := newEmpty()
 	trie.prefix = testbucket
 	vals := make(map[string]*kv)
 	for i := byte(0); i < 100; i++ {
 		value := &kv{common.LeftPadBytes([]byte{i}, 32), []byte{i}, false}
 		value2 := &kv{common.LeftPadBytes([]byte{i + 10}, 32), []byte{i}, false}
-		trie.Update(db, value.k, value.v, 0)
-		trie.Update(db, value2.k, value2.v, 0)
+		trie.Update(value.k, value.v, 0)
+		trie.Update(value2.k, value2.v, 0)
 		vals[string(value.k)] = value
 		vals[string(value2.k)] = value2
 	}
 	for i := 0; i < n; i++ {
 		value := &kv{randBytes(32), randBytes(20), false}
-		trie.Update(db, value.k, value.v, 0)
+		trie.Update(value.k, value.v, 0)
 		vals[string(value.k)] = value
 	}
 	return trie, vals

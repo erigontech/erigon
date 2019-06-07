@@ -40,7 +40,7 @@ func TestIterator(t *testing.T) {
 	all := make(map[string]string)
 	for _, val := range vals {
 		all[val.k] = val.v
-		trie.Update(diskdb, []byte(val.k), []byte(val.v), 0)
+		trie.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	found := make(map[string]string)
@@ -68,8 +68,8 @@ func TestIteratorLargeData(t *testing.T) {
 	for i := byte(0); i < 255; i++ {
 		value := &kv{common.LeftPadBytes([]byte{i}, 32), []byte{i}, false}
 		value2 := &kv{common.LeftPadBytes([]byte{10, i}, 32), []byte{i}, false}
-		trie.Update(diskdb, value.k, value.v, 0)
-		trie.Update(diskdb, value2.k, value2.v, 0)
+		trie.Update(value.k, value.v, 0)
+		trie.Update(value2.k, value2.v, 0)
 		vals[string(value.k)] = value
 		vals[string(value2.k)] = value2
 	}
@@ -141,7 +141,7 @@ var testdata2 = []kvs{
 func TestIteratorSeek(t *testing.T) {
 	diskdb, trie := newEmpty()
 	for _, val := range testdata1 {
-		trie.Update(diskdb, []byte(val.k), []byte(val.v), 0)
+		trie.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	// Seek to the middle.
@@ -182,12 +182,12 @@ func checkIteratorOrder(want []kvs, it *Iterator) error {
 func TestDifferenceIterator(t *testing.T) {
 	diskdba, triea := newEmpty()
 	for _, val := range testdata1 {
-		triea.Update(diskdba, []byte(val.k), []byte(val.v), 0)
+		triea.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	diskdbb, trieb := newEmpty()
 	for _, val := range testdata2 {
-		trieb.Update(diskdbb, []byte(val.k), []byte(val.v), 0)
+		trieb.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	found := make(map[string]string)
@@ -216,12 +216,12 @@ func TestDifferenceIterator(t *testing.T) {
 func TestUnionIterator(t *testing.T) {
 	diskdba, triea := newEmpty()
 	for _, val := range testdata1 {
-		triea.Update(diskdba, []byte(val.k), []byte(val.v), 0)
+		triea.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	diskdbb, trieb := newEmpty()
 	for _, val := range testdata2 {
-		trieb.Update(diskdbb, []byte(val.k), []byte(val.v), 0)
+		trieb.Update([]byte(val.k), []byte(val.v), 0)
 	}
 
 	di, _ := NewUnionIterator([]NodeIterator{triea.NodeIterator(diskdba, nil, 0), trieb.NodeIterator(diskdbb, nil, 0)})
@@ -259,9 +259,9 @@ func TestUnionIterator(t *testing.T) {
 }
 
 func TestIteratorNoDups(t *testing.T) {
-	diskdb, tr := newEmpty()
+	_, tr := newEmpty()
 	for _, val := range testdata1 {
-		tr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
+		tr.Update([]byte(val.k), []byte(val.v), 0)
 	}
 	checkIteratorNoDups(t, tr.NodeIterator(nil, nil, 0), nil)
 }
@@ -276,7 +276,7 @@ func testIteratorContinueAfterError(t *testing.T, memonly bool) {
 	bucket := []byte("B")
 	tr := New(common.Hash{}, bucket, nil, false)
 	for _, val := range testdata1 {
-		tr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
+		tr.Update([]byte(val.k), []byte(val.v), 0)
 	}
 	wantNodeCount := checkIteratorNoDups(t, tr.NodeIterator(nil, nil, 0), nil)
 
@@ -348,7 +348,7 @@ func testIteratorContinueAfterSeekError(t *testing.T, memonly bool) {
 	bucket := []byte("B")
 	ctr := New(common.Hash{}, bucket, nil, false)
 	for _, val := range testdata1 {
-		ctr.Update(diskdb, []byte(val.k), []byte(val.v), 0)
+		ctr.Update([]byte(val.k), []byte(val.v), 0)
 	}
 	barNodeHash := common.HexToHash("05041990364eb72fcb1127652ce40d8bab765f2bfe53225b1170d276cc101c2e")
 	var (

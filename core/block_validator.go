@@ -136,10 +136,7 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 	}
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
-	if root, err := tds.IntermediateRoot(statedb, v.config.IsEIP158(header.Number)); header.Root != root {
-		if err != nil {
-			return err
-		}
+	if root := tds.LastRoot(); header.Root != root {
 		filename := fmt.Sprintf("root_%d.txt", block.NumberU64())
 		log.Warn("Generating deep snapshot of the wront tries...", "file", filename)
 		f, err := os.Create(filename)

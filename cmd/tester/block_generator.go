@@ -140,6 +140,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		signedTxs := []*types.Transaction{}
 		receipts := []*types.Receipt{}
 		usedGas := new(uint64)
+		tds.StartNewBuffer()
 		if height > 1 && gasLimit >= 21000 {
 			signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
 			gp := new(core.GasPool).AddGas(header.GasLimit)
@@ -157,11 +158,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 				return nil, fmt.Errorf("tx %x failed: %v", signed_tx.Hash(), err)
 			}
 			if !chainConfig.IsByzantium(header.Number) {
-				rootHash, err := tds.TrieRoot()
-				if err != nil {
-					panic(fmt.Errorf("%x failed: %v", signed_tx.Hash(), err))
-				}
-				receipt.PostState = rootHash.Bytes()
+				tds.StartNewBuffer()
 			}
 			receipts = append(receipts, receipt)
 			nonce++
@@ -172,11 +169,19 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 			return nil, err
 		}
-
-		header.Root, err = tds.IntermediateRoot(statedb, chainConfig.IsEIP158(header.Number))
+		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+			return nil, err
+		}
+		roots, err := tds.ComputeTrieRoots()
 		if err != nil {
 			return nil, err
 		}
+		if !chainConfig.IsByzantium(header.Number) {
+			for i, receipt := range receipts {
+				receipt.PostState = roots[i].Bytes()
+			}
+		}
+		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
 		tds.SetBlockNr(uint64(height))
 		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
@@ -262,11 +267,16 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		}
 		tds.SetBlockNr(parent.NumberU64())
 		statedb := state.New(tds)
+		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
-		header.Root, err = tds.IntermediateRoot(statedb, config.IsEIP158(header.Number))
+		if err := statedb.Finalise(config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+			return nil, err
+		}
+		roots, err := tds.ComputeTrieRoots()
 		if err != nil {
 			return nil, err
 		}
+		header.Root = roots[len(roots)-1]
 		err = statedb.Commit(config.IsEIP158(header.Number), tds.DbStateWriter())
 		if err != nil {
 			return nil, err
