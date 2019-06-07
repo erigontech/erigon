@@ -51,7 +51,6 @@ type LeafCallback func(leaf []byte, parent common.Hash) error
 // Trie is not safe for concurrent use.
 type Trie struct {
 	root         node
-	originalRoot common.Hash
 
 	encodeToBytes bool
 
@@ -76,15 +75,12 @@ func (t *Trie) PrintTrie() {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash, encodeToBytes bool) *Trie {
 	trie := &Trie{
-		originalRoot:   root,
 		encodeToBytes:  encodeToBytes,
 		joinGeneration: func(uint64) {},
 		leftGeneration: func(uint64) {},
 	}
 	if (root != common.Hash{}) && root != emptyRoot {
-		rootcopy := make([]byte, len(root[:]))
-		copy(rootcopy, root[:])
-		trie.root = hashNode(rootcopy)
+		trie.root = hashNode(root[:])
 	}
 	return trie
 }

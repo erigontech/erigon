@@ -1086,7 +1086,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 
 func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
 	if *original == *value {
-		//return nil
+		return nil
 	}
 	seckey, err := dsw.tds.HashKey(key, true /*save*/)
 	if err != nil {

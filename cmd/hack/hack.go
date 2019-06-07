@@ -772,7 +772,7 @@ func testResolve() {
 	t := trie.New(common.Hash{}, true)
 	r := trie.NewResolver(false, false, 2701646)
 	key := common.FromHex("0x040a0b080e0605050909080c01030c0d000c0b0f090f0806010503090104000f0907080a0c070b0a0c0c080a0a010401000e0105030e04030602030c0f07060310")
-	resolveHash := common.FromHex("0x8749840272b0828e3d213c39895304ca81deb7eed47845aa95e38f9c3c537a36")
+	resolveHash := common.FromHex("0x2249232f912ed64e670d4af39f707c4478a6bf5c3e7815a0839fff55f9926b2a")
 	tc := t.NewContinuation(contract, key, 0, resolveHash)
 	r.AddContinuation(tc)
 	err = r.ResolveWithDb(ethDb, 2701646)
