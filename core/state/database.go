@@ -362,8 +362,9 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		if err != nil {
 			return err
 		}
+		var contract = address // To avoid the value being overwritten, though still shared between continuations
 		for _, keyHash := range hashes {
-			if need, c := storageTrie.NeedResolution(address[:], keyHash[:]); need {
+			if need, c := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
@@ -392,8 +393,9 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[common.Addr
 		if err != nil {
 			return err
 		}
+		var contract = address
 		for _, keyHash := range hashes {
-			storageTrie.PopulateBlockProofData(address[:], keyHash[:], tds.pg)
+			storageTrie.PopulateBlockProofData(contract[:], keyHash[:], tds.pg)
 		}
 	}
 	return nil
@@ -454,6 +456,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			tds.aggregateBuffer.initialise()
 		}
 		tds.aggregateBuffer.merge(tds.currentBuffer)
+		tds.currentBuffer.detachAccounts()
 	}
 	if tds.aggregateBuffer == nil {
 		return nil, nil

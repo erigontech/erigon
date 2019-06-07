@@ -764,15 +764,15 @@ func testStartup() {
 func testResolve() {
 	startTime := time.Now()
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer ethDb.Close()
-	contract := common.FromHex("0x37a9679c41e99db270bda88de8ff50c0cd23f326")
+	contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
 	t := trie.New(common.Hash{}, true)
 	r := trie.NewResolver(false, false, 2701646)
-	key := common.FromHex("0x040a0b080e0605050909080c01030c0d000c0b0f090f0806010503090104000f0907080a0c070b0a0c0c080a0a010401000e0105030e04030602030c0f07060310")
-	resolveHash := common.FromHex("0x2249232f912ed64e670d4af39f707c4478a6bf5c3e7815a0839fff55f9926b2a")
+	key := common.FromHex("0x0305040a0e0100050907000c0109020906000304050c090700010b0a060f09080b03050707080c0908060d090103040d060f06010a09060d0b0d06040c07070410")
+	resolveHash := common.FromHex("0x2a470525dff3d3cf9b9cff1e7cea78c762a9d390e7c67a13400cdbe3071e4e1f")
 	tc := t.NewContinuation(contract, key, 0, resolveHash)
 	r.AddContinuation(tc)
 	err = r.ResolveWithDb(ethDb, 2701646)
@@ -781,6 +781,8 @@ func testResolve() {
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
 	fmt.Printf("%s\n", tc)
+	enc, _ := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
+	fmt.Printf("Account: %x\n", enc)
 }
 
 func hashFile() {

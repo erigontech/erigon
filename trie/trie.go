@@ -50,7 +50,7 @@ type LeafCallback func(leaf []byte, parent common.Hash) error
 //
 // Trie is not safe for concurrent use.
 type Trie struct {
-	root         node
+	root node
 
 	encodeToBytes bool
 
@@ -925,7 +925,7 @@ func (t *Trie) NewContinuation(contract []byte, hex []byte, pos int, resolveHash
 }
 
 func (tc *TrieContinuation) String() string {
-	return fmt.Sprintf("tc{t:%x,resolveHex:%x,resolvePos:%d}", tc.contract, tc.resolveHex, tc.resolvePos)
+	return fmt.Sprintf("tc{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", tc.contract, tc.resolveHex, tc.resolvePos, tc.resolveHash)
 }
 
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *TrieContinuation) {
@@ -973,7 +973,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *TrieContinuat
 		case valueNode:
 			return false, nil
 		case hashNode:
-			c := t.NewContinuation(contract, hex, pos, n)
+			c := t.NewContinuation(contract, hex, pos, common.CopyBytes(n))
 			c.resolveParent = parent
 			return true, c
 		default:

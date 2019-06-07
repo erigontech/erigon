@@ -167,6 +167,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 		if prevC == nil || c.resolvePos < prevC.resolvePos ||
 			!bytes.Equal(c.contract, prevC.contract) ||
 			!bytes.HasPrefix(c.resolveHex[:c.resolvePos], prevC.resolveHex[:prevC.resolvePos]) {
+
 			tr.contIndices = append(tr.contIndices, i)
 			pLen := len(c.contract)
 			key := make([]byte, pLen+32)
