@@ -41,10 +41,9 @@ func init() {
 }
 
 // Used for testing
-func newEmpty() (ethdb.Database, *Trie) {
-	diskdb := ethdb.NewMemDatabase()
-	trie := New(common.Hash{}, testbucket, nil, false)
-	return diskdb, trie
+func newEmpty() *Trie {
+	trie := New(common.Hash{}, false)
+	return trie
 }
 
 func TestEmptyTrie(t *testing.T) {
@@ -57,11 +56,11 @@ func TestEmptyTrie(t *testing.T) {
 }
 
 func testInsert(t *testing.T) {
-	diskdb, trie := newEmpty()
+	trie := newEmpty()
 
-	updateString(trie, diskdb, "doe", "reindeer")
-	updateString(trie, diskdb, "dog", "puppy")
-	updateString(trie, diskdb, "dogglesworth", "cat")
+	updateString(trie, "doe", "reindeer")
+	updateString(trie, "dog", "puppy")
+	updateString(trie, "dogglesworth", "cat")
 
 	fmt.Printf("\n\n%s\n\n", trie.root.fstring(""))
 	exp := common.HexToHash("8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3")
@@ -70,8 +69,8 @@ func testInsert(t *testing.T) {
 		t.Errorf("exp %x got %x", exp, root)
 	}
 
-	diskdb, trie = newEmpty()
-	updateString(trie, diskdb, "A", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	trie = newEmpty()
+	updateString(trie, "A", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 	exp = common.HexToHash("d23786fb4a010da3ce639d66d5e904a11dbc02746d1ce25029e53290cabf28ab")
 	root = trie.Hash()
@@ -81,18 +80,18 @@ func testInsert(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
-	diskdb, trie := newEmpty()
-	updateString(trie, diskdb, "doe", "reindeer")
-	updateString(trie, diskdb, "dog", "puppy")
-	updateString(trie, diskdb, "dogglesworth", "cat")
+	trie := newEmpty()
+	updateString(trie, "doe", "reindeer")
+	updateString(trie, "dog", "puppy")
+	updateString(trie, "dogglesworth", "cat")
 
 	for i := 0; i < 2; i++ {
-		res := getString(trie, diskdb, "dog")
+		res := getString(trie, "dog")
 		if !bytes.Equal(res, []byte("puppy")) {
 			t.Errorf("expected puppy got %x", res)
 		}
 
-		unknown := getString(trie, diskdb, "unknown")
+		unknown := getString(trie, "unknown")
 		if unknown != nil {
 			t.Errorf("expected nil got %x", unknown)
 		}
@@ -104,7 +103,7 @@ func TestGet(t *testing.T) {
 }
 
 func testDelete(t *testing.T) {
-	diskdb, trie := newEmpty()
+	trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -117,9 +116,9 @@ func testDelete(t *testing.T) {
 	}
 	for _, val := range vals {
 		if val.v != "" {
-			updateString(trie, diskdb, val.k, val.v)
+			updateString(trie, val.k, val.v)
 		} else {
-			deleteString(trie, diskdb, val.k)
+			deleteString(trie, val.k)
 		}
 	}
 
@@ -131,7 +130,7 @@ func testDelete(t *testing.T) {
 }
 
 func testEmptyValues(t *testing.T) {
-	diskdb, trie := newEmpty()
+	trie := newEmpty()
 
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
@@ -144,7 +143,7 @@ func testEmptyValues(t *testing.T) {
 		{"shaman", ""},
 	}
 	for _, val := range vals {
-		updateString(trie, diskdb, val.k, val.v)
+		updateString(trie, val.k, val.v)
 	}
 
 	hash := trie.Hash()
@@ -155,7 +154,7 @@ func testEmptyValues(t *testing.T) {
 }
 
 func testReplication(t *testing.T) {
-	diskdb, trie := newEmpty()
+	trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
 		{"ether", "wookiedoo"},
@@ -166,14 +165,14 @@ func testReplication(t *testing.T) {
 		{"somethingveryoddindeedthis is", "myothernodedata"},
 	}
 	for _, val := range vals {
-		updateString(trie, diskdb, val.k, val.v)
+		updateString(trie, val.k, val.v)
 	}
 	exp := trie.Hash()
 
 	// create a new trie on top of the database and check that lookups work.
-	trie2 := New(exp, testbucket, nil, false)
+	trie2 := New(exp, false)
 	for _, kv := range vals {
-		if string(getString(trie2, diskdb, kv.k)) != kv.v {
+		if string(getString(trie2, kv.k)) != kv.v {
 			t.Errorf("trie2 doesn't have %q => %q", kv.k, kv.v)
 		}
 	}
@@ -195,7 +194,7 @@ func testReplication(t *testing.T) {
 		// {"shaman", ""},
 	}
 	for _, val := range vals2 {
-		updateString(trie2, diskdb, val.k, val.v)
+		updateString(trie2, val.k, val.v)
 	}
 	if hash := trie2.Hash(); hash != exp {
 		t.Errorf("root failure. expected %x got %x", exp, hash)
@@ -203,7 +202,7 @@ func testReplication(t *testing.T) {
 }
 
 func TestLargeValue(t *testing.T) {
-	_, trie := newEmpty()
+	trie := newEmpty()
 	trie.Update([]byte("key1"), []byte{99, 99, 99, 99}, 0)
 	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32), 0)
 	trie.Hash()
@@ -273,8 +272,7 @@ func (randTest) Generate(r *rand.Rand, size int) reflect.Value {
 }
 
 func runRandTest(rt randTest) bool {
-	diskdb := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
@@ -286,7 +284,7 @@ func runRandTest(rt randTest) bool {
 			tr.Delete(step.key, 0)
 			delete(values, string(step.key))
 		case opGet:
-			v := tr.Get(diskdb, step.key, 0)
+			v, _ := tr.Get(step.key, 0)
 			want := values[string(step.key)]
 			if string(v) != want {
 				rt[i].err = fmt.Errorf("mismatch for key 0x%x, got 0x%x want 0x%x", step.key, v, want)
@@ -296,17 +294,8 @@ func runRandTest(rt randTest) bool {
 			tr.Hash()
 		case opReset:
 			hash := tr.Hash()
-			newtr := New(hash, testbucket, nil, false)
+			newtr := New(hash, false)
 			tr = newtr
-		case opItercheckhash:
-			checktr := New(common.Hash{}, testbucket, nil, false)
-			it := NewIterator(tr.NodeIterator(diskdb, nil, 0))
-			for it.Next() {
-				checktr.Update(it.Key, it.Value, 0)
-			}
-			if tr.Hash() != checktr.Hash() {
-				rt[i].err = fmt.Errorf("hash mismatch in opItercheckhash")
-			}
 		case opCheckCacheInvariant:
 		}
 		// Abort the test on error.
@@ -338,7 +327,7 @@ func benchGet(b *testing.B, commit bool) {
 	var tmpdb ethdb.Database
 	if commit {
 		_, tmpdb = tempDB()
-		trie = New(common.Hash{}, testbucket, nil, false)
+		trie = New(common.Hash{}, false)
 	}
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {
@@ -349,7 +338,7 @@ func benchGet(b *testing.B, commit bool) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		trie.Get(tmpdb, k, 0)
+		trie.Get(k, 0)
 	}
 	b.StopTimer()
 
@@ -361,7 +350,7 @@ func benchGet(b *testing.B, commit bool) {
 }
 
 func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
-	_, trie := newEmpty()
+	trie := newEmpty()
 	k := make([]byte, 32)
 	for i := 0; i < b.N; i++ {
 		e.PutUint64(k, uint64(i))
@@ -396,7 +385,7 @@ func BenchmarkHash(b *testing.B) {
 		accounts[i], _ = rlp.EncodeToBytes([]interface{}{nonce, balance, root, code})
 	}
 	// Insert the accounts into the trie and hash it
-	_, trie := newEmpty()
+	trie := newEmpty()
 	for i := 0; i < len(addresses); i++ {
 		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i], 0)
 	}
@@ -417,14 +406,15 @@ func tempDB() (string, ethdb.Database) {
 	return dir, diskdb
 }
 
-func getString(trie *Trie, db ethdb.Database, k string) []byte {
-	return trie.Get(db, []byte(k), 0)
+func getString(trie *Trie, k string) []byte {
+	v, _ := trie.Get([]byte(k), 0)
+	return v
 }
 
-func updateString(trie *Trie, db ethdb.Database, k, v string) {
+func updateString(trie *Trie, k, v string) {
 	trie.Update([]byte(k), []byte(v), 0)
 }
 
-func deleteString(trie *Trie, db ethdb.Database, k string) {
+func deleteString(trie *Trie, k string) {
 	trie.Delete([]byte(k), 0)
 }

@@ -356,11 +356,11 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
-	t := trie.New(rootHash, state.AccountsBucket, nil, false)
+	t := trie.New(rootHash, false)
 	r := trie.NewResolver(false, true, blockNum)
 	key := []byte{}
-	tc := t.NewContinuation(key, 0, rootHash[:])
-	r.AddContinuation(tc)
+	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	r.AddRequest(req)
 	err := r.ResolveWithDb(stateDb, blockNum)
 	if err != nil {
 		fmt.Printf("%v\n", err)
@@ -394,11 +394,11 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	}
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != emptyRoot {
-			st := trie.New(root, state.StorageBucket, address[:], true)
+			st := trie.New(root, true)
 			sr := trie.NewResolver(false, false, blockNum)
 			key := []byte{}
-			stc := st.NewContinuation(key, 0, root[:])
-			sr.AddContinuation(stc)
+			streq := st.NewResolveRequest(address[:], key, 0, root[:])
+			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {
 				fmt.Printf("%x: %v\n", address, err)

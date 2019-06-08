@@ -146,16 +146,3 @@ func (p *FakePeer) RequestReceipts(hashes []common.Hash) error {
 	p.dl.DeliverReceipts(p.id, receipts)
 	return nil
 }
-
-// RequestNodeData implements downloader.Peer, returning a batch of state trie
-// nodes corresponding to the specified trie hashes.
-func (p *FakePeer) RequestNodeData(hashes []common.Hash) error {
-	var data [][]byte
-	for _, hash := range hashes {
-		if entry, err := p.db.Get([]byte("FakePeer"), hash.Bytes()); err == nil {
-			data = append(data, entry)
-		}
-	}
-	p.dl.DeliverNodeData(p.id, data)
-	return nil
-}

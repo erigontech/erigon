@@ -357,18 +357,6 @@ func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	return nil
 }
 
-// RequestNodeData constructs a getNodeData method associated with a particular
-// peer in the download tester. The returned function can be used to retrieve
-// batches of node state data from the particularly requested peer.
-func (dlp *downloadTesterPeer) RequestNodeData(hashes []common.Hash) error {
-	dlp.dl.lock.RLock()
-	defer dlp.dl.lock.RUnlock()
-
-	results := make([][]byte, 0, len(hashes))
-	go dlp.dl.downloader.DeliverNodeData(dlp.id, results)
-	return nil
-}
-
 // assertOwnChain checks if the local chain contains the correct number of items
 // of the various chain components.
 func assertOwnChain(t *testing.T, tester *downloadTester, length int) {
@@ -1477,9 +1465,6 @@ func (ftp *floodingTestPeer) RequestBodies(hashes []common.Hash) error {
 }
 func (ftp *floodingTestPeer) RequestReceipts(hashes []common.Hash) error {
 	return ftp.peer.RequestReceipts(hashes)
-}
-func (ftp *floodingTestPeer) RequestNodeData(hashes []common.Hash) error {
-	return ftp.peer.RequestNodeData(hashes)
 }
 
 func (ftp *floodingTestPeer) RequestHeadersByNumber(from uint64, count, skip int, reverse bool) error {

@@ -10,11 +10,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+var testbucket = []byte("test")
+
 func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := []byte("AT")
-	tr := New(common.Hash{}, bucket, nil, false)
+	tr := New(common.Hash{}, false)
 
 	keys := []string{
 		"FIRSTFIRSTFIRSTFIRSTFIRSTFIRSTFI",
@@ -47,7 +49,7 @@ func testRebuild(t *testing.T) {
 			t.Errorf("Could not encode value: %v", err)
 		}
 		db.Put(bucket, key, v1)
-		t1 := New(common.BytesToHash(root1), bucket, nil, false)
+		t1 := New(common.BytesToHash(root1), false)
 		t1.Rebuild(db, 0)
 	}
 }
@@ -55,19 +57,17 @@ func testRebuild(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1Embedded(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.PutS(testbucket, []byte("abcdefghijklmnopqrstuvwxyz012345"), []byte("a"), 0)
-	tc := &TrieContinuation{
+	req := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("abcdefghijklmnopqrstuvwxyz012345")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: nil,
 		resolved:    nil,
-		n:           nil,
 	}
 	r := NewResolver(false, false, 0)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
 	}
@@ -76,63 +76,57 @@ func TestResolve1Embedded(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-	tc := &TrieContinuation{
+	req := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("741326629cbf4ba5d5afebd56dd714ba4a531ddb6b07b829aa85dee4d97d34a4").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
 	r := NewResolver(false, false, 0)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
 	}
-	//t.Errorf("TestResolve1 resolved:\n%s\n", tc.resolved.fstring(""))
+	//t.Errorf("TestResolve1 resolved:\n%s\n", req.resolved.fstring(""))
 }
 
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-	tc := &TrieContinuation{
+	req := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
 	r := NewResolver(false, false, 0)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
 	}
-	//t.Errorf("TestResolve2 resolved:\n%s\n", tc.resolved.fstring(""))
+	//t.Errorf("TestResolve2 resolved:\n%s\n", req.resolved.fstring(""))
 }
 
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-	tc := &TrieContinuation{
+	req := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
 	r := NewResolver(false, false, 0)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
 	}
@@ -141,21 +135,19 @@ func TestResolve2Keep(t *testing.T) {
 
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-	tc := &TrieContinuation{
+	req := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("03e27bd9cc47c0a03a8480035f765a4ba242c40ae4badfd1628af5a1ca5fd57a").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
 	r := NewResolver(false, false, 0)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
 	}
@@ -164,7 +156,7 @@ func TestResolve3Keep(t *testing.T) {
 
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, testbucket, nil, false)
+	tr := New(common.Hash{}, false)
 	db.Put(testbucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 
@@ -173,39 +165,33 @@ func TestTrieResolver(t *testing.T) {
 	db.Put(testbucket, []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
 	db.Put(testbucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
-	tc1 := &TrieContinuation{
+	req1 := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("c9f98a7d966d37c7231d11910c72f01a213057111b8171f5f137269bb73e45e4").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
-	tc2 := &TrieContinuation{
+	req2 := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 2 bytes is 4 nibbles
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
-	tc3 := &TrieContinuation{
+	req3 := &ResolveRequest{
 		t:           tr,
-		value:       nil,
 		resolveHex:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 3 bytes is 6 nibbles
 		resolveHash: hashNode(common.HexToHash("b183c6dd36a92675ab74e32008a41735f485d20df283be0f349a412c769fe6c9").Bytes()),
 		resolved:    nil,
-		n:           nil,
 	}
 	resolver := NewResolver(false, false, 0)
-	resolver.AddContinuation(tc3)
-	resolver.AddContinuation(tc2)
-	resolver.AddContinuation(tc1)
+	resolver.AddRequest(req3)
+	resolver.AddRequest(req2)
+	resolver.AddRequest(req1)
 	if err := resolver.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Resolve error: %v", err)
 	}
-	//t.Errorf("TestTrieResolver resolved:\n%s\n", tc3.resolved.fstring(""))
+	//t.Errorf("TestTrieResolver resolved:\n%s\n", req3.resolved.fstring(""))
 }
