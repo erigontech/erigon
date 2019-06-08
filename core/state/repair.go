@@ -259,11 +259,11 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		}
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
-			if need, c := storageTrie.NeedResolution(address[:], keyHash[:]); need {
+			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(false, false, rds.blockNr)
 				}
-				resolver.AddContinuation(c)
+				resolver.AddRequest(req)
 			}
 		}
 	}

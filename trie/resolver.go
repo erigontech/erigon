@@ -58,39 +58,39 @@ func (rh ResolveHexes) Swap(i, j int) {
 
 /* One resolver per trie (prefix) */
 type TrieResolver struct {
-	accounts      bool // Is this a resolver for accounts or for storage
-	hashes        bool
-	continuations []*TrieContinuation
-	resolveHexes  ResolveHexes
-	rhIndexLte    int // index in resolveHexes with resolve key less or equal to the current key
+	accounts     bool // Is this a resolver for accounts or for storage
+	hashes       bool
+	requests     []*ResolveRequest
+	resolveHexes ResolveHexes
+	rhIndexLte   int // index in resolveHexes with resolve key less or equal to the current key
 	// if the current key is less than the first resolve key, this index is -1
 	rhIndexGt int // index in resolveHexes with resolve key greater than the current key
 	// if the current key is greater than the last resolve key, this index is len(resolveHexes)
-	contIndices []int // Indices pointing back to continuation array from arrays retured by PrepareResolveParams
-	key_array   [52]byte
-	key         []byte
-	value       []byte
-	key_set     bool
-	nodeStack   [Levels + 1]shortNode
-	vertical    [Levels + 1]fullNode
-	fillCount   [Levels + 1]int
-	startLevel  int
-	keyIdx      int
-	h           *hasher
-	historical  bool
-	blockNr     uint64
+	reqIndices []int // Indices pointing back to request slice from slices retured by PrepareResolveParams
+	key_array  [52]byte
+	key        []byte
+	value      []byte
+	key_set    bool
+	nodeStack  [Levels + 1]shortNode
+	vertical   [Levels + 1]fullNode
+	fillCount  [Levels + 1]int
+	startLevel int
+	keyIdx     int
+	h          *hasher
+	historical bool
+	blockNr    uint64
 }
 
 func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
-		accounts:      accounts,
-		hashes:        hashes,
-		continuations: []*TrieContinuation{},
-		resolveHexes:  [][]byte{},
-		rhIndexLte:    -1,
-		rhIndexGt:     0,
-		contIndices:   []int{},
-		blockNr:       blockNr,
+		accounts:     accounts,
+		hashes:       hashes,
+		requests:     []*ResolveRequest{},
+		resolveHexes: [][]byte{},
+		rhIndexLte:   -1,
+		rhIndexGt:    0,
+		reqIndices:   []int{},
+		blockNr:      blockNr,
 	}
 	return &tr
 }
@@ -100,8 +100,10 @@ func (tr *TrieResolver) SetHistorical(h bool) {
 }
 
 // TrieResolver implements sort.Interface
+// and sorts by resolve requests
+// (more general requests come first)
 func (tr *TrieResolver) Len() int {
-	return len(tr.continuations)
+	return len(tr.requests)
 }
 
 func min(a, b int) int {
@@ -112,8 +114,8 @@ func min(a, b int) int {
 }
 
 func (tr *TrieResolver) Less(i, j int) bool {
-	ci := tr.continuations[i]
-	cj := tr.continuations[j]
+	ci := tr.requests[i]
+	cj := tr.requests[j]
 	m := min(ci.resolvePos, cj.resolvePos)
 	c := bytes.Compare(ci.contract, cj.contract)
 	if c != 0 {
@@ -127,30 +129,30 @@ func (tr *TrieResolver) Less(i, j int) bool {
 }
 
 func (tr *TrieResolver) Swap(i, j int) {
-	tr.continuations[i], tr.continuations[j] = tr.continuations[j], tr.continuations[i]
+	tr.requests[i], tr.requests[j] = tr.requests[j], tr.requests[i]
 }
 
-func (tr *TrieResolver) AddContinuation(c *TrieContinuation) {
-	tr.continuations = append(tr.continuations, c)
-	if c.contract == nil {
-		tr.resolveHexes = append(tr.resolveHexes, c.resolveHex)
+func (tr *TrieResolver) AddRequest(req *ResolveRequest) {
+	tr.requests = append(tr.requests, req)
+	if req.contract == nil {
+		tr.resolveHexes = append(tr.resolveHexes, req.resolveHex)
 	} else {
-		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(c.contract)[:40], c.resolveHex...))
+		tr.resolveHexes = append(tr.resolveHexes, append(keybytesToHex(req.contract)[:40], req.resolveHex...))
 	}
 }
 
 func (tr *TrieResolver) Print() {
-	for _, c := range tr.continuations {
-		fmt.Printf("%s\n", c.String())
+	for _, req := range tr.requests {
+		fmt.Printf("%s\n", req.String())
 	}
 }
 
 // Prepares information for the MultiWalk
 func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
-	// Remove continuations strictly contained in the preceeding ones
+	// Remove requests strictly contained in the preceeding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	if len(tr.continuations) == 0 {
+	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
 	sort.Stable(tr)
@@ -162,24 +164,24 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 		}
 	}
 	tr.resolveHexes = newHexes
-	var prevC *TrieContinuation
-	for i, c := range tr.continuations {
-		if prevC == nil || c.resolvePos < prevC.resolvePos ||
-			!bytes.Equal(c.contract, prevC.contract) ||
-			!bytes.HasPrefix(c.resolveHex[:c.resolvePos], prevC.resolveHex[:prevC.resolvePos]) {
+	var prevReq *ResolveRequest
+	for i, req := range tr.requests {
+		if prevReq == nil || req.resolvePos < prevReq.resolvePos ||
+			!bytes.Equal(req.contract, prevReq.contract) ||
+			!bytes.HasPrefix(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
 
-			tr.contIndices = append(tr.contIndices, i)
-			pLen := len(c.contract)
+			tr.reqIndices = append(tr.reqIndices, i)
+			pLen := len(req.contract)
 			key := make([]byte, pLen+32)
-			copy(key[:], c.contract)
-			decodeNibbles(c.resolveHex[:c.resolvePos], key[pLen:])
+			copy(key[:], req.contract)
+			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
-			c.extResolvePos = c.resolvePos + 2*pLen
-			fixedbits = append(fixedbits, uint(4*c.extResolvePos))
-			prevC = c
+			req.extResolvePos = req.resolvePos + 2*pLen
+			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+			prevReq = req
 		}
 	}
-	tr.startLevel = tr.continuations[0].extResolvePos
+	tr.startLevel = tr.requests[0].extResolvePos
 	return startkeys, fixedbits
 }
 
@@ -189,10 +191,10 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	if k != nil && (k[pLen]^tr.key[pLen])&0xf0 == 0 {
 		stopLevel++
 	}
-	tc := tr.continuations[tr.contIndices[tr.keyIdx]]
+	req := tr.requests[tr.reqIndices[tr.keyIdx]]
 	startLevel := tr.startLevel
-	if startLevel < tc.extResolvePos {
-		startLevel = tc.extResolvePos
+	if startLevel < req.extResolvePos {
+		startLevel = req.extResolvePos
 	}
 	if startLevel < stopLevel {
 		startLevel = stopLevel
@@ -237,7 +239,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 				tr.nodeStack[level].flags.dirty = true
 			}
 			tr.fillCount[level]++
-			if level >= tc.extResolvePos {
+			if level >= req.extResolvePos {
 				tr.nodeStack[level+1].Key = nil
 				tr.nodeStack[level+1].Val = nil
 				tr.nodeStack[level+1].flags.dirty = true
@@ -279,7 +281,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			}
 		}
 		tr.fillCount[level]++
-		if level >= tc.extResolvePos {
+		if level >= req.extResolvePos {
 			tr.nodeStack[level+1].Key = nil
 			tr.nodeStack[level+1].Val = nil
 			tr.nodeStack[level+1].flags.dirty = true
@@ -293,38 +295,37 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	tr.startLevel = stopLevel
 	if k == nil {
 		var root node
-		//fmt.Printf("root fillCount %d\n", tr.fillCount[tc.resolvePos])
-		if tr.fillCount[tc.extResolvePos] == 1 {
-			root = tr.nodeStack[tc.extResolvePos].copy()
-		} else if tr.fillCount[tc.extResolvePos] == 2 {
-			root = tr.vertical[tc.extResolvePos].duoCopy()
-		} else if tr.fillCount[tc.extResolvePos] > 2 {
-			root = tr.vertical[tc.extResolvePos].copy()
+		if tr.fillCount[req.extResolvePos] == 1 {
+			root = tr.nodeStack[req.extResolvePos].copy()
+		} else if tr.fillCount[req.extResolvePos] == 2 {
+			root = tr.vertical[req.extResolvePos].duoCopy()
+		} else if tr.fillCount[req.extResolvePos] > 2 {
+			root = tr.vertical[req.extResolvePos].copy()
 		}
 		if root == nil {
 			return fmt.Errorf("Resolve returned nil root")
 		}
 		var gotHash common.Hash
-		hashLen := tr.h.hash(root, tc.resolvePos == 0, gotHash[:])
+		hashLen := tr.h.hash(root, req.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
-			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
+			if !bytes.Equal(req.resolveHash, gotHash[:]) {
 				return fmt.Errorf("Resolving wrong hash for contract %x, key %x, pos %d, \nexpected %s, got %s\n",
-					tc.contract,
-					tc.resolveHex,
-					tc.resolvePos,
-					tc.resolveHash,
+					req.contract,
+					req.resolveHex,
+					req.resolvePos,
+					req.resolveHash,
 					hashNode(gotHash[:]),
 				)
 			}
 		} else {
-			if tc.resolveHash != nil {
+			if req.resolveHash != nil {
 				return fmt.Errorf("Resolving wrong hash for key %x, pos %d\nexpected %s, got embedded node\n",
-					tc.resolveHex,
-					tc.resolvePos,
-					tc.resolveHash)
+					req.resolveHex,
+					req.resolvePos,
+					req.resolveHash)
 			}
 		}
-		tc.resolved = root
+		req.resolved = root
 		for i := 0; i <= Levels; i++ {
 			tr.nodeStack[i].Key = nil
 			tr.nodeStack[i].Val = nil
@@ -335,16 +336,16 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.vertical[i].flags.dirty = true
 			tr.fillCount[i] = 0
 		}
-		tc.t.timestampSubTree(root, tr.blockNr)
-		if tc.resolveParent == nil {
-			if _, ok := tc.t.root.(hashNode); ok {
-				tc.t.root = root
+		req.t.timestampSubTree(root, tr.blockNr)
+		if req.resolveParent == nil {
+			if _, ok := req.t.root.(hashNode); ok {
+				req.t.root = root
 			}
 		} else {
-			switch parent := tc.resolveParent.(type) {
+			switch parent := req.resolveParent.(type) {
 			case nil:
-				if _, ok := tc.t.root.(hashNode); ok {
-					tc.t.root = root
+				if _, ok := req.t.root.(hashNode); ok {
+					req.t.root = root
 				}
 			case *shortNode:
 				if _, ok := parent.Val.(hashNode); ok {
@@ -352,7 +353,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 				}
 			case *duoNode:
 				i1, i2 := parent.childrenIdx()
-				switch tc.resolveHex[tc.resolvePos-1] {
+				switch req.resolveHex[req.resolvePos-1] {
 				case i1:
 					if _, ok := parent.child1.(hashNode); ok {
 						parent.child1 = root
@@ -363,7 +364,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 					}
 				}
 			case *fullNode:
-				idx := tc.resolveHex[tc.resolvePos-1]
+				idx := req.resolveHex[req.resolvePos-1]
 				if _, ok := parent.Children[idx].(hashNode); ok {
 					parent.Children[idx] = root
 				}
@@ -475,11 +476,11 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
-	tc := t.NewContinuation(nil, key, pos, expected)
+	req := t.NewResolveRequest(nil, key, pos, expected)
 	r := NewResolver(true, accounts, blockNr)
-	r.AddContinuation(tc)
+	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, blockNr); err != nil {
 		return nil, nil, err
 	}
-	return tc.resolved, expected, nil
+	return req.resolved, expected, nil
 }

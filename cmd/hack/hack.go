@@ -752,8 +752,8 @@ func testStartup() {
 	r := trie.NewResolver(false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
-	tc := t.NewContinuation(nil, key, 0, rootHash[:])
-	r.AddContinuation(tc)
+	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr)
 	if err != nil {
 		fmt.Printf("%v\n", err)
@@ -773,14 +773,14 @@ func testResolve() {
 	r := trie.NewResolver(false, false, 2701646)
 	key := common.FromHex("0x0305040a0e0100050907000c0109020906000304050c090700010b0a060f09080b03050707080c0908060d090103040d060f06010a09060d0b0d06040c07070410")
 	resolveHash := common.FromHex("0x2a470525dff3d3cf9b9cff1e7cea78c762a9d390e7c67a13400cdbe3071e4e1f")
-	tc := t.NewContinuation(contract, key, 0, resolveHash)
-	r.AddContinuation(tc)
+	req := t.NewResolveRequest(contract, key, 0, resolveHash)
+	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, 2701646)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
-	fmt.Printf("%s\n", tc)
+	fmt.Printf("%s\n", req)
 	enc, _ := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
 	fmt.Printf("Account: %x\n", enc)
 }

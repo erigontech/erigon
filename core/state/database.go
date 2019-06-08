@@ -363,12 +363,12 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		}
 		var contract = address // To avoid the value being overwritten, though still shared between continuations
 		for _, keyHash := range hashes {
-			if need, c := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
+			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
-				resolver.AddContinuation(c)
+				resolver.AddRequest(req)
 			}
 		}
 	}
@@ -424,12 +424,12 @@ func (tds *TrieDbState) buildAccountTouches() Hashes {
 func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	var resolver *trie.TrieResolver
 	for _, addrHash := range accountTouches {
-		if need, c := tds.t.NeedResolution(nil, addrHash[:]); need {
+		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
 				resolver = trie.NewResolver(false, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
-			resolver.AddContinuation(c)
+			resolver.AddRequest(req)
 		}
 	}
 	if resolver != nil {
