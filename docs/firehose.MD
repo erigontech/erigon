@@ -13,9 +13,9 @@ See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for 
 
 Changes in this revision:
 - Dropped "fuzzy" flag
-- Renamed GetStateData -> GetStateRanges, GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes, GetStorageData -> GetStorageRanges
+- Renamed GetStateData -> GetStateRanges, GetStateNodeData -> GetStateNodes, GetStorageData -> GetStorageRanges, GetStorageNodeData -> GetStorageNodes
 - Prefix encoding changed to the Yellow Paper's
-- Single block hash per request as opposed to multiple state roots per request in GetStateRanges
+- Single state root per request in GetStateRanges
 - Return available block hashes rather than state roots
 - StateRanges & StorageRanges may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
@@ -70,7 +70,7 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ### `GetStateRanges` Request
 
-The requester asks for state data (i.e. accounts) defined by a key prefix as of a given block.
+The requester asks for state data (i.e. accounts) defined by a given state root hash and key prefix.
 This command exclusively deals with retrieving the account RLPs.
 
 The requests can be batched so that multiple prefixes may be requested.
@@ -80,8 +80,8 @@ The requests can be batched so that multiple prefixes may be requested.
     # A request id is supplied, to match against the response
     id, # int
     
-    # The block hash as of which we request the data
-    block_hash, # 32 bytes
+    # The root hash for which we request the data
+    root_hash, # 32 bytes
 
     # A list of prefixes being requested
     (
@@ -98,13 +98,13 @@ also known as the compact encoding.
 No additional flags are utilized (i.e. `t == 0` always).
 
 #### Example
-Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block `0xaaa...aaa`.
+Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at state root `0xaaa…aaa`.
 Your request would look like:
 ```
 (
     1, #id
 
-    0xaaa...aaa, # block_hash
+    0xaaa...aaa, # state root hash
     
     # even-length 0xbeef and odd-length 0x0ddba11, encoded
     (
@@ -131,7 +131,7 @@ For each requested prefix the responder has the option of returning either:
         # There is one 2-tuple for every prefix requested
         (
             # 0 – success
-            # 1 – no data as of the requested block, the final entry of the response should be non-empty
+            # 1 – no data for the requested root, the final entry of the response should be non-empty
             # 2 – too many leaves matching the prefix
             status_code, # int
 
@@ -152,7 +152,7 @@ For each requested prefix the responder has the option of returning either:
         ...
     ),
 
-    # If an old block was requested, return the available blocks.
+    # If an old state root was requested, return the available blocks.
     # Otherwise, return an empty list.
     (
         # include the hash of every block that the server has the data for
@@ -204,12 +204,12 @@ A response to the example request above might look like:
         )
     ),
     
-    # this is empty, because the server had data for the requested block
+    # this is empty, because the server had data for the requested root
     () # available blocks
 )
 ```
 
-If the server does not have any data at the requested block hash, then it will return status code 1 for every prefix requested, and a list of available block hashes, like:
+If the server does not have any data for the requested state root, then it will return status code 1 for every prefix requested, and a list of available block hashes, like:
 
 ```
 (
@@ -219,7 +219,7 @@ If the server does not have any data at the requested block hash, then it will r
     (
         # This 2-tuple is for the 0xbeef prefix
         (
-            # the block hash is unavailable
+            # the state root is unavailable
             1, # status code
 
             # empty since not success
@@ -228,7 +228,7 @@ If the server does not have any data at the requested block hash, then it will r
 
         # This 2-tuple is for the 0x0ddba11 prefix
         (
-            # the block hash is unavailable
+            # the state root is unavailable
             1, # status code
 
             # empty since not success
@@ -236,7 +236,7 @@ If the server does not have any data at the requested block hash, then it will r
         )
     ),
 
-    # this should be populated, because the server did not have data for the requested block
+    # this should be populated, because the server did not have data for the requested root
     (
         # one available block hash
         0x1a2b3c4d...,
