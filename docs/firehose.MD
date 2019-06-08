@@ -15,7 +15,8 @@ Changes in this revision:
 - Dropped "fuzzy" flag
 - Renamed GetStateData -> GetStateRanges, GetStateNodeData -> GetStateNodes, GetStorageNodeData -> GetStorageNodes, GetStorageData -> GetStorageRanges
 - Prefix encoding changed to the Yellow Paper's
-- Single block hash per request as opposed to multiple state roots per request
+- Single block hash per request as opposed to multiple state roots per request in GetStateRanges
+- Return available block hashes rather than state roots
 - StateRanges & StorageRanges may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
 
@@ -69,7 +70,7 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ### `GetStateRanges` Request
 
-The requester asks for data defined by a key prefix as of a given block.
+The requester asks for state data (i.e. accounts) defined by a key prefix as of a given block.
 This command exclusively deals with retrieving the account RLPs.
 
 The requests can be batched so that multiple prefixes may be requested.
@@ -94,9 +95,7 @@ The requests can be batched so that multiple prefixes may be requested.
 
 We use the same prefix encoding as described in Appendix C of the [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf#appendix.C),
 also known as the compact encoding.
-No additional flags are utilized (ie `t == 0` always).
-
-**[TODO]** What if a prefix is in the middle of a Patricia extension?
+No additional flags are utilized (i.e. `t == 0` always).
 
 #### Example
 Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, as of block `0xaaa...aaa`.
@@ -118,11 +117,9 @@ Your request would look like:
 
 ### `StateRanges` Response
 
-
 For each requested prefix the responder has the option of returning either:
 1) **All** the keys & values that are stored in that key prefix range, OR
 2) An error status code
-
 
 ```
 (
@@ -136,7 +133,7 @@ For each requested prefix the responder has the option of returning either:
             # 0 – success
             # 1 – no data as of the requested block, the final entry of the response should be non-empty
             # 2 – too many leaves matching the prefix
-            status_code,
+            status_code, # int
 
             # If success, return the key/value pairs.
             # Otherwise, return an empty list.
@@ -176,7 +173,6 @@ The keys and values within a prefix may be returned in any order.
 #### Example
 A response to the example request above might look like:
 
-
 ```
 (
     1, # id
@@ -203,9 +199,9 @@ A response to the example request above might look like:
                 (0x0ddba119876..., 0x111...),
                 
                 # Second key/value pair
-                (0x0ddba11a1b5..., 0x1a2...),
+                (0x0ddba11a1b5..., 0x1a2...)
             )
-        ),
+        )
     ),
     
     # this is empty, because the server had data for the requested block
@@ -237,7 +233,7 @@ If the server does not have any data at the requested block hash, then it will r
 
             # empty since not success
             ()
-        ),
+        )
     ),
 
     # this should be populated, because the server did not have data for the requested block
@@ -245,7 +241,7 @@ If the server does not have any data at the requested block hash, then it will r
         # one available block hash
         0x1a2b3c4d...,
         # another available block hash
-        0x11223344...,
+        0x11223344...
     ) # available blocks
 )
 ```
@@ -256,46 +252,45 @@ It *is* possible for a server to return status code 1 for one prefix and status 
 
 ### `GetStorageRanges` Request
 
-Very similar to `GetStateRanges`: request storage by storage root hash, and key prefix. Also include account hash for clients that find this helpful for indexing. This command exclusively deals with retrieving the storage values.
+Very similar to `GetStateRanges`: request storage data by storage root hash and key prefix.
+Also include account hash for clients that find this helpful for indexing.
+This command exclusively deals with retrieving the storage values.
 
 The requests can be batched so that multiple prefixes and multiple root hashes may be requested.
 
-:::warning
-TODO: add single account state root
-:::
-
 ```
-{
+(
     # A request id is supplied, to match against the response
-    "id": int,
+    id, # int
 
-    # Requests are batched in a list under the single key: prefixes
-    "prefixes": [
-    
+    # Requests are batched in a list
+    (
         # Each list item is a three-element tuple
         (
             # The first element is the hash of the account address
-            address_hash,
+            address_hash, # 32 bytes
             
             # The second element is the hash of the requested storage trie root
-            storage_root_hash,
+            storage_root_hash, # 32 bytes
             
             # The third element is a list of prefixes being requested
-            [key_prefix, ...]
+            (key_prefix, ...)
         ),
         ...
-    ]
-}
+    )
+)
 ```
 
 
 #### Example
-Say you want the storage keys that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at storage root 0xbbb...bbb (in hashed account address 0xaaa...aaa). Additionally, you want all the values in the storage trie with root 0xddd...ddd (in hashed account address 0xccc...ccc). Your request would look like:
+Say you want the storage keys that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at storage root `0xbbb...bbb` (in hashed account address `0xaaa...aaa`).
+Additionally, you want all the values in the storage trie with root `0xddd...ddd` (in hashed account address `0xccc...ccc`).
+Your request would look like:
 ```
-{
-    "id": 1,
+(
+    1, # id
     
-    "prefixes": [
+    (
         (
             # account address hash
             0xaaa...aaa,
@@ -304,7 +299,7 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
             0xbbb...bbb,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
-            [0x00beef, 0x10ddba11]
+            (0x00beef, 0x10ddba11)
         ),
         (
             # second account address hash
@@ -314,10 +309,10 @@ Say you want the storage keys that (after hashing) have the prefixes `0xbeef` an
             0xddd...ddd,
             
             # ask for all values by requesting the empty prefix
-            [0x00]
+            (0x00)
         )
-    ]
-}
+    )
+)
 ```
 
 Note that the syncing client can (and probably should!) skip over storage tries with duplicate roots. There is no need to request an identical storage root twice for two different accounts. This could save you about [480MB of downloads](https://notes.ethereum.org/c/r1ESS_oLE/%2FGCePmXL9TZGzZ_Cm26qxAQ) in the current mainnet.
@@ -326,124 +321,129 @@ Note that the syncing client can (and probably should!) skip over storage tries 
 ### `StorageRanges` Response
 
 
-The responder has the option of returning either:
-1) Some nodes in the subtrie starting at the requested prefix (with some flexibility on which nodes to return), OR
-2) **All** the keys & values that are stored in that key prefix range
+For each requested prefix the responder has the option of returning either:
+1) **All** the keys & values that are stored in that key prefix range, OR
+2) An error status code
 
-This looks just like the `StateRanges` response
+This looks similar to the `StateRanges` response:
 
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id, # int
     
     # The response data, in the same ordering of the request
-    "data": [
+    (
 
-        # there is one element in this outer list for each state root requested
-        [
+        # there is one element in this outer list for each storage root requested
+        (
         
             # There is one 2-tuple for every prefix requested
             (
-            
-                # The responder may choose to reply with a list of trie nodes
-                [node, ...],
-                
-                # OR, the responder may reply with the keys & values
-                [
+    
+                # 0 – success
+                # 1 – no data for the requested storage root, the final entry of the response should be non-empty
+                # 2 – too many leaves matching the prefix
+                status_code, # int
+                    
+                # If success, return the key/value pairs.
+                # Otherwise, return an empty list.
+                (
                     # A single key/value pair
                     (
-                        # The prefix is omitted from the key
-                        key_suffix,
+                        # The prefix is NOT omitted from the key
+                        key,
                         
                         # The RLP-encoded value stored in the trie
                         value
                     ),
                     ...
-                ]
+                )
             ),
             ...
-        ],
+        ),
         ...
-    ],
+    ),
 
-    # If an old state root was requested, return the available roots.
+    # If an old storage root was requested, return the available blocks.
     # Otherwise, return an empty list.
-    "available_roots": [
-    
-        # include an entry for every state root hash that the server supports
-        state_root_hash,
+    (
+        # include the hash of every block that the server has the data for
+        available_block_0, # 32 bytes
         ...
-    ]
-}
+    )
+)
 ```
 
 #### Example
 A response to the example request above might look like:
 
-
 ```
-{
-    "id": 1,
+(
+    1, # id
     
     # This is a list of two elements, matching the `prefixes` request example
-    "data": [
+    (
     
         # All values in this first list correspond to
         # storage root hash: 0xbbb...bbb
-        [
+        (
             # This 2-tuple is for the 0xbeef prefix
             (
-                # Node data is not empty: the prefix was too short
-                [0xabc..., 0xdef...],
+                2, # the prefix was too short
                 
-                # The second element must be empty if the first is not
-                []
+                # The second element must be empty if not success
+                ()
             ),
             
             # This 2-tuple is for the 0x0ddba11 prefix
             (
-                # Node data is empty: the prefix was long enough to get values
-                [],
+                0, # success
                 
                 # This is the list of the key suffixes and values under 0x0ddba11
-                [
-                    # This is a single key suffix and value pair
-                    (0x09876..., 0x111...),
+                (
+                    # First key/value pair
+                    (0x0ddba11987..., 0x111e...),
                     
-                    # Here, all keys start with 0x0, because they are odd-length
-                    
-                    # Each key suffix must be 57 nibbles long, which
-                    # rounds out to 29 bytes
-                    (0x0a1b..., 0x1a2...),
-                ]),
-        ],
+                    # Second key/value pair
+                    (0x0ddba110a1..., 0x1a20...)
+
+                    # Third key/value pair
+                    (0x0ddba11f43..., 0x3434...)
+                )
+                # Note that returned key/value pairs may be not sorted by key
+            )
+        ),
         
         # All values in this second list correspond to
         # storage root hash: 0xddd...ddd
-        [
-            # The first (only) element in this list is for the empty prefix
-            
-            # The responder returned nothing, perhaps it hit an internal timeout.
-            # An empty tuple is a valid response, as is ([], [])
-            (),
-        ]
-    ],
+        (
+            # The first (only) element in this list is for the empty prefix    
+            (
+                1, # no data
+
+                () # empty since not success
+            )
+        )
+    ),
     
-    # this is empty, because the server had data for the requested state root
-    "available_roots": []
-}
+    # this should be populated, because the server did not have data for some requested storage roots
+    (
+        # one available block hash
+        0x1a2b3c4d...,
+        # another available block hash
+        0x11223344...
+    ) # available blocks
+)
 ```
 
-
-:::info
-Note that the request is keyed on storage root hashes, but if `available_roots` is returned, they are still for **state roots**, not storage root hashes for the requested account.
-:::
 
 ### `GetStateNodes` Request
 
 
 **TODO** description
+
+**TODO** What if a prefix is in the middle of a Patricia extension?
 
 ```
 {
