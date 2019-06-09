@@ -456,7 +456,8 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 
 	// Create a long block chain to download and the tester
 	targetBlocks := testChainBase.len() - 1
-	tester.newPeer("peer", protocol, testChainBase)
+	testChain:=testChainBase.copy(testChainBase.len())
+	tester.newPeer("peer", protocol, testChain)
 
 	// Wrap the importer to allow stepping
 	blocked, proceed := uint32(0), make(chan struct{})
@@ -823,7 +824,7 @@ func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 
 	// Create a block chain to download
-	chain := testChainBase
+	chain := testChainBase.copy(testChainBase.len())
 	tester.newPeer("peer", protocol, chain)
 
 	// Instrument the downloader to signal body requests

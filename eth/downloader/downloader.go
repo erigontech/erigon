@@ -469,10 +469,18 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	}
 
 	fetchers := []func() error{
-		func() error { return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
-		func() error { return d.fetchBodies(origin + 1) },          // Bodies are retrieved during normal and fast sync
-		func() error { return d.fetchReceipts(origin + 1) },        // Receipts are retrieved during fast sync
-		func() error { return d.processHeaders(origin+1, pivot, td) },
+		func() error {
+			fmt.Println("fetchHeaders")
+			return d.fetchHeaders(p, origin+1, pivot) }, // Headers are always retrieved
+		func() error {
+			fmt.Println("fetchBodies")
+			return d.fetchBodies(origin + 1) },          // Bodies are retrieved during normal and fast sync
+		func() error {
+			fmt.Println("fetchReceipts")
+			return d.fetchReceipts(origin + 1) },        // Receipts are retrieved during fast sync
+		func() error {
+			fmt.Println("processHeaders")
+			return d.processHeaders(origin+1, pivot, td) },
 	}
 	if d.mode == FastSync {
 		fetchers = append(fetchers, func() error { return d.processFastSyncContent(latest) })
@@ -489,7 +497,8 @@ func (d *Downloader) spawnSync(fetchers []func() error) error {
 	d.cancelWg.Add(len(fetchers))
 	for _, fn := range fetchers {
 		fn := fn
-		go func() { defer d.cancelWg.Done(); errc <- fn() }()
+		go func() {
+			defer d.cancelWg.Done(); errc <- fn() }()
 	}
 	// Wait for the first error, then terminate the others.
 	var err error

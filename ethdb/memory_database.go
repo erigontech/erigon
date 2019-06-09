@@ -53,6 +53,17 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 }
 
 func (db *BoltDatabase) MemCopy() Database {
+	//rnd:=rand.Int()
+	//_,s1,l1,_:=runtime.Caller(1)
+	//_,s2,l2,_:=runtime.Caller(2)
+	//_,s3,l3,_:=runtime.Caller(3)
+	//_,s4,l4,_:=runtime.Caller(4)
+	//_,s5,l5,_:=runtime.Caller(5)
+	//fmt.Println(rnd, " -- ", s1, l1)
+	//fmt.Println(rnd, " -- ", s2, l2)
+	//fmt.Println(rnd, " -- ", s3, l3)
+	//fmt.Println(rnd, " -- ", s4, l4)
+	//fmt.Println(rnd, " -- ", s5, l5)
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
@@ -60,24 +71,85 @@ func (db *BoltDatabase) MemCopy() Database {
 	if err != nil {
 		panic(err)
 	}
-	if err := mem.Update(func(memTx *bolt.Tx) error {
-		return db.db.View(func(tx *bolt.Tx) error {
-			return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-				memB, err := memTx.CreateBucket(name, true)
-				if err != nil {
-					return err
-				}
-				return b.ForEach(func(k, v []byte) error {
-					if err := memB.Put(k, v); err != nil {
-						return err
-					}
-					return nil
-				})
-			})
-		})
-	}); err != nil {
+
+	//db.boltDBWriteLock.Lock()
+	//defer db.boltDBWriteLock.Unlock()
+
+	//mp:=make(map[*bolt.Bucket][]struct{
+	//	k,v []byte
+	//})
+	//if err := mem.Update(func(writeTx *bolt.Tx) error {
+	//	return db.db.View(func(readTx *bolt.Tx) error {
+	//		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+	//			memB, err := writeTx.CreateBucket(name, true)
+	//			if err != nil {
+	//				return err
+	//			}
+	//			mp[memB] = []struct{
+	//				k, v []byte
+	//			}{}
+	//			return b.ForEach(func(k, v []byte) error {
+	//				mp[memB] = append(mp[memB],struct{
+	//					k, v []byte
+	//				}{
+	//					k:k,
+	//					v:v,
+	//				})
+	//				//if err := memB.Put(k, v); err != nil {
+	//				//	return err
+	//				//}
+	//				return nil
+	//			})
+	//		})
+	//	})
+	//}); err != nil {
+	//	panic(err)
+	//}
+	tx,err:=mem.Begin(true)
+	if err!=nil {
 		panic(err)
 	}
+
+	readTx,err:=db.db.Begin(false)
+	if err!=nil {
+		panic(err)
+	}
+
+
+	readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+		newBucket,err:=tx.CreateBucket(name, true)
+		if err != nil {
+			return err
+		}
+		return b.ForEach(func(k, v []byte) error {
+			return newBucket.Put(k,v)
+		})
+	})
+
+	readTx.Rollback()
+	err=tx.Commit()
+	if err!=nil {
+		panic(err)
+	}
+
+	//if err := mem.Update(func(writeTx *bolt.Tx) error {
+	//	return db.db.View(func(readTx *bolt.Tx) error {
+	//		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+	//			memB, err := writeTx.CreateBucketIfNotExists(name, true)
+	//			if err != nil {
+	//				return err
+	//			}
+	//			return b.ForEach(func(k, v []byte) error {
+	//				if err := memB.Put(k, v); err != nil {
+	//					return err
+	//				}
+	//				return nil
+	//			})
+	//		})
+	//	})
+	//}); err != nil {
+	//	panic(err)
+	//}
 	return &BoltDatabase{
 		fn:  "in-memory",
 		db:  mem,
