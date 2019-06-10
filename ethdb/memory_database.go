@@ -60,15 +60,16 @@ func (db *BoltDatabase) MemCopy() Database {
 	if err != nil {
 		panic(err)
 	}
-	if err := mem.Update(func(memTx *bolt.Tx) error {
-		return db.db.View(func(tx *bolt.Tx) error {
-			return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-				memB, err := memTx.CreateBucket(name, true)
+
+	if err := db.db.View(func(readTx *bolt.Tx) error {
+		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			return mem.Batch(func(writeTx *bolt.Tx) error {
+				newBucketToWrite, err := writeTx.CreateBucket(name, true)
 				if err != nil {
 					return err
 				}
 				return b.ForEach(func(k, v []byte) error {
-					if err := memB.Put(k, v); err != nil {
+					if err := newBucketToWrite.Put(k, v); err != nil {
 						return err
 					}
 					return nil

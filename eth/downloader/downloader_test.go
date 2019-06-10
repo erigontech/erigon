@@ -357,18 +357,6 @@ func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	return nil
 }
 
-// RequestNodeData constructs a getNodeData method associated with a particular
-// peer in the download tester. The returned function can be used to retrieve
-// batches of node state data from the particularly requested peer.
-func (dlp *downloadTesterPeer) RequestNodeData(hashes []common.Hash) error {
-	dlp.dl.lock.RLock()
-	defer dlp.dl.lock.RUnlock()
-
-	results := make([][]byte, 0, len(hashes))
-	go dlp.dl.downloader.DeliverNodeData(dlp.id, results)
-	return nil
-}
-
 // assertOwnChain checks if the local chain contains the correct number of items
 // of the various chain components.
 func assertOwnChain(t *testing.T, tester *downloadTester, length int) {
@@ -453,7 +441,8 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 
 	// Create a long block chain to download and the tester
 	targetBlocks := testChainBase.len() - 1
-	tester.newPeer("peer", protocol, testChainBase)
+	testChain:=testChainBase.copy(testChainBase.len())
+	tester.newPeer("peer", protocol, testChain)
 
 	// Wrap the importer to allow stepping
 	blocked, proceed := uint32(0), make(chan struct{})
@@ -820,7 +809,7 @@ func testEmptyShortCircuit(t *testing.T, protocol int, mode SyncMode) {
 	defer tester.terminate()
 
 	// Create a block chain to download
-	chain := testChainBase
+	chain := testChainBase.copy(testChainBase.len())
 	tester.newPeer("peer", protocol, chain)
 
 	// Instrument the downloader to signal body requests
@@ -1478,9 +1467,6 @@ func (ftp *floodingTestPeer) RequestBodies(hashes []common.Hash) error {
 func (ftp *floodingTestPeer) RequestReceipts(hashes []common.Hash) error {
 	return ftp.peer.RequestReceipts(hashes)
 }
-func (ftp *floodingTestPeer) RequestNodeData(hashes []common.Hash) error {
-	return ftp.peer.RequestNodeData(hashes)
-}
 
 func (ftp *floodingTestPeer) RequestHeadersByNumber(from uint64, count, skip int, reverse bool) error {
 	deliveriesDone := make(chan struct{}, 500)
@@ -1587,4 +1573,22 @@ func TestRemoteHeaderRequestSpan(t *testing.T) {
 			t.Errorf("test %d: wrong values", i)
 		}
 	}
+}
+
+func TestDataRace(t *testing.T) {
+	wg:= &sync.WaitGroup{}
+
+	const N = 10
+	wg.Add(N)
+	ln:=testChainBase.len()
+	for i:=0; i<N; i++ {
+		go makeFork(wg,ln,i)
+	}
+	wg.Wait()
+}
+
+func makeFork(wg *sync.WaitGroup, ln, i int) {
+	testChainBase.makeFork(ln,false, uint8(i))
+	wg.Done()
+	fmt.Println("done", i)
 }

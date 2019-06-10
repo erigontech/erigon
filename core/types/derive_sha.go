@@ -31,7 +31,7 @@ type DerivableList interface {
 
 func DeriveSha(list DerivableList) common.Hash {
 	keybuf := new(bytes.Buffer)
-	trie := trie.New(common.Hash{}, nil /*bucket*/, nil /*prefix*/, false /*encodeToBytes*/)
+	trie := trie.New(common.Hash{}, false /*encodeToBytes*/)
 	for i := 0; i < list.Len(); i++ {
 		keybuf.Reset()
 		rlp.Encode(keybuf, uint(i))
