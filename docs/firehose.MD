@@ -571,20 +571,20 @@ Just like `GetNodeData` [eth/63], except:
 2. Will only return bytecode with the corresponding hash, not arbitrary nodes data
 
 
-
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id, # int
     
     # Requesting bytecode with the following hashes
-    "bytecode_hashes": [
+    (
     
         # 32-byte hash of requested bytecode
         bytecode_hash,
         
         ...
-    ]
+    )
+)
 ```
 
 ### `Bytecode` Response
@@ -595,20 +595,20 @@ Just like `NodeData` [eth/63], except:
 2. Will only return bytecode with the corresponding hash, not arbitrary nodes data
 
 
-
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id, # int
     
-    # Hashes of bytecode that are being requested
-    "bytecodes": [
+    # Requested bytecodes
+    (
     
         # arbitrary byte length bytecode
         bytecode,
         
         ...
-    ]
+    )
+)
 ```
 
 Bytecode position in the response list must correspond to the position in the request list. Empty bytecode responses are permitted if the server declines to include it. The list may be short or empty, if any trailing bytecodes are omitted.
