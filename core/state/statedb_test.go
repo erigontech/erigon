@@ -28,7 +28,7 @@ import (
 	"testing"
 	"testing/quick"
 
-	check "gopkg.in/check.v1"
+	"gopkg.in/check.v1"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -491,5 +491,17 @@ func TestCopyOfCopy(t *testing.T) {
 	}
 	if got := sdb.Copy().Copy().GetBalance(addr).Uint64(); got != 42 {
 		t.Fatalf("2nd copy fail, expected 42, got %v", got)
+	}
+}
+
+func TestStateDBNewEmptyAccount(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	state := New(tds)
+	addr := common.Address{1}
+	state.CreateAccount(common.Address{1}, true)
+	obj := state.getStateObject(addr)
+	if obj.data.storageSize != 0 {
+		t.Fatal("Storage size of empty account should be 0")
 	}
 }

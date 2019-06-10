@@ -110,19 +110,23 @@ type Account struct {
 }
 
 // huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
-const HugeNumber = 1<<63
+const HugeNumber = 1 << 63
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, data, original Account) *stateObject {
 	if data.Balance == nil {
 		data.Balance = new(big.Int)
 	}
+
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
+		data.storageSize = 0
+	} else {
 		if data.storageSize == 0 {
 			data.storageSize = HugeNumber
 		}
 	}
+
 	return &stateObject{
 		db:                 db,
 		address:            address,
@@ -337,8 +341,8 @@ func (self *stateObject) StorageSize() uint64 {
 
 func (self *stateObject) SetStorageSize(size uint64) {
 	self.db.journal.append(storageSizeChange{
-		account:     &self.address,
-		prevsize:    self.data.storageSize,
+		account:  &self.address,
+		prevsize: self.data.storageSize,
 	})
 	self.setStorageSize(size)
 }
