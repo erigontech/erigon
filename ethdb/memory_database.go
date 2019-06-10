@@ -52,17 +52,6 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 }
 
 func (db *BoltDatabase) MemCopy() Database {
-	//rnd:=rand.Int()
-	//_,s1,l1,_:=runtime.Caller(1)
-	//_,s2,l2,_:=runtime.Caller(2)
-	//_,s3,l3,_:=runtime.Caller(3)
-	//_,s4,l4,_:=runtime.Caller(4)
-	//_,s5,l5,_:=runtime.Caller(5)
-	//fmt.Println(rnd, " -- ", s1, l1)
-	//fmt.Println(rnd, " -- ", s2, l2)
-	//fmt.Println(rnd, " -- ", s3, l3)
-	//fmt.Println(rnd, " -- ", s4, l4)
-	//fmt.Println(rnd, " -- ", s5, l5)
 	logger := log.New("database", "in-memory")
 
 	// Open the db and recover any potential corruptions
@@ -70,9 +59,6 @@ func (db *BoltDatabase) MemCopy() Database {
 	if err != nil {
 		panic(err)
 	}
-
-	db.boltDBWriteLock.Lock()
-	defer db.boltDBWriteLock.Unlock()
 
 	if err := mem.Batch(func(writeTx *bolt.Tx) error {
 		return db.db.View(func(readTx *bolt.Tx) error {

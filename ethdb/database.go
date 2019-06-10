@@ -48,7 +48,6 @@ type BoltDatabase struct {
 	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
 
 	log log.Logger // Contextual logger tracking the database path
-	boltDBWriteLock sync.Mutex
 }
 
 // NewBoltDatabase returns a LevelDB wrapped object.
