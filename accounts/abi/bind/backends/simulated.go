@@ -124,6 +124,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
 	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
+	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {

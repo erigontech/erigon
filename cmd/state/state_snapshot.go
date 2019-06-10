@@ -356,11 +356,11 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
-	t := trie.New(rootHash, state.AccountsBucket, nil, false)
-	r := trie.NewResolver(stateDb, false, true)
+	t := trie.New(rootHash, false)
+	r := trie.NewResolver(false, true, blockNum)
 	key := []byte{}
-	tc := t.NewContinuation(key, 0, rootHash[:])
-	r.AddContinuation(tc)
+	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	r.AddRequest(req)
 	err := r.ResolveWithDb(stateDb, blockNum)
 	if err != nil {
 		fmt.Printf("%v\n", err)
@@ -394,11 +394,11 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	}
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != emptyRoot {
-			st := trie.New(root, state.StorageBucket, address[:], true)
-			sr := trie.NewResolver(stateDb, false, false)
+			st := trie.New(root, true)
+			sr := trie.NewResolver(false, false, blockNum)
 			key := []byte{}
-			stc := st.NewContinuation(key, 0, root[:])
-			sr.AddContinuation(stc)
+			streq := st.NewResolveRequest(address[:], key, 0, root[:])
+			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {
 				fmt.Printf("%x: %v\n", address, err)
@@ -451,6 +451,7 @@ func state_snapshot() {
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(nextBlock.Number()) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
+	tds.StartNewBuffer()
 	for i, tx := range nextBlock.Transactions() {
 		statedb.Prepare(tx.Hash(), nextBlock.Hash(), i)
 		receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, tds.TrieStateWriter(), nextHeader, tx, usedGas, vmConfig)
@@ -458,26 +459,26 @@ func state_snapshot() {
 			panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 		}
 		if !chainConfig.IsByzantium(nextHeader.Number) {
-			rootHash, err := tds.TrieRoot()
-			if err != nil {
-				panic(fmt.Errorf("tx %d, %x failed: %v", i, tx.Hash(), err))
-			}
-			receipt.PostState = rootHash.Bytes()
+			tds.StartNewBuffer()
 		}
 		receipts = append(receipts, receipt)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	_, err = engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts)
-	if err != nil {
+	if _, err := engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts); err != nil {
 		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
 	}
-	nextRoot, err := tds.IntermediateRoot(statedb, chainConfig.IsEIP158(nextHeader.Number))
+	if err := statedb.Finalise(chainConfig.IsEIP158(nextHeader.Number), tds.TrieStateWriter()); err != nil {
+		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
+	}
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		panic(err)
 	}
-	fmt.Printf("Next root %x\n", nextRoot)
-	err = statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), tds.DbStateWriter())
-	if err != nil {
+	for i, receipt := range receipts {
+		receipt.PostState = roots[i].Bytes()
+	}
+	fmt.Printf("Next root %x\n", roots[len(roots)-1])
+	if err := statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), tds.DbStateWriter()); err != nil {
 		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
 	}
 	if _, err := batch.Commit(); err != nil {

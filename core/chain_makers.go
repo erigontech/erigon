@@ -102,11 +102,7 @@ func (b *BlockGen) AddTxWithChain(bc *BlockChain, tx *types.Transaction) {
 		panic(err)
 	}
 	if !b.config.IsByzantium(b.header.Number) {
-		rootHash, err := b.triedbstate.TrieRoot()
-		if err != nil {
-			panic(err)
-		}
-		receipt.PostState = rootHash.Bytes()
+		b.triedbstate.StartNewBuffer()
 	}
 	b.txs = append(b.txs, tx)
 	b.receipts = append(b.receipts, receipt)
@@ -186,7 +182,6 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	genblock := func(i int, parent *types.Block, statedb *state.StateDB, tds *state.TrieDbState) (*types.Block, types.Receipts) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
 		b.header = makeHeader(chainreader, parent, statedb, tds, b.engine)
-
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
@@ -196,6 +191,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				}
 			}
 		}
+		tds.StartNewBuffer()
 		if config.DAOForkSupport && config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(b.header.Number) == 0 {
 			misc.ApplyDAOHardFork(statedb)
 		}
@@ -205,20 +201,27 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
-			_, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts)
-			if err != nil {
+			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
-			b.header.Root, err = tds.IntermediateRoot(statedb, config.IsEIP158(b.header.Number))
-			if err != nil {
-				panic(fmt.Sprintf("could not get root: %v", err))
+			if err := statedb.Finalise(config.IsEIP158(b.header.Number), tds.TrieStateWriter()); err != nil {
+				panic(err)
 			}
+			roots, err := tds.ComputeTrieRoots()
+			if err != nil {
+				panic(err)
+			}
+			if !b.config.IsByzantium(b.header.Number) {
+				for i, receipt := range b.receipts {
+					receipt.PostState = roots[i].Bytes()
+				}
+			}
+			b.header.Root = roots[len(roots)-1]
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
-			err = statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter())
-			if err != nil {
+			if err := statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
@@ -232,12 +235,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	tds.Rebuild()
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
-		err = db.DeleteTimestamp(parent.NumberU64() + 1)
-		if err != nil {
-			panic(err)
-		}
 		block, receipt := genblock(i, parent, statedb, tds)
-		//tds.SetBlockNr(block.NumberU64())
 		blocks[i] = block
 		receipts[i] = receipt
 		parent = block

@@ -62,6 +62,7 @@ type testChain struct {
 	blockm   map[common.Hash]*types.Block
 	receiptm map[common.Hash][]*types.Receipt
 	tdm      map[common.Hash]*big.Int
+	cpyLock  sync.Mutex
 }
 
 // newTestChain creates a blockchain of the given length.
@@ -94,6 +95,8 @@ func (tc *testChain) shorten(length int) *testChain {
 }
 
 func (tc *testChain) copy(newlen int) *testChain {
+	tc.cpyLock.Lock()
+	defer  tc.cpyLock.Unlock()
 	cpy := &testChain{
 		genesis:  tc.genesis,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
@@ -122,6 +125,9 @@ func (tc *testChain) copy(newlen int) *testChain {
 func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool) {
 	// start := time.Now()
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
+	tc.cpyLock.Lock()
+	defer  tc.cpyLock.Unlock()
+
 	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 		// If a heavy chain is requested, delay blocks to raise difficulty

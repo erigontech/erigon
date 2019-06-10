@@ -302,12 +302,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				failed = err
 				break
 			}
-			root, err := tds.IntermediateRoot(statedb, api.eth.chainConfig.IsEIP158(big.NewInt(int64(number))))
-			if err != nil {
-				failed = err
-				break
-			}
-			proot = root
+			proot = tds.LastRoot()
 
 			// TODO(karalabe): Do we need the preimages? Won't they accumulate too much?
 		}
