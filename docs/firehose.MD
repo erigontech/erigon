@@ -441,7 +441,7 @@ A response to the example request above might look like:
 ### `GetStateNodes` Request
 
 Request state trie nodes for a specific state root.
-Note that this operative is similar to `GetNodeData` of ETH/63, but uses prefixes rather than hashes as node keys.
+Note that this operative is similar to `GetNodeData` [eth/63], but uses prefixes rather than hashes as node keys.
 It will also only return nodes from the state trie, not arbitrary node data.
 
 In a radix trie there is a trivial one-to-one correspondence between nodes and prefixes.
@@ -566,7 +566,7 @@ In such cases available blocks should be populated.
 ### `GetBytecode` Request
 
 
-Just like `GetNodeData`, except:
+Just like `GetNodeData` [eth/63], except:
 1. Includes a request ID
 2. Will only return bytecode with the corresponding hash, not arbitrary nodes data
 
@@ -590,7 +590,7 @@ Just like `GetNodeData`, except:
 ### `Bytecode` Response
 
 
-Just like `NodeData`, except:
+Just like `NodeData` [eth/63], except:
 1. Includes a request ID
 2. Will only return bytecode with the corresponding hash, not arbitrary nodes data
 
@@ -615,7 +615,7 @@ Bytecode position in the response list must correspond to the position in the re
 
 ### Handshakes
 
-This proposal doesn't have a position on the *format* of the handshake, or for headers of requests. If all goes well, these things will be improved during v64.
+This proposal doesn't have a position on the *format* of the handshake, or for headers of requests.
 
 However, it's likely that a few items will be very valuable to negotiate during handshake. For example:
 
@@ -764,4 +764,6 @@ In order to rebuild the structure of the trie, we need the full suffix of the ke
 
 ## References
 
-[Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://ethereum.github.io/yellowpaper](https://ethereum.github.io/yellowpaper)
+[Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://ethereum.github.io/yellowpaper](https://ethereum.github.io/yellowpaper).
+
+[eth/63] Vitalik Buterin, Gavin Wood, et al. [Ethereum Wire Protocol (ETH)](https://github.com/ethereum/devp2p/blob/master/caps/eth.md), 2019.
