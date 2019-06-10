@@ -2,7 +2,7 @@
 
 Jason Carver, Brian Cloutier, Andrew Ashikhmin
 
-**v0.3** (WIP)
+**v0.3**
 
 ---
 See [Firehose Sync v0.1](https://notes.ethereum.org/eXnqtO_vQquzrFDPHjuaFQ) for goals, background, and summaries of similar proposals.
@@ -168,6 +168,8 @@ For each requested prefix the responder has the option of returning either:
 The response must reuse the same ordering of prefixes as used for the request.
 
 For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root.
+
+"Too many leave" (`status_code = 2`) may only be returned is there are more than 4096 leaves matching the prefix.
 
 The keys and values within a prefix may be returned in any order.
 
@@ -449,7 +451,8 @@ In a radix trie there is a trivial one-to-one correspondence between nodes and p
 Since Ethereum employs a modified radix trie with extension nodes,
 we define node’s prefix as the shortest one such that all leaves descending from the node match the prefix
 and, conversely, all leaves that match the prefix descend from the node in question.
-**TODO** What if a prefix is in the middle of a Patricia extension?
+If a prefix is in the middle of a Patricia extension,
+the server may return either the matching node or an empty string.
 
 ```
 (
