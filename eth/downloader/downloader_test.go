@@ -1575,17 +1575,19 @@ func TestRemoteHeaderRequestSpan(t *testing.T) {
 	}
 }
 
-func TestDataRace(t *testing.T)  {
-	wg:=sync.WaitGroup{}
-	wg.Add(10)
+func TestDataRace(t *testing.T) {
+	wg:= &sync.WaitGroup{}
+
+	const N = 10
+	wg.Add(N)
 	ln:=testChainBase.len()
-	for i:=0; i<10; i++ {
+	for i:=0; i<N; i++ {
 		go makeFork(wg,ln,i)
 	}
 	wg.Wait()
 }
 
-func makeFork(wg sync.WaitGroup, ln, i int)  {
+func makeFork(wg *sync.WaitGroup, ln, i int) {
 	testChainBase.makeFork(ln,false, uint8(i))
 	wg.Done()
 	fmt.Println("done", i)

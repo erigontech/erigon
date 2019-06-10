@@ -18,6 +18,7 @@ package ethdb
 
 import (
 	"github.com/ledgerwatch/bolt"
+	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -73,12 +74,23 @@ func (db *BoltDatabase) MemCopy() Database {
 	db.boltDBWriteLock.Lock()
 	defer db.boltDBWriteLock.Unlock()
 
-	if err := mem.Update(func(writeTx *bolt.Tx) error {
+	if err := mem.Batch(func(writeTx *bolt.Tx) error {
 		return db.db.View(func(readTx *bolt.Tx) error {
 			return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-				newBucketToWrite, err := writeTx.CreateBucket(name, true)
-				if err != nil {
-					return err
+				_, err := writeTx.CreateBucket(name, true)
+				return err
+			})
+		})
+	}); err != nil {
+		panic(err)
+	}
+
+	if err := mem.Batch(func(writeTx *bolt.Tx) error {
+		return db.db.View(func(readTx *bolt.Tx) error {
+			return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+				newBucketToWrite := writeTx.Bucket(name)
+				if newBucketToWrite == nil {
+					return errors.New("all the buckets should already exist")
 				}
 				return b.ForEach(func(k, v []byte) error {
 					if err := newBucketToWrite.Put(k, v); err != nil {
