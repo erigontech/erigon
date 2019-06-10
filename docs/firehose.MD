@@ -69,7 +69,9 @@ Firehose Sync *enables* the strategies above, but does not enforce any one of th
 
 ## Command Specification for Firehose Sync
 
-### `GetStateRanges` Request
+All the new operatives/commands live under a new [RLPx](https://github.com/ethereum/devp2p/blob/master/rlpx.md) capability, `firehose`, rather than `eth`.
+
+### `GetStateRanges` Request (`0x00`)
 
 The requester asks for state data (i.e. accounts) defined by a given state root hash and key prefix.
 This command exclusively deals with retrieving the account RLPs.
@@ -116,7 +118,7 @@ Your request would look like:
 ```
 
 
-### `StateRanges` Response
+### `StateRanges` Response (`0x01`)
 
 For each requested prefix the responder has the option of returning either:
 1) **All** the keys & values that are stored in that key prefix range, OR
@@ -253,7 +255,7 @@ The only reason a server might return status code 1 and an empty list of availab
 
 It *is* possible for a server to return status code 1 for one prefix and status code 0 (or 2) for another prefix on the same block. It might do this if the server is in the middle of syncing data.
 
-### `GetStorageRanges` Request
+### `GetStorageRanges` Request (`0x02`)
 
 Very similar to `GetStateRanges`: request storage data by storage root hash and key prefix.
 Also include account hash for clients that find this helpful for indexing.
@@ -321,7 +323,7 @@ Your request would look like:
 Note that the syncing client can (and probably should!) skip over storage tries with duplicate roots. There is no need to request an identical storage root twice for two different accounts. This could save you about [480MB of downloads](https://notes.ethereum.org/c/r1ESS_oLE/%2FGCePmXL9TZGzZ_Cm26qxAQ) in the current mainnet.
 
 
-### `StorageRanges` Response
+### `StorageRanges` Response (`0x03`)
 
 
 For each requested prefix the responder has the option of returning either:
@@ -441,7 +443,7 @@ A response to the example request above might look like:
 ```
 
 
-### `GetStateNodes` Request
+### `GetStateNodes` Request (`0x04`)
 
 Request state trie nodes for a specific state root.
 Note that this operative is similar to `GetNodeData` [eth/63], but uses prefixes rather than hashes as node keys.
@@ -470,7 +472,7 @@ the server may return either the matching node or an empty string.
 )
 ```
 
-### `StateNodes` Response
+### `StateNodes` Response (`0x05`)
 
 ```
 (
@@ -501,7 +503,7 @@ Empty node responses are permitted if the server declines to include it.
 The list may be short or empty, if any trailing nodes are omitted.
 In such cases available blocks should be populated.
 
-### `GetStorageNodes` Request
+### `GetStorageNodes` Request (`0x06`)
 
 Analogue of `GetStateNodes` for storage nodes.
 
@@ -529,7 +531,7 @@ Analogue of `GetStateNodes` for storage nodes.
 )
 ```
 
-### `StorageNodes` Response
+### `StorageNodes` Response (`0x07`)
 
 
 ```
@@ -567,7 +569,7 @@ The list may be short or empty, if any trailing nodes are omitted.
 In such cases available blocks should be populated.
 
 
-### `GetBytecode` Request
+### `GetBytecode` Request (`0x08`)
 
 
 Just like `GetNodeData` [eth/63], except:
@@ -591,7 +593,7 @@ Just like `GetNodeData` [eth/63], except:
 )
 ```
 
-### `Bytecode` Response
+### `Bytecode` Response (`0x09`)
 
 
 Just like `NodeData` [eth/63], except:
@@ -618,7 +620,7 @@ Just like `NodeData` [eth/63], except:
 Bytecode position in the response list must correspond to the position in the request list. Empty bytecode responses are permitted if the server declines to include it. The list may be short or empty, if any trailing bytecodes are omitted.
 
 
-### `GetStorageSizes` Request
+### `GetStorageSizes` Request (`0x0a`)
 
 Request storage trie sizes (the number of leaves).
 
@@ -644,7 +646,7 @@ Request storage trie sizes (the number of leaves).
 ```
 
 
-### `GetStorageSizes` Response
+### `GetStorageSizes` Response (`0x0b`)
 
 ```
 (
@@ -671,7 +673,7 @@ Request storage trie sizes (the number of leaves).
 ```
 
 
-The server may return approximate storage size.
+The server may return approximate storage sizes.
 Refer to
 [[Size Estimation](https://medium.com/@akhounov/estimation-approximate-of-the-size-of-contracst-in-ethereum-4642fe92d6fe)]
 for a fast way of size estimation.
