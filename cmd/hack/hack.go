@@ -392,78 +392,6 @@ func bucketStats(db *bolt.DB) {
 		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 }
 
-func printOccupancies(t *trie.Trie, db ethdb.Database, blockNr uint64) {
-	o := make(map[int]map[int]int)
-	t.CountOccupancies(db, blockNr, o)
-	for level, lo := range o {
-		for i, count := range lo {
-			fmt.Printf("[%d %d]:%d ", level, i, count)
-		}
-	}
-	fmt.Printf("\n")
-}
-
-func trieStats() {
-	//db, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	db, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	if err != nil {
-		panic(err)
-	}
-	defer db.Close()
-	lastHash := rawdb.ReadHeadHeaderHash(db)
-	lastNumber := rawdb.ReadHeaderNumber(db, lastHash)
-	lastHeader := rawdb.ReadHeader(db, lastHash, *lastNumber)
-	tds, err := state.NewTrieDbState(lastHeader.Root, db, *lastNumber)
-	if err != nil {
-		panic(err)
-	}
-	t := tds.AccountTrie()
-	printOccupancies(t, db, *lastNumber)
-	/*
-		statedb := state.New(triedbst)
-		t := statedb.GetTrie()
-		for i := 0; i < 1; i++ {
-			//h1 := t.ResolveRoot(db, lastHeader.Root, lastNumber, i)
-			//fmt.Printf("Resolved hash for %d: %s\n", i, h1)
-			startTime := time.Now()
-			h2 := t.Rebuild(db, lastNumber, i)
-			fmt.Printf("Rebuding took %s\n", time.Since(startTime))
-			fmt.Printf("Rebult to %s, actual root %x\n", h2, lastHeader.Root)
-			fmt.Printf("\n\n")
-			//if !bytes.Equal(h1, h2) || !matched {
-			//	fmt.Printf("DIFFERENT ROOTS: %d %s %s\n", i, h1, h2)
-			//	break
-			//}
-		}
-		statedb.PrintOccupancies()
-
-		fmt.Printf("%x %x\n", lastHeader.Root, statedb.IntermediateRoot(true))
-		triedb, tree, err := statedb.EnumerateAccounts()
-		if err != nil {
-			panic(err)
-		}
-		sectrie, _ := triedb.(*trie.SecureTrie)
-		t := sectrie.GetTrie()
-		printOccupancies(t, db, lastNumber)
-		nextThreshold := big.NewInt(0)
-		step := big.NewInt(1)
-		tree.AscendGreaterOrEqual(&state.AccountItem{SecKey: nil, Balance: big.NewInt(0)}, func(i llrb.Item) bool {
-			item := i.(*state.AccountItem)
-			if item.Balance.Cmp(nextThreshold) != -1 {
-				fmt.Printf("Threshold: %s | ", nextThreshold.String())
-				printOccupancies(t, db, lastNumber)
-				for ; item.Balance.Cmp(nextThreshold) != -1; {
-					nextThreshold = nextThreshold.Add(nextThreshold, step)
-				}
-			}
-			t.TryDelete(db, item.SecKey, lastNumber)
-			return true
-		})
-		fmt.Printf("Final check | ")
-		printOccupancies(t, db, lastNumber)
-	*/
-}
-
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -708,8 +636,7 @@ func execToBlock(block int) {
 		}
 	}
 	tds := bc.GetTrieDbState()
-	root, err := tds.TrieRoot()
-	check(err)
+	root := tds.LastRoot()
 	fmt.Printf("Root hash: %x\n", root)
 	fmt.Printf("Last block root hash: %x\n", lastBlock.Root())
 	filename := fmt.Sprintf("right_%d.txt", lastBlock.NumberU64())
@@ -733,8 +660,7 @@ func extractTrie(block int) {
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
-	rebuiltRoot, err := tds.TrieRoot()
-	check(err)
+	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	filename := fmt.Sprintf("right_%d.txt", baseBlock.NumberU64())
 	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
@@ -767,8 +693,7 @@ func testRewind(block, rewind int) {
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
-	rebuiltRoot, err := tds.TrieRoot()
-	check(err)
+	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	startTime = time.Now()
 	rewindLen := uint64(rewind)
@@ -786,8 +711,7 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Rewound block hash: %x\n", rewoundBlock.Hash())
 	fmt.Printf("Rewound block root hash: %x\n", rewoundBlock.Root())
 	fmt.Printf("Rewound block parent hash: %x\n", rewoundBlock.ParentHash())
-	rewoundRoot, err := tds.TrieRoot()
-	check(err)
+	rewoundRoot := tds.LastRoot()
 	fmt.Printf("Calculated rewound root hash: %x\n", rewoundRoot)
 	/*
 		filename := fmt.Sprintf("root_%d.txt", rewoundBlock.NumberU64())
@@ -824,12 +748,12 @@ func testStartup() {
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	t := trie.New(common.Hash{}, state.AccountsBucket, nil, false)
-	r := trie.NewResolver(ethDb, false, true)
+	t := trie.New(common.Hash{}, false)
+	r := trie.NewResolver(false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
-	tc := t.NewContinuation(key, 0, rootHash[:])
-	r.AddContinuation(tc)
+	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, currentBlockNr)
 	if err != nil {
 		fmt.Printf("%v\n", err)
@@ -840,23 +764,25 @@ func testStartup() {
 func testResolve() {
 	startTime := time.Now()
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer ethDb.Close()
-	//treePrefix := common.FromHex("1194e966965418c7d73a42cceeb254d875860356")
-	t := trie.New(common.Hash{}, state.AccountsBucket, nil, true)
-	r := trie.NewResolver(ethDb, false, true)
-	key := common.FromHex("0803040c01")
-	resolveHash := common.FromHex("f123ef56888702971ba0604b51d0e229979f8e0b9f719cd18699e1238ab7bb4c")
-	tc := t.NewContinuation(key, 5, resolveHash)
-	r.AddContinuation(tc)
-	err = r.ResolveWithDb(ethDb, 1828653)
+	contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
+	t := trie.New(common.Hash{}, true)
+	r := trie.NewResolver(false, false, 2701646)
+	key := common.FromHex("0x0305040a0e0100050907000c0109020906000304050c090700010b0a060f09080b03050707080c0908060d090103040d060f06010a09060d0b0d06040c07070410")
+	resolveHash := common.FromHex("0x2a470525dff3d3cf9b9cff1e7cea78c762a9d390e7c67a13400cdbe3071e4e1f")
+	req := t.NewResolveRequest(contract, key, 0, resolveHash)
+	r.AddRequest(req)
+	err = r.ResolveWithDb(ethDb, 2701646)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
-	fmt.Printf("%s\n", tc)
+	fmt.Printf("%s\n", req)
+	enc, _ := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
+	fmt.Printf("Account: %x\n", enc)
 }
 
 func hashFile() {
@@ -879,40 +805,6 @@ func hashFile() {
 			w.WriteString(line)
 			w.WriteString("\n")
 		}
-	}
-	fmt.Printf("%d lines scanned\n", count)
-}
-
-func buildHashFromFile() {
-	treePrefix := common.FromHex("2a0c0dbecc7e4d658f48e01e3fa353f44050c208")
-	t := trie.New(common.Hash{}, state.StorageBucket, treePrefix, false)
-	r := trie.NewResolver(nil, false, false)
-	key := common.FromHex("010d04080f0e060e08000d09040800040f0f0f020c04060109090d0c020c090a010d0609070a0905020e0904000808030c020f060c0709060107080f0209020210")
-	resolveHash := common.FromHex("9edde1605e84902c450fdf275a6c9ef00fc67691d2ed62b4de35ef8c8bf1b20")
-	tc := t.NewContinuation(key, 0, resolveHash)
-	r.AddContinuation(tc)
-	f, err := os.Open("/Users/alexeyakhunov/mygit/go-ethereum/geth_read.log")
-	check(err)
-	defer f.Close()
-	r.PrepareResolveParams()
-	scanner := bufio.NewScanner(f)
-	count := 0
-	for scanner.Scan() {
-		terms := strings.Split(scanner.Text(), " ")
-		idx, _ := strconv.Atoi(terms[0])
-		key := common.FromHex(terms[1])
-		if len(key) == 0 {
-			key = nil
-		}
-		value := common.FromHex(terms[2])
-		if len(value) == 0 {
-			value = nil
-		}
-		_, err := r.Walker(idx, key, value)
-		if err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-		count++
 	}
 	fmt.Printf("%d lines scanned\n", count)
 }
@@ -1069,12 +961,12 @@ func invTree(wrong, right, diff string, block int, encodeToBytes bool) {
 }
 
 func preimage() {
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x2a23229958e691340d70ce446e3f3986df5f5289bbe763257e9c2321f7404f87"))
+	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x1c65b0ce81d408e9d99fa990df5bdf129bfc8ddb4458b5ae111a3241e6425a5e"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1123,15 +1015,12 @@ func loadAccount() {
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
-	t := trie.New(common.Hash{}, state.StorageBucket, accountBytes[:], true)
+	t := trie.New(common.Hash{}, true)
 	count := 0
 	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
-		err := t.TryUpdate(ethDb, key, v, blockNr)
-		if err != nil {
-			return false, err
-		}
+		t.Update(key, v, blockNr)
 		count++
 		return true, nil
 	}); err != nil {
@@ -1162,131 +1051,14 @@ func loadAccount() {
 		key := ([]byte(k))[len(accountBytes):]
 		if len(v) > 0 {
 			fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-			err := t.TryUpdate(ethDb, key, v, blockNr)
+			t.Update(key, v, blockNr)
 			check(err)
 		} else {
 			fmt.Printf("Deleted %x from %x\n", key, v_orig)
-			err := t.TryDelete(ethDb, key, blockNr)
-			check(err)
+			t.Delete(key, blockNr)
 		}
 	}
 	fmt.Printf("Updated storage root: %x\n", t.Hash())
-	/*
-		maxBits := uint64(1) << uint(len(keys))
-		for bits := uint64(0); bits < maxBits; bits++ {
-			undo := make(map[string][]byte)
-			count = 0
-			for i, k := range keys {
-				if (bits & (uint64(1) << uint(i))) == 0 {
-					continue
-				}
-				v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				v_orig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				key := ([]byte(k))[len(accountBytes):]
-				undo[string(key)] = common.CopyBytes(v_orig)
-				if len(v) > 0 {
-					fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-					err := t.TryUpdate(ethDb, key, v, blockNr)
-					check(err)
-				} else {
-					fmt.Printf("Deleted %x from %x\n", key, v_orig)
-					err := t.TryDelete(ethDb, key, blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Updated storage root: %x\n", t.Hash())
-			// Undo the changes
-			for key, v := range undo {
-				if len(v) > 0 {
-					err := t.TryUpdate(ethDb, []byte(key), v, blockNr)
-					check(err)
-				} else {
-					err := t.TryDelete(ethDb, []byte(key), blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Storage root after undo: %x\n--------------------------\n", t.Hash())
-		}
-		// Now try all permutations
-		p := make([]int, len(keys))
-		for i := 0; i < len(p); i++ {
-			p[i] = i
-		}
-		for {
-			undo := make(map[string][]byte)
-			count = 0
-			for _, pi := range p {
-				k := keys[pi]
-				v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				v_orig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
-				if err != nil {
-					fmt.Printf("for key %x err %v\n", k, err)
-				}
-				key := ([]byte(k))[len(accountBytes):]
-				undo[string(key)] = common.CopyBytes(v_orig)
-				if len(v) > 0 {
-					fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
-					err := t.TryUpdate(ethDb, key, v, blockNr)
-					check(err)
-				} else {
-					fmt.Printf("Deleted %x from %x\n", key, v_orig)
-					err := t.TryDelete(ethDb, key, blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Updated storage root: %x\n", t.Hash())
-			// Undo the changes
-			for key, v := range undo {
-				if len(v) > 0 {
-					err := t.TryUpdate(ethDb, []byte(key), v, blockNr)
-					check(err)
-				} else {
-					err := t.TryDelete(ethDb, []byte(key), blockNr)
-					check(err)
-				}
-			}
-			fmt.Printf("Storage root after undo: %x\n--------------------------\n", t.Hash())
-			count := len(p)
-	        if count <= 1 {
-	            break
-	        }
-
-	        // L2: Find last j such that self[j] <= self[j+1]. Terminate if no such j
-	        // exists.
-	        j := count - 2
-	        for j >= 0 && p[j] > p[j+1] {
-	            j--
-	        }
-	        if j == -1 {
-	            break
-	        }
-
-	        // L3: Find last l such that self[j] <= self[l], then exchange elements j and l:
-	        l := count - 1
-	        for p[j] > p[l] {
-	            l--
-	        }
-	        p[j], p[l] = p[l], p[j]
-
-	        // L4: Reverse elements j+1 ... count-1:
-	        lo := j + 1
-	        hi := count - 1
-	        for lo < hi {
-	        	p[lo], p[hi] = p[hi], p[lo]
-	            lo++
-	            hi--
-	        }
-		}
-	*/
 }
 
 func printBranches(block uint64) {
@@ -1516,7 +1288,7 @@ func main() {
 	//testRewind(*block, *rewind)
 	//hashFile()
 	//buildHashFromFile()
-	//testResolve()
+	testResolve()
 	//rlpIndices()
 	//printFullNodeRLPs()
 	//testStartup()
@@ -1539,7 +1311,7 @@ func main() {
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)
-	fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x040c0668aebe0bc41be1f70ebbed671dfdcd118be767a1ad6f78861c5e81abfc")))
+	//fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x040c0668aebe0bc41be1f70ebbed671dfdcd118be767a1ad6f78861c5e81abfc")))
 	//repair()
 	//readAccount()
 	//repairCurrent()

@@ -25,7 +25,6 @@ import (
 func NewMemDatabase() *BoltDatabase {
 	logger := log.New("database", "in-memory")
 
-	// Open the db and recover any potential corruptions
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		panic(err)
@@ -40,7 +39,6 @@ func NewMemDatabase() *BoltDatabase {
 func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 	logger := log.New("database", "in-memory")
 
-	// Open the db and recover any potential corruptions
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		panic(err)

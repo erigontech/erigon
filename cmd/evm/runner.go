@@ -215,7 +215,6 @@ func runCmd(ctx *cli.Context) error {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}
-		tds.IntermediateRoot(statedb, true)
 		fmt.Println(string(tds.Dump()))
 	}
 

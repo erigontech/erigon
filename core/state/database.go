@@ -25,12 +25,12 @@ import (
 	"runtime"
 	"sort"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	lru "github.com/hashicorp/golang-lru"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -121,15 +121,81 @@ func (nw *NoopWriter) WriteAccountStorage(address common.Address, key, original,
 	return nil
 }
 
+// Structure holding updates, deletes, and reads registered within one change period
+// A change period can be transaction within a block, or a block within group of blocks
+type Buffer struct {
+	storageUpdates map[common.Address]map[common.Hash][]byte
+	storageReads   map[common.Address]map[common.Hash]struct{}
+	accountUpdates map[common.Hash]*Account
+	accountReads   map[common.Hash]struct{}
+	deleted        map[common.Address]struct{}
+}
+
+// Prepares buffer for work or clears previous data
+func (b *Buffer) initialise() {
+	b.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
+	b.storageReads = make(map[common.Address]map[common.Hash]struct{})
+	b.accountUpdates = make(map[common.Hash]*Account)
+	b.accountReads = make(map[common.Hash]struct{})
+	b.deleted = make(map[common.Address]struct{})
+}
+
+// Replaces account pointer with pointers to the copies
+func (b *Buffer) detachAccounts() {
+	for addrHash, account := range b.accountUpdates {
+		if account != nil {
+			b.accountUpdates[addrHash] = &Account{
+				Nonce:    account.Nonce,
+				Balance:  new(big.Int).Set(account.Balance),
+				Root:     account.Root,
+				CodeHash: account.CodeHash,
+			}
+		}
+	}
+}
+
+// Merges the content of another buffer into this one
+func (b *Buffer) merge(other *Buffer) {
+	for address, om := range other.storageUpdates {
+		m, ok := b.storageUpdates[address]
+		if !ok {
+			m = make(map[common.Hash][]byte)
+			b.storageUpdates[address] = m
+		}
+		for keyHash, v := range om {
+			m[keyHash] = v
+		}
+	}
+	for address, om := range other.storageReads {
+		m, ok := b.storageReads[address]
+		if !ok {
+			m = make(map[common.Hash]struct{})
+			b.storageReads[address] = m
+		}
+		for keyHash := range om {
+			m[keyHash] = struct{}{}
+		}
+	}
+	for addrHash, account := range other.accountUpdates {
+		b.accountUpdates[addrHash] = account
+	}
+	for addrHash := range other.accountReads {
+		b.accountReads[addrHash] = struct{}{}
+	}
+	for address := range other.deleted {
+		b.deleted[address] = struct{}{}
+	}
+}
+
 // Implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
 	t                *trie.Trie
 	db               ethdb.Database
 	blockNr          uint64
-	storageTries     map[common.Hash]*trie.Trie
-	storageUpdates   map[common.Address]map[common.Hash][]byte
-	accountUpdates   map[common.Hash]*Account
-	deleted          map[common.Hash]struct{}
+	storageTries     map[common.Address]*trie.Trie
+	buffers          []*Buffer
+	aggregateBuffer  *Buffer // Merge of all buffers
+	currentBuffer    *Buffer
 	codeCache        *lru.Cache
 	codeSizeCache    *lru.Cache
 	historical       bool
@@ -138,22 +204,7 @@ type TrieDbState struct {
 	oldestGeneration uint64
 	noHistory        bool
 	resolveReads     bool
-	proofMasks       map[string]uint32
-	sMasks           map[string]map[string]uint32
-	proofHashes      map[string][16]common.Hash
-	sHashes          map[string]map[string][16]common.Hash
-	soleHashes       map[string]common.Hash
-	sSoleHashes      map[string]map[string]common.Hash
-	createdProofs    map[string]struct{}
-	sCreatedProofs   map[string]map[string]struct{}
-	proofShorts      map[string][]byte
-	sShorts          map[string]map[string][]byte
-	createdShorts    map[string]struct{}
-	sCreatedShorts   map[string]map[string]struct{}
-	proofValues      map[string][]byte
-	sValues          map[string]map[string][]byte
-	proofCodes       map[common.Hash][]byte
-	createdCodes     map[common.Hash]struct{}
+	pg               *trie.ProofGenerator
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -165,36 +216,17 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	if err != nil {
 		return nil, err
 	}
-	t := trie.New(root, AccountsBucket, nil, false)
+	t := trie.New(root, false)
 	tds := TrieDbState{
-		t:              t,
-		db:             db,
-		blockNr:        blockNr,
-		storageTries:   make(map[common.Hash]*trie.Trie),
-		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
-		accountUpdates: make(map[common.Hash]*Account),
-		deleted:        make(map[common.Hash]struct{}),
-		proofMasks:     make(map[string]uint32),
-		sMasks:         make(map[string]map[string]uint32),
-		proofHashes:    make(map[string][16]common.Hash),
-		sHashes:        make(map[string]map[string][16]common.Hash),
-		soleHashes:     make(map[string]common.Hash),
-		sSoleHashes:    make(map[string]map[string]common.Hash),
-		createdProofs:  make(map[string]struct{}),
-		sCreatedProofs: make(map[string]map[string]struct{}),
-		proofShorts:    make(map[string][]byte),
-		sShorts:        make(map[string]map[string][]byte),
-		createdShorts:  make(map[string]struct{}),
-		sCreatedShorts: make(map[string]map[string]struct{}),
-		proofValues:    make(map[string][]byte),
-		sValues:        make(map[string]map[string][]byte),
-		proofCodes:     make(map[common.Hash][]byte),
-		createdCodes:   make(map[common.Hash]struct{}),
-		codeCache:      cc,
-		codeSizeCache:  csc,
+		t:             t,
+		db:            db,
+		blockNr:       blockNr,
+		storageTries:  make(map[common.Address]*trie.Trie),
+		codeCache:     cc,
+		codeSizeCache: csc,
+		pg:            trie.NewProofGenerator(),
 	}
 	t.MakeListed(tds.joinGeneration, tds.leftGeneration)
-	t.ProofFunctions(tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
 	tds.generationCounts = make(map[uint64]int, 4096)
 	tds.oldestGeneration = blockNr
 	return &tds, nil
@@ -202,17 +234,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 
 func (tds *TrieDbState) SetHistorical(h bool) {
 	tds.historical = h
-	tds.t.SetHistorical(h)
 }
 
 func (tds *TrieDbState) SetResolveReads(rr bool) {
-	if tds.resolveReads != rr {
-		tds.resolveReads = rr
-		tds.t.SetResolveReads(rr)
-		for _, st := range tds.storageTries {
-			st.SetResolveReads(rr)
-		}
-	}
+	tds.resolveReads = rr
 }
 
 func (tds *TrieDbState) SetNoHistory(nh bool) {
@@ -222,29 +247,10 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
 	cpy := TrieDbState{
-		t:              &tcopy,
-		db:             tds.db,
-		blockNr:        tds.blockNr,
-		storageTries:   make(map[common.Hash]*trie.Trie),
-		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
-		accountUpdates: make(map[common.Hash]*Account),
-		deleted:        make(map[common.Hash]struct{}),
-		proofMasks:     make(map[string]uint32),
-		sMasks:         make(map[string]map[string]uint32),
-		proofHashes:    make(map[string][16]common.Hash),
-		sHashes:        make(map[string]map[string][16]common.Hash),
-		soleHashes:     make(map[string]common.Hash),
-		sSoleHashes:    make(map[string]map[string]common.Hash),
-		createdProofs:  make(map[string]struct{}),
-		sCreatedProofs: make(map[string]map[string]struct{}),
-		proofShorts:    make(map[string][]byte),
-		sShorts:        make(map[string]map[string][]byte),
-		createdShorts:  make(map[string]struct{}),
-		sCreatedShorts: make(map[string]map[string]struct{}),
-		proofValues:    make(map[string][]byte),
-		sValues:        make(map[string]map[string][]byte),
-		proofCodes:     make(map[common.Hash][]byte),
-		createdCodes:   make(map[common.Hash]struct{}),
+		t:            &tcopy,
+		db:           tds.db,
+		blockNr:      tds.blockNr,
+		storageTries: make(map[common.Address]*trie.Trie),
 	}
 	return &cpy
 }
@@ -257,257 +263,28 @@ func (tds *TrieDbState) AccountTrie() *trie.Trie {
 	return tds.t
 }
 
-func (tds *TrieDbState) TrieRoot() (common.Hash, error) {
-	root, err := tds.trieRoot(true)
+func (tds *TrieDbState) StartNewBuffer() {
+	if tds.currentBuffer != nil {
+		if tds.aggregateBuffer == nil {
+			tds.aggregateBuffer = &Buffer{}
+			tds.aggregateBuffer.initialise()
+		}
+		tds.aggregateBuffer.merge(tds.currentBuffer)
+		tds.currentBuffer.detachAccounts()
+	}
+	tds.currentBuffer = &Buffer{}
+	tds.currentBuffer.initialise()
+	tds.buffers = append(tds.buffers, tds.currentBuffer)
+}
+
+func (tds *TrieDbState) LastRoot() common.Hash {
+	return tds.t.Hash()
+}
+
+func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
+	roots, err := tds.computeTrieRoots(true)
 	tds.clearUpdates()
-	return root, err
-}
-
-func (tds *TrieDbState) extractProofs(prefix []byte, trace bool) (
-	masks []uint16, hashes []common.Hash, shortKeys [][]byte, values [][]byte,
-) {
-	if trace {
-		fmt.Printf("Extracting proofs for prefix %x\n", prefix)
-		if prefix != nil {
-			h := newHasher()
-			defer returnHasherToPool(h)
-			h.sha.Reset()
-			h.sha.Write(prefix)
-			var buf common.Hash
-			h.sha.Read(buf[:])
-			fmt.Printf("prefix hash: %x\n", buf)
-		}
-	}
-	var proofMasks map[string]uint32
-	if prefix == nil {
-		proofMasks = tds.proofMasks
-	} else {
-		var ok bool
-		ps := string(prefix)
-		proofMasks, ok = tds.sMasks[ps]
-		if !ok {
-			proofMasks = make(map[string]uint32)
-		}
-	}
-	var proofHashes map[string][16]common.Hash
-	if prefix == nil {
-		proofHashes = tds.proofHashes
-	} else {
-		var ok bool
-		ps := string(prefix)
-		proofHashes, ok = tds.sHashes[ps]
-		if !ok {
-			proofHashes = make(map[string][16]common.Hash)
-		}
-	}
-	var soleHashes map[string]common.Hash
-	if prefix == nil {
-		soleHashes = tds.soleHashes
-	} else {
-		var ok bool
-		ps := string(prefix)
-		soleHashes, ok = tds.sSoleHashes[ps]
-		if !ok {
-			soleHashes = make(map[string]common.Hash)
-		}
-	}
-	var proofValues map[string][]byte
-	if prefix == nil {
-		proofValues = tds.proofValues
-	} else {
-		var ok bool
-		ps := string(prefix)
-		proofValues, ok = tds.sValues[ps]
-		if !ok {
-			proofValues = make(map[string][]byte)
-		}
-	}
-	var proofShorts map[string][]byte
-	if prefix == nil {
-		proofShorts = tds.proofShorts
-	} else {
-		var ok bool
-		ps := string(prefix)
-		proofShorts, ok = tds.sShorts[ps]
-		if !ok {
-			proofShorts = make(map[string][]byte)
-		}
-	}
-	// Collect all the strings
-	keys := []string{}
-	keySet := make(map[string]struct{})
-	for key := range proofMasks {
-		if _, ok := keySet[key]; !ok {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
-		}
-	}
-	for key := range proofShorts {
-		if _, ok := keySet[key]; !ok {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
-		}
-	}
-	for key := range proofValues {
-		if _, ok := keySet[key]; !ok {
-			keys = append(keys, key)
-			keySet[key] = struct{}{}
-		}
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		if trace {
-			fmt.Printf("%x\n", key)
-		}
-		if hashmask, ok := proofMasks[key]; ok {
-			// Determine the downward mask
-			var fullnodemask uint16
-			var shortnodemask uint16
-			for nibble := byte(0); nibble < 16; nibble++ {
-				if _, ok2 := proofShorts[key+string(nibble)]; ok2 {
-					shortnodemask |= (uint16(1) << nibble)
-				}
-				if _, ok3 := proofMasks[key+string(nibble)]; ok3 {
-					fullnodemask |= (uint16(1) << nibble)
-				}
-			}
-			h := proofHashes[key]
-			for i := byte(0); i < 16; i++ {
-				if (hashmask & (uint32(1) << i)) != 0 {
-					hashes = append(hashes, h[i])
-				}
-			}
-			if trace {
-				fmt.Printf("%x: hash %16b, full %16b, short %16b\n", key, hashmask, fullnodemask, shortnodemask)
-			}
-			if len(masks) == 0 {
-				masks = append(masks, 0)
-			}
-			masks = append(masks, uint16(hashmask))      // Hash mask
-			masks = append(masks, uint16(fullnodemask))  // Fullnode mask
-			masks = append(masks, uint16(shortnodemask)) // Short node mask
-		}
-		if short, ok := proofShorts[key]; ok {
-			if trace {
-				fmt.Printf("Short %x: %x\n", []byte(key), short)
-			}
-			var downmask uint16
-			if _, ok2 := proofHashes[key+string(short)]; ok2 {
-				downmask = 1
-			} else if h, ok1 := soleHashes[key+string(short)]; ok1 {
-				if trace {
-					fmt.Printf("Sole hash: %x\n", h[:2])
-				}
-				hashes = append(hashes, h)
-			}
-			if trace {
-				fmt.Printf("Down %16b\n", downmask)
-			}
-			if len(masks) == 0 {
-				masks = append(masks, 1)
-			}
-			masks = append(masks, downmask)
-			shortKeys = append(shortKeys, short)
-		}
-		if value, ok := proofValues[key]; ok {
-			if trace {
-				fmt.Printf("Value %x\n", value)
-			}
-			values = append(values, value)
-		}
-	}
-	if trace {
-		fmt.Printf("Masks:")
-		for _, mask := range masks {
-			fmt.Printf(" %16b", mask)
-		}
-		fmt.Printf("\n")
-		fmt.Printf("Shorts:")
-		for _, short := range shortKeys {
-			fmt.Printf(" %x", short)
-		}
-		fmt.Printf("\n")
-		fmt.Printf("Hashes:")
-		for _, hash := range hashes {
-			fmt.Printf(" %x", hash[:4])
-		}
-		fmt.Printf("\n")
-		fmt.Printf("Values:")
-		for _, value := range values {
-			if value == nil {
-				fmt.Printf(" nil")
-			} else {
-				fmt.Printf(" %x", value)
-			}
-		}
-		fmt.Printf("\n")
-	}
-	return masks, hashes, shortKeys, values
-}
-
-func (tds *TrieDbState) ExtractProofs(trace bool) BlockProof {
-	if trace {
-		fmt.Printf("Extracting proofs for block %d\n", tds.blockNr)
-	}
-	// Collect prefixes
-	prefixes := []string{}
-	prefixSet := make(map[string]struct{})
-	for prefix := range tds.sMasks {
-		if _, ok := prefixSet[prefix]; !ok {
-			prefixes = append(prefixes, prefix)
-			prefixSet[prefix] = struct{}{}
-		}
-	}
-	for prefix := range tds.sShorts {
-		if _, ok := prefixSet[prefix]; !ok {
-			prefixes = append(prefixes, prefix)
-			prefixSet[prefix] = struct{}{}
-		}
-	}
-	for prefix := range tds.sValues {
-		if _, ok := prefixSet[prefix]; !ok {
-			prefixes = append(prefixes, prefix)
-			prefixSet[prefix] = struct{}{}
-		}
-	}
-	sort.Strings(prefixes)
-	var contracts []common.Address
-	var cMasks []uint16
-	var cHashes []common.Hash
-	var cShortKeys [][]byte
-	var cValues [][]byte
-	for _, prefix := range prefixes {
-		m, h, s, v := tds.extractProofs([]byte(prefix), trace)
-		if len(m) > 0 || len(h) > 0 || len(s) > 0 || len(v) > 0 {
-			contracts = append(contracts, common.BytesToAddress([]byte(prefix)))
-			cMasks = append(cMasks, m...)
-			cHashes = append(cHashes, h...)
-			cShortKeys = append(cShortKeys, s...)
-			cValues = append(cValues, v...)
-		}
-	}
-	masks, hashes, shortKeys, values := tds.extractProofs(nil, trace)
-	var codes [][]byte
-	for _, code := range tds.proofCodes {
-		codes = append(codes, code)
-	}
-	tds.proofMasks = make(map[string]uint32)
-	tds.sMasks = make(map[string]map[string]uint32)
-	tds.proofHashes = make(map[string][16]common.Hash)
-	tds.sHashes = make(map[string]map[string][16]common.Hash)
-	tds.soleHashes = make(map[string]common.Hash)
-	tds.sSoleHashes = make(map[string]map[string]common.Hash)
-	tds.createdProofs = make(map[string]struct{})
-	tds.sCreatedProofs = make(map[string]map[string]struct{})
-	tds.proofShorts = make(map[string][]byte)
-	tds.sShorts = make(map[string]map[string][]byte)
-	tds.createdShorts = make(map[string]struct{})
-	tds.sCreatedShorts = make(map[string]map[string]struct{})
-	tds.proofValues = make(map[string][]byte)
-	tds.sValues = make(map[string]map[string][]byte)
-	tds.proofCodes = make(map[common.Hash][]byte)
-	tds.createdCodes = make(map[common.Hash]struct{})
-	return BlockProof{contracts, cMasks, cHashes, cShortKeys, cValues, codes, masks, hashes, shortKeys, values}
+	return roots, err
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
@@ -517,8 +294,8 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	}
 }
 
-func (tds *TrieDbState) PrintStorageTrie(w io.Writer, addrHash common.Hash) {
-	storageTrie := tds.storageTries[addrHash]
+func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
+	storageTrie := tds.storageTries[address]
 	storageTrie.Print(w)
 }
 
@@ -534,148 +311,243 @@ func (hashes Hashes) Swap(i, j int) {
 	hashes[i], hashes[j] = hashes[j], hashes[i]
 }
 
-func (tds *TrieDbState) trieRoot(forward bool) (common.Hash, error) {
-	if len(tds.storageUpdates) == 0 && len(tds.accountUpdates) == 0 {
-		return tds.t.Hash(), nil
+// Builds a map where for each address (of a smart contract) there is
+// a sorted list of all key hashes that were touched within the
+// period for which we are aggregating updates
+func (tds *TrieDbState) buildStorageTouches() map[common.Address]Hashes {
+	storageTouches := make(map[common.Address]Hashes)
+	for address, m := range tds.aggregateBuffer.storageUpdates {
+		var hashes Hashes
+		mRead := tds.aggregateBuffer.storageReads[address]
+		i := 0
+		hashes = make(Hashes, len(m)+len(mRead))
+		for keyHash := range m {
+			hashes[i] = keyHash
+			i++
+		}
+		for keyHash := range mRead {
+			if _, ok := m[keyHash]; !ok {
+				hashes[i] = keyHash
+				i++
+			}
+		}
+		if len(hashes) > 0 {
+			sort.Sort(hashes)
+			storageTouches[address] = hashes
+		}
 	}
-	//for address, account := range tds.accountUpdates {
-	//	fmt.Printf("%x %d %x %x\n", address[:], account.Balance, account.CodeHash, account.Root[:])
-	//}
-	//fmt.Printf("=================\n")
-	oldContinuations := []*trie.TrieContinuation{}
-	newContinuations := []*trie.TrieContinuation{}
-	// Updates before deletes
-	for address, m := range tds.storageUpdates {
-		addrHash, err := tds.HashAddress(&address, false /*save*/)
-		if err != nil {
-			return common.Hash{}, nil
-		}
-		if _, ok := tds.deleted[addrHash]; ok {
+	for address, m := range tds.aggregateBuffer.storageReads {
+		if _, ok := tds.aggregateBuffer.storageUpdates[address]; ok {
 			continue
-		}
-		storageTrie, err := tds.getStorageTrie(address, addrHash, true)
-		if err != nil {
-			return common.Hash{}, err
 		}
 		hashes := make(Hashes, len(m))
 		i := 0
-		for keyHash, _ := range m {
+		for keyHash := range m {
 			hashes[i] = keyHash
 			i++
 		}
 		sort.Sort(hashes)
-		for _, keyHash := range hashes {
-			v := m[keyHash]
-			var c *trie.TrieContinuation
-			if len(v) > 0 {
-				c = storageTrie.UpdateAction(keyHash[:], v)
-				oldContinuations = append(oldContinuations, c)
-			} else {
-				c = storageTrie.DeleteAction(keyHash[:])
-				oldContinuations = append(oldContinuations, c)
-			}
-		}
+		storageTouches[address] = hashes
 	}
-	it := 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
+	return storageTouches
+}
+
+// Expands the storage tries (by loading data from the database) if it is required
+// for accessing storage slots containing in the storageTouches map
+func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]Hashes) error {
+	var resolver *trie.TrieResolver
+	for address, hashes := range storageTouches {
+		storageTrie, err := tds.getStorageTrie(address, true)
+		if err != nil {
+			return err
+		}
+		var contract = address // To avoid the value being overwritten, though still shared between continuations
+		for _, keyHash := range hashes {
+			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, false)
+					resolver = trie.NewResolver(false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
-				resolver.AddContinuation(c)
+				resolver.AddRequest(req)
 			}
 		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
-			}
-			resolver = nil
+	}
+	if resolver != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+			return err
 		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
 	}
-	if it > 3 {
-		fmt.Printf("Resolved storage in %d iterations\n", it)
+	return nil
+}
+
+// Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
+func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[common.Address]Hashes) error {
+	for address, hashes := range storageTouches {
+		if _, ok := tds.aggregateBuffer.deleted[address]; ok && len(tds.aggregateBuffer.storageReads[address]) == 0 {
+			// We can only skip the proof of storage entirely if
+			// there were no reads before writes and account got deleted
+			continue
+		}
+		storageTrie, err := tds.getStorageTrie(address, true)
+		if err != nil {
+			return err
+		}
+		var contract = address
+		for _, keyHash := range hashes {
+			storageTrie.PopulateBlockProofData(contract[:], keyHash[:], tds.pg)
+		}
 	}
-	oldContinuations = []*trie.TrieContinuation{}
-	newContinuations = []*trie.TrieContinuation{}
-	addrs := make(Hashes, len(tds.accountUpdates))
+	return nil
+}
+
+// Builds a sorted list of all adsresss hashes that were touched within the
+// period for which we are aggregating updates
+func (tds *TrieDbState) buildAccountTouches() Hashes {
+	accountTouches := make(Hashes, len(tds.aggregateBuffer.accountUpdates)+len(tds.aggregateBuffer.accountReads))
 	i := 0
-	for addrHash, _ := range tds.accountUpdates {
-		addrs[i] = addrHash
+	for addrHash := range tds.aggregateBuffer.accountUpdates {
+		accountTouches[i] = addrHash
 		i++
 	}
-	sort.Sort(addrs)
-	for _, addrHash := range addrs {
-		account := tds.accountUpdates[addrHash]
-		var c *trie.TrieContinuation
-		// first argument to getStorageTrie is not used unless the last one == true
-		storageTrie, err := tds.getStorageTrie(common.Address{}, addrHash, false)
-		if err != nil {
-			return common.Hash{}, err
+	for addrHash := range tds.aggregateBuffer.accountReads {
+		if _, ok := tds.aggregateBuffer.accountUpdates[addrHash]; !ok {
+			accountTouches[i] = addrHash
+			i++
 		}
-		deleteStorageTrie := false
-		if account != nil {
-			if _, ok := tds.deleted[addrHash]; ok {
-				deleteStorageTrie = true
-				account.Root = emptyRoot
-			} else if storageTrie != nil && forward {
-				account.Root = storageTrie.Hash()
+	}
+	sort.Sort(accountTouches)
+	return accountTouches
+}
+
+// Expands the accounts trie (by loading data from the database) if it is required
+// for accessing accounts whose addresses are contained in the accountTouches
+func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
+	var resolver *trie.TrieResolver
+	for _, addrHash := range accountTouches {
+		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
+			if resolver == nil {
+				resolver = trie.NewResolver(false, true, tds.blockNr)
+				resolver.SetHistorical(tds.historical)
 			}
-			//fmt.Printf("Set root %x %x\n", address[:], account.Root[:])
-			data, err := rlp.EncodeToBytes(account)
+			resolver.AddRequest(req)
+		}
+	}
+	if resolver != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+			return err
+		}
+		resolver = nil
+	}
+	return nil
+}
+
+func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
+	for _, addrHash := range accountTouches {
+		tds.t.PopulateBlockProofData(nil, addrHash[:], tds.pg)
+	}
+}
+
+func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
+	// Aggregating the current buffer, if any
+	if tds.currentBuffer != nil {
+		if tds.aggregateBuffer == nil {
+			tds.aggregateBuffer = &Buffer{}
+			tds.aggregateBuffer.initialise()
+		}
+		tds.aggregateBuffer.merge(tds.currentBuffer)
+	}
+	if tds.aggregateBuffer == nil {
+		return nil, nil
+	}
+	accountUpdates := tds.aggregateBuffer.accountUpdates
+
+	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
+	storageTouches := tds.buildStorageTouches()
+	if err := tds.resolveStorageTouches(storageTouches); err != nil {
+		return nil, err
+	}
+	if tds.resolveReads {
+		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
+			return nil, err
+		}
+	}
+
+	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
+	accountTouches := tds.buildAccountTouches()
+	if err := tds.resolveAccountTouches(accountTouches); err != nil {
+		return nil, err
+	}
+	if tds.resolveReads {
+		tds.populateAccountBlockProof(accountTouches)
+	}
+
+	// Perform actual updates on the tries, and compute one trie root per buffer
+	// These roots can be used to populate receipt.PostState on pre-Byzantium
+	roots := make([]common.Hash, len(tds.buffers))
+	for i, b := range tds.buffers {
+		for address, m := range b.storageUpdates {
+			addrHash, err := tds.HashAddress(&address, false /*save*/)
 			if err != nil {
-				return common.Hash{}, err
+				return nil, err
 			}
-			c = tds.t.UpdateAction(addrHash[:], data)
-			oldContinuations = append(oldContinuations, c)
-		} else {
-			deleteStorageTrie = true
-			c = tds.t.DeleteAction(addrHash[:])
-			oldContinuations = append(oldContinuations, c)
-		}
-		if deleteStorageTrie && storageTrie != nil {
-			delete(tds.storageTries, addrHash)
-			storageTrie.PrepareToRemove()
-		}
-	}
-	it = 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(tds.db, tds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(tds.db, false, true)
-					resolver.SetHistorical(tds.historical)
+			if _, ok := b.deleted[address]; ok {
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					account.Root = emptyRoot
 				}
-				resolver.AddContinuation(c)
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					account.Root = emptyRoot
+				}
+				storageTrie, err := tds.getStorageTrie(address, false)
+				if err != nil {
+					return nil, err
+				}
+				if storageTrie != nil {
+					delete(tds.storageTries, address)
+					storageTrie.PrepareToRemove()
+				}
+				continue
+			}
+			storageTrie, err := tds.getStorageTrie(address, true)
+			if err != nil {
+				return nil, err
+			}
+			for keyHash, v := range m {
+				if len(v) > 0 {
+					storageTrie.Update(keyHash[:], v, tds.blockNr)
+				} else {
+					storageTrie.Delete(keyHash[:], tds.blockNr)
+				}
+			}
+			if forward {
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					account.Root = storageTrie.Hash()
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					account.Root = storageTrie.Hash()
+				}
 			}
 		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return common.Hash{}, err
+
+		for addrHash, account := range b.accountUpdates {
+			if account != nil {
+				data, err := rlp.EncodeToBytes(account)
+				if err != nil {
+					return nil, err
+				}
+				tds.t.Update(addrHash[:], data, tds.blockNr)
+			} else {
+				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
-			resolver = nil
 		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
+		roots[i] = tds.t.Hash()
 	}
-	if it > 3 {
-		fmt.Printf("Resolved in %d iterations\n", it)
-	}
-	hash := tds.t.Hash()
-	return hash, nil
+	return roots, nil
 }
 
 func (tds *TrieDbState) clearUpdates() {
-	tds.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
-	tds.accountUpdates = make(map[common.Hash]*Account)
-	tds.deleted = make(map[common.Hash]struct{})
+	tds.buffers = nil
+	tds.currentBuffer = nil
+	tds.aggregateBuffer = nil
 }
 
 func (tds *TrieDbState) Rebuild() {
@@ -695,29 +567,22 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	var storagePutKeys [][]byte
 	var storagePutVals [][]byte
 	var storageDelKeys [][]byte
+	tds.StartNewBuffer()
+	b := tds.currentBuffer
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
-		//var pre []byte
-		if len(key) == 32 {
-			//pre, _ = tds.db.Get(trie.SecureKeyPrefix, key)
-		} else {
-			//pre, _ = tds.db.Get(trie.SecureKeyPrefix, key[20:52])
-		}
-		//fmt.Printf("Rewind with key %x (%x) value %x\n", key, pre, value)
 		var err error
 		if bytes.Equal(bucket, AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
-				tds.accountUpdates[addrHash], err = encodingToAccount(value)
+				b.accountUpdates[addrHash], err = encodingToAccount(value)
 				if err != nil {
 					return err
 				}
 				accountPutKeys = append(accountPutKeys, key)
 				accountPutVals = append(accountPutVals, value)
 			} else {
-				//fmt.Printf("Deleted account\n")
-				tds.accountUpdates[addrHash] = nil
-				tds.deleted[addrHash] = struct{}{}
+				b.accountUpdates[addrHash] = nil
 				accountDelKeys = append(accountDelKeys, key)
 			}
 		} else if bytes.Equal(bucket, StorageHistoryBucket) {
@@ -725,10 +590,10 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			copy(address[:], key[:20])
 			var keyHash common.Hash
 			copy(keyHash[:], key[20:])
-			m, ok := tds.storageUpdates[address]
+			m, ok := b.storageUpdates[address]
 			if !ok {
 				m = make(map[common.Hash][]byte)
-				tds.storageUpdates[address] = m
+				b.storageUpdates[address] = m
 			}
 			m[keyHash] = value
 			if len(value) > 0 {
@@ -743,10 +608,10 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.trieRoot(false); err != nil {
+	if _, err := tds.computeTrieRoots(false); err != nil {
 		return err
 	}
-	for addrHash, account := range tds.accountUpdates {
+	for addrHash, account := range tds.aggregateBuffer.accountUpdates {
 		if account == nil {
 			if err := tds.db.Delete(AccountsBucket, addrHash[:]); err != nil {
 				return err
@@ -761,7 +626,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 		}
 	}
-	for address, m := range tds.storageUpdates {
+	for address, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash, value := range m {
 			if len(value) == 0 {
 				if err := tds.db.Delete(StorageBucket, append(address[:], keyHash[:]...)); err != nil {
@@ -859,273 +724,6 @@ func (tds *TrieDbState) leftGeneration(gen uint64) {
 	tds.generationCounts[gen]--
 }
 
-func (tds *TrieDbState) addProof(prefix, key []byte, pos int, mask uint32, hashes []common.Hash) {
-	if tds.resolveReads {
-		var createdProofs map[string]struct{}
-		if prefix == nil {
-			createdProofs = tds.createdProofs
-		} else {
-			var ok bool
-			ps := string(prefix)
-			createdProofs, ok = tds.sCreatedProofs[ps]
-			if !ok {
-				createdProofs = make(map[string]struct{})
-			}
-		}
-		var proofShorts map[string][]byte
-		if prefix == nil {
-			proofShorts = tds.proofShorts
-		} else {
-			var ok bool
-			proofShorts, ok = tds.sShorts[string(common.CopyBytes(prefix))]
-			if !ok {
-				proofShorts = make(map[string][]byte)
-			}
-		}
-		if prefix == nil {
-			//fmt.Printf("addProof %x %x\n", prefix, key[:pos])
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		for i := len(k); i >= 0; i-- {
-			if i < len(k) {
-				if short, ok := proofShorts[string(k[:i])]; ok && i+len(short) <= len(k) && bytes.Equal(short, k[i:i+len(short)]) {
-					break
-				}
-			}
-			if _, ok := createdProofs[string(k[:i])]; ok {
-				return
-			}
-		}
-		if prefix == nil {
-			//fmt.Printf("addProof %x %x added\n", prefix, key[:pos])
-		}
-		var proofMasks map[string]uint32
-		if prefix == nil {
-			proofMasks = tds.proofMasks
-		} else {
-			var ok bool
-			ps := string(prefix)
-			proofMasks, ok = tds.sMasks[ps]
-			if !ok {
-				proofMasks = make(map[string]uint32)
-				tds.sMasks[ps] = proofMasks
-			}
-		}
-		var proofHashes map[string][16]common.Hash
-		if prefix == nil {
-			proofHashes = tds.proofHashes
-		} else {
-			var ok bool
-			ps := string(prefix)
-			proofHashes, ok = tds.sHashes[ps]
-			if !ok {
-				proofHashes = make(map[string][16]common.Hash)
-				tds.sHashes[ps] = proofHashes
-			}
-		}
-		ks := string(k)
-		if m, ok := proofMasks[ks]; ok {
-			intersection := m & mask
-			//if mask != 0 {
-			proofMasks[ks] = intersection
-			//}
-			h := proofHashes[ks]
-			idx := 0
-			for i := byte(0); i < 16; i++ {
-				if intersection&(uint32(1)<<i) != 0 {
-					h[i] = hashes[idx]
-				} else {
-					h[i] = common.Hash{}
-				}
-				if mask&(uint32(1)<<i) != 0 {
-					idx++
-				}
-			}
-			proofHashes[ks] = h
-		} else {
-			//if mask != 0 {
-			proofMasks[ks] = mask
-			//}
-			var h [16]common.Hash
-			idx := 0
-			for i := byte(0); i < 16; i++ {
-				if mask&(uint32(1)<<i) != 0 {
-					h[i] = hashes[idx]
-					idx++
-				}
-			}
-			proofHashes[ks] = h
-		}
-	}
-}
-
-func (tds *TrieDbState) addSoleHash(prefix, key []byte, pos int, hash common.Hash) {
-	if tds.resolveReads {
-		var soleHashes map[string]common.Hash
-		if prefix == nil {
-			soleHashes = tds.soleHashes
-		} else {
-			var ok bool
-			ps := string(prefix)
-			soleHashes, ok = tds.sSoleHashes[ps]
-			if !ok {
-				soleHashes = make(map[string]common.Hash)
-				tds.sSoleHashes[ps] = soleHashes
-			}
-		}
-		if prefix == nil {
-			//fmt.Printf("addSoleHash %x %x\n", prefix, key[:pos])
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		ks := string(k)
-		if _, ok := soleHashes[ks]; !ok {
-			soleHashes[ks] = hash
-		}
-	}
-}
-
-func (tds *TrieDbState) createProof(prefix, key []byte, pos int) {
-	if tds.resolveReads {
-		if prefix == nil {
-			//fmt.Printf("createProof %x %x\n", prefix, key[:pos])
-		}
-		var createdProofs map[string]struct{}
-		if prefix == nil {
-			createdProofs = tds.createdProofs
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			createdProofs, ok = tds.sCreatedProofs[ps]
-			if !ok {
-				createdProofs = make(map[string]struct{})
-				tds.sCreatedProofs[ps] = createdProofs
-			}
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		ks := string(k)
-		if _, ok := createdProofs[ks]; !ok {
-			createdProofs[ks] = struct{}{}
-		}
-	}
-}
-
-func (tds *TrieDbState) addValue(prefix, key []byte, pos int, value []byte) {
-	if tds.resolveReads {
-		var proofShorts map[string][]byte
-		if prefix == nil {
-			proofShorts = tds.proofShorts
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			proofShorts, ok = tds.sShorts[ps]
-			if !ok {
-				proofShorts = make(map[string][]byte)
-			}
-		}
-		// Find corresponding short
-		found := false
-		for i := 0; i < pos; i++ {
-			if short, ok := proofShorts[string(key[:i])]; ok && bytes.Equal(short, key[i:pos]) {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return
-		}
-		var proofValues map[string][]byte
-		if prefix == nil {
-			proofValues = tds.proofValues
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			proofValues, ok = tds.sValues[ps]
-			if !ok {
-				proofValues = make(map[string][]byte)
-				tds.sValues[ps] = proofValues
-			}
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		ks := string(k)
-		if _, ok := proofValues[ks]; !ok {
-			proofValues[ks] = common.CopyBytes(value)
-		}
-	}
-}
-
-func (tds *TrieDbState) createShort(prefix, key []byte, pos int) {
-	if tds.resolveReads {
-		if prefix == nil {
-			//fmt.Printf("createShort %x %x\n", prefix, key[:pos])
-		}
-		var createdShorts map[string]struct{}
-		if prefix == nil {
-			createdShorts = tds.createdShorts
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			createdShorts, ok = tds.sCreatedShorts[ps]
-			if !ok {
-				createdShorts = make(map[string]struct{})
-				tds.sCreatedShorts[ps] = createdShorts
-			}
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		ks := string(k)
-		if _, ok := createdShorts[ks]; !ok {
-			createdShorts[ks] = struct{}{}
-		}
-	}
-}
-
-func (tds *TrieDbState) addShort(prefix, key []byte, pos int, short []byte) bool {
-	if tds.resolveReads {
-		var createdShorts map[string]struct{}
-		if prefix == nil {
-			createdShorts = tds.createdShorts
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			createdShorts, ok = tds.sCreatedShorts[ps]
-			if !ok {
-				createdShorts = make(map[string]struct{})
-				tds.sCreatedShorts[ps] = createdShorts
-			}
-		}
-		var proofShorts map[string][]byte
-		if prefix == nil {
-			proofShorts = tds.proofShorts
-		} else {
-			var ok bool
-			ps := string(common.CopyBytes(prefix))
-			proofShorts, ok = tds.sShorts[ps]
-			if !ok {
-				proofShorts = make(map[string][]byte)
-				tds.sShorts[ps] = proofShorts
-			}
-		}
-		k := make([]byte, pos)
-		copy(k, key[:pos])
-		ks := string(k)
-		if _, ok := createdShorts[ks]; ok {
-			return false
-		}
-		if prefix == nil {
-			//fmt.Printf("addShort %x %x\n", prefix, key[:pos])
-		}
-		if _, ok := proofShorts[ks]; !ok {
-			proofShorts[ks] = common.CopyBytes(short)
-			return true
-		}
-	}
-	return false
-}
-
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
@@ -1133,9 +731,26 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error
 	h.sha.Write(address[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := tds.t.TryGet(tds.db, buf[:], tds.blockNr)
-	if err != nil {
-		return nil, err
+	if tds.resolveReads {
+		if _, ok := tds.currentBuffer.accountUpdates[buf]; !ok {
+			tds.currentBuffer.accountReads[buf] = struct{}{}
+		}
+	}
+	enc, ok := tds.t.Get(buf[:], tds.blockNr)
+	if !ok {
+		// Not present in the trie, try the database
+		var err error
+		if tds.historical {
+			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr)
+			if err != nil {
+				enc = nil
+			}
+		} else {
+			enc, err = tds.db.Get(AccountsBucket, buf[:])
+			if err != nil {
+				enc = nil
+			}
+		}
 	}
 	return encodingToAccount(enc)
 }
@@ -1172,35 +787,26 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	return key
 }
 
-func (tds *TrieDbState) getStorageTrie(address common.Address, addrHash common.Hash, create bool) (*trie.Trie, error) {
-	t, ok := tds.storageTries[addrHash]
+func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
+	t, ok := tds.storageTries[address]
 	if !ok && create {
 		account, err := tds.ReadAccountData(address)
 		if err != nil {
 			return nil, err
 		}
 		if account == nil {
-			//fmt.Printf("Creating storage trie for address %x with empty storage root\n", address)
-			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
+			t = trie.New(common.Hash{}, true)
 		} else {
-			//fmt.Printf("Creating storage trie for address %x with storage root %x\n", address, account.Root)
-			t = trie.New(account.Root, StorageBucket, address[:], true)
+			t = trie.New(account.Root, true)
 		}
-		t.SetHistorical(tds.historical)
-		t.SetResolveReads(tds.resolveReads)
 		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
-		t.ProofFunctions(tds.addProof, tds.addSoleHash, tds.createProof, tds.addValue, tds.addShort, tds.createShort)
-		tds.storageTries[addrHash] = t
+		tds.storageTries[address] = t
 	}
 	return t, nil
 }
 
 func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
-	addrHash, err := tds.HashAddress(&address, false /*save*/)
-	if err != nil {
-		return nil, err
-	}
-	t, err := tds.getStorageTrie(address, addrHash, true)
+	t, err := tds.getStorageTrie(address, true)
 	if err != nil {
 		return nil, err
 	}
@@ -1208,9 +814,41 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 	if err != nil {
 		return nil, err
 	}
-	enc, err := t.TryGet(tds.db, seckey[:], tds.blockNr)
-	if err != nil {
-		return nil, err
+	if tds.resolveReads {
+		var addReadRecord = false
+		if mWrite, ok := tds.currentBuffer.storageUpdates[address]; ok {
+			if _, ok1 := mWrite[seckey]; !ok1 {
+				addReadRecord = true
+			}
+		} else {
+			addReadRecord = true
+		}
+		if addReadRecord {
+			m, ok := tds.currentBuffer.storageReads[address]
+			if !ok {
+				m = make(map[common.Hash]struct{})
+				tds.currentBuffer.storageReads[address] = m
+			}
+			m[seckey] = struct{}{}
+		}
+	}
+	enc, ok := t.Get(seckey[:], tds.blockNr)
+	if !ok {
+		// Not present in the trie, try database
+		cKey := make([]byte, len(address)+len(seckey))
+		copy(cKey, address[:])
+		copy(cKey[len(address):], seckey[:])
+		if tds.historical {
+			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
+			if err != nil {
+				enc = nil
+			}
+		} else {
+			enc, err = tds.db.Get(StorageBucket, cKey)
+			if err != nil {
+				enc = nil
+			}
+		}
 	}
 	return enc, nil
 }
@@ -1229,9 +867,7 @@ func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) (code []byte, err 
 		}
 	}
 	if tds.resolveReads {
-		if _, ok := tds.createdCodes[codeHash]; !ok {
-			tds.proofCodes[codeHash] = code
-		}
+		tds.pg.ReadCode(codeHash, code)
 	}
 	return code, err
 }
@@ -1258,9 +894,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 		codeSize = len(code)
 	}
 	if tds.resolveReads {
-		if _, ok := tds.createdCodes[codeHash]; !ok {
-			tds.proofCodes[codeHash] = code
-		}
+		tds.pg.ReadCode(codeHash, code)
 	}
 	return codeSize, nil
 }
@@ -1279,10 +913,10 @@ func (tds *TrieDbState) PruneTries(print bool) {
 			gen++
 		}
 		// Unload all nodes with touch timestamp < gen
-		for addrHash, storageTrie := range tds.storageTries {
+		for address, storageTrie := range tds.storageTries {
 			empty := storageTrie.UnloadOlderThan(gen, false)
 			if empty {
-				delete(tds.storageTries, addrHash)
+				delete(tds.storageTries, address)
 			}
 		}
 		tds.t.UnloadOlderThan(gen, false)
@@ -1348,7 +982,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 	if err != nil {
 		return err
 	}
-	tsw.tds.accountUpdates[addrHash] = account
+	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	return nil
 }
 
@@ -1388,8 +1022,8 @@ func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *Acco
 	if err != err {
 		return err
 	}
-	tsw.tds.accountUpdates[addrHash] = nil
-	tsw.tds.deleted[addrHash] = struct{}{}
+	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil
+	tsw.tds.currentBuffer.deleted[address] = struct{}{}
 	return nil
 }
 
@@ -1419,28 +1053,24 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *Accoun
 
 func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
-		if _, ok := tsw.tds.createdCodes[codeHash]; !ok {
-			tsw.tds.createdCodes[codeHash] = struct{}{}
-		}
+		tsw.tds.pg.CreateCode(codeHash, code)
 	}
 	return nil
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	if dsw.tds.resolveReads {
-		if _, ok := dsw.tds.createdCodes[codeHash]; !ok {
-			dsw.tds.createdCodes[codeHash] = struct{}{}
-		}
+		dsw.tds.pg.CreateCode(codeHash, code)
 	}
 	return dsw.tds.db.Put(CodeBucket, codeHash[:], code)
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
 	v := bytes.TrimLeft(value[:], "\x00")
-	m, ok := tsw.tds.storageUpdates[address]
+	m, ok := tsw.tds.currentBuffer.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)
-		tsw.tds.storageUpdates[address] = m
+		tsw.tds.currentBuffer.storageUpdates[address] = m
 	}
 	seckey, err := tsw.tds.HashKey(key, false /*save*/)
 	if err != nil {
@@ -1455,7 +1085,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
-	//fmt.Printf("WriteAccountStorage address %x, key %x, original %x, value %x\n", address, *key, *original, *value)
 	if *original == *value {
 		return nil
 	}
@@ -1484,100 +1113,6 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, origi
 	return dsw.tds.db.PutS(StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
 }
 
-// Database wraps access to tries and contract code.
-type Database interface {
-	// OpenTrie opens the main account trie.
-	OpenTrie(root common.Hash) (Trie, error)
-
-	// OpenStorageTrie opens the storage trie of an account.
-	OpenStorageTrie(addrHash, root common.Hash) (Trie, error)
-
-	// CopyTrie returns an independent copy of the given trie.
-	CopyTrie(Trie) Trie
-
-	// ContractCode retrieves a particular contract's code.
-	ContractCode(addrHash, codeHash common.Hash) ([]byte, error)
-
-	// ContractCodeSize retrieves a particular contracts code's size.
-	ContractCodeSize(addrHash, codeHash common.Hash) (int, error)
-
-	// TrieDB retrieves the low level trie database used for data storage.
-	TrieDB() ethdb.Database
-}
-
-// Trie is a Ethereum Merkle Trie.
-type Trie interface {
-	Prove(db ethdb.Database, key []byte, fromLevel uint, proofDb ethdb.Putter, blockNr uint64) error
-	TryGet(db ethdb.Database, key []byte, blockNr uint64) ([]byte, error)
-	TryUpdate(db ethdb.Database, key, value []byte, blockNr uint64) error
-	TryDelete(db ethdb.Database, key []byte, blockNr uint64) error
-	Hash() common.Hash
-	NodeIterator(db ethdb.Database, startKey []byte, blockNr uint64) trie.NodeIterator
-	GetKey(trie.DatabaseReader, []byte) []byte // TODO(fjl): remove this when SecureTrie is removed
-}
-
-// NewDatabase creates a backing store for state. The returned database is safe for
-// concurrent use and retains a few recent expanded trie nodes in memory. To keep
-// more historical state in memory, use the NewDatabaseWithCache constructor.
-func NewDatabase(db ethdb.Database) Database {
-	return NewDatabaseWithCache(db, 0)
-}
-
-// NewDatabase creates a backing store for state. The returned database is safe for
-// concurrent use and retains both a few recent expanded trie nodes in memory, as
-// well as a lot of collapsed RLP trie nodes in a large memory cache.
-func NewDatabaseWithCache(db ethdb.Database, cache int) Database {
-	csc, _ := lru.New(codeSizeCacheSize)
-	return &cachingDB{
-		db:            db,
-		codeSizeCache: csc,
-	}
-}
-
-type cachingDB struct {
-	db            ethdb.Database
-	codeSizeCache *lru.Cache
-}
-
-// OpenTrie opens the main account trie.
-func (db *cachingDB) OpenTrie(root common.Hash) (Trie, error) {
-	return trie.NewSecure(root, AccountsBucket, nil, false)
-}
-
-// OpenStorageTrie opens the storage trie of an account.
-func (db *cachingDB) OpenStorageTrie(addrHash, root common.Hash) (Trie, error) {
-	return trie.NewSecure(root, StorageBucket, addrHash[:], true)
-}
-
-// CopyTrie returns an independent copy of the given trie.
-func (db *cachingDB) CopyTrie(t Trie) Trie {
-	switch t := t.(type) {
-	case *trie.SecureTrie:
-		return t.Copy()
-	default:
-		panic(fmt.Errorf("unknown trie type %T", t))
-	}
-}
-
-// ContractCode retrieves a particular contract's code.
-func (db *cachingDB) ContractCode(addrHash, codeHash common.Hash) ([]byte, error) {
-	code, err := db.db.Get(CodeBucket, codeHash[:])
-	if err == nil {
-		db.codeSizeCache.Add(codeHash, len(code))
-	}
-	return code, err
-}
-
-// ContractCodeSize retrieves a particular contracts code's size.
-func (db *cachingDB) ContractCodeSize(addrHash, codeHash common.Hash) (int, error) {
-	if cached, ok := db.codeSizeCache.Get(codeHash); ok {
-		return cached.(int), nil
-	}
-	code, err := db.ContractCode(addrHash, codeHash)
-	return len(code), err
-}
-
-// TrieDB retrieves any intermediate trie-node caching layer.
-func (db *cachingDB) TrieDB() ethdb.Database {
-	return db.db
+func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
+	return tds.pg.ExtractProofs(trace)
 }

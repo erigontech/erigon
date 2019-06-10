@@ -28,11 +28,9 @@ import (
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // Reduce some of the parameters to make the tester faster.
@@ -184,8 +182,7 @@ func (dl *downloadTester) CurrentFastBlock() *types.Block {
 func (dl *downloadTester) FastSyncCommitHead(hash common.Hash) error {
 	// For now only check that the state trie is correct
 	if block := dl.GetBlockByHash(hash); block != nil {
-		_, err := trie.NewSecure(block.Root(), state.AccountsBucket, nil, false)
-		return err
+		return nil
 	}
 	return fmt.Errorf("non existent block: %x", hash[:4])
 }
@@ -357,18 +354,6 @@ func (dlp *downloadTesterPeer) RequestBodies(hashes []common.Hash) error {
 func (dlp *downloadTesterPeer) RequestReceipts(hashes []common.Hash) error {
 	receipts := dlp.chain.receipts(hashes)
 	go dlp.dl.downloader.DeliverReceipts(dlp.id, receipts)
-	return nil
-}
-
-// RequestNodeData constructs a getNodeData method associated with a particular
-// peer in the download tester. The returned function can be used to retrieve
-// batches of node state data from the particularly requested peer.
-func (dlp *downloadTesterPeer) RequestNodeData(hashes []common.Hash) error {
-	dlp.dl.lock.RLock()
-	defer dlp.dl.lock.RUnlock()
-
-	results := make([][]byte, 0, len(hashes))
-	go dlp.dl.downloader.DeliverNodeData(dlp.id, results)
 	return nil
 }
 
@@ -1481,9 +1466,6 @@ func (ftp *floodingTestPeer) RequestBodies(hashes []common.Hash) error {
 }
 func (ftp *floodingTestPeer) RequestReceipts(hashes []common.Hash) error {
 	return ftp.peer.RequestReceipts(hashes)
-}
-func (ftp *floodingTestPeer) RequestNodeData(hashes []common.Hash) error {
-	return ftp.peer.RequestNodeData(hashes)
 }
 
 func (ftp *floodingTestPeer) RequestHeadersByNumber(from uint64, count, skip int, reverse bool) error {
