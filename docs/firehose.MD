@@ -495,75 +495,73 @@ and, conversely, all leaves that match the prefix descend from the node in quest
 Node position in the response list must correspond to the prefix position in the request list.
 Empty node responses are permitted if the server declines to include it.
 The list may be short or empty, if any trailing nodes are omitted.
-In that case available blocks should be populated.
+In such cases available blocks should be populated.
 
 ### `GetStorageNodes` Request
 
-
-**TODO** description
+Analogue of `GetStateNodes` for storage nodes.
 
 ```
-{
+(
     # A request id is supplied, to match against the response
-    "id": int,
+    id, # int
     
-    # Requests are batched in a list under the single key: prefixes
-    "prefixes": [
+    # Requests are batched in a list
+    (
     
         # Each list item is a three-element tuple
         (
             # The first element is the hash of the account address
-            address_hash,
+            address_hash, # 32 bytes
             
             # The second element is the hash of the requested storage trie root
-            storage_root_hash,
+            storage_root_hash, # 32 bytes
             
             # The third element is a list of prefixes being requested
-            [key_prefix, ...]
+            (node_prefix, ...)
         ),
         ...
-    ]
-}
+    )
+)
 ```
 
 ### `StorageNodes` Response
 
 
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id, # int
     
     # The response data, in the same ordering of the request
-    "data": [
+    (
 
         # there is one inner list for each storage root requested
-        [
+        (
         
             # A node is returned for each requested key prefix
-            node,
+            node, # RLP-encoded
             
             ...
-        ],
+        ),
         ...
-    ],
+    ),
 
-    # If an old state root was requested, return the available roots.
+    # If an old storage root was requested, return the available blocks.
     # Otherwise, return an empty list.
-    "available_roots": [
-    
-        # include an entry for every state root hash that the server supports
-        state_root_hash,
+    (
+        # include the hash of every block that the server has the data for
+        available_block_0, # 32 bytes
         ...
-    ]
-}
+    )
+)
 ```
 
-Node position in the response list must correspond to the prefix position in the request list. Empty node responses are permitted if the server declines to include it. The list may be short or empty, if any trailing nodes are omitted.
+Node position in the response list must correspond to the prefix position in the request list.
+Empty node responses are permitted if the server declines to include it.
+The list may be short or empty, if any trailing nodes are omitted.
+In such cases available blocks should be populated.
 
-:::info
-Note that the request is for storage root hashes, but if `available_roots` is returned, they are still for **state roots**, not storage root hashes for the requested account.
-:::
 
 ### `GetBytecode` Request
 
