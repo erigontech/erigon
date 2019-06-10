@@ -13,12 +13,13 @@ See [Firehose Sync v0.2](https://notes.ethereum.org/0v_W4E8lROazqYymPAF7Ew) for 
 
 Changes in this revision:
 - Dropped "fuzzy" flag
-- Renamed GetStateData -> GetStateRanges, GetStateNodeData -> GetStateNodes, GetStorageData -> GetStorageRanges, GetStorageNodeData -> GetStorageNodes
+- Renamed `GetStateData` -> `GetStateRanges`, `GetStateNodeData` -> `GetStateNodes`, `GetStorageData` -> `GetStorageRanges`, `GetStorageNodeData` -> `GetStorageNodes`
 - Prefix encoding changed to the Yellow Paper's
-- Single state root per request in GetStateRanges
+- Single state root per request in `GetStateRanges`
 - Return available block hashes rather than state roots
-- StateRanges & StorageRanges may only have all subtrie leaves or nothing, not intermediate nodes
+- `StateRanges` & `StorageRanges` may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
+- Added `GetStorageSizes` & `StorageSizes`
 
 ## Casual Examples of Firehose Sync
 
@@ -613,6 +614,65 @@ Just like `NodeData` [eth/63], except:
 
 Bytecode position in the response list must correspond to the position in the request list. Empty bytecode responses are permitted if the server declines to include it. The list may be short or empty, if any trailing bytecodes are omitted.
 
+
+### `GetStorageSizes` Request
+
+Request storage trie sizes (the number of leaves).
+
+```
+(
+    # A request id is supplied, to match against the response
+    id, # int
+    
+    # Requests are batched in a list
+    (
+    
+        # Each list item is a two-element tuple
+        (
+            # The first element is the hash of the account address
+            address_hash_0, # 32 bytes
+            
+            # The second element is the hash of the requested storage trie root
+            storage_root_hash_0 # 32 bytes
+        ),
+        ...
+    )
+)
+```
+
+
+### `GetStorageSizes` Response
+
+```
+(
+    # The ID to be used by the requestor to match the response
+    id, # int
+    
+    # The response data, in the same ordering of the request
+    (
+        # An empty string may be returned if the server doesn't have the data for a requested storage.
+        # In such case available blocks (the last element of a reply) should be populated.
+        num_leaves_0, # int OR ""
+
+        ...
+    ),
+
+    # If an old storage root was requested, return the available blocks.
+    # Otherwise, return an empty list.
+    (
+        # include the hash of every block that the server has the data for
+        available_block_0, # 32 bytes
+        ...
+    )
+)
+```
+
+
+The server may return approximate storage size.
+Refer to
+[[Size Estimation](https://medium.com/@akhounov/estimation-approximate-of-the-size-of-contracst-in-ethereum-4642fe92d6fe)]
+for a fast way of size estimation.
+
 ### Handshakes
 
 This proposal doesn't have a position on the *format* of the handshake, or for headers of requests.
@@ -767,3 +827,5 @@ In order to rebuild the structure of the trie, we need the full suffix of the ke
 [Yellow Paper] Gavin Wood. Ethereum: A Secure Decentralised Generalised Transaction Ledger, December 2018. [https://ethereum.github.io/yellowpaper](https://ethereum.github.io/yellowpaper).
 
 [eth/63] Vitalik Buterin, Gavin Wood, et al. [Ethereum Wire Protocol (ETH)](https://github.com/ethereum/devp2p/blob/master/caps/eth.md), 2019.
+
+[Size Estimation] Alexey Akhunov. [Estimation (approximate) of the size of contracts in Ethereum](https://medium.com/@akhounov/estimation-approximate-of-the-size-of-contracst-in-ethereum-4642fe92d6fe), April 2019.
