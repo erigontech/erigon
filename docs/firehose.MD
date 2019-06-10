@@ -440,67 +440,62 @@ A response to the example request above might look like:
 
 ### `GetStateNodes` Request
 
+Request state trie nodes for a specific state root.
+Note that this operative is similar to `GetNodeData` of ETH/63, but uses prefixes rather than hashes as node keys.
+It will also only return nodes from the state trie, not arbitrary node data.
 
-**TODO** description
-
+In a radix trie there is a trivial one-to-one correspondence between nodes and prefixes.
+Since Ethereum employs a modified radix trie with extension nodes,
+we define node’s prefix as the shortest one such that all leaves descending from the node match the prefix
+and, conversely, all leaves that match the prefix descend from the node in question.
 **TODO** What if a prefix is in the middle of a Patricia extension?
 
 ```
-{
+(
     # A request id is supplied, to match against the response
-    "id": int,
+    id, # int
     
-    # Requests are batched in a list under the single key: prefixes
-    "prefixes": [
-    
-        # Each list item is a two-element tuple
-        (
-            # The first element is the root hash being requested
-            root_hash,
-        
-            # The second element is a list of prefixes being requested
-            [key_prefix, ...]
-        ),
+    # The root hash for which we request the data
+    root_hash, # 32 bytes
+
+    # A list of prefixes being requested
+    (
+        node_prefix_0, # int
         ...
-    ]
-}
+    )
+)
 ```
 
 ### `StateNodes` Response
 
-
 ```
-{
+(
     # The ID to be used by the requestor to match the response
-    "id": int,
+    id: int,
     
     # The response data, in the same ordering of the request
-    "data": [
-
-        # there is one inner list for each state root requested
-        [
-        
-            # A node is returned for each requested key prefix
-            node,
-            
-            ...
-        ],
+    # An empty list signifies lack of data,
+    # in which case available blocks (the last element of a reply) should be populated.
+    (
+        # A node is returned for each requested prefix
+        node_0, # RLP-encoded
         ...
-    ],
+    ),
 
-    # If an old state root was requested, return the available roots.
+    # If an old state root was requested, return the available blocks.
     # Otherwise, return an empty list.
-    "available_roots": [
-    
-        # include an entry for every state root hash that the server supports
-        state_root_hash,
+    (
+        # include the hash of every block that the server has the data for
+        available_block_0, # 32 bytes
         ...
-    ]
-}
+    )
+)
 ```
 
-Node position in the response list must correspond to the prefix position in the request list. Empty node responses are permitted if the server declines to include it. The list may be short or empty, if any trailing nodes are omitted.
-
+Node position in the response list must correspond to the prefix position in the request list.
+Empty node responses are permitted if the server declines to include it.
+The list may be short or empty, if any trailing nodes are omitted.
+In that case available blocks should be populated.
 
 ### `GetStorageNodes` Request
 
