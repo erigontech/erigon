@@ -50,7 +50,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(Account))
 	s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(Account))
 	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.TrieRoot()
+	s.tds.ComputeTrieRoots()
 	s.tds.SetBlockNr(1)
 	s.state.Commit(false, s.tds.DbStateWriter())
 
@@ -94,6 +94,7 @@ func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
 	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
+	s.tds.StartNewBuffer()
 }
 
 func (s *StateSuite) TestNull(c *checker.C) {
@@ -105,7 +106,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	s.state.SetState(address, common.Hash{}, value)
 	s.state.Finalise(false, s.tds.TrieStateWriter())
 	s.tds.SetBlockNr(1)
-	s.state.Finalise(false, s.tds.DbStateWriter())
+	s.state.Commit(false, s.tds.DbStateWriter())
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -147,6 +148,7 @@ func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
+	tds.StartNewBuffer()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
 	stateobjaddr1 := toAddr([]byte("so1"))
@@ -167,9 +169,10 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	tds.IntermediateRoot(state, false)
+	state.Finalise(false, tds.TrieStateWriter())
+	tds.ComputeTrieRoots()
 	tds.SetBlockNr(1)
-	state.Finalise(false, tds.DbStateWriter())
+	state.Commit(false, tds.DbStateWriter())
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)

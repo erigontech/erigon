@@ -157,10 +157,12 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	root, err := tds.IntermediateRoot(statedb, config.IsEIP158(block.Number()))
+	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error calculating state root: %v", err)
 	}
+	root := roots[len(roots)-1]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
@@ -182,6 +184,7 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 		return nil, nil, err
 	}
 	statedb := state.New(tds)
+	tds.StartNewBuffer()
 	for addr, a := range accounts {
 		statedb.SetCode(addr, a.Code)
 		statedb.SetNonce(addr, a.Nonce)
@@ -191,12 +194,14 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	statedb.Finalise(false, tds.TrieStateWriter())
-	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+	if err := statedb.Finalise(false, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tds.TrieRoot(); err != nil {
+	if _, err := tds.ComputeTrieRoots(); err != nil {
+		return nil, nil, err
+	}
+	tds.SetBlockNr(blockNr + 1)
+	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

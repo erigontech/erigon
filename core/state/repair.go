@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"runtime"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -230,9 +231,9 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 			return nil, err
 		}
 		if account == nil {
-			t = trie.New(common.Hash{}, StorageBucket, address[:], true)
+			t = trie.New(common.Hash{}, true)
 		} else {
-			t = trie.New(account.Root, StorageBucket, address[:], true)
+			t = trie.New(account.Root, true)
 		}
 		t.MakeListed(rds.joinGeneration, rds.leftGeneration)
 		rds.storageTries[address] = t
@@ -241,8 +242,8 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 }
 
 func (rds *RepairDbState) UpdateAccountData(address common.Address, original, account *Account) error {
-	oldContinuations := []*trie.TrieContinuation{}
-	newContinuations := []*trie.TrieContinuation{}
+	// Perform resolutions first
+	var resolver *trie.TrieResolver
 	var storageTrie *trie.Trie
 	var err error
 	if m, ok := rds.storageUpdates[address]; ok {
@@ -250,40 +251,49 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		if err != nil {
 			return err
 		}
-		for keyHash, v := range m {
-			var c *trie.TrieContinuation
-			if len(v) > 0 {
-				c = storageTrie.UpdateAction(keyHash[:], v)
-			} else {
-				c = storageTrie.DeleteAction(keyHash[:])
+		hashes := make(Hashes, len(m))
+		i := 0
+		for keyHash, _ := range m {
+			hashes[i] = keyHash
+			i++
+		}
+		sort.Sort(hashes)
+		for _, keyHash := range hashes {
+			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
+				if resolver == nil {
+					resolver = trie.NewResolver(false, false, rds.blockNr)
+				}
+				resolver.AddRequest(req)
 			}
-			oldContinuations = append(oldContinuations, c)
+		}
+	}
+	if resolver != nil {
+		if err := resolver.ResolveWithDb(rds.currentDb, rds.blockNr); err != nil {
+			return err
+		}
+		resolver = nil
+	}
+	if m, ok := rds.storageUpdates[address]; ok {
+		storageTrie, err = rds.getStorageTrie(address, true)
+		if err != nil {
+			return err
+		}
+		hashes := make(Hashes, len(m))
+		i := 0
+		for keyHash, _ := range m {
+			hashes[i] = keyHash
+			i++
+		}
+		sort.Sort(hashes)
+		for _, keyHash := range hashes {
+			v := m[keyHash]
+			if len(v) > 0 {
+				storageTrie.Update(keyHash[:], v, rds.blockNr)
+			} else {
+				storageTrie.Delete(keyHash[:], rds.blockNr)
+			}
 		}
 		delete(rds.storageUpdates, address)
-	}
-	it := 0
-	for len(oldContinuations) > 0 {
-		var resolver *trie.TrieResolver
-		for _, c := range oldContinuations {
-			if !c.RunWithDb(rds.currentDb, rds.blockNr) {
-				newContinuations = append(newContinuations, c)
-				if resolver == nil {
-					resolver = trie.NewResolver(rds.currentDb, false, false)
-				}
-				resolver.AddContinuation(c)
-			}
-		}
-		if len(newContinuations) > 0 {
-			if err := resolver.ResolveWithDb(rds.currentDb, rds.blockNr); err != nil {
-				return err
-			}
-			resolver = nil
-		}
-		oldContinuations, newContinuations = newContinuations, []*trie.TrieContinuation{}
-		it++
-	}
-	if it > 3 {
-		fmt.Printf("Resolved storage in %d iterations\n", it)
 	}
 	if storageTrie != nil {
 		account.Root = storageTrie.Hash()
