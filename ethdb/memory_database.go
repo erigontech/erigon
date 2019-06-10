@@ -72,84 +72,27 @@ func (db *BoltDatabase) MemCopy() Database {
 		panic(err)
 	}
 
-	//db.boltDBWriteLock.Lock()
-	//defer db.boltDBWriteLock.Unlock()
+	db.boltDBWriteLock.Lock()
+	defer db.boltDBWriteLock.Unlock()
 
-	//mp:=make(map[*bolt.Bucket][]struct{
-	//	k,v []byte
-	//})
-	//if err := mem.Update(func(writeTx *bolt.Tx) error {
-	//	return db.db.View(func(readTx *bolt.Tx) error {
-	//		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-	//			memB, err := writeTx.CreateBucket(name, true)
-	//			if err != nil {
-	//				return err
-	//			}
-	//			mp[memB] = []struct{
-	//				k, v []byte
-	//			}{}
-	//			return b.ForEach(func(k, v []byte) error {
-	//				mp[memB] = append(mp[memB],struct{
-	//					k, v []byte
-	//				}{
-	//					k:k,
-	//					v:v,
-	//				})
-	//				//if err := memB.Put(k, v); err != nil {
-	//				//	return err
-	//				//}
-	//				return nil
-	//			})
-	//		})
-	//	})
-	//}); err != nil {
-	//	panic(err)
-	//}
-	tx,err:=mem.Begin(true)
-	if err!=nil {
-		panic(err)
-	}
-
-	readTx,err:=db.db.Begin(false)
-	if err!=nil {
-		panic(err)
-	}
-
-
-	readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-		newBucket,err:=tx.CreateBucket(name, true)
-		if err != nil {
-			return err
-		}
-		return b.ForEach(func(k, v []byte) error {
-			return newBucket.Put(k,v)
+	if err := mem.Update(func(writeTx *bolt.Tx) error {
+		return db.db.View(func(readTx *bolt.Tx) error {
+			return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+				newBucketToWrite, err := writeTx.CreateBucket(name, true)
+				if err != nil {
+					return err
+				}
+				return b.ForEach(func(k, v []byte) error {
+					if err := newBucketToWrite.Put(k, v); err != nil {
+						return err
+					}
+					return nil
+				})
+			})
 		})
-	})
-
-	readTx.Rollback()
-	err=tx.Commit()
-	if err!=nil {
+	}); err != nil {
 		panic(err)
 	}
-
-	//if err := mem.Update(func(writeTx *bolt.Tx) error {
-	//	return db.db.View(func(readTx *bolt.Tx) error {
-	//		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-	//			memB, err := writeTx.CreateBucketIfNotExists(name, true)
-	//			if err != nil {
-	//				return err
-	//			}
-	//			return b.ForEach(func(k, v []byte) error {
-	//				if err := memB.Put(k, v); err != nil {
-	//					return err
-	//				}
-	//				return nil
-	//			})
-	//		})
-	//	})
-	//}); err != nil {
-	//	panic(err)
-	//}
 	return &BoltDatabase{
 		fn:  "in-memory",
 		db:  mem,
