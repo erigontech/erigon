@@ -171,7 +171,7 @@ The response must reuse the same ordering of prefixes as used for the request.
 
 For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root.
 
-"Too many leave" (`status_code = 2`) may only be returned is there are more than 4096 leaves matching the prefix.
+"Too many leaves" (`status_code = 2`) may only be returned is there are more than 4096 leaves matching the prefix.
 
 The keys and values within a prefix may be returned in any order.
 
@@ -678,17 +678,6 @@ Refer to
 [[Size Estimation](https://medium.com/@akhounov/estimation-approximate-of-the-size-of-contracst-in-ethereum-4642fe92d6fe)]
 for a fast way of size estimation.
 
-### Handshakes
-
-This proposal doesn't have a position on the *format* of the handshake, or for headers of requests.
-
-However, it's likely that a few items will be very valuable to negotiate during handshake. For example:
-
-1) Minimum bucket size that the server will support
-2) Maximum bucket size that the client will accept
-3) Number of trailing tries that server will maintain
-
-Actually implementing those things is not a hard requirement of Firehose, but would certainly be a nice extension. It is left for future work, when the handshake & header proposals are further along.
 
 ## Strategies for Firehose Sync
 
