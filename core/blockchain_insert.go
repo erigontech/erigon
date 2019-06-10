@@ -40,7 +40,7 @@ type insertStats struct {
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
 /*
-func (st *insertStats) report(chain []*types.Block, index int, cache common.StorageSize) {
+func (st *insertStats) report(chain []*types.Block, index int, cache common.storageSize) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()

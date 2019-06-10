@@ -1411,10 +1411,10 @@ type ExtAccount struct {
 	Balance *big.Int
 }
 type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
 }
 
 func encodingToAccount(enc []byte) (*Account, error) {

@@ -439,6 +439,14 @@ func (self *StateDB) Suicide(addr common.Address) bool {
 	return true
 }
 
+func (self *StateDB) IncreaseStorageSize(addr common.Address) {
+	self.SetStorageSize(addr, self.StorageSize(addr)+1)
+}
+
+func (self *StateDB) DecreaseStorageSize(addr common.Address) {
+	self.SetStorageSize(addr, self.StorageSize(addr)-1)
+}
+
 func (self *StateDB) SetStorageSize(addr common.Address, size uint64) {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)

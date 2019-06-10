@@ -106,7 +106,7 @@ type Account struct {
 	Balance     *big.Int
 	Root        common.Hash // merkle root of the storage trie
 	CodeHash    []byte
-	StorageSize uint64
+	storageSize uint64
 }
 
 const HugeNumber = 1<<63
@@ -118,8 +118,8 @@ func newObject(db *StateDB, address common.Address, data, original Account) *sta
 	}
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
-		if data.StorageSize == 0 {
-			data.StorageSize = HugeNumber
+		if data.storageSize == 0 {
+			data.storageSize = HugeNumber
 		}
 	}
 	return &stateObject{
@@ -331,19 +331,19 @@ func (self *stateObject) setNonce(nonce uint64) {
 }
 
 func (self *stateObject) StorageSize() uint64 {
-	return self.data.StorageSize
+	return self.data.storageSize
 }
 
 func (self *stateObject) SetStorageSize(size uint64) {
 	self.db.journal.append(storageSizeChange{
 		account:     &self.address,
-		prevsize:    self.data.StorageSize,
+		prevsize:    self.data.storageSize,
 	})
 	self.setStorageSize(size)
 }
 
 func (self *stateObject) setStorageSize(size uint64) {
-	self.data.StorageSize = size
+	self.data.storageSize = size
 }
 
 func (self *stateObject) CodeHash() []byte {

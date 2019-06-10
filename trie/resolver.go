@@ -260,6 +260,8 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
+var NN int
+
 func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	pLen := prefixLen(k, tr.key)
 	stopLevel := 2 * pLen
@@ -383,9 +385,37 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		}
 		var gotHash common.Hash
 		hashLen := tr.h.hash(root, tc.resolvePos == 0, gotHash[:])
+
+		fmt.Printf("!!! Resolving wrong hash for prefix trie '%x', key '%x', pos %d, \nexpected %q, got %q\n",
+			tc.t.prefix,
+			tc.resolveKey,
+			tc.resolvePos,
+			tc.resolveHash,
+			hashNode(gotHash[:]),
+		)
+
+		log.Error(fmt.Sprintf("!!! Resolving wrong hash for prefix trie '%x', key '%x', pos %d, \nexpected %q, got %q\n",
+			tc.t.prefix,
+			tc.resolveKey,
+			tc.resolvePos,
+			tc.resolveHash,
+			hashNode(gotHash[:]),
+		))
+
+		if tc.resolveHash.String() == "fa0c758119d47355ce0a4fb84b1a701606dfc9919db02a62a370167b92c943b7" {
+			panic(1)
+		}
+		if tc.resolveHash.String() == "9e9dfc17f2d37a9dafd2212bb4edbfb7297b23f4b9b97a1a169a4ac345deab8b" {
+			panic(2)
+		}
+		if NN == 10 {
+			//panic(1)
+		}
+		NN++
+
 		if hashLen == 32 {
 			if !bytes.Equal(tc.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for prefix trie %x, key %x, pos %d, \nexpected %s, got %s\n",
+				return fmt.Errorf("Resolving wrong hash for prefix trie '%x', key '%x', pos %d, \nexpected %q, got %q\n",
 					tc.t.prefix,
 					tc.resolveKey,
 					tc.resolvePos,
@@ -421,10 +451,11 @@ type ExtAccount struct {
 	Balance *big.Int
 }
 type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+	storageSize uint64
 }
 
 var emptyCodeHash = crypto.Keccak256(nil)

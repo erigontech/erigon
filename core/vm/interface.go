@@ -48,7 +48,8 @@ type StateDB interface {
 	SetState(common.Address, common.Hash, common.Hash)
 
 	StorageSize(common.Address) uint64
-	SetStorageSize(common.Address, uint64)
+	IncreaseStorageSize(common.Address)
+	DecreaseStorageSize(common.Address)
 
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool
