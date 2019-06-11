@@ -1,0 +1,29 @@
+run:
+  deadline: 10m
+
+linters:
+  enable-all: true
+  disable:
+    - lll
+    - dupl
+    - gochecknoglobals
+    - gocritic
+    - maligned
+    - goimports
+
+linters-settings:
+    govet:
+      check-shadowing: true
+    golint:
+      min-confidence: 0
+    maligned:
+      suggest-new: true
+    goconst:
+      min-len: 2
+      min-occurrences: 2
+    misspell:
+      locale: US
+    gocyclo:
+      min-complexity: 35
+    gofmt:
+      auto-fix: false
