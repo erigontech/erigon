@@ -511,8 +511,9 @@ func TestStateDBNewContractAccount(t *testing.T) {
 	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{2}
-	new, _ := state.createObject(addr, nil)
-	new.code = []byte("some non empty byte code")
+	newObj, _ := state.createObject(addr, nil)
+	newObj.code = []byte("some non empty byte code")
+	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
 	obj := state.getStateObject(addr)
 	if obj.data.storageSize != HugeNumber {
