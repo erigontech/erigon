@@ -441,7 +441,11 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 
 	// Create a long block chain to download and the tester
 	targetBlocks := testChainBase.len() - 1
-	tester.newPeer("peer", protocol, testChainBase)
+
+	err := tester.newPeer("peer", protocol, testChainBase)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Wrap the importer to allow stepping
 	blocked, proceed := uint32(0), make(chan struct{})
