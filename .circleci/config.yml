@@ -27,9 +27,11 @@ jobs:
 
       - run: make
 
+      - run: make lintci-deps
+
       - run:
-        name: Run extra linters
-        command: make lintci
+          name: Run extra linters
+          command: make lintci
 
       - save_cache:
           key: v1-pkg-cache
@@ -42,3 +44,4 @@ jobs:
 
       - store_test_results:
           path: ${TEST_RESULTS}
+
