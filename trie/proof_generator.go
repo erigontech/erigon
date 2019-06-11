@@ -519,7 +519,6 @@ func constructFullNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	f := &fullNode{}
 	f.flags.dirty = true
 	touchFunc(hex, false)
-	f.flags.t = ctime
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1) << nibble)) != 0 {
 			hash := hashes[*hashIdx]
@@ -551,7 +550,6 @@ func constructFullNode(touchFunc func(hex []byte, del bool), ctime uint64,
 			f.Children[nibble] = constructShortNode(touchFunc, ctime, concat(hex, nibble), masks, shortKeys, values, hashes, maskIdx, shortIdx, valueIdx, hashIdx, trace)
 		}
 	}
-	f.adjustTod(ctime)
 	return f
 }
 
@@ -575,7 +573,6 @@ func constructShortNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	(*shortIdx)++
 	s := &shortNode{Key: hexToCompact(nKey)}
 	s.flags.dirty = true
-	s.flags.t = ctime
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -600,7 +597,6 @@ func constructShortNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	if s.Val == nil {
 		fmt.Printf("s.Val is nil, pos %d, nKey %x, downmask %d\n", pos, nKey, downmask)
 	}
-	s.adjustTod(ctime)
 	return s
 }
 
@@ -613,9 +609,7 @@ func NewFromProofs(touchFunc func(hex []byte, del bool), ctime uint64,
 	trace bool,
 ) (t *Trie, mIdx, hIdx, sIdx, vIdx int) {
 	t = &Trie{
-		encodeToBytes:  encodeToBytes,
-		joinGeneration: func(uint64) {},
-		leftGeneration: func(uint64) {},
+		encodeToBytes: encodeToBytes,
 	}
 	var maskIdx int
 	var hashIdx int  // index in the hashes
@@ -870,7 +864,6 @@ func applyFullNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint64
 		}
 	}
 	touchFunc(hex, false)
-	f.flags.t = ctime
 	for nibble := byte(0); nibble < 16; nibble++ {
 		if (hashmask & (uint16(1) << nibble)) != 0 {
 			hash := hashes[*hashIdx]
@@ -916,7 +909,6 @@ func applyFullNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint64
 			f.Children[nibble] = sn
 		}
 	}
-	f.adjustTod(ctime)
 	if f.flags.dirty {
 		var hn common.Hash
 		h.hash(f, pos == 0, hn[:])
@@ -959,7 +951,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 			fmt.Printf("%skeep existing short node %x\n", strings.Repeat(" ", pos), compactToHex(s.Key))
 		}
 	}
-	s.flags.t = ctime
 	switch downmask {
 	case 0:
 		if pos+len(nKey) == 65 {
@@ -1003,7 +994,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, nKey...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
-	s.adjustTod(ctime)
 	if s.flags.dirty {
 		var hn common.Hash
 		h.hash(s, pos == 0, hn[:])

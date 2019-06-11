@@ -189,23 +189,20 @@ func (b *Buffer) merge(other *Buffer) {
 
 // Implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                *trie.Trie
-	db               ethdb.Database
-	blockNr          uint64
-	storageTries     map[common.Address]*trie.Trie
-	buffers          []*Buffer
-	aggregateBuffer  *Buffer // Merge of all buffers
-	currentBuffer    *Buffer
-	codeCache        *lru.Cache
-	codeSizeCache    *lru.Cache
-	historical       bool
-	generationCounts map[uint64]int
-	nodeCount        int
-	oldestGeneration uint64
-	noHistory        bool
-	resolveReads     bool
-	pg               *trie.ProofGenerator
-	tp               *trie.TriePruning
+	t               *trie.Trie
+	db              ethdb.Database
+	blockNr         uint64
+	storageTries    map[common.Address]*trie.Trie
+	buffers         []*Buffer
+	aggregateBuffer *Buffer // Merge of all buffers
+	currentBuffer   *Buffer
+	codeCache       *lru.Cache
+	codeSizeCache   *lru.Cache
+	historical      bool
+	noHistory       bool
+	resolveReads    bool
+	pg              *trie.ProofGenerator
+	tp              *trie.TriePruning
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -235,8 +232,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})
-	tds.generationCounts = make(map[uint64]int, 4096)
-	tds.oldestGeneration = blockNr
 	return &tds, nil
 }
 
@@ -719,17 +714,6 @@ func encodingToAccount(enc []byte) (*Account, error) {
 		}
 	}
 	return &data, nil
-}
-
-func (tds *TrieDbState) joinGeneration(gen uint64) {
-	tds.nodeCount++
-	tds.generationCounts[gen]++
-
-}
-
-func (tds *TrieDbState) leftGeneration(gen uint64) {
-	tds.nodeCount--
-	tds.generationCounts[gen]--
 }
 
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error) {
