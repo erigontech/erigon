@@ -232,7 +232,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	if err != nil {
 		panic(err)
 	}
-	tds.Rebuild()
+	if err := tds.Rebuild(); err != nil {
+		panic(err)
+	}
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
 		block, receipt := genblock(i, parent, statedb, tds)

@@ -72,7 +72,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (ethdb.Database, *B
 // Test fork of length N starting from block i
 func testFork(t *testing.T, blockchain *BlockChain, i, n int, full bool, comparator func(td1, td2 *big.Int)) {
 	// Copy old chain up to #i into a new db
-	db, blockchain2, err := newCanonical(ethash.NewFaker(), i, full)
+	db, blockchain2, err := newCanonical(ethash.NewFaker(), i, true)
 	if err != nil {
 		t.Fatal("could not make new canonical in testFork", err)
 	}
@@ -350,7 +350,7 @@ func TestBrokenBlockChain(t *testing.T)  { testBrokenChain(t, true) }
 
 func testBrokenChain(t *testing.T, full bool) {
 	// Make chain starting from genesis
-	db, blockchain, err := newCanonical(ethash.NewFaker(), 10, full)
+	db, blockchain, err := newCanonical(ethash.NewFaker(), 10, true)
 	if err != nil {
 		t.Fatalf("failed to make new canonical chain: %v", err)
 	}
