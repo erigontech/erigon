@@ -233,7 +233,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp:            tp,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
-		tp.Touch(nil, hex, del)
+		tp.Touch(hex, del)
 	})
 	tds.generationCounts = make(map[uint64]int, 4096)
 	tds.oldestGeneration = blockNr
@@ -808,7 +808,7 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 			t = trie.New(account.Root, true)
 		}
 		t.SetTouchFunc(func(hex []byte, del bool) {
-			tds.tp.Touch(common.CopyBytes(address[:]), hex, del)
+			tds.tp.TouchContract(address, hex, del)
 		})
 		tds.storageTries[address] = t
 	}

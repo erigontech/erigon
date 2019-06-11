@@ -19,20 +19,15 @@
 package trie
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type TriePruning struct {
-	// boltDB is used here for its B+tree implementation with prefix-compression.
-	// It maps prefixes to their corresponding timestamps (uint64)
-	timestamps *bolt.DB
+	storageTimestamps map[common.Address]map[string]uint64
+	accountTimestamps map[string]uint64
 
 	// Maps timestamp (uint64) to address of the contract to set of prefixes of nodes (string)
 	storage map[uint64]map[common.Address]map[string]struct{}
@@ -54,30 +49,14 @@ type TriePruning struct {
 }
 
 func NewTriePruning(oldestGeneration uint64) (*TriePruning, error) {
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		return nil, err
-	}
-	// Pre-create the bucket so we can assume it is there
-	if err := db.Update(func(tx *bolt.Tx) error {
-		if _, err := tx.CreateBucket(abucket, false); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucket(sbucket, false); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		db.Close()
-		return nil, err
-	}
 	return &TriePruning{
-		oldestGeneration: oldestGeneration,
-		blockNr:          oldestGeneration,
-		timestamps:       db,
-		storage:          make(map[uint64]map[common.Address]map[string]struct{}),
-		accounts:         make(map[uint64]map[string]struct{}),
-		generationCounts: make(map[uint64]int),
+		oldestGeneration:  oldestGeneration,
+		blockNr:           oldestGeneration,
+		storageTimestamps: make(map[common.Address]map[string]uint64),
+		accountTimestamps: make(map[string]uint64),
+		storage:           make(map[uint64]map[common.Address]map[string]struct{}),
+		accounts:          make(map[uint64]map[string]struct{}),
+		generationCounts:  make(map[uint64]int),
 	}, nil
 }
 
@@ -85,8 +64,9 @@ func (tp *TriePruning) SetBlockNr(blockNr uint64) {
 	tp.blockNr = blockNr
 }
 
-var abucket = []byte("a")
-var sbucket = []byte("s")
+func (tp *TriePruning) BlockNr() uint64 {
+	return tp.blockNr
+}
 
 // Updates a node to the current timestamp
 // contract is effectively address of the smart contract
@@ -94,57 +74,35 @@ var sbucket = []byte("s")
 // parent is the node that needs to be modified to unload the touched node
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
-func (tp *TriePruning) TouchFrom(contract []byte, hex []byte, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
-	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
+func (tp *TriePruning) touchContract(contract common.Address, hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
 	}
 	if !del {
-		hexS := string(common.CopyBytes(hex))
 		var newMap map[string]struct{}
-		if contract == nil {
-			if m, ok := tp.accounts[newTimestamp]; ok {
-				newMap = m
+		if m, ok := tp.storage[newTimestamp]; ok {
+			if m1, ok1 := m[contract]; ok1 {
+				newMap = m1
 			} else {
 				newMap = make(map[string]struct{})
-				tp.accounts[newTimestamp] = newMap
+				m[contract] = newMap
 			}
 		} else {
-			contractAddress := common.BytesToAddress(contract)
-			if m, ok := tp.storage[newTimestamp]; ok {
-				if m1, ok1 := m[contractAddress]; ok1 {
-					newMap = m1
-				} else {
-					newMap = make(map[string]struct{})
-					m[contractAddress] = newMap
-				}
-			} else {
-				m = make(map[common.Address]map[string]struct{})
-				newMap = make(map[string]struct{})
-				m[contractAddress] = newMap
-				tp.storage[newTimestamp] = m
-			}
+			m = make(map[common.Address]map[string]struct{})
+			newMap = make(map[string]struct{})
+			m[contract] = newMap
+			tp.storage[newTimestamp] = m
 		}
 		newMap[hexS] = struct{}{}
 	}
 	if exists {
-		if contract == nil {
-			if m, ok := tp.accounts[prevTimestamp]; ok {
-				delete(m, string(hex))
-				if len(m) == 0 {
-					delete(tp.accounts, prevTimestamp)
-				}
-			}
-		} else {
-			contractAddress := common.BytesToAddress(contract)
-			if m, ok := tp.storage[prevTimestamp]; ok {
-				if m1, ok1 := m[contractAddress]; ok1 {
-					delete(m1, string(hex))
-					if len(m1) == 0 {
-						delete(m, contractAddress)
-						if len(m) == 0 {
-							delete(tp.storage, prevTimestamp)
-						}
+		if m, ok := tp.storage[prevTimestamp]; ok {
+			if m1, ok1 := m[contract]; ok1 {
+				delete(m1, hexS)
+				if len(m1) == 0 {
+					delete(m, contract)
+					if len(m) == 0 {
+						delete(tp.storage, prevTimestamp)
 					}
 				}
 			}
@@ -168,59 +126,102 @@ func (tp *TriePruning) TouchFrom(contract []byte, hex []byte, exists bool, prevT
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
 // parent is the node that needs to be modified to unload the touched node
-func (tp *TriePruning) Touch(contract []byte, hex []byte, del bool) error {
-	var exists = false
-	var timestampInput [8]byte
-	var timestampOutput [8]byte
-	// Now it is the current timestamp, but after the transaction, it will be replaced
-	// by the previously existing (if it existed)
-	binary.BigEndian.PutUint64(timestampInput[:], tp.blockNr)
-	var cKey []byte
-	var bucket []byte
-	if contract == nil {
-		cKey = make([]byte, len(hex)+1)
-		cKey[0] = 0xff
-		copy(cKey[1:], hex)
-		bucket = abucket
-	} else {
-		cKey = make([]byte, len(contract)+len(hex))
-		copy(cKey, contract)
-		copy(cKey[len(contract):], hex)
-		bucket = sbucket
+// exists is true when the node existed before, and false if it is a new one
+// prevTimestamp is the timestamp the node current has
+func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
+	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
+	if exists && !del && prevTimestamp == newTimestamp {
+		return
 	}
-	if err := tp.timestamps.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return fmt.Errorf("timestamp bucket %s did not exist", bucket)
-		}
-		if v, _ := b.Get(cKey); v != nil {
-			if del {
-				if err := b.Delete(cKey); err != nil {
-					return err
-				}
-			} else if !bytes.Equal(v, timestampInput[:]) {
-				if err := b.Put(cKey, timestampInput[:]); err != nil {
-					return err
-				}
-			}
-			copy(timestampOutput[:], v)
-			exists = true
+	if !del {
+		var newMap map[string]struct{}
+		if m, ok := tp.accounts[newTimestamp]; ok {
+			newMap = m
 		} else {
-			if !del {
-				if err := b.Put(cKey, timestampInput[:]); err != nil {
-					return err
+			newMap = make(map[string]struct{})
+			tp.accounts[newTimestamp] = newMap
+		}
+		newMap[hexS] = struct{}{}
+	}
+	if exists {
+		if m, ok := tp.accounts[prevTimestamp]; ok {
+			delete(m, hexS)
+			if len(m) == 0 {
+				delete(tp.accounts, prevTimestamp)
+			}
+		}
+	}
+	// Update generation count
+	if !del {
+		tp.generationCounts[newTimestamp]++
+		tp.nodeCount++
+	}
+	if exists {
+		tp.generationCounts[prevTimestamp]--
+		if tp.generationCounts[prevTimestamp] == 0 {
+			delete(tp.generationCounts, prevTimestamp)
+		}
+		tp.nodeCount--
+	}
+}
+
+func (tp *TriePruning) Timestamp(hex []byte) uint64 {
+	return tp.accountTimestamps[string(hex)]
+}
+
+// Returns timestamp for the given prunable node
+func (tp *TriePruning) TimestampContract(contract common.Address, hex []byte) uint64 {
+	if m, ok := tp.storageTimestamps[contract]; ok {
+		return m[string(hex)]
+	}
+	return 0
+}
+
+func (tp *TriePruning) TouchContract(contract common.Address, hex []byte, del bool) {
+	var exists = false
+	var prevTimestamp uint64
+	hexS := string(common.CopyBytes(hex))
+	if m, ok := tp.storageTimestamps[contract]; ok {
+		if m1, ok1 := m[hexS]; ok1 {
+			prevTimestamp = m1
+			exists = true
+			if del {
+				delete(m, hexS)
+				if len(m) == 0 {
+					delete(tp.storageTimestamps, contract)
 				}
 			}
 		}
-		return nil
-	}); err != nil {
-		return err
+		if !del {
+			m[hexS] = tp.blockNr
+		}
+	} else if !del {
+		m = make(map[string]uint64)
+		tp.storageTimestamps[contract] = m
+		m[hexS] = tp.blockNr
 	}
+	tp.touchContract(contract, hexS, exists, prevTimestamp, del, tp.blockNr)
+}
+
+// Updates a node to the current timestamp
+// contract is effectively address of the smart contract
+// hex is the prefix of the key
+// parent is the node that needs to be modified to unload the touched node
+func (tp *TriePruning) Touch(hex []byte, del bool) error {
+	var exists = false
 	var prevTimestamp uint64
-	if exists {
-		prevTimestamp = binary.BigEndian.Uint64(timestampOutput[:])
+	hexS := string(common.CopyBytes(hex))
+	if m, ok := tp.accountTimestamps[hexS]; ok {
+		prevTimestamp = m
+		exists = true
+		if del {
+			delete(tp.accountTimestamps, hexS)
+		}
 	}
-	tp.TouchFrom(contract, hex, exists, prevTimestamp, del, tp.blockNr)
+	if !del {
+		tp.accountTimestamps[hexS] = tp.blockNr
+	}
+	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 	return nil
 }
 
@@ -244,27 +245,18 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 	return empty
 }
 
-func (tp *TriePruning) PruneTo(
-	t *Trie,
-	targetNodeCount int,
+// Prunes all nodes that are older than given timestamp
+func (tp *TriePruning) PruneToTimestamp(
+	mainTrie *Trie,
+	targetTimestamp uint64,
 	storageTrieFunc func(contract common.Address) (*Trie, error),
-) (bool, []common.Address, error) {
-	if tp.nodeCount <= targetNodeCount {
-		return false, nil, nil
-	}
-	excess := tp.nodeCount - targetNodeCount
-	prunable := 0
-	pruneGeneration := tp.oldestGeneration
-	for prunable < excess {
-		prunable += tp.generationCounts[pruneGeneration]
-		delete(tp.generationCounts, pruneGeneration)
-		pruneGeneration++
-	}
-	//fmt.Printf("Will prune to generation %d, nodes to prune: %d, excess %d\n", pruneGeneration, prunable, excess)
+) ([]common.Address, error) {
 	// Remove (unload) nodes from storage tries and account trie
 	aggregateStorage := make(map[common.Address]map[string]struct{})
 	aggregateAccounts := make(map[string]struct{})
-	for gen := tp.oldestGeneration; gen < pruneGeneration; gen++ {
+	for gen := tp.oldestGeneration; gen < targetTimestamp; gen++ {
+		tp.nodeCount -= tp.generationCounts[gen]
+		delete(tp.generationCounts, gen)
 		if m, ok := tp.storage[gen]; ok {
 			for address, m1 := range m {
 				var aggregateM map[string]struct{}
@@ -293,7 +285,7 @@ func (tp *TriePruning) PruneTo(
 	for address, m := range aggregateStorage {
 		storageTrie, err := storageTrieFunc(address)
 		if err != nil {
-			return false, nil, err
+			return nil, err
 		}
 		empty := pruneMap(storageTrie, m, h)
 		if empty {
@@ -302,41 +294,47 @@ func (tp *TriePruning) PruneTo(
 	}
 	// Change hasher to be appropriate for the main trie
 	h.encodeToBytes = false
-	pruneMap(t, aggregateAccounts, h)
+	pruneMap(mainTrie, aggregateAccounts, h)
 	// Remove fom the timestamp structure
-	if err := tp.timestamps.Update(func(tx *bolt.Tx) error {
-		ab := tx.Bucket(abucket)
-		if ab == nil {
-			return fmt.Errorf("timestamp bucket %s did not exist", abucket)
-		}
-		for hexS := range aggregateAccounts {
-			cKey := make([]byte, 1+len(hexS))
-			cKey[0] = 0xff
-			copy(cKey[1:], []byte(hexS))
-			if err := ab.Delete(cKey); err != nil {
-				return err
-			}
-		}
-		sb := tx.Bucket(sbucket)
-		if sb == nil {
-			return fmt.Errorf("timestamp bucket %s did not exist", sbucket)
-		}
-		for address, m := range aggregateStorage {
+	for hexS := range aggregateAccounts {
+		delete(tp.accountTimestamps, hexS)
+	}
+	for address, m := range aggregateStorage {
+		if m1, ok := tp.storageTimestamps[address]; ok {
 			for hexS := range m {
-				cKey := make([]byte, len(address)+len(hexS))
-				copy(cKey, address[:])
-				copy(cKey[len(address):], []byte(hexS))
-				if err := sb.Delete(cKey); err != nil {
-					return err
-				}
+				delete(m1, hexS)
+			}
+			if len(m1) == 0 {
+				delete(tp.storageTimestamps, address)
 			}
 		}
-		return nil
-	}); err != nil {
+	}
+	tp.oldestGeneration = targetTimestamp
+	return emptyAddresses, nil
+}
+
+// Prunes mininum number of generations necessary so that the total
+// number of prunable nodes is at most `targetNodeCount`
+func (tp *TriePruning) PruneTo(
+	mainTrie *Trie,
+	targetNodeCount int,
+	storageTrieFunc func(contract common.Address) (*Trie, error),
+) (bool, []common.Address, error) {
+	if tp.nodeCount <= targetNodeCount {
+		return false, nil, nil
+	}
+	excess := tp.nodeCount - targetNodeCount
+	prunable := 0
+	pruneGeneration := tp.oldestGeneration
+	for prunable < excess {
+		prunable += tp.generationCounts[pruneGeneration]
+		pruneGeneration++
+	}
+	//fmt.Printf("Will prune to generation %d, nodes to prune: %d, excess %d\n", pruneGeneration, prunable, excess)
+	emptyAddresses, err := tp.PruneToTimestamp(mainTrie, pruneGeneration, storageTrieFunc)
+	if err != nil {
 		return false, nil, err
 	}
-	tp.oldestGeneration = pruneGeneration
-	tp.nodeCount -= prunable
 	return true, emptyAddresses, nil
 }
 

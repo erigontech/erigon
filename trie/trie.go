@@ -839,10 +839,7 @@ func (t *Trie) prepareToRemove(n node, hex []byte) {
 	case *shortNode:
 		var hexVal []byte
 		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			nKey := compactToHex(n.Key)
-			hexVal = make([]byte, len(hex)+len(nKey))
-			copy(hexVal, hex)
-			copy(hexVal[len(hex):], nKey)
+			hexVal = concat(hex, compactToHex(n.Key)...)
 		}
 		t.leftGeneration(n.flags.t)
 		t.prepareToRemove(n.Val, hexVal)
@@ -863,10 +860,7 @@ func (t *Trie) prepareToRemove(n node, hex []byte) {
 		t.leftGeneration(n.flags.t)
 		for i, child := range n.Children {
 			if child != nil {
-				hexChild := make([]byte, len(hex)+1)
-				copy(hexChild, hex)
-				hexChild[len(hex)] = byte(i)
-				t.prepareToRemove(child, hexChild)
+				t.prepareToRemove(child, concat(hex, byte(i)))
 			}
 		}
 	}
@@ -1033,10 +1027,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 	case *shortNode:
 		var hexVal []byte
 		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			nKey := compactToHex(n.Key)
-			hexVal = make([]byte, len(hex)+len(nKey))
-			copy(hexVal, hex)
-			copy(hexVal[len(hex):], nKey)
+			hexVal = concat(hex, compactToHex(n.Key)...)
 		}
 		return t.countPrunableNodes(n.Val, hexVal, print)
 	case *duoNode:
@@ -1058,10 +1049,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 		count := 0
 		for i, child := range n.Children {
 			if child != nil {
-				hexChild := make([]byte, len(hex)+1)
-				copy(hexChild, hex)
-				hexChild[len(hex)] = byte(i)
-				count += t.countPrunableNodes(child, hexChild, print)
+				count += t.countPrunableNodes(child, concat(hex, byte(i)), print)
 			}
 		}
 		return 1 + count

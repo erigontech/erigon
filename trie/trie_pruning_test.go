@@ -33,7 +33,7 @@ func TestOnePerTimestamp(t *testing.T) {
 	}
 	tr := New(common.Hash{}, false)
 	tr.SetTouchFunc(func(hex []byte, del bool) {
-		tp.Touch(nil, hex, del)
+		tp.Touch(hex, del)
 	})
 	var key [4]byte
 	value := []byte("V")

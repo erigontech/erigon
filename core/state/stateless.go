@@ -43,6 +43,7 @@ type Stateless struct {
 	storageUpdates map[common.Address]map[common.Hash][]byte
 	accountUpdates map[common.Hash]*Account
 	deleted        map[common.Hash]struct{}
+	tp             *trie.TriePruning
 }
 
 func NewStateless(stateRoot common.Hash,
@@ -52,10 +53,18 @@ func NewStateless(stateRoot common.Hash,
 ) (*Stateless, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
+	tp, err := trie.NewTriePruning(blockNr)
+	if err != nil {
+		return nil, err
+	}
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
-	t, _, _, _, _ := trie.NewFromProofs(blockNr, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+	touchFunc := func(hex []byte, del bool) {
+		tp.Touch(hex, del)
+	}
+	t, _, _, _, _ := trie.NewFromProofs(touchFunc, blockNr, false, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes, trace)
+	t.SetTouchFunc(touchFunc)
 	if stateRoot != t.Hash() {
 		filename := fmt.Sprintf("root_%d.txt", blockNr)
 		f, err := os.Create(filename)
@@ -71,8 +80,13 @@ func NewStateless(stateRoot common.Hash,
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(blockNr, true,
+		contractCopy := contract
+		touchFunc := func(hex []byte, del bool) {
+			tp.TouchContract(contractCopy, hex, del)
+		}
+		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(touchFunc, blockNr, true,
 			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
+		st.SetTouchFunc(touchFunc)
 		h.sha.Reset()
 		h.sha.Write(contract[:])
 		var addrHash common.Hash
@@ -133,10 +147,14 @@ func NewStateless(stateRoot common.Hash,
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*Account),
 		deleted:        make(map[common.Hash]struct{}),
+		tp:             tp,
 	}, nil
 }
 
 func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttime uint64, trace bool) trie.BlockProof {
+	if blockNr != s.tp.BlockNr() {
+		panic(fmt.Sprintf("blockNr %d != s.tp.BlockNr() %d", blockNr, s.tp.BlockNr()))
+	}
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
@@ -146,7 +164,10 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 	var aShortKeys, acShortKeys [][]byte
 	var aValues, acValues [][]byte
 	var aHashes, acHashes []common.Hash
-	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(cuttime, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes,
+	timeFunc := func(hex []byte) uint64 {
+		return s.tp.Timestamp(hex)
+	}
+	_, _, _, _, aMasks, aShortKeys, aValues, aHashes = s.t.AmmendProofs(timeFunc, cuttime, blockProof.Masks, blockProof.ShortKeys, blockProof.Values, blockProof.Hashes,
 		aMasks, aShortKeys, aValues, aHashes, trace)
 	var maskIdx, hashIdx, shortIdx, valueIdx int
 	aContracts := []common.Address{}
@@ -162,7 +183,8 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[contract]; !ok {
-			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
+			touchFunc := func(hex []byte, del bool) {}
+			_, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(touchFunc, blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 			if mIdx > 0 {
 				acMasks = append(acMasks, blockProof.CMasks[maskIdx:maskIdx+mIdx]...)
@@ -178,7 +200,11 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 			}
 			aContracts = append(aContracts, contract)
 		} else {
-			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(cuttime,
+			contractCopy := contract
+			timeFunc := func(hex []byte) uint64 {
+				return s.tp.TimestampContract(contractCopy, hex)
+			}
+			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(timeFunc, cuttime,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:],
 				acMasks, acShortKeys, acValues, acHashes,
 				trace)
@@ -234,6 +260,9 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 	blockNr uint64,
 	trace bool,
 ) error {
+	if blockNr != s.tp.BlockNr() {
+		panic(fmt.Sprintf("blockNr %d != s.tp.BlockNr() %d", blockNr, s.tp.BlockNr()))
+	}
 	h := newHasher()
 	defer returnHasherToPool(h)
 	if trace {
@@ -264,8 +293,13 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[contract]; !ok {
-			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(blockNr, true,
+			contractCopy := contract
+			touchFunc := func(hex []byte, del bool) {
+				s.tp.TouchContract(contractCopy, hex, del)
+			}
+			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(touchFunc, blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
+			st.SetTouchFunc(touchFunc)
 			s.storageTries[contract] = st
 		} else {
 			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockNr, blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
@@ -304,6 +338,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
+	s.tp.SetBlockNr(blockNr)
 }
 
 func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
@@ -324,6 +359,9 @@ func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.T
 	t, ok := s.storageTries[address]
 	if !ok && create {
 		t = trie.New(common.Hash{}, true)
+		t.SetTouchFunc(func(hex []byte, del bool) {
+			s.tp.TouchContract(address, hex, del)
+		})
 		s.storageTries[address] = t
 	}
 	return t, nil
@@ -525,12 +563,14 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 }
 
 func (s *Stateless) Prune(oldest uint64, trace bool) {
-	s.t.UnloadOlderThan(oldest, trace)
-	for addrHash, st := range s.storageTries {
-		empty := st.UnloadOlderThan(oldest, trace)
-		if empty {
-			delete(s.storageTries, addrHash)
-		}
+	emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
+		return s.getStorageTrie(contract, false)
+	})
+	if err != nil {
+		fmt.Printf("Error while pruning: %v\n", err)
+	}
+	for _, address := range emptyAddresses {
+		delete(s.storageTries, address)
 	}
 	if m, ok := s.timeToCodeHash[oldest-1]; ok {
 		for codeHash, _ := range m {
