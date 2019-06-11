@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"runtime"
 	"sort"
 
@@ -180,7 +181,7 @@ func (rds *RepairDbState) CheckKeys() {
 	}
 }
 
-func (rds *RepairDbState) ReadAccountData(address common.Address) (*Account, error) {
+func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -241,7 +242,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 	return t, nil
 }
 
-func (rds *RepairDbState) UpdateAccountData(address common.Address, original, account *Account) error {
+func (rds *RepairDbState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	// Perform resolutions first
 	var resolver *trie.TrieResolver
 	var storageTrie *trie.Trie
@@ -334,7 +335,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	return nil
 }
 
-func (rds *RepairDbState) DeleteAccount(address common.Address, original *Account) error {
+func (rds *RepairDbState) DeleteAccount(address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

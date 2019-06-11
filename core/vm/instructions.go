@@ -634,24 +634,18 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 }
 
 // todo check is it correct 0 location value
-var NullLocation = common.Hash{}
-var NullValue = common.Big0
+var nullLocation = common.Hash{}
+var nullValue = common.Big0
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
-	// todo all the ifs should live here:
-	/*
-	If previous value of the [location] is 0, and value is not 0, increment storagesize (semantics of increment described below)
-	If previous value of the [location] is not 0, and value is 0, decrement storagesize (semantics of decrement described below)
-	As with other state changes, changes of storagesize get reverted when the execution frame reverts, i.e. it needs to use the same techniques as storage values, like journalling (in Geth), and substates (in Parity). Value of storagesize is not observable from contracts at this point.
-	*/
-	if loc == NullLocation && val == NullValue {
+	if loc == nullLocation && val == nullValue {
 		interpreter.evm.StateDB.IncreaseStorageSize(contract.Address())
 	}
-	if loc != NullLocation && val == NullValue {
+	if loc != nullLocation && val == nullValue {
 		interpreter.evm.StateDB.DecreaseStorageSize(contract.Address())
 	}
 

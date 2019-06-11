@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	account2 "github.com/ledgerwatch/turbo-geth/core/types/account"
 	"io"
 	"io/ioutil"
 	"log"
@@ -22,7 +23,7 @@ import (
 	"github.com/ledgerwatch/bolt"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
-	util "github.com/wcharczuk/go-chart/util"
+	"github.com/wcharczuk/go-chart/util"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -1406,29 +1407,18 @@ func oldStorage() {
 	}
 }
 
-type ExtAccount struct {
-	Nonce   uint64
-	Balance *big.Int
-}
-type Account struct {
-	Nonce       uint64
-	Balance     *big.Int
-	Root        common.Hash // merkle root of the storage trie
-	CodeHash    []byte
-}
-
-func encodingToAccount(enc []byte) (*Account, error) {
+func encodingToAccount(enc []byte) (*account2.Account, error) {
 	if enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	var data Account
+	var data account2.Account
 	// Kind of hacky
 	if len(enc) == 1 {
 		data.Balance = new(big.Int)
 		data.CodeHash = emptyCodeHash
 		data.Root = emptyRoot
 	} else if len(enc) < 60 {
-		var extData ExtAccount
+		var extData account2.ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return nil, err
 		}

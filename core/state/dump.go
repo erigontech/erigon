@@ -25,12 +25,13 @@ import (
 )
 
 type DumpAccount struct {
-	Balance  string            `json:"balance"`
-	Nonce    uint64            `json:"nonce"`
-	Root     string            `json:"root"`
-	CodeHash string            `json:"codeHash"`
-	Code     string            `json:"code"`
-	Storage  map[string]string `json:"storage"`
+	Balance     string            `json:"balance"`
+	Nonce       uint64            `json:"nonce"`
+	Root        string            `json:"root"`
+	CodeHash    string            `json:"codeHash"`
+	Code        string            `json:"code"`
+	Storage     map[string]string `json:"storage"`
+	StorageSize uint64            `json:"storagesize"`
 }
 
 type Dump struct {
@@ -57,12 +58,13 @@ func (self *TrieDbState) RawDump() Dump {
 			}
 		}
 		account := DumpAccount{
-			Balance:  data.Balance.String(),
-			Nonce:    data.Nonce,
-			Root:     common.Bytes2Hex(data.Root[:]),
-			CodeHash: common.Bytes2Hex(data.CodeHash),
-			Code:     common.Bytes2Hex(code),
-			Storage:  make(map[string]string),
+			Balance:     data.Balance.String(),
+			Nonce:       data.Nonce,
+			Root:        common.Bytes2Hex(data.Root[:]),
+			CodeHash:    common.Bytes2Hex(data.CodeHash),
+			Code:        common.Bytes2Hex(code),
+			Storage:     make(map[string]string),
+			StorageSize: data.StorageSize,
 		}
 		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
 			account.Storage[common.Bytes2Hex(self.GetKey(ks))] = common.Bytes2Hex(vs)

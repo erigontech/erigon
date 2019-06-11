@@ -23,6 +23,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -63,8 +64,8 @@ func (self Storage) Copy() Storage {
 // Finally, call CommitTrie to write the modified storage trie into a database.
 type stateObject struct {
 	address  common.Address
-	data     Account
-	original Account
+	data     accounts.Account
+	original accounts.Account
 	db       *StateDB
 
 	// DB error.
@@ -95,35 +96,21 @@ func (s *stateObject) empty() bool {
 	return s.data.Nonce == 0 && s.data.Balance.Sign() == 0 && bytes.Equal(s.data.CodeHash, emptyCodeHash)
 }
 
-// Account is the Ethereum consensus representation of accounts.
-// These objects are stored in the main account trie.
-type ExtAccount struct {
-	Nonce   uint64
-	Balance *big.Int
-}
-type Account struct {
-	Nonce       uint64
-	Balance     *big.Int
-	Root        common.Hash // merkle root of the storage trie
-	CodeHash    []byte
-	storageSize uint64
-}
-
 // huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
 const HugeNumber = 1 << 63
 
 // newObject creates a state object.
-func newObject(db *StateDB, address common.Address, data, original Account) *stateObject {
+func newObject(db *StateDB, address common.Address, data, original accounts.Account) *stateObject {
 	if data.Balance == nil {
 		data.Balance = new(big.Int)
 	}
 
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
-		data.storageSize = 0
+		data.StorageSize = 0
 	} else {
-		if data.storageSize == 0 {
-			data.storageSize = HugeNumber
+		if data.StorageSize == 0 {
+			data.StorageSize = HugeNumber
 		}
 	}
 
@@ -336,19 +323,19 @@ func (self *stateObject) setNonce(nonce uint64) {
 }
 
 func (self *stateObject) StorageSize() uint64 {
-	return self.data.storageSize
+	return self.data.StorageSize
 }
 
 func (self *stateObject) SetStorageSize(size uint64) {
 	self.db.journal.append(storageSizeChange{
 		account:  &self.address,
-		prevsize: self.data.storageSize,
+		prevsize: self.data.StorageSize,
 	})
 	self.setStorageSize(size)
 }
 
 func (self *stateObject) setStorageSize(size uint64) {
-	self.data.storageSize = size
+	self.data.StorageSize = size
 }
 
 func (self *stateObject) CodeHash() []byte {

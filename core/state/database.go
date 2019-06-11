@@ -27,6 +27,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -53,16 +54,16 @@ const (
 )
 
 type StateReader interface {
-	ReadAccountData(address common.Address) (*Account, error)
+	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error)
 	ReadAccountCode(codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(codeHash common.Hash) (int, error)
 }
 
 type StateWriter interface {
-	UpdateAccountData(address common.Address, original, account *Account) error
+	UpdateAccountData(address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
-	DeleteAccount(address common.Address, original *Account) error
+	DeleteAccount(address common.Address, original *accounts.Account) error
 	WriteAccountStorage(address common.Address, key, original, value *common.Hash) error
 }
 
@@ -105,11 +106,11 @@ func NewNoopWriter() *NoopWriter {
 	return &NoopWriter{}
 }
 
-func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *Account) error {
+func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(address common.Address, original *Account) error {
+func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -126,7 +127,7 @@ func (nw *NoopWriter) WriteAccountStorage(address common.Address, key, original,
 type Buffer struct {
 	storageUpdates map[common.Address]map[common.Hash][]byte
 	storageReads   map[common.Address]map[common.Hash]struct{}
-	accountUpdates map[common.Hash]*Account
+	accountUpdates map[common.Hash]*accounts.Account
 	accountReads   map[common.Hash]struct{}
 	deleted        map[common.Address]struct{}
 }
@@ -135,7 +136,7 @@ type Buffer struct {
 func (b *Buffer) initialise() {
 	b.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Address]map[common.Hash]struct{})
-	b.accountUpdates = make(map[common.Hash]*Account)
+	b.accountUpdates = make(map[common.Hash]*accounts.Account)
 	b.accountReads = make(map[common.Hash]struct{})
 	b.deleted = make(map[common.Address]struct{})
 }
@@ -144,11 +145,12 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
-			b.accountUpdates[addrHash] = &Account{
-				Nonce:    account.Nonce,
-				Balance:  new(big.Int).Set(account.Balance),
-				Root:     account.Root,
-				CodeHash: account.CodeHash,
+			b.accountUpdates[addrHash] = &accounts.Account{
+				Nonce:       account.Nonce,
+				Balance:     new(big.Int).Set(account.Balance),
+				Root:        account.Root,
+				CodeHash:    account.CodeHash,
+				StorageSize: account.StorageSize,
 			}
 		}
 	}
@@ -649,14 +651,14 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	return nil
 }
 
-func accountToEncoding(account *Account) ([]byte, error) {
+func accountToEncoding(account *accounts.Account) ([]byte, error) {
 	var data []byte
 	var err error
 	if (account.CodeHash == nil || bytes.Equal(account.CodeHash, emptyCodeHash)) && (account.Root == emptyRoot || account.Root == common.Hash{}) {
 		if (account.Balance == nil || account.Balance.Sign() == 0) && account.Nonce == 0 {
 			data = []byte{byte(192)}
 		} else {
-			var extAccount ExtAccount
+			var extAccount accounts.ExtAccount
 			extAccount.Nonce = account.Nonce
 			extAccount.Balance = account.Balance
 			if extAccount.Balance == nil {
@@ -678,8 +680,8 @@ func accountToEncoding(account *Account) ([]byte, error) {
 		if a.Root == (common.Hash{}) {
 			a.Root = emptyRoot
 		}
-		if a.storageSize == 0 {
-			a.storageSize = HugeNumber
+		if a.StorageSize == 0 {
+			a.StorageSize = HugeNumber
 		}
 		data, err = rlp.EncodeToBytes(a)
 		if err != nil {
@@ -689,18 +691,18 @@ func accountToEncoding(account *Account) ([]byte, error) {
 	return data, err
 }
 
-func encodingToAccount(enc []byte) (*Account, error) {
+func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	if enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	var data Account
+	var data accounts.Account
 	// Kind of hacky
 	if len(enc) == 1 {
 		data.Balance = new(big.Int)
 		data.CodeHash = emptyCodeHash
 		data.Root = emptyRoot
 	} else if len(enc) < 60 {
-		var extData ExtAccount
+		var extData accounts.ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return nil, err
 		}
@@ -727,7 +729,7 @@ func (tds *TrieDbState) leftGeneration(gen uint64) {
 	tds.generationCounts[gen]--
 }
 
-func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error) {
+func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -952,7 +954,7 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
-func accountsEqual(a1, a2 *Account) bool {
+func accountsEqual(a1, a2 *accounts.Account) bool {
 	if a1.Nonce != a2.Nonce {
 		return false
 	}
@@ -980,7 +982,7 @@ func accountsEqual(a1, a2 *Account) bool {
 	return true
 }
 
-func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, account *Account) error {
+func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != nil {
 		return err
@@ -989,7 +991,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *Account) error {
+func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	data, err := accountToEncoding(account)
 	if err != nil {
 		return err
@@ -1020,7 +1022,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
-func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *Account) error {
+func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != err {
 		return err
@@ -1030,7 +1032,7 @@ func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *Acco
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *Account) error {
+func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
 	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
 	if err != nil {
 		return err

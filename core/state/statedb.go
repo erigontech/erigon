@@ -19,6 +19,8 @@ package state
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+
 	//"errors"
 	"fmt"
 	"math/big"
@@ -520,12 +522,12 @@ func (self *StateDB) GetOrNewStateObject(addr common.Address) *stateObject {
 func (self *StateDB) createObject(addr common.Address, previous *stateObject) (newobj, prev *stateObject) {
 	//fmt.Printf("CREATE %x\n", addr[:])
 	prev = previous
-	var account Account
-	var original Account
+	var account accounts.Account
+	var original accounts.Account
 	if previous == nil {
-		account = Account{}
+		account = accounts.Account{}
 		account.Root.SetBytes(emptyRoot[:])
-		original = Account{}
+		original = accounts.Account{}
 	} else {
 		account = previous.data
 		original = previous.original

@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"os"
 	"sort"
 
@@ -41,7 +42,7 @@ type Stateless struct {
 	timeToCodeHash map[uint64]map[common.Hash]struct{}
 	trace          bool
 	storageUpdates map[common.Address]map[common.Hash][]byte
-	accountUpdates map[common.Hash]*Account
+	accountUpdates map[common.Hash]*accounts.Account
 	deleted        map[common.Hash]struct{}
 }
 
@@ -131,7 +132,7 @@ func NewStateless(stateRoot common.Hash,
 		timeToCodeHash: timeToCodeHash,
 		trace:          trace,
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
-		accountUpdates: make(map[common.Hash]*Account),
+		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
 	}, nil
 }
@@ -306,7 +307,7 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
 }
 
-func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
+func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -384,7 +385,7 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	}
 }
 
-func (s *Stateless) UpdateAccountData(address common.Address, original, account *Account) error {
+func (s *Stateless) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -476,7 +477,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		}
 	}
 	s.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
-	s.accountUpdates = make(map[common.Hash]*Account)
+	s.accountUpdates = make(map[common.Hash]*accounts.Account)
 	s.deleted = make(map[common.Hash]struct{})
 	return nil
 }
@@ -487,7 +488,7 @@ func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (s *Stateless) DeleteAccount(address common.Address, original *Account) error {
+func (s *Stateless) DeleteAccount(address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

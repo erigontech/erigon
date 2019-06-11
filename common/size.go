@@ -20,7 +20,7 @@ import (
 	"fmt"
 )
 
-// storageSize is a wrapper around a float value that supports user friendly
+// StorageSize is a wrapper around a float value that supports user friendly
 // formatting.
 type StorageSize float64
 

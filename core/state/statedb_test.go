@@ -32,6 +32,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -154,7 +155,7 @@ func testCopy(t *testing.T) {
 	for i := byte(0); i < 255; i++ {
 		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
 		obj.AddBalance(big.NewInt(int64(i)))
-		origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(Account))
+		origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(accounts.Account))
 	}
 	orig.Finalise(false, origTds.TrieStateWriter())
 	origTds.ComputeTrieRoots()
@@ -174,8 +175,8 @@ func testCopy(t *testing.T) {
 		origObj.AddBalance(big.NewInt(2 * int64(i)))
 		copyObj.AddBalance(big.NewInt(3 * int64(i)))
 
-		origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(Account))
-		copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(Account))
+		origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(accounts.Account))
+		copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(accounts.Account))
 	}
 	// Finalise the changes on both concurrently
 	done := make(chan struct{})
@@ -501,8 +502,8 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
 	obj := state.getStateObject(addr)
-	if obj.data.storageSize != 0 {
-		t.Fatal("Storage size of empty account should be 0", obj.data.storageSize)
+	if obj.data.StorageSize != 0 {
+		t.Fatal("Storage size of empty account should be 0", obj.data.StorageSize)
 	}
 }
 
@@ -516,21 +517,21 @@ func TestStateDBNewContractAccount(t *testing.T) {
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
 	obj := state.getStateObject(addr)
-	if obj.data.storageSize != HugeNumber {
-		t.Fatal("Storage size of empty account should be HugeNumber", obj.data.storageSize)
+	if obj.data.StorageSize != HugeNumber {
+		t.Fatal("Storage size of empty account should be HugeNumber", obj.data.StorageSize)
 	}
 
 	state.IncreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if obj.data.storageSize != HugeNumber+1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.storageSize)
+	if obj.data.StorageSize != HugeNumber+1 {
+		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize)
 	}
 
 	state.DecreaseStorageSize(addr)
 	state.DecreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if obj.data.storageSize != HugeNumber-1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.storageSize)
+	if obj.data.StorageSize != HugeNumber-1 {
+		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize)
 	}
 
 }

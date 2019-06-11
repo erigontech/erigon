@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -186,8 +187,6 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
-var NN int
-
 func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	pLen := prefixLen(k, tr.key)
 	stopLevel := 2 * pLen
@@ -310,7 +309,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		}
 		var gotHash common.Hash
 		hashLen := tr.h.hash(root, req.resolvePos == 0, gotHash[:])
-
 		if hashLen == 32 {
 			if !bytes.Equal(req.resolveHash, gotHash[:]) {
 				return fmt.Errorf("Resolving wrong hash for contract '%x', key '%x', pos %d, \nexpected %q, got %q\n",
@@ -378,18 +376,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	return nil
 }
 
-type ExtAccount struct {
-	Nonce   uint64
-	Balance *big.Int
-}
-type Account struct {
-	Nonce       uint64
-	Balance     *big.Int
-	Root        common.Hash // merkle root of the storage trie
-	CodeHash    []byte
-	storageSize uint64
-}
-
 var emptyCodeHash = crypto.Keccak256(nil)
 
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
@@ -419,7 +405,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			tr.key = tr.key_array[:52]
 		}
 		if tr.accounts {
-			var data Account
+			var data accounts.Account
 			var err error
 			if len(v) == 1 {
 				data.Balance = new(big.Int)
@@ -429,7 +415,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 					return false, err
 				}
 			} else if len(v) < 60 {
-				var extData ExtAccount
+				var extData accounts.ExtAccount
 				if err = rlp.DecodeBytes(v, &extData); err != nil {
 					return false, err
 				}
