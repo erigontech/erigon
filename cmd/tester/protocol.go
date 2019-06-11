@@ -156,6 +156,12 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 	return nil
 }
 
+func (tp *TesterProtocol) firehoseRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	fmt.Printf("Firehose peer connected: %s\n", peer.Name())
+	// TODO [yperbasis] implement
+	return nil
+}
+
 // hashOrNumber is a combined field for specifying an origin block.
 type hashOrNumber struct {
 	Hash   common.Hash // Block hash from which to retrieve headers (excludes Number)

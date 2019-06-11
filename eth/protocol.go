@@ -41,7 +41,7 @@ var ProtocolName = "eth"
 var ProtocolVersions = []uint{eth62}
 
 // ProtocolLengths are the number of implemented message corresponding to different protocol versions.
-var ProtocolLengths = []uint64{17, 8}
+var ProtocolLengths = []uint64{8}
 
 const ProtocolMaxMsgSize = 10 * 1024 * 1024 // Maximum cap on the size of a protocol message
 
@@ -58,8 +58,8 @@ const (
 	NewBlockMsg        = 0x07
 
 	// Protocol messages belonging to eth/63
-	GetNodeDataMsg = 0x0d
-	NodeDataMsg    = 0x0e
+	GetNodeDataMsg = 0x0d // NOT IMPLEMENTED
+	NodeDataMsg    = 0x0e // NOT IMPLEMENTED
 	GetReceiptsMsg = 0x0f
 	ReceiptsMsg    = 0x10
 )
