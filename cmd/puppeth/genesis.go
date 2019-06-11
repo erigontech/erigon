@@ -42,6 +42,7 @@ type alethGenesisSpec struct {
 		DaoHardforkBlock        math2.HexOrDecimal64   `json:"daoHardforkBlock"`
 		EIP150ForkBlock         hexutil.Uint64         `json:"EIP150ForkBlock"`
 		EIP158ForkBlock         hexutil.Uint64         `json:"EIP158ForkBlock"`
+		EIP2027ForkBlock        hexutil.Uint64         `json:"EIP2027ForkBlock"`
 		ByzantiumForkBlock      hexutil.Uint64         `json:"byzantiumForkBlock"`
 		ConstantinopleForkBlock hexutil.Uint64         `json:"constantinopleForkBlock"`
 		MinGasLimit             hexutil.Uint64         `json:"minGasLimit"`
@@ -111,6 +112,7 @@ func newAlethGenesisSpec(network string, genesis *core.Genesis) (*alethGenesisSp
 	spec.Params.HomesteadForkBlock = (hexutil.Uint64)(genesis.Config.HomesteadBlock.Uint64())
 	spec.Params.EIP150ForkBlock = (hexutil.Uint64)(genesis.Config.EIP150Block.Uint64())
 	spec.Params.EIP158ForkBlock = (hexutil.Uint64)(genesis.Config.EIP158Block.Uint64())
+	spec.Params.EIP2027ForkBlock = (hexutil.Uint64)(genesis.Config.EIP2027Block.Uint64())
 
 	// Byzantium
 	if num := genesis.Config.ByzantiumBlock; num != nil {
