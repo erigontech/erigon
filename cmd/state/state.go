@@ -6,7 +6,6 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	account2 "github.com/ledgerwatch/turbo-geth/core/types/account"
 	"io"
 	"io/ioutil"
 	"log"
@@ -24,12 +23,12 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -1407,18 +1406,18 @@ func oldStorage() {
 	}
 }
 
-func encodingToAccount(enc []byte) (*account2.Account, error) {
+func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	if enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	var data account2.Account
+	var data accounts.Account
 	// Kind of hacky
 	if len(enc) == 1 {
 		data.Balance = new(big.Int)
 		data.CodeHash = emptyCodeHash
 		data.Root = emptyRoot
 	} else if len(enc) < 60 {
-		var extData account2.ExtAccount
+		var extData accounts.ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return nil, err
 		}
