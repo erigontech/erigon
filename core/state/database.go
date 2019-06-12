@@ -35,7 +35,7 @@ import (
 )
 
 // Trie cache generation limit after which to evict trie nodes from memory.
-var MaxTrieCacheGen = uint32(4 * 1024 * 1024)
+var MaxTrieCacheGen = uint32(1024 * 1024)
 
 var AccountsBucket = []byte("AT")
 var AccountsHistoryBucket = []byte("hAT")
