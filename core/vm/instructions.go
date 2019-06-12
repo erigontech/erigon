@@ -634,11 +634,14 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
-	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! opSstore")
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
-	interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
+
+	if interpreter.evm.ChainConfig().IsEIP158(interpreter.evm.BlockNumber) {
+		fmt.Println("+++++++++++++++++++++++++++")
+		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
+	}
 
 	interpreter.intPool.put(val)
 	return nil, nil

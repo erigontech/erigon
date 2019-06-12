@@ -112,7 +112,9 @@ func newAlethGenesisSpec(network string, genesis *core.Genesis) (*alethGenesisSp
 	spec.Params.HomesteadForkBlock = (hexutil.Uint64)(genesis.Config.HomesteadBlock.Uint64())
 	spec.Params.EIP150ForkBlock = (hexutil.Uint64)(genesis.Config.EIP150Block.Uint64())
 	spec.Params.EIP158ForkBlock = (hexutil.Uint64)(genesis.Config.EIP158Block.Uint64())
-	spec.Params.EIP2027ForkBlock = (hexutil.Uint64)(genesis.Config.EIP2027Block.Uint64())
+	if genesis.Config.EIP2027Block != nil {
+		spec.Params.EIP2027ForkBlock = (hexutil.Uint64)(genesis.Config.EIP2027Block.Uint64())
+	}
 
 	// Byzantium
 	if num := genesis.Config.ByzantiumBlock; num != nil {

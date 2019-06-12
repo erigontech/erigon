@@ -17,6 +17,7 @@
 package core
 
 import (
+	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -144,6 +145,7 @@ func TestSetupGenesis(t *testing.T) {
 	for _, test := range tests {
 		db := ethdb.NewMemDatabase()
 		config, hash, _, err := test.fn(db)
+		fmt.Println("+++", test.name, len(db.Keys()), config)
 		// Check the return values.
 		if !reflect.DeepEqual(err, test.wantErr) {
 			spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}

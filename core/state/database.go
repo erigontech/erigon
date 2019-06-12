@@ -651,6 +651,14 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	return nil
 }
 
+// Account before EIP-2027
+type Account struct {
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash
+	CodeHash    []byte
+}
+
 func accountToEncoding(account *accounts.Account) ([]byte, error) {
 	var data []byte
 	var err error
@@ -680,9 +688,28 @@ func accountToEncoding(account *accounts.Account) ([]byte, error) {
 		if a.Root == (common.Hash{}) {
 			a.Root = emptyRoot
 		}
-		data, err = rlp.EncodeToBytes(a)
-		if err != nil {
-			return nil, err
+
+		if a.StorageSize == nil || *a.StorageSize == 0 {
+			accBeforeEIP2027 := &Account {
+				Nonce: a.Nonce,
+				Balance: a.Balance,
+				Root: a.Root,
+				CodeHash: a.CodeHash,
+			}
+
+			data, err = rlp.EncodeToBytes(accBeforeEIP2027)
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Println("*** 1", string(data))
+			data1, _ := rlp.EncodeToBytes(a)
+			fmt.Println("*** 2", string(data1))
+		} else {
+			data, err = rlp.EncodeToBytes(a)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 	return data, err
@@ -708,8 +735,23 @@ func encodingToAccount(enc []byte) (*accounts.Account, error) {
 		data.CodeHash = emptyCodeHash
 		data.Root = emptyRoot
 	} else {
-		if err := rlp.DecodeBytes(enc, &data); err != nil {
-			return nil, err
+		var dataWithoutStorage Account
+		if err := rlp.DecodeBytes(enc, &dataWithoutStorage); err != nil {
+			if err.Error() != "rlp: too few elements for accounts.Account" {
+				return nil, err
+			}
+
+			var dataWithStorage accounts.Account
+			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
+				return nil, err
+			}
+
+			data = dataWithStorage
+		} else {
+			data.Nonce = dataWithoutStorage.Nonce
+			data.Balance = dataWithoutStorage.Balance
+			data.CodeHash = dataWithoutStorage.CodeHash
+			data.Root = dataWithoutStorage.Root
 		}
 	}
 	return &data, nil
