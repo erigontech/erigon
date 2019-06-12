@@ -117,7 +117,7 @@ type (
 	}
 	storageSizeChange struct {
 		account     *common.Address
-		prevsize    uint64
+		prevsize    *uint64
 	}
 
 	// Changes to other state values.

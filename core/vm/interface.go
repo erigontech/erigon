@@ -47,9 +47,7 @@ type StateDB interface {
 	GetState(common.Address, common.Hash) common.Hash
 	SetState(common.Address, common.Hash, common.Hash)
 
-	StorageSize(common.Address) uint64
-	IncreaseStorageSize(common.Address)
-	DecreaseStorageSize(common.Address)
+	SetStorageSize(addr common.Address, loc common.Hash, val *big.Int)
 
 	Suicide(common.Address) bool
 	HasSuicided(common.Address) bool

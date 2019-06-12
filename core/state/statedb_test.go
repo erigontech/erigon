@@ -502,7 +502,7 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
 	obj := state.getStateObject(addr)
-	if obj.data.StorageSize != 0 {
+	if obj.data.StorageSize != nil {
 		t.Fatal("Storage size of empty account should be 0", obj.data.StorageSize)
 	}
 }
@@ -517,21 +517,21 @@ func TestStateDBNewContractAccount(t *testing.T) {
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
 	obj := state.getStateObject(addr)
-	if obj.data.StorageSize != HugeNumber {
-		t.Fatal("Storage size of empty account should be HugeNumber", obj.data.StorageSize)
+	if obj.data.StorageSize != nil {
+		t.Fatal("Storage size of empty account should be nil", obj.data.StorageSize)
 	}
 
 	state.IncreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if obj.data.StorageSize != HugeNumber+1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize)
+	if *obj.data.StorageSize != HugeNumber+1 {
+		t.Fatal("Storage size of empty account should be HugeNumber +1", *obj.data.StorageSize, HugeNumber)
 	}
 
 	state.DecreaseStorageSize(addr)
 	state.DecreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if obj.data.StorageSize != HugeNumber-1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize)
+	if *obj.data.StorageSize != HugeNumber-1 {
+		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize - HugeNumber)
 	}
 
 }

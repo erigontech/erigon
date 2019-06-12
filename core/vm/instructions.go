@@ -633,21 +633,12 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 	return nil, nil
 }
 
-// todo check is it correct 0 location value
-var nullLocation = common.Hash{}
-var nullValue = common.Big0
-
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+	fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! opSstore")
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
-
-	if loc == nullLocation && val == nullValue {
-		interpreter.evm.StateDB.IncreaseStorageSize(contract.Address())
-	}
-	if loc != nullLocation && val == nullValue {
-		interpreter.evm.StateDB.DecreaseStorageSize(contract.Address())
-	}
+	interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
 
 	interpreter.intPool.put(val)
 	return nil, nil

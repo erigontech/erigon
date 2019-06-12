@@ -335,7 +335,7 @@ func (self *StateDB) HasSuicided(addr common.Address) bool {
 	return false
 }
 
-func (self *StateDB) StorageSize(addr common.Address) uint64 {
+func (self *StateDB) StorageSize(addr common.Address) *uint64 {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
 	}
@@ -344,7 +344,7 @@ func (self *StateDB) StorageSize(addr common.Address) uint64 {
 		return stateObject.StorageSize()
 	}
 
-	return 0
+	return nil
 }
 
 /*
@@ -442,21 +442,56 @@ func (self *StateDB) Suicide(addr common.Address) bool {
 }
 
 func (self *StateDB) IncreaseStorageSize(addr common.Address) {
-	self.SetStorageSize(addr, self.StorageSize(addr)+1)
+	self.changeStorageSize(addr, 1)
 }
 
 func (self *StateDB) DecreaseStorageSize(addr common.Address) {
-	self.SetStorageSize(addr, self.StorageSize(addr)-1)
+	self.changeStorageSize(addr, -1)
 }
 
-func (self *StateDB) SetStorageSize(addr common.Address, size uint64) {
+// todo check is it correct 0 location value
+var nullLocation = common.Hash{}
+var nullValue = common.Big0
+
+func (self *StateDB) SetStorageSize(addr common.Address, loc common.Hash, val *big.Int) {
+	if loc == nullLocation && val == nullValue {
+		self.IncreaseStorageSize(addr)
+	}
+	if loc != nullLocation && val == nullValue {
+		self.DecreaseStorageSize(addr)
+	}
+}
+
+func (self *StateDB) changeStorageSize(addr common.Address, sizeDiff int64) {
+	if sizeDiff == 0 {
+		return
+	}
+
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
 	}
+
 	stateObject := self.GetOrNewStateObject(addr)
-	if stateObject != nil {
-		stateObject.SetStorageSize(size)
+	if stateObject == nil {
+		return
 	}
+
+	size := self.StorageSize(addr)
+	if size == nil  {
+		size = new(uint64)
+		*size = HugeNumber
+	}
+	if size != nil && *size == 0 {
+		*size = HugeNumber
+	}
+
+	if sizeDiff >= 0 {
+		*size = *size + uint64(sizeDiff)
+	} else {
+		*size = *size - uint64(-sizeDiff)
+	}
+
+	stateObject.SetStorageSize(size)
 }
 
 // Retrieve a state object given my the address. Returns nil if not found.

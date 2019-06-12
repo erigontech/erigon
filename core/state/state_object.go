@@ -97,7 +97,7 @@ func (s *stateObject) empty() bool {
 }
 
 // huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
-const HugeNumber = 1 << 63
+const HugeNumber = uint64(1 << 63)
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, data, original accounts.Account) *stateObject {
@@ -107,11 +107,6 @@ func newObject(db *StateDB, address common.Address, data, original accounts.Acco
 
 	if data.CodeHash == nil {
 		data.CodeHash = emptyCodeHash
-		data.StorageSize = 0
-	} else {
-		if data.StorageSize == 0 {
-			data.StorageSize = HugeNumber
-		}
 	}
 
 	return &stateObject{
@@ -322,11 +317,11 @@ func (self *stateObject) setNonce(nonce uint64) {
 	self.data.Nonce = nonce
 }
 
-func (self *stateObject) StorageSize() uint64 {
+func (self *stateObject) StorageSize() *uint64 {
 	return self.data.StorageSize
 }
 
-func (self *stateObject) SetStorageSize(size uint64) {
+func (self *stateObject) SetStorageSize(size *uint64) {
 	self.db.journal.append(storageSizeChange{
 		account:  &self.address,
 		prevsize: self.data.StorageSize,
@@ -334,7 +329,7 @@ func (self *stateObject) SetStorageSize(size uint64) {
 	self.setStorageSize(size)
 }
 
-func (self *stateObject) setStorageSize(size uint64) {
+func (self *stateObject) setStorageSize(size *uint64) {
 	self.data.StorageSize = size
 }
 
