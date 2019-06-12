@@ -256,7 +256,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.nodeStack[level].flags.dirty = true
 		}
 		tr.vertical[level].flags.dirty = true
-		if onResolvingPath || (tr.hashes && level <= 5) {
+		if onResolvingPath || (tr.hashes && level < 5) {
 			var c node
 			if tr.fillCount[level+1] == 2 {
 				c = full.duoCopy()

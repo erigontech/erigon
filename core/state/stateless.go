@@ -563,11 +563,27 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 }
 
 func (s *Stateless) Prune(oldest uint64, trace bool) {
+	if trace {
+		mainPrunable := s.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		for _, storageTrie := range s.storageTries {
+			prunableNodes += storageTrie.CountPrunableNodes()
+		}
+		fmt.Printf("[Before pruning to %d] Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
+	}
 	emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
 		return s.getStorageTrie(contract, false)
 	})
 	if err != nil {
 		fmt.Printf("Error while pruning: %v\n", err)
+	}
+	if trace {
+		mainPrunable := s.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		for _, storageTrie := range s.storageTries {
+			prunableNodes += storageTrie.CountPrunableNodes()
+		}
+		fmt.Printf("[After pruning to %d Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
 	}
 	for _, address := range emptyAddresses {
 		delete(s.storageTries, address)

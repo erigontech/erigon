@@ -929,7 +929,17 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	downmask := masks[*maskIdx]
 	(*maskIdx)++
 	// short node (leaf or extension)
-	s, ok := n.(*shortNode)
+	var s *shortNode
+	var ok bool
+	switch nt := n.(type) {
+	case *shortNode:
+		s = nt
+		ok = true
+	case *duoNode:
+		touchFunc(hex, true) // duoNode turned into shortNode - delete from prunable set
+	case *fullNode:
+		touchFunc(hex, true) // fullNode turned into shortNode - delete from prunable set
+	}
 	var nKey []byte
 	if (downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6 {
 		nKey = shortKeys[*shortIdx]
@@ -991,7 +1001,7 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 		s.Val = applyFullNode(h, touchFunc, ctime, nil, concat(hex, nKey...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	case 7:
-		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, nKey...), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, compactToHex(s.Key)...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
 	if s.flags.dirty {

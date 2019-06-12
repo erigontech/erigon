@@ -33,11 +33,6 @@ var (
 	emptyState = crypto.Keccak256Hash(nil)
 )
 
-// LeafCallback is a callback type invoked when a trie operation reaches a leaf
-// node. It's used by state sync and commit to allow handling external references
-// between account and storage tries.
-type LeafCallback func(leaf []byte, parent common.Hash) error
-
 // Trie is a Merkle Patricia Trie.
 // The zero value is an empty trie with no database.
 // Use New to create a trie that sits on top of a database.
@@ -654,7 +649,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 			// values.
 			var pos1, pos2 int
 			count := 0
-			for i, cld := range &n.Children {
+			for i, cld := range n.Children {
 				if cld != nil {
 					if count == 0 {
 						pos1 = i
