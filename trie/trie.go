@@ -33,11 +33,6 @@ var (
 	emptyState = crypto.Keccak256Hash(nil)
 )
 
-// LeafCallback is a callback type invoked when a trie operation reaches a leaf
-// node. It's used by state sync and commit to allow handling external references
-// between account and storage tries.
-type LeafCallback func(leaf []byte, parent common.Hash) error
-
 // Trie is a Merkle Patricia Trie.
 // The zero value is an empty trie with no database.
 // Use New to create a trie that sits on top of a database.
@@ -48,8 +43,7 @@ type Trie struct {
 
 	encodeToBytes bool
 
-	joinGeneration func(gen uint64)
-	leftGeneration func(gen uint64)
+	touchFunc func(hex []byte, del bool)
 }
 
 // New creates a trie with an existing root node from db.
@@ -60,9 +54,8 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash, encodeToBytes bool) *Trie {
 	trie := &Trie{
-		encodeToBytes:  encodeToBytes,
-		joinGeneration: func(uint64) {},
-		leftGeneration: func(uint64) {},
+		encodeToBytes: encodeToBytes,
+		touchFunc:     func([]byte, bool) {},
 	}
 	if (root != common.Hash{}) && root != emptyRoot {
 		trie.root = hashNode(root[:])
@@ -70,9 +63,8 @@ func New(root common.Hash, encodeToBytes bool) *Trie {
 	return trie
 }
 
-func (t *Trie) MakeListed(joinGeneration, leftGeneration func(gen uint64)) {
-	t.joinGeneration = joinGeneration
-	t.leftGeneration = leftGeneration
+func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
+	t.touchFunc = touchFunc
 }
 
 // TryGet returns the value for key stored in the trie.
@@ -88,50 +80,33 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 	case valueNode:
 		return n, true
 	case *shortNode:
-		var adjust bool
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			adjust = false
 			value, gotValue = nil, true
 		} else {
-			adjust = true
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
 			} else {
 				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
 			}
 		}
-		if adjust {
-			n.adjustTod(blockNr)
-		}
 		return
 	case *duoNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
-		var adjust bool
+		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			adjust = n.tod(blockNr) == n.child1.tod(blockNr)
 			value, gotValue = t.get(n.child1, key, pos+1, blockNr)
 		case i2:
-			adjust = n.tod(blockNr) == n.child2.tod(blockNr)
 			value, gotValue = t.get(n.child2, key, pos+1, blockNr)
 		default:
-			adjust = false
 			value, gotValue = nil, true
-		}
-		if adjust {
-			n.adjustTod(blockNr)
 		}
 		return
 	case *fullNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
+		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
 		value, gotValue = t.get(child, key, pos+1, blockNr)
-		if adjust {
-			n.adjustTod(blockNr)
-		}
 		return
 	case hashNode:
 		return nil, false
@@ -151,9 +126,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		newnode.flags.dirty = true
-		newnode.flags.t = blockNr
-		newnode.adjustTod(blockNr)
-		t.joinGeneration(blockNr)
 		t.root = newnode
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value), blockNr)
@@ -167,8 +139,6 @@ type ResolveRequest struct {
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
-	resolved      node     // Node that has been resolved via Database access
-	resolveParent node     // Parent node of the one needs to be resolved. nil if the root needs to be resolved
 }
 
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
@@ -184,7 +154,6 @@ func (rr *ResolveRequest) String() string {
 // In the case of "Yes", also returns a corresponding ResolveRequest
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
 	var nd node = t.root
-	var parent node = nil
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
@@ -195,7 +164,6 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
 			if matchlen == len(nKey) {
-				parent = nd
 				nd = n.Val
 				pos += matchlen
 			} else {
@@ -205,11 +173,9 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
-				parent = nd
 				nd = n.child1
 				pos++
 			case i2:
-				parent = nd
 				nd = n.child2
 				pos++
 			default:
@@ -220,16 +186,13 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			if child == nil {
 				return false, nil
 			} else {
-				parent = nd
 				nd = child
 				pos++
 			}
 		case valueNode:
 			return false, nil
 		case hashNode:
-			c := t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
-			c.resolveParent = parent
-			return true, c
+			return true, t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
@@ -357,7 +320,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				n.flags.dirty = true
 			}
 			newNode = n
-			n.adjustTod(blockNr)
 		} else {
 			// Otherwise branch out at the index where they differ.
 			var c1 node
@@ -366,10 +328,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			} else {
 				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
 				s1.flags.dirty = true
-				s1.flags.t = blockNr
-				s1.adjustTod(blockNr)
 				c1 = s1
-				t.joinGeneration(blockNr)
 			}
 			var c2 node
 			if len(key) == pos+matchlen+1 {
@@ -377,10 +336,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			} else {
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				s2.flags.dirty = true
-				s2.flags.t = blockNr
-				s2.adjustTod(blockNr)
 				c2 = s2
-				t.joinGeneration(blockNr)
 			}
 			branch := &duoNode{}
 			if nKey[matchlen] < key[pos+matchlen] {
@@ -392,75 +348,39 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			}
 			branch.mask = (1 << (nKey[matchlen])) | (1 << (key[pos+matchlen]))
 			branch.flags.dirty = true
-			branch.flags.t = blockNr
-			branch.adjustTod(blockNr)
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
+				t.touchFunc(key[:pos], false)
 				newNode = branch // current node leaves the generation, but new node branch joins it
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
+				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = hexToCompact(key[pos : pos+matchlen])
 				n.Val = branch
-				t.joinGeneration(blockNr) // new branch node joins the generation
 				n.flags.dirty = true
-				n.flags.t = blockNr
 				newNode = n
-				n.adjustTod(blockNr)
 			}
 			updated = true
 		}
 		return
 
 	case *duoNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
-		var adjust bool
+		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			adjust = n.child1 != nil && n.tod(blockNr) == n.child1.tod(blockNr)
-			if n.child1 == nil {
-				if len(key) == pos+1 {
-					n.child1 = value
-				} else {
-					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-					short.flags.dirty = true
-					short.flags.t = blockNr
-					short.adjustTod(blockNr)
-					t.joinGeneration(blockNr)
-					n.child1 = short
-				}
-				updated = true
+			updated, nn = t.insert(n.child1, key, pos+1, value, blockNr)
+			if updated {
+				n.child1 = nn
 				n.flags.dirty = true
-			} else {
-				updated, nn = t.insert(n.child1, key, pos+1, value, blockNr)
-				if updated {
-					n.child1 = nn
-					n.flags.dirty = true
-				}
 			}
 			newNode = n
 		case i2:
-			adjust = n.child2 != nil && n.tod(blockNr) == n.child2.tod(blockNr)
-			if n.child2 == nil {
-				if len(key) == pos+1 {
-					n.child2 = value
-				} else {
-					short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-					short.flags.dirty = true
-					short.flags.t = blockNr
-					short.adjustTod(blockNr)
-					t.joinGeneration(blockNr)
-					n.child2 = short
-				}
-				updated = true
+			updated, nn = t.insert(n.child2, key, pos+1, value, blockNr)
+			if updated {
+				n.child2 = nn
 				n.flags.dirty = true
-			} else {
-				updated, nn = t.insert(n.child2, key, pos+1, value, blockNr)
-				if updated {
-					n.child2 = nn
-					n.flags.dirty = true
-				}
 			}
 			newNode = n
 		default:
@@ -470,41 +390,28 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 				short.flags.dirty = true
-				short.flags.t = blockNr
-				short.adjustTod(blockNr)
-				t.joinGeneration(blockNr)
 				child = short
 			}
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
 			newnode.flags.dirty = true
-			newnode.flags.t = blockNr
-			newnode.adjustTod(blockNr)
-			adjust = false
 			newnode.Children[key[pos]] = child
 			updated = true
 			// current node leaves the generation but newnode joins it
 			newNode = newnode
 		}
-		if adjust {
-			n.adjustTod(blockNr)
-		}
 		return
 
 	case *fullNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
+		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
 		if child == nil {
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
 				short.flags.dirty = true
-				short.flags.t = blockNr
-				short.adjustTod(blockNr)
-				t.joinGeneration(blockNr)
 				n.Children[key[pos]] = short
 			}
 			updated = true
@@ -517,13 +424,83 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			}
 		}
 		newNode = n
-		if adjust {
-			n.adjustTod(blockNr)
-		}
 		return
 	default:
-		fmt.Printf("Key: %x, Prefix: %x\n", key[pos:], key[:pos])
+		fmt.Printf("Key: %x, Pos: %d\n", key, pos)
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
+	}
+}
+
+func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+	var nd node = t.root
+	var parent node
+	pos := 0
+	for pos < len(hex) {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hex[pos:], nKey)
+			if matchlen == len(nKey) {
+				parent = n
+				nd = n.Val
+				pos += matchlen
+			} else {
+				return
+			}
+		case *duoNode:
+			t.touchFunc(hex[:pos], false)
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				parent = n
+				nd = n.child1
+				pos++
+			case i2:
+				parent = n
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			t.touchFunc(hex[:pos], false)
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			} else {
+				parent = n
+				nd = child
+				pos++
+			}
+		case valueNode:
+			return
+		case hashNode:
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	if _, ok := nd.(hashNode); !ok {
+		return
+	}
+	switch p := parent.(type) {
+	case nil:
+		t.root = n
+	case *shortNode:
+		p.Val = n
+	case *duoNode:
+		i1, i2 := p.childrenIdx()
+		switch hex[len(hex)-1] {
+		case i1:
+			p.child1 = n
+		case i2:
+			p.child2 = n
+		}
+	case *fullNode:
+		idx := hex[len(hex)-1]
+		p.Children[idx] = n
 	}
 }
 
@@ -548,11 +525,8 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			k[0] = byte(pos)
 			copy(k[1:], cnodeKey)
 			newshort := &shortNode{Key: hexToCompact(k)}
-			t.leftGeneration(short.flags.t)
 			newshort.Val = short.Val
 			newshort.flags.dirty = true
-			newshort.flags.t = blockNr
-			newshort.adjustTod(blockNr)
 			// cnode gets removed, but newshort gets added
 			return newshort
 		}
@@ -562,8 +536,6 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 	newshort := &shortNode{Key: hexToCompact([]byte{byte(pos)})}
 	newshort.Val = cnode
 	newshort.flags.dirty = true
-	newshort.flags.t = blockNr
-	newshort.adjustTod(blockNr)
 	return newshort
 }
 
@@ -580,7 +552,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 			updated = false
 			newNode = n // don't replace n on mismatch
 		} else if matchlen == len(key)-keyStart {
-			t.leftGeneration(n.flags.t)
 			updated = true
 			newNode = nil // remove n entirely for whole matches
 		} else {
@@ -593,7 +564,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 				newNode = n
 			} else {
 				if nn == nil {
-					t.leftGeneration(n.flags.t)
 					newNode = nil
 				} else {
 					if shortChild, ok := nn.(*shortNode); ok {
@@ -607,15 +577,10 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 						newnode := &shortNode{Key: hexToCompact(concat(nKey, childKey...))}
 						newnode.Val = shortChild.Val
 						newnode.flags.dirty = true
-						newnode.flags.t = blockNr
-						newnode.adjustTod(blockNr)
-						// We do not increase generation count here, because one short node comes, but another one
-						t.leftGeneration(shortChild.flags.t) // But shortChild goes away
 						newNode = newnode
 					} else {
 						n.Val = nn
 						n.flags.dirty = true
-						n.adjustTod(blockNr)
 						newNode = n
 					}
 				}
@@ -624,66 +589,52 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 		return
 
 	case *duoNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
-		var adjust bool
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			adjust = n.child1 != nil && n.tod(blockNr) == n.child1.tod(blockNr)
 			updated, nn = t.delete(n.child1, key, keyStart+1, blockNr)
 			if !updated {
+				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
-				n.child1 = nn
 				if nn == nil {
-					if n.child2 == nil {
-						adjust = false
-						t.leftGeneration(n.flags.t)
-						newNode = nil
-					} else {
-						newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2), blockNr)
-					}
+					t.touchFunc(key[:keyStart], true)
+					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2), blockNr)
 				} else {
+					t.touchFunc(key[:keyStart], false)
+					n.child1 = nn
 					n.flags.dirty = true
 					newNode = n
 				}
 			}
 		case i2:
-			adjust = n.child2 != nil && n.tod(blockNr) == n.child2.tod(blockNr)
 			updated, nn = t.delete(n.child2, key, keyStart+1, blockNr)
 			if !updated {
+				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
-				n.child2 = nn
 				if nn == nil {
-					if n.child1 == nil {
-						adjust = false
-						t.leftGeneration(n.flags.t)
-						newNode = nil
-					} else {
-						newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1), blockNr)
-					}
+					t.touchFunc(key[:keyStart], true)
+					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1), blockNr)
 				} else {
+					t.touchFunc(key[:keyStart], false)
+					n.child2 = nn
 					n.flags.dirty = true
 					newNode = n
 				}
 			}
 		default:
-			adjust = false
+			t.touchFunc(key[:keyStart], false)
 			updated = false
 			newNode = n
-		}
-		if adjust {
-			n.adjustTod(blockNr)
 		}
 		return
 
 	case *fullNode:
-		n.updateT(blockNr, t.joinGeneration, t.leftGeneration)
 		child := n.Children[key[keyStart]]
-		adjust := child != nil && n.tod(blockNr) == child.tod(blockNr)
 		updated, nn = t.delete(child, key, keyStart+1, blockNr)
 		if !updated {
+			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
 			n.Children[key[keyStart]] = nn
@@ -698,7 +649,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 			// values.
 			var pos1, pos2 int
 			count := 0
-			for i, cld := range &n.Children {
+			for i, cld := range n.Children {
 				if cld != nil {
 					if count == 0 {
 						pos1 = i
@@ -712,12 +663,11 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 					}
 				}
 			}
-			if count == 0 {
-				t.leftGeneration(n.flags.t)
-				newNode = nil
-			} else if count == 1 {
+			if count == 1 {
+				t.touchFunc(key[:keyStart], true)
 				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1), blockNr)
 			} else if count == 2 {
+				t.touchFunc(key[:keyStart], false)
 				duo := &duoNode{}
 				if pos1 == int(key[keyStart]) {
 					duo.child1 = nn
@@ -731,18 +681,13 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 				}
 				duo.flags.dirty = true
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
-				duo.flags.t = blockNr
-				duo.adjustTod(blockNr)
-				adjust = false
 				newNode = duo
-			} else {
+			} else if count > 2 {
+				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
 				n.flags.dirty = true
 				newNode = n
 			}
-		}
-		if adjust {
-			n.adjustTod(blockNr)
 		}
 		return
 
@@ -762,55 +707,33 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 }
 
 func (t *Trie) PrepareToRemove() {
-	t.prepareToRemove(t.root)
+	t.prepareToRemove(t.root, []byte{})
 }
 
-func (t *Trie) prepareToRemove(n node) {
+func (t *Trie) prepareToRemove(n node, hex []byte) {
 	switch n := n.(type) {
 	case *shortNode:
-		t.leftGeneration(n.flags.t)
-		t.prepareToRemove(n.Val)
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			hexVal = concat(hex, compactToHex(n.Key)...)
+		}
+		t.prepareToRemove(n.Val, hexVal)
 	case *duoNode:
-		t.leftGeneration(n.flags.t)
-		t.prepareToRemove(n.child1)
-		t.prepareToRemove(n.child2)
+		t.touchFunc(hex, true)
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = byte(i1)
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = byte(i2)
+		t.prepareToRemove(n.child1, hex1)
+		t.prepareToRemove(n.child2, hex2)
 	case *fullNode:
-		t.leftGeneration(n.flags.t)
-		for _, child := range n.Children {
+		t.touchFunc(hex, true)
+		for i, child := range n.Children {
 			if child != nil {
-				t.prepareToRemove(child)
-			}
-		}
-	}
-}
-
-// Timestamp given node and all descendants
-func (t *Trie) timestampSubTree(n node, blockNr uint64) {
-	switch n := n.(type) {
-	case *shortNode:
-		if n.flags.t == 0 {
-			n.flags.t = blockNr
-			n.flags.tod = blockNr
-			t.joinGeneration(blockNr)
-			t.timestampSubTree(n.Val, blockNr)
-		}
-	case *duoNode:
-		if n.flags.t == 0 {
-			n.flags.t = blockNr
-			n.flags.tod = blockNr
-			t.joinGeneration(blockNr)
-			t.timestampSubTree(n.child1, blockNr)
-			t.timestampSubTree(n.child2, blockNr)
-		}
-	case *fullNode:
-		if n.flags.t == 0 {
-			n.flags.t = blockNr
-			n.flags.tod = blockNr
-			t.joinGeneration(blockNr)
-			for _, child := range n.Children {
-				if child != nil {
-					t.timestampSubTree(child, blockNr)
-				}
+				t.prepareToRemove(child, concat(hex, byte(i)))
 			}
 		}
 	}
@@ -834,58 +757,124 @@ func (t *Trie) Hash() common.Hash {
 	return common.BytesToHash(hash.(hashNode))
 }
 
-func (t *Trie) UnloadOlderThan(gen uint64, trace bool) bool {
-	if hn, unloaded := unloadOlderThan(t.root, gen); unloaded {
-		t.root = hn
-		return true
+func (t *Trie) unload(hex []byte, h *hasher) {
+	var nd node = t.root
+	var parent node
+	pos := 0
+	for pos < len(hex) {
+		switch n := nd.(type) {
+		case nil:
+			return
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hex[pos:], nKey)
+			if matchlen == len(nKey) {
+				parent = n
+				nd = n.Val
+				pos += matchlen
+			} else {
+				return
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hex[pos] {
+			case i1:
+				parent = n
+				nd = n.child1
+				pos++
+			case i2:
+				parent = n
+				nd = n.child2
+				pos++
+			default:
+				return
+			}
+		case *fullNode:
+			child := n.Children[hex[pos]]
+			if child == nil {
+				return
+			} else {
+				parent = n
+				nd = child
+				pos++
+			}
+		case valueNode:
+			return
+		case hashNode:
+			return
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
 	}
-	return false
-}
-
-func unloadOlderThan(n node, gen uint64) (hashNode, bool) {
-	if n == nil {
-		return nil, false
+	if _, ok := nd.(hashNode); ok {
+		return
 	}
-	switch n := (n).(type) {
+	var hn common.Hash
+	h.hash(nd, len(hex) == 0, hn[:])
+	hnode := hashNode(hn[:])
+	switch p := parent.(type) {
+	case nil:
+		t.root = hnode
 	case *shortNode:
-		if n.flags.tod < gen {
-			if hn, unloaded := unloadOlderThan(n.Val, gen); unloaded {
-				n.Val = hn
-			}
-		}
+		p.Val = hnode
 	case *duoNode:
-		if n.flags.t < gen {
-			if n.flags.dirty {
-				panic(fmt.Sprintf("duoNode dirty: %s", n))
-			}
-			return hashNode(common.CopyBytes(n.hash())), true
-		}
-		if n.flags.tod < gen {
-			if hn, unloaded := unloadOlderThan(n.child1, gen); unloaded {
-				n.child1 = hn
-			}
-			if hn, unloaded := unloadOlderThan(n.child2, gen); unloaded {
-				n.child2 = hn
-			}
+		i1, i2 := p.childrenIdx()
+		switch hex[len(hex)-1] {
+		case i1:
+			p.child1 = hnode
+		case i2:
+			p.child2 = hnode
 		}
 	case *fullNode:
-		if n.flags.t < gen {
-			if n.flags.dirty {
-				panic(fmt.Sprintf("fullNode dirty: %s", n))
-			}
-			return hashNode(common.CopyBytes(n.hash())), true
-		}
-		if n.flags.tod < gen {
-			for i, child := range &n.Children {
-				if child != nil {
-					if hn, unloaded := unloadOlderThan(child, gen); unloaded {
-						n.Children[i] = hn
-					}
-				}
-			}
-		}
+		idx := hex[len(hex)-1]
+		p.Children[idx] = hnode
 	}
-	return nil, false
+}
+
+func (t *Trie) CountPrunableNodes() int {
+	return t.countPrunableNodes(t.root, []byte{}, false)
+}
+
+func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
+	switch n := nd.(type) {
+	case nil:
+		return 0
+	case valueNode:
+		return 0
+	case hashNode:
+		return 0
+	case *shortNode:
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			hexVal = concat(hex, compactToHex(n.Key)...)
+		}
+		return t.countPrunableNodes(n.Val, hexVal, print)
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = byte(i1)
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = byte(i2)
+		if print {
+			fmt.Printf("%T node: %x\n", n, hex)
+		}
+		return 1 + t.countPrunableNodes(n.child1, hex1, print) + t.countPrunableNodes(n.child2, hex2, print)
+	case *fullNode:
+		if print {
+			fmt.Printf("%T node: %x\n", n, hex)
+		}
+		count := 0
+		for i, child := range n.Children {
+			if child != nil {
+				count += t.countPrunableNodes(child, concat(hex, byte(i)), print)
+			}
+		}
+		return 1 + count
+	default:
+		panic("")
+	}
 }
 
 func (t *Trie) hashRoot() (node, error) {
