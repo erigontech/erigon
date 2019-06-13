@@ -115,7 +115,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 
 func stateless(genLag, consLag int) {
-	//state.MaxTrieCacheGen = 64*1024
+	state.MaxTrieCacheGen = 64*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -126,8 +126,8 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
@@ -254,7 +254,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 		if (blockNum%500000 == 0) || (blockNum > 5600000 && blockNum%100000 == 0) {
-			//save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
+			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			blockProof := tds.ExtractProofs(trace)

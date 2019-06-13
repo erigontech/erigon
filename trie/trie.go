@@ -127,7 +127,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
-		newnode.flags.dirty = true
 		t.root = newnode
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value), blockNr)
@@ -325,7 +324,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value, blockNr)
 			if updated {
 				n.Val = nn
-				n.flags.dirty = true
 			}
 			newNode = n
 		} else {
@@ -335,7 +333,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				c1 = n.Val
 			} else {
 				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
-				s1.flags.dirty = true
 				c1 = s1
 			}
 			var c2 node
@@ -343,7 +340,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				c2 = value
 			} else {
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
-				s2.flags.dirty = true
 				c2 = s2
 			}
 			branch := &duoNode{}
@@ -366,7 +362,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = hexToCompact(key[pos : pos+matchlen])
 				n.Val = branch
-				n.flags.dirty = true
 				newNode = n
 			}
 			updated = true
@@ -397,7 +392,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				child = value
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-				short.flags.dirty = true
 				child = short
 			}
 			newnode := &fullNode{}
@@ -419,7 +413,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				n.Children[key[pos]] = value
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-				short.flags.dirty = true
 				n.Children[key[pos]] = short
 			}
 			updated = true
@@ -533,19 +526,12 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			k := make([]byte, len(cnodeKey)+1)
 			k[0] = byte(pos)
 			copy(k[1:], cnodeKey)
-			newshort := &shortNode{Key: hexToCompact(k)}
-			newshort.Val = short.Val
-			newshort.flags.dirty = true
-			// cnode gets removed, but newshort gets added
-			return newshort
+			return &shortNode{Key: hexToCompact(k), Val: short.Val}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
-	newshort := &shortNode{Key: hexToCompact([]byte{byte(pos)})}
-	newshort.Val = cnode
-	newshort.flags.dirty = true
-	return newshort
+	return &shortNode{Key: hexToCompact([]byte{byte(pos)}), Val: cnode}
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -583,13 +569,9 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 						// avoid modifying n.Key since it might be shared with
 						// other nodes.
 						childKey := compactToHex(shortChild.Key)
-						newnode := &shortNode{Key: hexToCompact(concat(nKey, childKey...))}
-						newnode.Val = shortChild.Val
-						newnode.flags.dirty = true
-						newNode = newnode
+						newNode = &shortNode{Key: hexToCompact(concat(nKey, childKey...)), Val: shortChild.Val}
 					} else {
 						n.Val = nn
-						n.flags.dirty = true
 						newNode = n
 					}
 				}

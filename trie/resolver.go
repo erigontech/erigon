@@ -197,7 +197,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	hex := keybytesToHex(tr.key)
 	tr.nodeStack[startLevel+1].Key = hexToCompact(hex[startLevel+1:])
 	tr.nodeStack[startLevel+1].Val = valueNode(tr.value)
-	tr.nodeStack[startLevel+1].flags.dirty = true
 	tr.fillCount[startLevel+1] = 1
 	// Adjust rhIndices if needed
 	if tr.rhIndexGt < tr.resolveHexes.Len() {
@@ -231,13 +230,11 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			if tr.fillCount[level] == 0 {
 				tr.nodeStack[level].Key = hexToCompact(append([]byte{keynibble}, compactToHex(short.Key)...))
 				tr.nodeStack[level].Val = short.Val
-				tr.nodeStack[level].flags.dirty = true
 			}
 			tr.fillCount[level]++
 			if level >= req.extResolvePos {
 				tr.nodeStack[level+1].Key = nil
 				tr.nodeStack[level+1].Val = nil
-				tr.nodeStack[level+1].flags.dirty = true
 				tr.fillCount[level+1] = 0
 				for i := 0; i < 17; i++ {
 					tr.vertical[level+1].Children[i] = nil
@@ -255,7 +252,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		}
 		if tr.fillCount[level] == 0 {
 			tr.nodeStack[level].Key = hexToCompact([]byte{keynibble})
-			tr.nodeStack[level].flags.dirty = true
 		}
 		tr.vertical[level].flags.dirty = true
 		if onResolvingPath || (tr.hashes && level < 4) {
@@ -280,7 +276,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		if level >= req.extResolvePos {
 			tr.nodeStack[level+1].Key = nil
 			tr.nodeStack[level+1].Val = nil
-			tr.nodeStack[level+1].flags.dirty = true
 			tr.fillCount[level+1] = 0
 			for i := 0; i < 17; i++ {
 				tr.vertical[level+1].Children[i] = nil
@@ -326,7 +321,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		for i := 0; i <= Levels; i++ {
 			tr.nodeStack[i].Key = nil
 			tr.nodeStack[i].Val = nil
-			tr.nodeStack[i].flags.dirty = true
 			for j := 0; j < 17; j++ {
 				tr.vertical[i].Children[j] = nil
 			}

@@ -572,7 +572,6 @@ func constructShortNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	nKey := shortKeys[*shortIdx]
 	(*shortIdx)++
 	s := &shortNode{Key: hexToCompact(nKey)}
-	s.flags.dirty = true
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -950,7 +949,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	}
 	if !ok && ((downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6) {
 		s = &shortNode{Key: hexToCompact(nKey)}
-		s.flags.dirty = true
 	}
 	if trace {
 		fmt.Printf("%spos: %d, down: %16b, nKey: %x", strings.Repeat(" ", pos), pos, downmask, nKey)
@@ -1003,10 +1001,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	case 7:
 		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, compactToHex(s.Key)...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
-	}
-	if s.flags.dirty {
-		var hn common.Hash
-		h.hash(s, pos == 0, hn[:])
 	}
 	return s
 }

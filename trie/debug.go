@@ -131,7 +131,6 @@ func loadDuo(br *bufio.Reader) (*duoNode, error) {
 
 func loadShort(br *bufio.Reader) (*shortNode, error) {
 	n := shortNode{}
-	n.flags.dirty = true
 	keyHexHex, err := br.ReadBytes(':')
 	if err != nil {
 		return nil, err

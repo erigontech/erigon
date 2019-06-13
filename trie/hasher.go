@@ -84,9 +84,6 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	hashLen := h.store(children, force, storeTo)
 	if hashLen == 32 {
 		switch n := n.(type) {
-		case *shortNode:
-			copy(n.flags.hash[:], storeTo)
-			n.flags.dirty = false
 		case *duoNode:
 			copy(n.flags.hash[:], storeTo)
 			n.flags.dirty = false
