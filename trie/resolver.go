@@ -17,26 +17,19 @@ import (
 
 var emptyHash [32]byte
 
-func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) hashNode {
+func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	if t.root == nil {
 		return nil
 	}
 	n, ok := t.root.(hashNode)
 	if !ok {
-		panic("Expected hashNode")
+		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
-	root, roothash, err := t.rebuildHashes(db, nil, 0, blockNr, true, n)
-	if err != nil {
-		panic(err)
+	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
+		return err
 	}
-	if bytes.Equal(roothash, n) {
-		t.root = root
-		log.Info("Rebuilt hashfile and verified", "root hash", roothash)
-	} else {
-		log.Error(fmt.Sprintf("Could not rebuild %s vs %s\n", roothash, n))
-	}
-	t.timestampSubTree(t.root, blockNr)
-	return roothash
+	log.Info("Rebuilt hashfile and verified", "root hash", n)
+	return nil
 }
 
 const Levels = 104
@@ -263,7 +256,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.nodeStack[level].flags.dirty = true
 		}
 		tr.vertical[level].flags.dirty = true
-		if onResolvingPath || (tr.hashes && level == 5) {
+		if onResolvingPath || (tr.hashes && level < 5) {
 			var c node
 			if tr.fillCount[level+1] == 2 {
 				c = full.duoCopy()
@@ -274,6 +267,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			if tr.fillCount[level] == 0 {
 				tr.nodeStack[level].Val = c
 			}
+			req.t.touchFunc(hex[2*len(req.contract):level+1], false)
 		} else {
 			tr.vertical[level].Children[keynibble] = hashNode(storeHashTo[:])
 			if tr.fillCount[level] == 0 {
@@ -298,8 +292,10 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 		if tr.fillCount[req.extResolvePos] == 1 {
 			root = tr.nodeStack[req.extResolvePos].copy()
 		} else if tr.fillCount[req.extResolvePos] == 2 {
+			req.t.touchFunc(req.resolveHex[:req.resolvePos], false)
 			root = tr.vertical[req.extResolvePos].duoCopy()
 		} else if tr.fillCount[req.extResolvePos] > 2 {
+			req.t.touchFunc(req.resolveHex[:req.resolvePos], false)
 			root = tr.vertical[req.extResolvePos].copy()
 		}
 		if root == nil {
@@ -325,7 +321,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 					req.resolveHash)
 			}
 		}
-		req.resolved = root
 		for i := 0; i <= Levels; i++ {
 			tr.nodeStack[i].Key = nil
 			tr.nodeStack[i].Val = nil
@@ -336,40 +331,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			tr.vertical[i].flags.dirty = true
 			tr.fillCount[i] = 0
 		}
-		req.t.timestampSubTree(root, tr.blockNr)
-		if req.resolveParent == nil {
-			if _, ok := req.t.root.(hashNode); ok {
-				req.t.root = root
-			}
-		} else {
-			switch parent := req.resolveParent.(type) {
-			case nil:
-				if _, ok := req.t.root.(hashNode); ok {
-					req.t.root = root
-				}
-			case *shortNode:
-				if _, ok := parent.Val.(hashNode); ok {
-					parent.Val = root
-				}
-			case *duoNode:
-				i1, i2 := parent.childrenIdx()
-				switch req.resolveHex[req.resolvePos-1] {
-				case i1:
-					if _, ok := parent.child1.(hashNode); ok {
-						parent.child1 = root
-					}
-				case i2:
-					if _, ok := parent.child2.(hashNode); ok {
-						parent.child2 = root
-					}
-				}
-			case *fullNode:
-				idx := req.resolveHex[req.resolvePos-1]
-				if _, ok := parent.Children[idx].(hashNode); ok {
-					parent.Children[idx] = root
-				}
-			}
-		}
+		req.t.hook(req.resolveHex[:req.resolvePos], root, tr.blockNr)
 	}
 	return nil
 }
@@ -475,12 +437,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	return err
 }
 
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) (node, hashNode, error) {
+func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
 	r := NewResolver(true, accounts, blockNr)
 	r.AddRequest(req)
-	if err := r.ResolveWithDb(db, blockNr); err != nil {
-		return nil, nil, err
-	}
-	return req.resolved, expected, nil
+	return r.ResolveWithDb(db, blockNr)
 }
