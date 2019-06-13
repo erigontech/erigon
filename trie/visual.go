@@ -62,19 +62,23 @@ var fontColors = []string{
 }
 
 // Visualisation of trie without any highlighting
-func Visual(t *Trie, highlight []byte, w io.Writer) {
+func Visual(t *Trie, highlights [][]byte, w io.Writer) {
 	fmt.Fprintf(w,
 		`digraph trie {
 	node [shape=none margin=0 width=0 height=0]
     edge [dir = none headport=n tailport=s]
 `)
-	visualNode(t.root, []byte{}, highlight, w)
+	var highlightsHex [][]byte
+	for _, h := range highlights {
+		highlightsHex = append(highlightsHex, keybytesToHex(h))
+	}
+	visualNode(t.root, []byte{}, highlightsHex, w)
 	fmt.Fprintf(w,
 		`}
 `)
 }
 
-func visualNode(nd node, hex []byte, highlight []byte, w io.Writer) {
+func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 	switch n := nd.(type) {
 	case nil:
 	case *shortNode:
@@ -82,15 +86,28 @@ func visualNode(nd node, hex []byte, highlight []byte, w io.Writer) {
 		fmt.Fprintf(w,
 			`
 	n_%x [label=<
-	<table border="1" cellborder="0" cellspacing="0">
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
 `, hex)
-		for _, h := range nKey {
+		var pLenMax int
+		for _, h := range highlights {
+			pLen := prefixLen(nKey, h)
+			if pLen > pLenMax {
+				pLenMax = pLen
+			}
+		}
+		for i, h := range nKey {
 			if h == 16 {
 				continue
 			}
-			fmt.Fprintf(w,
-				`		<tr><td bgcolor="%s"></td></tr>
+			if i < pLenMax {
+				fmt.Fprintf(w,
+					`		<tr><td bgcolor="%s"><font color="%s">%s</font></td></tr>
+`, indexColors[h], fontColors[h], indices[h])
+			} else {
+				fmt.Fprintf(w,
+					`		<tr><td bgcolor="%s"></td></tr>
 `, indexColors[h])
+			}
 		}
 		fmt.Fprintf(w,
 			`
@@ -103,52 +120,94 @@ func visualNode(nd node, hex []byte, highlight []byte, w io.Writer) {
 
 	n_%x -> n_%x;
 `, hex, concat(hex, nKey...))
-			var newHighlight []byte
-			if highlight != nil && bytes.HasPrefix(highlight, nKey) {
-				newHighlight = highlight[len(nKey):]
+			var newHighlights [][]byte
+			for _, h := range highlights {
+				if h != nil && bytes.HasPrefix(h, nKey) {
+					newHighlights = append(newHighlights, h[len(nKey):])
+				}
 			}
-			visualNode(n.Val, concat(hex, nKey...), newHighlight, w)
+			visualNode(n.Val, concat(hex, nKey...), newHighlights, w)
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
 		fmt.Fprintf(w,
 			`
 	n_%x [label=<
-	<table border="1" cellborder="0" cellspacing="0">
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
 		<tr>
+`, hex)
+		var hOn1, hOn2 bool
+		var highlights1, highlights2 [][]byte
+		for _, h := range highlights {
+			if len(h) > 0 && h[0] == i1 {
+				highlights1 = append(highlights1, h[1:])
+				hOn1 = true
+			}
+			if len(h) > 0 && h[0] == i2 {
+				highlights2 = append(highlights2, h[1:])
+				hOn2 = true
+			}
+		}
+		if hOn1 {
+			fmt.Fprintf(w,
+				` 
+			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
+`, indexColors[i1], i1, fontColors[i1], indices[i1])
+		} else {
+			fmt.Fprintf(w,
+				` 
 			<td bgcolor="%s" port="h%d"></td>
+`, indexColors[i1], i1)
+		}
+		if hOn2 {
+			fmt.Fprintf(w,
+				` 
+			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
+`, indexColors[i2], i2, fontColors[i2], indices[i2])
+		} else {
+			fmt.Fprintf(w,
+				` 
 			<td bgcolor="%s" port="h%d"></td>
+`, indexColors[i2], i2)
+		}
+		fmt.Fprintf(w,
+			`
 		</tr>
 	</table>
     >];
     n_%x:h%d -> n_%x;
     n_%x:h%d -> n_%x;
-`, hex, indexColors[i1], i1, indexColors[i2], i2, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
-		var highlight1 []byte
-		if highlight != nil && highlight[0] == i1 {
-			highlight1 = highlight[1:]
-		}
-		var highlight2 []byte
-		if highlight != nil && highlight[0] == i2 {
-			highlight2 = highlight[1:]
-		}
-		visualNode(n.child1, concat(hex, i1), highlight1, w)
-		visualNode(n.child2, concat(hex, i2), highlight2, w)
+`, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
+		visualNode(n.child1, concat(hex, i1), highlights1, w)
+		visualNode(n.child2, concat(hex, i2), highlights2, w)
 	case *fullNode:
 		fmt.Fprintf(w,
 			`
 	n_%x [label=<
-	<table border="1" cellborder="0" cellspacing="0">
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
 		<tr>
 `, hex)
+		hOn := make(map[byte]struct{})
+		for _, h := range highlights {
+			if len(h) > 0 {
+				hOn[h[0]] = struct{}{}
+			}
+		}
 		for i, child := range n.Children {
 			if child == nil {
 				continue
 			}
-			fmt.Fprintf(w,
-				`
+			if _, ok := hOn[byte(i)]; ok {
+				fmt.Fprintf(w,
+					`
+			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
+`, indexColors[i], i, fontColors[i], indices[i])
+			} else {
+				fmt.Fprintf(w,
+					`
 			<td bgcolor="%s" port="h%d"></td>
 `, indexColors[i], i)
+			}
 		}
 		fmt.Fprintf(w,
 			`
@@ -168,11 +227,13 @@ func visualNode(nd node, hex []byte, highlight []byte, w io.Writer) {
 			if child == nil {
 				continue
 			}
-			var newHighlight []byte
-			if highlight != nil && highlight[0] == byte(i) {
-				newHighlight = highlight[1:]
+			var newHighlights [][]byte
+			for _, h := range highlights {
+				if len(h) > 0 && h[0] == byte(i) {
+					newHighlights = append(newHighlights, h[1:])
+				}
 			}
-			visualNode(child, concat(hex, byte(i)), newHighlight, w)
+			visualNode(child, concat(hex, byte(i)), newHighlights, w)
 		}
 	}
 }

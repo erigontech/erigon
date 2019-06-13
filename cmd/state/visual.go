@@ -28,11 +28,11 @@ func visual() {
 	if err != nil {
 		panic(err)
 	}
-	trie.Visual(tr, keyHashes[0], f)
+	trie.Visual(tr, [][]byte{keyHashes[0], keyHashes[7]}, f)
 	if err := f.Close(); err != nil {
 		panic(err)
 	}
-	cmd := exec.Command("dot", "-Tpng", "-O", filename)
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
