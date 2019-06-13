@@ -76,6 +76,7 @@ const (
 	ErrNoStatusMsg
 	ErrExtraStatusMsg
 	ErrSuspendedPeer
+	ErrNotImplemented
 )
 
 func (e errCode) String() string {
@@ -93,6 +94,7 @@ var errorToString = map[int]string{
 	ErrNoStatusMsg:             "No status message",
 	ErrExtraStatusMsg:          "Extra status message",
 	ErrSuspendedPeer:           "Suspended peer",
+	ErrNotImplemented:          "Not implemented yet",
 }
 
 type txPool interface {

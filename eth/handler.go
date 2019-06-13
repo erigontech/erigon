@@ -127,7 +127,7 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 		manager.fastSync = uint32(1)
 	}
 	// Initiate a sub-protocol for every implemented version we can handle
-	manager.SubProtocols = make([]p2p.Protocol, 0, len(ProtocolVersions))
+	manager.SubProtocols = make([]p2p.Protocol, 0, len(ProtocolVersions)+1)
 	for i, version := range ProtocolVersions {
 		// Skip protocol version if incompatible with the mode of operation
 		if mode == downloader.FastSync && version < eth63 {
@@ -164,6 +164,28 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 	if len(manager.SubProtocols) == 0 {
 		return nil, errIncompatibleConfig
 	}
+
+	// Initiate Firehose
+	log.Info("Initialising Firehose protocol", "versions", FirehoseVersions)
+	manager.SubProtocols = append(manager.SubProtocols, p2p.Protocol{
+		Name:    FirehoseName,
+		Version: FirehoseVersions[0],
+		Length:  FirehoseLengths[0],
+		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			// TODO [yperbasis] implement
+			return errResp(ErrNotImplemented, "not implemented yet")
+		},
+		NodeInfo: func() interface{} {
+			return manager.NodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			if p := manager.peers.Peer(fmt.Sprintf("%x", id[:8])); p != nil {
+				return p.Info()
+			}
+			return nil
+		},
+	})
+
 	// Construct the different synchronisation mechanisms
 	manager.downloader = downloader.New(mode, chaindb, manager.eventMux, blockchain, nil, manager.removePeer)
 
