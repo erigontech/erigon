@@ -71,9 +71,8 @@ test: all
 lint: ## Run linters.
 	build/env.sh go run build/ci.go lint
 
-
 lintci:
-	@echo "--> Running linter for code diff versus origin/master commit $(LATEST_MASTER)"
+	@echo "--> Running linter for code diff versus origin/master commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run --new-from-rev=$(LATEST_COMMIT)
 
 lintci-deps:
