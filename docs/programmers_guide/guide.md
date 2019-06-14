@@ -44,6 +44,6 @@ type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract
 Binary 32-byte (256-bit) string.
 
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode` member function
-of the type `StateDB` [code/state/statedb.go](../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
+of the type `StateDB` [code/state/statedb.go](../../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
 makes sense for smart contract accounts. For non-contract accounts, the code hash is assumed to be equal to the hash of `nil`, which is
 hard-coded in the variable `emptyCode` in [code/state/statedb.go](../../core/state/statedb.go)
