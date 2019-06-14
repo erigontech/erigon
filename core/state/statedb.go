@@ -41,6 +41,7 @@ var (
 	emptyState = crypto.Keccak256Hash(nil)
 
 	// emptyCode is the known hash of the empty EVM bytecode.
+	// DESCRIBED: docs/programmers_guide/guide.md#code-hash
 	emptyCode = crypto.Keccak256Hash(nil)
 )
 
@@ -385,6 +386,7 @@ func (self *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#code-hash
 func (self *StateDB) SetCode(addr common.Address, code []byte) {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)

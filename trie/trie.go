@@ -27,6 +27,7 @@ import (
 
 var (
 	// emptyRoot is the known root hash of an empty trie.
+	// DESCRIBED: docs/programmers_guide/guide.md#root
 	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
@@ -121,6 +122,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 //
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
+// DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	if t.root == nil {
@@ -505,6 +507,7 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 }
 
 // Delete removes any existing value for key from the trie.
+// DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	_, t.root = t.delete(t.root, hex, 0, blockNr)
@@ -752,6 +755,7 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 
 // Hash returns the root hash of the trie. It does not write to the
 // database and can be used even if the trie doesn't have one.
+// DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
 	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))

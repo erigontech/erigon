@@ -949,6 +949,7 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{tds: tds}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#root
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func accountsEqual(a1, a2 *Account) bool {
