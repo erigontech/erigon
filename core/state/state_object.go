@@ -101,6 +101,8 @@ type ExtAccount struct {
 	Nonce   uint64
 	Balance *big.Int
 }
+
+// DESCRIBED: docs/programers_guide/guide.md/#ethereum-state
 type Account struct {
 	Nonce    uint64
 	Balance  *big.Int
