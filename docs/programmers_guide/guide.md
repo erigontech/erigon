@@ -1,4 +1,4 @@
-Turbo-Geth programming guide
+Turbo-Geth programmer's guide
 ==============================
 
 Ethereum State
@@ -65,3 +65,28 @@ address and the nonce of the creator , as shown in the function `CreateAddress` 
 For smart contract accounts created by `CREATE2` opcode, the address is derived from the creator's address, salt (256-bit argument
 supplied to the `CREATE2` invocation), and the code hash of the initialisation code (code that is executed to output the actual,
 deployed code of the new contract), as shown in the function `CreateAddress2` in the file [crypto/crypto.go](../../crypto/crypto.go)
+
+In many places in the code, sets of accounts are represented by mappings from account addresses to the objects representing
+the accounts themselves, for example, field `stateObjects` in the type `StateDB` [core/state/statedb.go](../../core/state/statedb.go).
+Member functions of the type `StateDB` that are for querying and modifying one of the componets of an accounts, are all accepting
+address as their first argument, see functions `GetBalance`, `GetNonce`, `GetCode`, `GetCodeSize`, `GetCodeHash`, `GetState` (this
+one queries an item in the contract storage), `GetCommittedState`, `AddBalance`, `SubBalance`, `SetBalance`, `SetNonce`,
+`SetCode`, `SetState` (this one modifies an item in the contract storage) [core/state/statedb.go](../../core/state/statedb.go).
+
+Organising Ethereum State into a Merkle Tree
+--------------------------------------------
+Ethereum network produces checkpoints of the Ethereum State after every block. These checkpoints come in a form of 32-byte binary
+string, which is the root hash of the Merkle tree constructed out of the accounts in the state. This root hash is often
+referred to as "State root". It is part of block header, and is contained in the field `Root` of the type
+`Header` [core/types/block.go](../../core/types/block.go)
+
+Prior to Byzantium release, the state root was also part of every transaction receipt, and was contained in the field `PostState`
+of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go). Side note: that is why the member function
+`ComputeTrieRoots` in the type `TrieDbState` [core/state/database.go](../../core/state/database.go) returns a slice of hashes,
+rather than just a single hash. For pre-Byzantium blocks, this function computes state roots for each transaction receipt, and
+another one for the block header. For post-Byzantium blocks, it always returns a singleton slice.
+
+### Hexary Radix tree
+Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. Entities that would be siblings
+on such tree (sharing the parent), are hashed, their hashes are concatenated, and that concatenation is hashed again to produce
+the hash of the parent.

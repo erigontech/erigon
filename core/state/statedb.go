@@ -219,6 +219,7 @@ func (self *StateDB) Empty(addr common.Address) bool {
 }
 
 // Retrieve the balance from the given address or 0 if object not found
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetBalance(addr common.Address) *big.Int {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
@@ -230,6 +231,7 @@ func (self *StateDB) GetBalance(addr common.Address) *big.Int {
 	return common.Big0
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetNonce(addr common.Address) uint64 {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
@@ -242,6 +244,7 @@ func (self *StateDB) GetNonce(addr common.Address) uint64 {
 	return 0
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetCode(addr common.Address) []byte {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
@@ -259,6 +262,7 @@ func (self *StateDB) GetCode(addr common.Address) []byte {
 	return nil
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetCodeSize(addr common.Address) int {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
@@ -277,6 +281,7 @@ func (self *StateDB) GetCodeSize(addr common.Address) int {
 	return len
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountRead(addr)
@@ -289,6 +294,7 @@ func (self *StateDB) GetCodeHash(addr common.Address) common.Hash {
 }
 
 // GetState retrieves a value from the given account's storage trie.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
@@ -318,6 +324,7 @@ func (self *StateDB) GetStorageProof(a common.Address, key common.Hash) ([][]byt
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := self.getStateObject(addr)
 	if stateObject != nil {
@@ -339,6 +346,7 @@ func (self *StateDB) HasSuicided(addr common.Address) bool {
  */
 
 // AddBalance adds amount to the account associated with addr.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 	if self.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
@@ -353,6 +361,7 @@ func (self *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 }
 
 // SubBalance subtracts amount from the account associated with addr.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 	if self.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
@@ -366,6 +375,7 @@ func (self *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
@@ -376,6 +386,7 @@ func (self *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
@@ -387,6 +398,7 @@ func (self *StateDB) SetNonce(addr common.Address, nonce uint64) {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#code-hash
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) SetCode(addr common.Address, code []byte) {
 	if self.tracer != nil {
 		self.tracer.CaptureAccountWrite(addr)
@@ -397,6 +409,7 @@ func (self *StateDB) SetCode(addr common.Address, code []byte) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (self *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := self.GetOrNewStateObject(addr)
 	if stateObject != nil {
