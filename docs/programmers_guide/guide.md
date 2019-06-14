@@ -1,17 +1,21 @@
-# Turbo-Geth programming guide
+Turbo-Geth programming guide
+==============================
 
-## Ethereum State
+Ethereum State
+--------------
 On the high level, Ethereum state is a collection of accounts. An account can be either a non-contract
 (also known as "Externally Owned Account", or EOA), or a smart contract.
+
+### Content of an account
 Type `Account` [core/state/state_object.go](../../core/state/state_object.go) lists the main components
-of an account's data structure:
+of an account's content (not identifier):
 
 1. Nonce
 2. Balance
 3. Root
 4. Code hash
 
-### Nonce
+#### Nonce
 Number of the type `uint64`.
 
 For non-contract accounts, nonce is important in two contexts. Firsly, all transactions signed by an account, have to
@@ -25,12 +29,12 @@ performed in the member function `Create` of the type `EVM` [core/vm/evm.go](../
 member function `Create2`, where the address of the newly created contract is independent of the nonce. For contract accounts,
 the nonce is important in the context of creating new contracts via `CREATE` opcode.
 
-### Balance
+#### Balance
 Number of the type `*big.Int`. Since balance is denominated in wei, and there 10^18 wei in each Ether, maximum balance that needs to be
 representable is 110'000'000 (roughly amount of mainnet Ether in existence, but can be more for testnets and private networks),
 multiplied by 10^18, which exceeds the capacity of `uint64`.
 
-### Root
+#### Root
 Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts cannot have storage,
@@ -40,10 +44,24 @@ Merkle root of empty tree, which is hard-coded in the varible `emptyRoot` in [co
 type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
 `Update` and `Delete` on the same type.
 
-### Code hash
+#### Code hash
 Binary 32-byte (256-bit) string.
 
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode` member function
 of the type `StateDB` [code/state/statedb.go](../../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
 makes sense for smart contract accounts. For non-contract accounts, the code hash is assumed to be equal to the hash of `nil`, which is
 hard-coded in the variable `emptyCode` in [code/state/statedb.go](../../core/state/statedb.go)
+
+### Address - identifier of an account
+Accounts are identified by their addresses. Address is a 20-byte binary string, which is derived differently for smart contract and
+non-contract accounts.
+
+For non-contract accounts, the address is derived from the public key, by hashing it and taking lowest 20 bytes of the 32-byte hash value,
+as shown in the function `PubkeyToAddress` in the file [crypto/crypto.go](../../crypto/crypto.go)
+
+For smart contract accounts created by a transaction without destination, or by `CREATE` opcode, the address is derived from the
+address and the nonce of the creator , as shown in the function `CreateAddress` in the file [crypto/crypto.go](../../crypto/crypto.go)
+
+For smart contract accounts created by `CREATE2` opcode, the address is derived from the creator's address, salt (256-bit argument
+supplied to the `CREATE2` invocation), and the code hash of the initialisation code (code that is executed to output the actual,
+deployed code of the new contract), as shown in the function `CreateAddress2` in the file [crypto/crypto.go](../../crypto/crypto.go)
