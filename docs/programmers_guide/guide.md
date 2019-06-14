@@ -1,8 +1,11 @@
 # Turbo-Geth programming guide
 
 ## Ethereum State
-On the high level, Ethereum state is a collection of accounts. An account can be either a non-contract (also known as "Externally Owned Account", or EOA),
-or a smart contract. Type `Account` [core/state/state_object.go](../../core/state/state_object.go) lists the main components of an account's data structure:
+On the high level, Ethereum state is a collection of accounts. An account can be either a non-contract
+(also known as "Externally Owned Account", or EOA), or a smart contract.
+Type `Account` [core/state/state_object.go](../../core/state/state_object.go) lists the main components
+of an account's data structure:
+
 1. Nonce
 2. Balance
 3. Root
@@ -32,9 +35,9 @@ Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts cannot have storage,
 therefore root makes sense only for smart contract accounts. For non-contract accounts, the root field is assumed to be equal to the
-Merkle root of empty tree, which is hard-coded in the varible `emptyRoot` in [core/state/database.go](../core/state/database.go) and
-[trie/trie.go](../trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
-type `Trie` [trie/trie.go](../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
+Merkle root of empty tree, which is hard-coded in the varible `emptyRoot` in [core/state/database.go](../../core/state/database.go) and
+[trie/trie.go](../../trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
+type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
 `Update` and `Delete` on the same type.
 
 ### Code hash
@@ -43,4 +46,4 @@ Binary 32-byte (256-bit) string.
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode` member function
 of the type `StateDB` [code/state/statedb.go](../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
 makes sense for smart contract accounts. For non-contract accounts, the code hash is assumed to be equal to the hash of `nil`, which is
-hard-coded in the variable `emptyCode` in [code/state/statedb.go](../core/state/statedb.go)
+hard-coded in the variable `emptyCode` in [code/state/statedb.go](../../core/state/statedb.go)
