@@ -689,6 +689,10 @@ func (db *BoltDatabase) Keys() [][]byte {
 	return keys
 }
 
+func (db *BoltDatabase) DB() *bolt.DB {
+	return db.db
+}
+
 type PutItem struct {
 	key, value []byte
 }

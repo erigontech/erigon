@@ -311,7 +311,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
-		s.flags.dirty = true
 		newNode = s
 		updated = true
 		return
