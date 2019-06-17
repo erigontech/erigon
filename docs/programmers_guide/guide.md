@@ -89,7 +89,7 @@ another one for the block header. For post-Byzantium blocks, it always returns a
 ### Hexary radix "Patricia" tree
 Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. For the purposes of
 illustrations, we will use tres trees with radix 4 (because radix 16 requires many more items for "interesting" features
-to appear). We start from a set of randomly looking keys, 4 bytes (or 16 quarternary digits) each.
+to appear). We start from a set of randomly looking keys, 2 bytes (or 8 quarternary digits) each.
 
 ![prefix_groups_1](prefix_groups_1.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_1`
