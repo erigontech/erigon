@@ -106,3 +106,5 @@ the same prefix, and no other keys share this prefix. Here are the prefix groups
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
+
+Merke patricia tree hashing recursively replaces prefix groups with their hashes. 

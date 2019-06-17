@@ -119,7 +119,7 @@ func prefix_groups_3() {
 			leftCommon = commonPrefix(key, prefixStack[len(prefixStack)-1])
 		}
 		for len(prefixStack) > 0 && len(prefixStack[len(prefixStack)-1]) > leftCommon {
-			visual.EndCluster(f)
+			//visual.EndCluster(f)
 			prefixStack = prefixStack[:len(prefixStack)-1]
 		}
 		leftCommon = 0
@@ -130,19 +130,37 @@ func prefix_groups_3() {
 		for p := leftCommon + 1; p < len(key); p++ {
 			if _, ok := prefixSet[key[:p]]; ok {
 				group := key[:p]
-				visual.StartCluster(f, fmt.Sprintf("q_%x", group))
+				//visual.StartCluster(f, fmt.Sprintf("q_%x", group))
 				visual.QuadVertical(f, []byte(group), 0, fmt.Sprintf("q_%x", group))
+				if len(prefixStack) > 0 {
+					fmt.Fprintf(f,
+						`
+		q_%x->q_%x;
+		`, prefixStack[len(prefixStack)-1], group)
+				}
 				prefixStack = append(prefixStack, group)
 			}
+		}
+		if len(prefixStack) > 0 {
+			fmt.Fprintf(f,
+				`
+q_%x->q_%x;
+`, prefixStack[len(prefixStack)-1], key)
 		}
 		// Display the key
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
 	}
 	// Close remaining groups
 	for len(prefixStack) > 0 {
-		visual.EndCluster(f)
+		//visual.EndCluster(f)
 		prefixStack = prefixStack[:len(prefixStack)-1]
 	}
+	fmt.Fprintf(f, "{rank = same;")
+	for _, key := range keys {
+		fmt.Fprintf(f, "q_%x;", key)
+	}
+	fmt.Fprintf(f, `};
+`)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)

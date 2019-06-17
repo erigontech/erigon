@@ -15,7 +15,7 @@ func StartGraph(w io.Writer) {
 
 func StartCluster(w io.Writer, name string) {
 	fmt.Fprintf(w,
-		`subgraph cluster_%s {
+		`subgraph c_%s {
 `, name)
 }
 
