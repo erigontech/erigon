@@ -92,17 +92,17 @@ illustrations, we will use tres trees with radix 4 (because radix 16 requires ma
 to appear). We start from a set of randomly looking keys, 4 bytes (or 16 quarternary digits) each.
 
 ![prefix_groups_1](prefix_groups_1.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_1`
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_1`
 
 Next, we sort them in lexicographic order.
 
 ![prefix_groups_2](prefix_groups_2.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_2`
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_2`
 
 Next, we introduce the notion of a prefix group. Collection of adjacent keys form a prefix group if these keys share
 the same prefix, and no other keys share this prefix. Here are the prefix groups for our example:
 
 ![prefix_groups_3](prefix_groups_3.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_3`
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
