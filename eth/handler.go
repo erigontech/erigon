@@ -172,8 +172,10 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 		Version: FirehoseVersions[0],
 		Length:  FirehoseLengths[0],
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
-			// TODO [yperbasis] implement
-			return errResp(ErrNotImplemented, "not implemented yet")
+			peer := &firehosePeer{Peer: p, rw: rw}
+			manager.wg.Add(1)
+			defer manager.wg.Done()
+			return manager.handleFirehose(peer)
 		},
 		NodeInfo: func() interface{} {
 			return manager.NodeInfo()
@@ -345,6 +347,15 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	for {
 		if err := pm.handleMsg(p); err != nil {
 			p.Log().Debug("Ethereum message handling failed", "err", err)
+			return err
+		}
+	}
+}
+
+func (pm *ProtocolManager) handleFirehose(p *firehosePeer) error {
+	for {
+		if err := pm.handleFirehoseMsg(p); err != nil {
+			p.Log().Debug("Firehose message handling failed", "err", err)
 			return err
 		}
 	}
@@ -678,6 +689,58 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
 	}
 	return nil
+}
+
+func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
+	msg, err := p.rw.ReadMsg()
+	if err != nil {
+		return err
+	}
+	if msg.Size > FirehoseMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, FirehoseMaxMsgSize)
+	}
+	defer msg.Discard()
+
+	switch {
+	case msg.Code == GetStateRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StateRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStateNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StateNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetBytecodeCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == BytecodeCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageSizesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageSizesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	default:
+		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
+	}
 }
 
 // BroadcastBlock will either propagate a block to a subset of it's peers, or

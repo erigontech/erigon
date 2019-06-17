@@ -1,5 +1,9 @@
 package eth
 
+import (
+	"github.com/ledgerwatch/turbo-geth/p2p"
+)
+
 // FirehoseName is the official short name of the protocol used during capability negotiation.
 var FirehoseName = "firehose"
 
@@ -8,6 +12,9 @@ var FirehoseVersions = []uint{1}
 
 // FirehoseLengths are the number of implemented message corresponding to different protocol versions.
 var FirehoseLengths = []uint64{12}
+
+// FirehoseMaxMsgSize is the maximum cap on the size of a message.
+const FirehoseMaxMsgSize = 10 * 1024 * 1024
 
 // Firehose protocol message codes
 const (
@@ -24,3 +31,8 @@ const (
 	GetStorageSizesCode  = 0x0a
 	StorageSizesCode     = 0x0b
 )
+
+type firehosePeer struct {
+	*p2p.Peer
+	rw p2p.MsgReadWriter
+}
