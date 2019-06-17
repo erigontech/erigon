@@ -107,4 +107,15 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
 
-Merke patricia tree hashing recursively replaces prefix groups with their hashes. 
+Merke patricia tree hashing recursively replaces prefix groups with their hashes.
+It can be readily observed that the first item in any prefix group has this property that its common prefix
+with the item immediately to the right (or empty string if the item is the very last) is longer than its common
+prefix with the item immediately to the left (or empty string if the item is the very first).
+Analogously, the last item in any prefix group has the property that its common prefix with the item
+immediately to the left is longer than its common prefix with the item immediately to the right.
+Using this observation, we can devise an algorithm for producing a merkle hash of a sequence of such items.
+
+```
+keys is the list of items in the lexicographic order
+stack is the stack of the prefix groups, starting empty
+```

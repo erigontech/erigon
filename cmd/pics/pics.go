@@ -17,7 +17,7 @@ var account = flag.String("pic", "", "specifies picture to regenerate")
 func generate_prefix_groups() []string {
 	var keys []string
 	for b := byte(0); b < 32; b++ {
-		key := crypto.Keccak256([]byte{b})[:4]
+		key := crypto.Keccak256([]byte{b})[:2]
 		quad := make([]byte, len(key)*4)
 		for i := 0; i < len(key); i++ {
 			quad[i*4] = key[i] & 0x3
