@@ -115,7 +115,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 
 func stateless(genLag, consLag int) {
-	state.MaxTrieCacheGen = 64*1024
+	//state.MaxTrieCacheGen = 64*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -146,8 +146,9 @@ func stateless(genLag, consLag int) {
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	stateDb, db := ethdb.NewMemDatabase2()
-	defer stateDb.Close()
+	stateDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/state")
+	check(err)
+	db := stateDb.DB()
 	blockNum := uint64(*block)
 	var preRoot common.Hash
 	if blockNum == 1 {
@@ -157,8 +158,8 @@ func stateless(genLag, consLag int) {
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
-		load_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum-1))
-		load_codes(db, ethDb)
+		//load_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum-1))
+		//load_codes(db, ethDb)
 		block := bcb.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
@@ -174,7 +175,7 @@ func stateless(genLag, consLag int) {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 0
+	var thresholdBlock uint64 = 8000000
 	//prev := make(map[uint64]*state.Stateless)
 	var proofGen *state.Stateless  // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs
@@ -253,7 +254,7 @@ func stateless(genLag, consLag int) {
 			fmt.Printf("Failed to commit batch: %v\n", err)
 			return
 		}
-		if (blockNum%500000 == 0) || (blockNum > 5600000 && blockNum%100000 == 0) {
+		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
 			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
@@ -327,6 +328,7 @@ func stateless(genLag, consLag int) {
 		default:
 		}
 	}
+	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))

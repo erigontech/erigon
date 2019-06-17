@@ -1729,7 +1729,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 
-	//stateless(*genLag, *consLag)
+	stateless(*genLag, *consLag)
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
@@ -1745,7 +1745,7 @@ func main() {
 	//stateless_chart_key_values("stateless1.csv", []int{1, 2}, "c_mask_hash.png", 1, 4)
 	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
-	state_snapshot()
+	//state_snapshot()
 	//estimate()
 	//verify_snapshot()
 	//feemarket()

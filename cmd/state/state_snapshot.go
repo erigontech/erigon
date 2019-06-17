@@ -167,7 +167,6 @@ func load_snapshot(db *bolt.DB, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
 	check(err)
-	defer diskDb.Close()
 	tx, err := db.Begin(true)
 	check(err)
 	b, err := tx.CreateBucket(state.AccountsBucket, true)
@@ -223,6 +222,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 	check(err)
 	err = tx.Commit()
 	check(err)
+	diskDb.Close()
 }
 
 func load_codes(db *bolt.DB, codeDb ethdb.Database) {
