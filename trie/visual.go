@@ -21,6 +21,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+
+	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 var indexColors = []string{
@@ -83,11 +85,6 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 	case nil:
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		fmt.Fprintf(w,
-			`
-	n_%x [label=<
-	<table border="0" color="#000000" cellborder="1" cellspacing="0">
-`, hex)
 		var pLenMax int
 		for _, h := range highlights {
 			pLen := prefixLen(nKey, h)
@@ -95,25 +92,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 				pLenMax = pLen
 			}
 		}
-		for i, h := range nKey {
-			if h == 16 {
-				continue
-			}
-			if i < pLenMax {
-				fmt.Fprintf(w,
-					`		<tr><td bgcolor="%s"><font color="%s">%s</font></td></tr>
-`, indexColors[h], fontColors[h], indices[h])
-			} else {
-				fmt.Fprintf(w,
-					`		<tr><td bgcolor="%s"></td></tr>
-`, indexColors[h])
-			}
-		}
-		fmt.Fprintf(w,
-			`
-	</table>
-    >];
-`)
+		visual.HexVertical(w, nKey, pLenMax, fmt.Sprintf("n_%x", hex))
 		if _, ok := n.Val.(valueNode); !ok {
 			fmt.Fprintf(w,
 				`

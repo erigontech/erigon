@@ -86,7 +86,23 @@ of the type `Receipt` [core/types/receipt.go](../../core/types/receipt.go). Side
 rather than just a single hash. For pre-Byzantium blocks, this function computes state roots for each transaction receipt, and
 another one for the block header. For post-Byzantium blocks, it always returns a singleton slice.
 
-### Hexary Radix tree
-Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. Entities that would be siblings
-on such tree (sharing the parent), are hashed, their hashes are concatenated, and that concatenation is hashed again to produce
-the hash of the parent.
+### Hexary radix "Patricia" tree
+Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. For the purposes of
+illustrations, we will use tres trees with radix 4 (because radix 16 requires many more items for "interesting" features
+to appear). We start from a set of randomly looking keys, 4 bytes (or 16 quarternary digits) each.
+
+![prefix_groups_1](prefix_groups_1.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_1`
+
+Next, we sort them in lexicographic order.
+
+![prefix_groups_2](prefix_groups_2.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_2`
+
+Next, we introduce the notion of a prefix group. Collection of adjacent keys form a prefix group if these keys share
+the same prefix, and no other keys share this prefix. Here are the prefix groups for our example:
+
+![prefix_groups_3](prefix_groups_3.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics.go -pic prefix_groups_3`
+
+The entire collection of keys form one implicit prefix group, with the empty prefix.
