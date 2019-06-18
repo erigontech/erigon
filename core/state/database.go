@@ -450,6 +450,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 }
 
 func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
+	fmt.Println("computeTrieRoots")
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -462,9 +463,14 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		return nil, nil
 	}
 	accountUpdates := tds.aggregateBuffer.accountUpdates
+	//fmt.Println("accountUpdates")
+	//spew.Dump(accountUpdates)
 
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches := tds.buildStorageTouches()
+	//fmt.Println("storageTouches")
+	//spew.Dump(storageTouches)
+
 	if err := tds.resolveStorageTouches(storageTouches); err != nil {
 		return nil, err
 	}
@@ -510,6 +516,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				continue
 			}
 			storageTrie, err := tds.getStorageTrie(address, true)
+			//fmt.Println("storageTrie", m, address, storageTrie.Root())
 			if err != nil {
 				return nil, err
 			}
@@ -529,7 +536,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 		}
-
+		//fmt.Println("b.accountUpdates ")
+		//spew.Dump(b.accountUpdates)
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				data, err := rlp.EncodeToBytes(account)
@@ -653,10 +661,10 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 
 // Account before EIP-2027
 type Account struct {
-	Nonce       uint64
-	Balance     *big.Int
-	Root        common.Hash
-	CodeHash    []byte
+	Nonce    uint64
+	Balance  *big.Int
+	Root     common.Hash
+	CodeHash []byte
 }
 
 func accountToEncoding(account *accounts.Account) ([]byte, error) {
@@ -690,10 +698,10 @@ func accountToEncoding(account *accounts.Account) ([]byte, error) {
 		}
 
 		if a.StorageSize == nil || *a.StorageSize == 0 {
-			accBeforeEIP2027 := &Account {
-				Nonce: a.Nonce,
-				Balance: a.Balance,
-				Root: a.Root,
+			accBeforeEIP2027 := &Account{
+				Nonce:    a.Nonce,
+				Balance:  a.Balance,
+				Root:     a.Root,
 				CodeHash: a.CodeHash,
 			}
 
@@ -717,7 +725,7 @@ func accountToEncoding(account *accounts.Account) ([]byte, error) {
 
 func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	if enc == nil || len(enc) == 0 {
-		fmt.Println("--- 1")
+		//fmt.Println("--- 1")
 		return nil, nil
 	}
 	var data accounts.Account
