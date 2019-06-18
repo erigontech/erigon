@@ -31,7 +31,7 @@ type DumpAccount struct {
 	CodeHash    string            `json:"codeHash"`
 	Code        string            `json:"code"`
 	Storage     map[string]string `json:"storage"`
-	StorageSize *uint64           `json:"storagesize,omitempty"`
+	StorageSize *uint64           `json:",omitempty"`
 }
 
 type Dump struct {

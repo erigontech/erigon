@@ -378,6 +378,15 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+
+type Account struct {
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+}
+
+//fixme!!! дубль логики анмаршала
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("%d %x %x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
@@ -427,7 +436,30 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 					return false, err
 				}
 			} else {
-				tr.value = common.CopyBytes(v)
+				var dataWithoutStorage Account
+					if err := rlp.DecodeBytes(v, &dataWithoutStorage); err != nil {
+						if err.Error() != "rlp: input list has too many elements for state.Account" {
+							fmt.Println("--- 7", err)
+							return false, err
+						}
+
+						var dataWithStorage accounts.Account
+						if err := rlp.DecodeBytes(v, &dataWithStorage); err != nil {
+							fmt.Println("--- 8", err)
+							return false, err
+						}
+
+						data = dataWithStorage
+					} else {
+						data.Nonce = dataWithoutStorage.Nonce
+						data.Balance = dataWithoutStorage.Balance
+						data.CodeHash = dataWithoutStorage.CodeHash
+						data.Root = dataWithoutStorage.Root
+					}
+
+				if tr.value, err = rlp.EncodeToBytes(data); err != nil {
+					return false, err
+				}
 			}
 		} else {
 			tr.value = common.CopyBytes(v)
@@ -436,6 +468,114 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	}
 	return true, nil
 }
+
+/*
+func accountToEncoding(account *accounts.Account) ([]byte, error) {
+	var data []byte
+	var err error
+	if (account.CodeHash == nil || bytes.Equal(account.CodeHash, emptyCodeHash)) && (account.Root == emptyRoot || account.Root == common.Hash{}) {
+		if (account.Balance == nil || account.Balance.Sign() == 0) && account.Nonce == 0 {
+			data = []byte{byte(192)}
+		} else {
+			var extAccount accounts.ExtAccount
+			extAccount.Nonce = account.Nonce
+			extAccount.Balance = account.Balance
+			if extAccount.Balance == nil {
+				extAccount.Balance = new(big.Int)
+			}
+			data, err = rlp.EncodeToBytes(extAccount)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		a := *account
+		if a.Balance == nil {
+			a.Balance = new(big.Int)
+		}
+		if a.CodeHash == nil {
+			a.CodeHash = emptyCodeHash
+		}
+		if a.Root == (common.Hash{}) {
+			a.Root = emptyRoot
+		}
+
+		if a.StorageSize == nil || *a.StorageSize == 0 {
+			accBeforeEIP2027 := &Account {
+				Nonce: a.Nonce,
+				Balance: a.Balance,
+				Root: a.Root,
+				CodeHash: a.CodeHash,
+			}
+
+			data, err = rlp.EncodeToBytes(accBeforeEIP2027)
+			if err != nil {
+				return nil, err
+			}
+
+			fmt.Println("*** 1", string(data))
+			data1, _ := rlp.EncodeToBytes(a)
+			fmt.Println("*** 2", string(data1))
+		} else {
+			data, err = rlp.EncodeToBytes(a)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return data, err
+}
+
+func encodingToAccount(enc []byte) (*accounts.Account, error) {
+	if enc == nil || len(enc) == 0 {
+		fmt.Println("--- 1")
+		return nil, nil
+	}
+	var data accounts.Account
+	// Kind of hacky
+	fmt.Println("--- 5", len(enc))
+	if len(enc) == 1 {
+		data.Balance = new(big.Int)
+		data.CodeHash = emptyCodeHash
+		data.Root = emptyRoot
+	} else if len(enc) < 60 {
+		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
+		var extData accounts.ExtAccount
+		if err := rlp.DecodeBytes(enc, &extData); err != nil {
+			fmt.Println("--- 6", err)
+			return nil, err
+		}
+		data.Nonce = extData.Nonce
+		data.Balance = extData.Balance
+		data.CodeHash = emptyCodeHash
+		data.Root = emptyRoot
+	} else {
+		var dataWithoutStorage Account
+		if err := rlp.DecodeBytes(enc, &dataWithoutStorage); err != nil {
+			if err.Error() != "rlp: input list has too many elements for state.Account" {
+				fmt.Println("--- 7", err)
+				return nil, err
+			}
+
+			var dataWithStorage accounts.Account
+			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
+				fmt.Println("--- 8", err)
+				return nil, err
+			}
+
+			data = dataWithStorage
+		} else {
+			data.Nonce = dataWithoutStorage.Nonce
+			data.Balance = dataWithoutStorage.Balance
+			data.CodeHash = dataWithoutStorage.CodeHash
+			data.Root = dataWithoutStorage.Root
+		}
+	}
+
+	fmt.Println("--- 9", data)
+	return &data, nil
+}
+*/
 
 func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	tr.h = newHasher(!tr.accounts)
