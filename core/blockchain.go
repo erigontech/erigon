@@ -225,12 +225,14 @@ func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
 		log.Info("Creating StateDB from latest state", "block", currentBlockNr)
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
-		bc.trieDbState.SetNoHistory(bc.noHistory)
-		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err != nil {
 			panic(err)
 		}
-		bc.trieDbState.Rebuild()
+		bc.trieDbState.SetNoHistory(bc.noHistory)
+		bc.trieDbState.SetResolveReads(bc.resolveReads)
+		if err := bc.trieDbState.Rebuild(); err != nil {
+			panic(err)
+		}
 	}
 	return bc.trieDbState
 }
@@ -1186,12 +1188,14 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 			currentBlockNr := bc.CurrentBlock().NumberU64()
 			log.Info("Creating StateDB from latest state", "block", currentBlockNr)
 			bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
-			bc.trieDbState.SetNoHistory(bc.noHistory)
-			bc.trieDbState.SetResolveReads(bc.resolveReads)
 			if err != nil {
 				return k, events, coalescedLogs, err
 			}
-			bc.trieDbState.Rebuild()
+			bc.trieDbState.SetNoHistory(bc.noHistory)
+			bc.trieDbState.SetResolveReads(bc.resolveReads)
+			if err := bc.trieDbState.Rebuild(); err != nil {
+				return k, events, coalescedLogs, err
+			}
 		}
 		root = bc.trieDbState.LastRoot()
 		var parentRoot common.Hash

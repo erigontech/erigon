@@ -27,6 +27,7 @@ require (
 	github.com/go-stack/stack v1.5.4
 	github.com/golang/protobuf v0.0.0-20170726212829-748d386b5c1e
 	github.com/golang/snappy v0.0.0-20170215233205-553a64147049
+	github.com/graph-gophers/graphql-go v0.0.0-20190610161739-8f92f34fc598
 	github.com/hashicorp/golang-lru v0.0.0-20160813221303-0a025b7e63ad
 	github.com/huin/goupnp v0.0.0-20161224104101-679507af18f3
 	github.com/influxdata/influxdb v0.0.0-20180221223340-01288bdb0883
@@ -43,10 +44,11 @@ require (
 	github.com/mattn/go-runewidth v0.0.3
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826
+	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.0.0-20170918210437-9fafd6967416
 	github.com/nsf/termbox-go v0.0.0-20170211012700-3540b76b9c77
 	github.com/olekukonko/tablewriter v0.0.0-20170128050532-febf2d34b54a
-	github.com/opentracing/opentracing-go v0.0.0-20180606204148-bd9c31933947
+	github.com/opentracing/opentracing-go v1.1.0
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v0.0.0-20190123174540-a2c9a5303de7
