@@ -14,7 +14,7 @@ linters:
     - interfacer
 
 
-disable-all: true
+  disable-all: true
 
 linters-settings:
     golint:
