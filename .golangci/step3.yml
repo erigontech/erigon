@@ -9,9 +9,11 @@ linters:
     - varcheck
     - scopelint
     - staticcheck
+    - nakedret
+    - prealloc
+    - gocyclo
 
-
-  disable-all: true
+disable-all: true
 
 linters-settings:
     govet:

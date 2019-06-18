@@ -14,11 +14,9 @@ linters:
     - interfacer
 
 
-  disable-all: true
+disable-all: true
 
 linters-settings:
-    govet:
-      check-shadowing: true
     golint:
       min-confidence: 0
     maligned:
@@ -26,9 +24,5 @@ linters-settings:
     goconst:
       min-len: 2
       min-occurrences: 2
-    misspell:
-      locale: US
-    gocyclo:
-      min-complexity: 35
     gofmt:
       auto-fix: false

@@ -10,7 +10,6 @@ linters:
     - stylecheck
     - typecheck
 
-
   disable-all: true
 
 linters-settings:
