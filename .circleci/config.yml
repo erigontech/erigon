@@ -28,7 +28,6 @@ jobs:
       - run: make
 
       - run: make lintci-deps
-      - run: git diff --relative a0f2f4db2c00899c822e6556e2794067f07718e8
 
       - run:
           name: Run extra linters
