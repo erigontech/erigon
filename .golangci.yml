@@ -3,15 +3,13 @@ run:
 
 linters:
   enable:
-    - bodyclose
     - errcheck
     - gochecknoinits
     - goconst
     - gofmt
     - golint
+  disable-all: true
 
-
-  disable-all:
 linters-settings:
     govet:
       check-shadowing: true
