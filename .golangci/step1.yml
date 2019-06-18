@@ -19,8 +19,6 @@ disable-all: true
 linters-settings:
     golint:
       min-confidence: 0
-    maligned:
-      suggest-new: true
     goconst:
       min-len: 2
       min-occurrences: 2
