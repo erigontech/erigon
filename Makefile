@@ -12,6 +12,10 @@ GOBIN = $(shell pwd)/build/bin
 GO ?= latest
 
 LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
+ifeq ($(LATEST_COMMIT),)
+LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
+endif
+
 
 geth:
 	build/env.sh go run build/ci.go install ./cmd/geth
