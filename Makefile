@@ -83,6 +83,11 @@ lintci:
 	    --exclude="which can be annoying to use" \
 	    --config ./.golangci/step2.yml \
 	    --verbose
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --exclude="which can be annoying to use" \
+	    --config ./.golangci/step3.yml \
+	    --verbose
 
 lintci-deps:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.17.1
