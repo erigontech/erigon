@@ -76,8 +76,6 @@ lintci:
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
 	    --exclude="which can be annoying to use" \
-	    --no-config \
-	    --fast \
 	    --verbose
 
 lintci-deps:
