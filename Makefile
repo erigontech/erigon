@@ -71,14 +71,14 @@ test: all
 lint: ## Run linters.
 	build/env.sh go run build/ci.go lint
 
-lint:
+lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
 	    --exclude="which can be annoying to use" \
 	    --verbose
 
-lint-deps:
+lintci-deps:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.17.1
 
 clean:
