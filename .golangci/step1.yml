@@ -9,7 +9,10 @@ linters:
     - gofmt
     - golint
     - gosimple
-    - govet
+    - gosec
+    - ineffassign
+    - interfacer
+
 
   disable-all: true
 

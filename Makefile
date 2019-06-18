@@ -75,7 +75,13 @@ lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step1.yml \
 	    --exclude="which can be annoying to use" \
+	    --verbose
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --exclude="which can be annoying to use" \
+	    --config ./.golangci/step2.yml \
 	    --verbose
 
 lintci-deps:
