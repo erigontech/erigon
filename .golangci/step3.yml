@@ -11,5 +11,10 @@ linters:
     - staticcheck
     - nakedret
     - prealloc
+    - gocyclo
 
   disable-all: true
+
+linters-settings:
+  gocyclo:
+    min-complexity: 35
