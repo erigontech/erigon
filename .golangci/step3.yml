@@ -1,0 +1,20 @@
+run:
+  deadline: 10m
+
+linters:
+  enable:
+    - unconvert
+    - unparam
+    - unused
+    - varcheck
+    - scopelint
+    - staticcheck
+    - nakedret
+    - prealloc
+    - gocyclo
+
+  disable-all: true
+
+linters-settings:
+  gocyclo:
+    min-complexity: 35

@@ -11,6 +11,12 @@
 GOBIN = $(shell pwd)/build/bin
 GO ?= latest
 
+LATEST_COMMIT ?= $(shell git log -n 1 origin/master --pretty=format:"%H")
+ifeq ($(LATEST_COMMIT),)
+LATEST_COMMIT := $(shell git log -n 1 HEAD~1 --pretty=format:"%H")
+endif
+
+
 geth:
 	build/env.sh go run build/ci.go install ./cmd/geth
 	@echo "Done building."
@@ -64,6 +70,27 @@ test: all
 
 lint: ## Run linters.
 	build/env.sh go run build/ci.go lint
+
+lintci:
+	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --config ./.golangci/step1.yml \
+	    --exclude="which can be annoying to use" \
+	    --verbose
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --exclude="which can be annoying to use" \
+	    --config ./.golangci/step2.yml \
+	    --verbose
+	@./build/bin/golangci-lint run \
+	    --new-from-rev=$(LATEST_COMMIT) \
+	    --exclude="which can be annoying to use" \
+	    --config ./.golangci/step3.yml \
+	    --verbose
+
+lintci-deps:
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.17.1
 
 clean:
 	./build/clean_go_build_cache.sh
