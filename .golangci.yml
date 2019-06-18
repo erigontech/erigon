@@ -8,6 +8,9 @@ linters:
     - goconst
     - gofmt
     - golint
+    - gosimple
+    - govet
+
   disable-all: true
 
 linters-settings:
