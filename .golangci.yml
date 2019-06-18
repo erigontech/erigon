@@ -10,6 +10,7 @@ linters:
     - gocritic
     - maligned
     - goimports
+    - misspell
 
 linters-settings:
     govet:
