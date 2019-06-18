@@ -456,7 +456,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 	return nil
 }
 
-func (s *StateSuite) TestTouchDelete(c *check.C) {
+func (s *StateSuite) testTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 	s.state.Finalise(false, s.tds.TrieStateWriter())
 	s.tds.ComputeTrieRoots()
@@ -531,7 +531,7 @@ func TestStateDBNewContractAccount(t *testing.T) {
 	state.DecreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
 	if *obj.data.StorageSize != HugeNumber-1 {
-		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize - HugeNumber)
+		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize-HugeNumber)
 	}
 
 }
