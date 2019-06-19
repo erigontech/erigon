@@ -138,7 +138,8 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
 ### Separation of keys and the structure
 
 Our goal here will be to construct an algorithm that can produce the hash of the Patricia Merkle Tree of a sorted
-sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering). Another goal (perhaps more important)
+sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering, but with a stack).
+Another goal (perhaps more important)
 is to be able to split the sequence of key-value pairs into arbitrary chunks of consequitive keys, and reconstruct the
 root hash from hashes of the invidual chunks (note that a chunk might need to have more than one hash).
 
@@ -271,4 +272,4 @@ We can think of a multiproof as the combination of 3 things:
 
 1. Sequence of those 4 key-value pairs
 2. Sequence of 15 hashes
-3. structural information that lets us compute the root hash out of the sequences (1) and (2)
+3. Structural information that lets us compute the root hash out of the sequences (1) and (2)
