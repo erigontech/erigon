@@ -44,7 +44,7 @@ import (
 )
 
 const (
-	clientIdentifier = "geth" // Client identifier to advertise over the network
+	clientIdentifier = "turbo-geth" // Client identifier to advertise over the network
 )
 
 var (

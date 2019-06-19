@@ -36,7 +36,7 @@ import (
 )
 
 // Trie cache generation limit after which to evict trie nodes from memory.
-var MaxTrieCacheGen = uint32(4 * 1024 * 1024)
+var MaxTrieCacheGen = uint32(1024 * 1024)
 
 var AccountsBucket = []byte("AT")
 var AccountsHistoryBucket = []byte("hAT")
@@ -191,22 +191,20 @@ func (b *Buffer) merge(other *Buffer) {
 
 // Implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                *trie.Trie
-	db               ethdb.Database
-	blockNr          uint64
-	storageTries     map[common.Address]*trie.Trie
-	buffers          []*Buffer
-	aggregateBuffer  *Buffer // Merge of all buffers
-	currentBuffer    *Buffer
-	codeCache        *lru.Cache
-	codeSizeCache    *lru.Cache
-	historical       bool
-	generationCounts map[uint64]int
-	nodeCount        int
-	oldestGeneration uint64
-	noHistory        bool
-	resolveReads     bool
-	pg               *trie.ProofGenerator
+	t               *trie.Trie
+	db              ethdb.Database
+	blockNr         uint64
+	storageTries    map[common.Address]*trie.Trie
+	buffers         []*Buffer
+	aggregateBuffer *Buffer // Merge of all buffers
+	currentBuffer   *Buffer
+	codeCache       *lru.Cache
+	codeSizeCache   *lru.Cache
+	historical      bool
+	noHistory       bool
+	resolveReads    bool
+	pg              *trie.ProofGenerator
+	tp              *trie.TriePruning
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -219,6 +217,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		return nil, err
 	}
 	t := trie.New(root, false)
+	tp, err := trie.NewTriePruning(blockNr)
+	if err != nil {
+		return nil, err
+	}
 	tds := TrieDbState{
 		t:             t,
 		db:            db,
@@ -227,10 +229,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
+		tp:            tp,
 	}
-	t.MakeListed(tds.joinGeneration, tds.leftGeneration)
-	tds.generationCounts = make(map[uint64]int, 4096)
-	tds.oldestGeneration = blockNr
+	t.SetTouchFunc(func(hex []byte, del bool) {
+		tp.Touch(hex, del)
+	})
 	return &tds, nil
 }
 
@@ -560,13 +563,13 @@ func (tds *TrieDbState) clearUpdates() {
 	tds.aggregateBuffer = nil
 }
 
-func (tds *TrieDbState) Rebuild() {
-	tr := tds.AccountTrie()
-	tr.Rebuild(tds.db, tds.blockNr)
+func (tds *TrieDbState) Rebuild() error {
+	return tds.AccountTrie().Rebuild(tds.db, tds.blockNr)
 }
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.blockNr = blockNr
+	tds.tp.SetBlockNr(blockNr)
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
@@ -773,18 +776,7 @@ func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	return &data, nil
 }
 
-func (tds *TrieDbState) joinGeneration(gen uint64) {
-	tds.nodeCount++
-	tds.generationCounts[gen]++
-
-}
-
-func (tds *TrieDbState) leftGeneration(gen uint64) {
-	tds.nodeCount--
-	tds.generationCounts[gen]--
-}
-
-func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
+func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -859,7 +851,9 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 		} else {
 			t = trie.New(account.Root, true)
 		}
-		t.MakeListed(tds.joinGeneration, tds.leftGeneration)
+		t.SetTouchFunc(func(hex []byte, del bool) {
+			tds.tp.TouchContract(address, hex, del)
+		})
 		tds.storageTries[address] = t
 	}
 	return t, nil
@@ -962,32 +956,40 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 var prevMemStats runtime.MemStats
 
 func (tds *TrieDbState) PruneTries(print bool) {
-	if tds.nodeCount > int(MaxTrieCacheGen) {
-		toRemove := 0
-		excess := tds.nodeCount - int(MaxTrieCacheGen)
-		gen := tds.oldestGeneration
-		for excess > 0 {
-			excess -= tds.generationCounts[gen]
-			toRemove += tds.generationCounts[gen]
-			delete(tds.generationCounts, gen)
-			gen++
+	if print {
+		mainPrunable := tds.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		for _, storageTrie := range tds.storageTries {
+			prunableNodes += storageTrie.CountPrunableNodes()
 		}
-		// Unload all nodes with touch timestamp < gen
-		for address, storageTrie := range tds.storageTries {
-			empty := storageTrie.UnloadOlderThan(gen, false)
-			if empty {
-				delete(tds.storageTries, address)
-			}
+		fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
+	}
+	pruned, emptyAddresses, err := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen), func(contract common.Address) (*trie.Trie, error) {
+		return tds.getStorageTrie(contract, false)
+	})
+	if err != nil {
+		fmt.Printf("Error while pruning: %v\n", err)
+	}
+	if !pruned {
+		//return
+	}
+	if print {
+		mainPrunable := tds.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		for _, storageTrie := range tds.storageTries {
+			prunableNodes += storageTrie.CountPrunableNodes()
 		}
-		tds.t.UnloadOlderThan(gen, false)
-		tds.oldestGeneration = gen
-		tds.nodeCount -= toRemove
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		log.Info("Memory", "nodes", tds.nodeCount, "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-		if print {
-			fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.nodeCount, int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
-		}
+		fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
+	}
+	// Storage tries that were completely pruned
+	for _, address := range emptyAddresses {
+		delete(tds.storageTries, address)
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Memory", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+	if print {
+		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
 }
 

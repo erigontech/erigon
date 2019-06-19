@@ -174,7 +174,7 @@ func stateless(genLag, consLag int) {
 	var proofGen *state.Stateless  // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs
 	for !interrupt {
-		trace := false //blockNum == 318335
+		trace := false // blockNum == 1807
 		if trace {
 			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
 			f, err1 := os.Create(filename)
@@ -279,7 +279,6 @@ func stateless(genLag, consLag int) {
 						return
 					}
 					writeStats(wf, blockNum, pBlockProof)
-					proofCons.Prune(blockNum-uint64(consLag), false)
 				} else {
 					if err := proofCons.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
 						fmt.Printf("Error applying proof to consumer: %v\n", err)
@@ -288,6 +287,9 @@ func stateless(genLag, consLag int) {
 				}
 				if err := runBlock(tds, proofCons, chainConfig, bcb, header, block, trace, false); err != nil {
 					fmt.Printf("Error running block %d through proof consumer: %v\n", blockNum, err)
+				}
+				if blockNum > uint64(consLag) {
+					proofCons.Prune(blockNum-uint64(consLag), false)
 				}
 			}
 			if proofGen != nil {

@@ -236,7 +236,6 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 		} else {
 			t = trie.New(account.Root, true)
 		}
-		t.MakeListed(rds.joinGeneration, rds.leftGeneration)
 		rds.storageTries[address] = t
 	}
 	return t, nil
@@ -428,38 +427,8 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 	return nil
 }
 
-func (rds *RepairDbState) joinGeneration(gen uint64) {
-	rds.nodeCount++
-	rds.generationCounts[gen]++
-
-}
-
-func (rds *RepairDbState) leftGeneration(gen uint64) {
-	rds.nodeCount--
-	rds.generationCounts[gen]--
-}
-
 func (rds *RepairDbState) PruneTries() {
-	if rds.nodeCount > int(MaxTrieCacheGen) {
-		toRemove := 0
-		excess := rds.nodeCount - int(MaxTrieCacheGen)
-		gen := rds.oldestGeneration
-		for excess > 0 {
-			excess -= rds.generationCounts[gen]
-			toRemove += rds.generationCounts[gen]
-			delete(rds.generationCounts, gen)
-			gen++
-		}
-		// Unload all nodes with touch timestamp < gen
-		for address, storageTrie := range rds.storageTries {
-			empty := storageTrie.UnloadOlderThan(gen, false)
-			if empty {
-				delete(rds.storageTries, address)
-			}
-		}
-		rds.oldestGeneration = gen
-		rds.nodeCount -= toRemove
-	}
+	// TODO Reintroduce pruning if necessary
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	fmt.Printf("Memory: nodes=%d, alloc=%d, sys=%d\n", rds.nodeCount, int(m.Alloc/1024), int(m.Sys/1024))
