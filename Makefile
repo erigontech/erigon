@@ -75,19 +75,15 @@ lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --config ./.golangci/step1.yml \
-	    --exclude="which can be annoying to use" \
-	    --verbose
+	    --config ./.golangci/step1.yml
+
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --exclude="which can be annoying to use" \
-	    --config ./.golangci/step2.yml \
-	    --verbose
+	    --config ./.golangci/step2.yml
+
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --exclude="which can be annoying to use" \
-	    --config ./.golangci/step3.yml \
-	    --verbose
+	    --config ./.golangci/step3.yml
 
 lintci-deps:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.17.1
