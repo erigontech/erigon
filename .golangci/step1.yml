@@ -8,9 +8,6 @@ linters:
     - goconst
     - gofmt
     - golint
-    - gosimple
-    - gosec
-    - ineffassign
     - interfacer
 
 
