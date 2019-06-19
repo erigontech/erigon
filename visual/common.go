@@ -13,18 +13,14 @@ func StartGraph(w io.Writer) {
 `)
 }
 
-func StartCluster(w io.Writer, name string) {
-	fmt.Fprintf(w,
-		`subgraph c_%s {
-`, name)
-}
-
-func EndCluster(w io.Writer) {
-	EndGraph(w)
-}
-
 func EndGraph(w io.Writer) {
 	fmt.Fprintf(w,
 		`}
 `)
+}
+
+func Circle(w io.Writer, name string, label string) {
+	fmt.Fprintf(w,
+		`%s [label=%s shape=circle];
+`, name, label)
 }

@@ -25,62 +25,23 @@ import (
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
-var indexColors = []string{
-	"#FFFFFF", // white
-	"#FBF305", // yellow
-	"#FF6403", // orange
-	"#DD0907", // red
-	"#F20884", // magenta
-	"#4700A5", // purple
-	"#0000D3", // blue
-	"#02ABEA", // cyan
-	"#1FB714", // green
-	"#006412", // dark green
-	"#562C05", // brown
-	"#90713A", // tan
-	"#C0C0C0", // light grey
-	"#808080", // medium grey
-	"#404040", // dark grey
-	"#000000", // black
-}
-
-var fontColors = []string{
-	"#000000",
-	"#000000",
-	"#000000",
-	"#000000",
-	"#000000",
-	"#FFFFFF",
-	"#FFFFFF",
-	"#000000",
-	"#000000",
-	"#FFFFFF",
-	"#FFFFFF",
-	"#000000",
-	"#000000",
-	"#000000",
-	"#FFFFFF",
-	"#FFFFFF",
-}
-
-// Visualisation of trie without any highlighting
-func Visual(t *Trie, highlights [][]byte, w io.Writer) {
-	fmt.Fprintf(w,
-		`digraph trie {
-	node [shape=none margin=0 width=0 height=0]
-    edge [dir = none headport=n tailport=s]
-`)
+// Visual creates visualisation of trie with highlighting
+func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string) {
 	var highlightsHex [][]byte
 	for _, h := range highlights {
 		highlightsHex = append(highlightsHex, keybytesToHex(h))
 	}
-	visualNode(t.root, []byte{}, highlightsHex, w)
-	fmt.Fprintf(w,
-		`}
+	leaves := make(map[string]struct{})
+	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves)
+	fmt.Fprintf(w, "{rank = same;")
+	for leaf := range leaves {
+		fmt.Fprintf(w, "n_%x;", leaf)
+	}
+	fmt.Fprintf(w, `};
 `)
 }
 
-func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
+func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, leaves map[string]struct{}) {
 	switch n := nd.(type) {
 	case nil:
 	case *shortNode:
@@ -92,8 +53,8 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 				pLenMax = pLen
 			}
 		}
-		visual.HexVertical(w, nKey, pLenMax, fmt.Sprintf("n_%x", hex))
-		if _, ok := n.Val.(valueNode); !ok {
+		visual.Vertical(w, nKey, pLenMax, fmt.Sprintf("n_%x", hex), indexColors, fontColors)
+		if v, ok := n.Val.(valueNode); !ok {
 			fmt.Fprintf(w,
 				`
 
@@ -105,7 +66,13 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 					newHighlights = append(newHighlights, h[len(nKey):])
 				}
 			}
-			visualNode(n.Val, concat(hex, nKey...), newHighlights, w)
+			visualNode(n.Val, concat(hex, nKey...), newHighlights, w, indexColors, fontColors, leaves)
+		} else {
+			leaves[string(hex)] = struct{}{}
+			visual.Circle(w, fmt.Sprintf("e_%s", string(v)), string(v))
+			fmt.Fprintf(w,
+				`n_%x -> e_%s;
+	`, hex, string(v))
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
@@ -157,8 +124,8 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
     n_%x:h%d -> n_%x;
     n_%x:h%d -> n_%x;
 `, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
-		visualNode(n.child1, concat(hex, i1), highlights1, w)
-		visualNode(n.child2, concat(hex, i2), highlights2, w)
+		visualNode(n.child1, concat(hex, i1), highlights1, w, indexColors, fontColors, leaves)
+		visualNode(n.child2, concat(hex, i2), highlights2, w, indexColors, fontColors, leaves)
 	case *fullNode:
 		fmt.Fprintf(w,
 			`
@@ -212,7 +179,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer) {
 					newHighlights = append(newHighlights, h[1:])
 				}
 			}
-			visualNode(child, concat(hex, byte(i)), newHighlights, w)
+			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves)
 		}
 	}
 }

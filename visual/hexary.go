@@ -7,7 +7,7 @@ import (
 
 // Primitives for drawing hexary strings in graphviz dot format
 
-var hexIndexColors = []string{
+var HexIndexColors = []string{
 	"#FFFFFF", // white
 	"#FBF305", // yellow
 	"#FF6403", // orange
@@ -26,7 +26,7 @@ var hexIndexColors = []string{
 	"#000000", // black
 }
 
-var hexFontColors = []string{
+var HexFontColors = []string{
 	"#000000",
 	"#000000",
 	"#000000",
@@ -47,10 +47,10 @@ var hexFontColors = []string{
 
 var hexIndices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f"}
 
-// HexVertical produces a vertical line corresponding to hex digits in key (one byte - one digit)
+// Vertical produces a vertical line corresponding to hex digits in key (one byte - one digit)
 // highlighted - number of digits that need to be highlighted (contain digits themselves)
 // name - name of the compontent (to be connected to others)
-func HexVertical(w io.Writer, hex []byte, highlighted int, name string) {
+func Vertical(w io.Writer, hex []byte, highlighted int, name string, indexColors []string, fontColors []string) {
 	fmt.Fprintf(w,
 		`
 	%s [label=<
@@ -63,11 +63,11 @@ func HexVertical(w io.Writer, hex []byte, highlighted int, name string) {
 		if i < highlighted {
 			fmt.Fprintf(w,
 				`		<tr><td bgcolor="%s"><font color="%s">%s</font></td></tr>
-	`, hexIndexColors[h], hexFontColors[h], hexIndices[h])
+	`, indexColors[h], fontColors[h], hexIndices[h])
 		} else {
 			fmt.Fprintf(w,
 				`		<tr><td bgcolor="%s"></td></tr>
-	`, hexIndexColors[h])
+	`, HexIndexColors[h])
 		}
 	}
 	fmt.Fprintf(w,

@@ -238,6 +238,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 // hashChildren replaces the children of a node with their hashes if the encoded
 // size of the child is larger than a hash, returning the collapsed node as well
 // as a replacement for the original node with the child hashes cached in.
+// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 	buffer := h.buffers[bufOffset:]
 	pos := 4

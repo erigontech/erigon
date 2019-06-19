@@ -107,15 +107,41 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
 
-Merke patricia tree hashing recursively replaces prefix groups with their hashes.
+Merke patricia tree hashing rules first remove redundant parts of the each key within groups, making key-value
+pairs so-called "leaf nodes". They correspond to `shortNode` type in the file [trie/node.go](../../trie/node.go).
+To produce the hash of a leaf node, one applies the hash function to the two piece RLP (Recursive Length Prefix).
+First piece is the representation of the non-redundant part of the key. And the second piece is the
+representation of the leaf value corresponding to the key, as shown in the member function `hashChildren` of the
+type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
+
+Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
+types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the file [trie/node.go](../../trie/node.go).
+To produce the hash of the a branch node, one represents it as an array of 17 elements (17-th element is for the attached value).
+The position in the array that do not have corresponding elements in the prefix group, are filled with empty strings. This is
+shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*duoNode` and
+`*fullNode` cases.
+
+Sometimes, nested prefix groups have longer prefixes than 1-digit extension of their encompassing prefix group, as it is the case
+in the group of items `12, 13` or in the group of items `29, 30, 31`. Such cases give rise to so-called "extension nodes".
+They correspond to `shortNode` type in [trie/node.go](../../trie/node.go), the same type as leaf nodes. However, the value
+in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of the branch node,
+one applies the hash function to the two piece RLP. First piece is the representation of the non-redundant part of the key.
+The second part is the hash of the branch node representing the prefix group. This shown in the member function `hashChildren` of the
+type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
+
+This is the illlustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
+
+![prefix_groups_4](prefix_groups_4.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
+
+### Separation of keys ands the structure
+
+Our goal here will be to construct an algorithm that can produce the hash of the Patricia Merkle Tree of a sorted
+sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering).
+
 It can be readily observed that the first item in any prefix group has this property that its common prefix
 with the item immediately to the right (or empty string if the item is the very last) is longer than its common
 prefix with the item immediately to the left (or empty string if the item is the very first).
 Analogously, the last item in any prefix group has the property that its common prefix with the item
 immediately to the left is longer than its common prefix with the item immediately to the right.
-Using this observation, we can devise an algorithm for producing a merkle hash of a sequence of such items.
 
-```
-keys is the list of items in the lexicographic order
-stack is the stack of the prefix groups, starting empty
-```

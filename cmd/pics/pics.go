@@ -7,7 +7,9 @@ import (
 	"os/exec"
 	"sort"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -40,8 +42,12 @@ func prefix_groups_1() {
 
 	keys := generate_prefix_groups()
 	visual.StartGraph(f)
-	for _, key := range keys {
+	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		fmt.Fprintf(f,
+			`q_%x -> e_%d;
+`, key, i)
 	}
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
@@ -64,8 +70,12 @@ func prefix_groups_2() {
 	keys := generate_prefix_groups()
 	sort.Strings(keys)
 	visual.StartGraph(f)
-	for _, key := range keys {
+	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		fmt.Fprintf(f,
+			`q_%x -> e_%d;
+`, key, i)
 	}
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
@@ -112,14 +122,13 @@ func prefix_groups_3() {
 	}
 	visual.StartGraph(f)
 	var prefixStack []string
-	for _, key := range keys {
+	for i, key := range keys {
 		// Close all the groups that do not contain the current key
 		var leftCommon int
 		if len(prefixStack) > 0 {
 			leftCommon = commonPrefix(key, prefixStack[len(prefixStack)-1])
 		}
 		for len(prefixStack) > 0 && len(prefixStack[len(prefixStack)-1]) > leftCommon {
-			//visual.EndCluster(f)
 			prefixStack = prefixStack[:len(prefixStack)-1]
 		}
 		leftCommon = 0
@@ -130,7 +139,6 @@ func prefix_groups_3() {
 		for p := leftCommon + 1; p < len(key); p++ {
 			if _, ok := prefixSet[key[:p]]; ok {
 				group := key[:p]
-				//visual.StartCluster(f, fmt.Sprintf("q_%x", group))
 				visual.QuadVertical(f, []byte(group), 0, fmt.Sprintf("q_%x", group))
 				if len(prefixStack) > 0 {
 					fmt.Fprintf(f,
@@ -149,10 +157,13 @@ q_%x->q_%x;
 		}
 		// Display the key
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		fmt.Fprintf(f,
+			`q_%x -> e_%d;
+`, key, i)
 	}
 	// Close remaining groups
 	for len(prefixStack) > 0 {
-		//visual.EndCluster(f)
 		prefixStack = prefixStack[:len(prefixStack)-1]
 	}
 	fmt.Fprintf(f, "{rank = same;")
@@ -161,6 +172,38 @@ q_%x->q_%x;
 	}
 	fmt.Fprintf(f, `};
 `)
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+}
+
+func prefix_groups_4() {
+	fmt.Printf("Prefix groups 4\n")
+	filename := "prefix_groups_4.dot"
+	f, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	keys := generate_prefix_groups()
+	sort.Strings(keys)
+	tr := trie.New(common.Hash{}, false)
+	var hightlights [][]byte
+	for i, key := range keys {
+		hexKey := make([]byte, len(key)/2)
+		for j := 0; j < len(hexKey); j++ {
+			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
+		}
+		vs := fmt.Sprintf("%d", i)
+		tr.Update(hexKey, []byte(vs), 0)
+		hightlights = append(hightlights, hexKey)
+	}
+	visual.StartGraph(f)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -180,5 +223,7 @@ func main() {
 		prefix_groups_2()
 	case "prefix_groups_3":
 		prefix_groups_3()
+	case "prefix_groups_4":
+		prefix_groups_4()
 	}
 }
