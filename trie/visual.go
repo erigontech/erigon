@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -181,5 +182,103 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 			}
 			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves)
 		}
+	case hashNode:
+		visual.Box(w, fmt.Sprintf("n_%x", hex), "hash")
 	}
+}
+
+func (t *Trie) Fold(keys [][]byte) {
+	var hexes [][]byte
+	for _, key := range keys {
+		hexes = append(hexes, keybytesToHex(key))
+	}
+	h := newHasher(t.encodeToBytes)
+	defer returnHasherToPool(h)
+	_, t.root = fold(t.root, hexes, h, true)
+}
+
+func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
+	switch n := nd.(type) {
+	case *shortNode:
+		nKey := compactToHex(n.Key)
+		var newHexes [][]byte
+		for _, hex := range hexes {
+			if bytes.Equal(nKey, hex) {
+				var hn common.Hash
+				h.hash(n, isRoot, hn[:])
+				return true, hashNode(hn[:])
+			} else {
+				pLen := prefixLen(nKey, hex)
+				if pLen > 0 {
+					newHexes = append(newHexes, hex[pLen:])
+				}
+			}
+		}
+		if len(newHexes) > 0 {
+			folded, nn := fold(n.Val, newHexes, h, false)
+			n.Val = nn
+			if folded {
+				var hn common.Hash
+				h.hash(n, isRoot, hn[:])
+				return true, hashNode(hn[:])
+			}
+			return false, n
+		}
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		var hexes1, hexes2 [][]byte
+		for _, h := range hexes {
+			if len(h) > 0 && h[0] == i1 {
+				hexes1 = append(hexes1, h[1:])
+			}
+			if len(h) > 0 && h[0] == i2 {
+				hexes2 = append(hexes2, h[1:])
+			}
+		}
+		var folded1, folded2 bool
+		var nn1, nn2 node
+		if len(hexes1) > 0 {
+			folded1, nn1 = fold(n.child1, hexes1, h, false)
+			n.child1 = nn1
+		}
+		if len(hexes2) > 0 {
+			folded2, nn2 = fold(n.child2, hexes2, h, false)
+			n.child2 = nn2
+		}
+		if folded1 && folded2 {
+			var hn common.Hash
+			h.hash(n, isRoot, hn[:])
+			return true, hashNode(hn[:])
+		}
+		return false, n
+	case *fullNode:
+		var unfolded bool
+		for i, child := range n.Children {
+			if child == nil {
+				continue
+			}
+			var newHexes [][]byte
+			for _, h := range hexes {
+				if len(h) > 0 && h[0] == byte(i) {
+					newHexes = append(newHexes, h[1:])
+				}
+			}
+			if len(newHexes) > 0 {
+				folded, nn := fold(child, newHexes, h, false)
+				n.Children[i] = nn
+				if !folded {
+					unfolded = true
+				}
+			} else {
+				unfolded = true
+			}
+		}
+		if !unfolded {
+			var hn common.Hash
+			h.hash(n, isRoot, hn[:])
+			return true, hashNode(hn[:])
+		}
+		return false, n
+	}
+	return false, nd
 }

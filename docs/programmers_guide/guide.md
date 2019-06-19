@@ -116,7 +116,8 @@ type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` cas
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
 types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the file [trie/node.go](../../trie/node.go).
-To produce the hash of the a branch node, one represents it as an array of 17 elements (17-th element is for the attached value).
+To produce the hash of the a branch node, one represents it as an array of 17 elements (17-th element is for the attached leaf,
+if exists).
 The position in the array that do not have corresponding elements in the prefix group, are filled with empty strings. This is
 shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*duoNode` and
 `*fullNode` cases.
@@ -134,12 +135,64 @@ This is the illlustration of resulting leaf nodes, branch nodes, and extension n
 ![prefix_groups_4](prefix_groups_4.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
 
-### Separation of keys ands the structure
+### Separation of keys and the structure
 
 Our goal here will be to construct an algorithm that can produce the hash of the Patricia Merkle Tree of a sorted
-sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering).
+sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering). Another goal (perhaps more important)
+is to be able to split the sequence of key-value pairs into arbitrary chunks of consequitive keys, and reconstruct the
+root hash from hashes of the invidual chunks (note that a chunk might need to have more than one hash).
 
-It can be readily observed that the first item in any prefix group has this property that its common prefix
+Let's say that we would like to split the ordered sequence of 32 key-value pairs into 4 chunks, 8 pairs in each. We would then
+like to compute the hashes (there might be more than one hash per chunk) of each chunk separately. After that, we would like
+to combine the hashes of the chunks into the root hash.
+
+Our approach would be to generate some additional information, which we will call "structural information", for each chunk,
+as well as for the composition of chunks. This structural information can be a sequence of these "opcodes":
+1. `LEAF length-of-key`
+2. `BRANCH set-of-digits`
+3. `EXTENSION key`
+
+The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
+
+`LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
+`length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
+in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits.
+
+`BRANCH` opcode has a set of digits as its operand. This set can be encoded as a bitset, for example. The action of
+this opcode is to pop the same
+number of items from the stack as the number of digits in the operand's set, creates a branch node, and pushes it
+onto the stack. Sets of digits can be seen as the horizonal rectangles on the picture `prefix_groups_4`.
+
+`EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
+of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
+an extension node with the key provided in the operand, and the value being the item popped from the stack, and
+push this extension node onto the stack.
+
+This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
+```
+LEAF 5
+LEAF 5
+BRANCH 12
+LEAF 5
+LEAF 5
+LEAF 5
+BRANCH 023
+LEAF 6
+LEAF 6
+BRANCH 0123
+LEAF 5
+```
+After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
+node (or its hash) for the prefix group of leafs `0` to `6`, and the second representing one leaf node for the leaf
+`7`. It can be observed that if we did not see what the next key after the leaf `7` is, we would not know the operand
+for the last `LEAF` opcode. If the next key started with the prefix `101` instead of `103`, the last opcode could have
+been `LEAF 4` (because leafs `7` and `8` would have formed a prefix group).
+
+After hashing the first chunk, the tree would look as follows.
+![prefix_groups_5](prefix_groups_5.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
+
+It can then be readily observed that the first item in any prefix group has this property that its common prefix
 with the item immediately to the right (or empty string if the item is the very last) is longer than its common
 prefix with the item immediately to the left (or empty string if the item is the very first).
 Analogously, the last item in any prefix group has the property that its common prefix with the item
