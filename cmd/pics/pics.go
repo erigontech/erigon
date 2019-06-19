@@ -247,6 +247,117 @@ func prefix_groups_5() {
 	}
 }
 
+func prefix_groups_6() {
+	fmt.Printf("Prefix groups 6\n")
+	filename := "prefix_groups_6.dot"
+	f, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	keys := generate_prefix_groups()
+	sort.Strings(keys)
+	tr := trie.New(common.Hash{}, false)
+	var hightlights [][]byte
+	for i, key := range keys {
+		hexKey := make([]byte, len(key)/2)
+		for j := 0; j < len(hexKey); j++ {
+			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
+		}
+		vs := fmt.Sprintf("%d", i)
+		tr.Update(hexKey, []byte(vs), 0)
+		hightlights = append(hightlights, hexKey)
+	}
+	tr.Fold(hightlights[:8])
+	tr.Fold(hightlights[8:16])
+	visual.StartGraph(f)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+}
+
+func prefix_groups_7() {
+	fmt.Printf("Prefix groups 7\n")
+	filename := "prefix_groups_7.dot"
+	f, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	keys := generate_prefix_groups()
+	sort.Strings(keys)
+	tr := trie.New(common.Hash{}, false)
+	var hightlights [][]byte
+	for i, key := range keys {
+		hexKey := make([]byte, len(key)/2)
+		for j := 0; j < len(hexKey); j++ {
+			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
+		}
+		vs := fmt.Sprintf("%d", i)
+		tr.Update(hexKey, []byte(vs), 0)
+		hightlights = append(hightlights, hexKey)
+	}
+	tr.Fold(hightlights[:8])
+	tr.Fold(hightlights[8:16])
+	tr.Fold(hightlights[16:24])
+	tr.Fold(hightlights[24:])
+	visual.StartGraph(f)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+}
+
+func prefix_groups_8() {
+	fmt.Printf("Prefix groups 8\n")
+	filename := "prefix_groups_8.dot"
+	f, err := os.Create(filename)
+	if err != nil {
+		panic(err)
+	}
+	keys := generate_prefix_groups()
+	sort.Strings(keys)
+	tr := trie.New(common.Hash{}, false)
+	var hightlights [][]byte
+	for i, key := range keys {
+		hexKey := make([]byte, len(key)/2)
+		for j := 0; j < len(hexKey); j++ {
+			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
+		}
+		vs := fmt.Sprintf("%d", i)
+		tr.Update(hexKey, []byte(vs), 0)
+		hightlights = append(hightlights, hexKey)
+	}
+	var folds [][]byte
+	for i, h := range hightlights {
+		switch i {
+		case 3, 8, 22, 23:
+		default:
+			folds = append(folds, h)
+		}
+	}
+	tr.Fold(folds)
+	visual.StartGraph(f)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		panic(err)
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+}
+
 func main() {
 	flag.Parse()
 	switch *account {
@@ -260,5 +371,11 @@ func main() {
 		prefix_groups_4()
 	case "prefix_groups_5":
 		prefix_groups_5()
+	case "prefix_groups_6":
+		prefix_groups_6()
+	case "prefix_groups_7":
+		prefix_groups_7()
+	case "prefix_groups_8":
+		prefix_groups_8()
 	}
 }

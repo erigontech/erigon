@@ -192,9 +192,83 @@ After hashing the first chunk, the tree would look as follows.
 ![prefix_groups_5](prefix_groups_5.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
 
+If we apply the same produce to the next chunk of 8 leaves, we will get to the following picture.
+![prefix_groups_6](prefix_groups_6.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
+
+And, after hashing the two remaning chunks.
+![prefix_groups_7](prefix_groups_7.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
+
+Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
+This needs an introduction on an extra opcode, which takes specified number hash from the sequence (now we can have
+two sequences, one with key-value pairs, and another - with hashes), and places them on the stack
+
+4. `HASH number_of_hashes`
+
+```
+HASH 3
+BRANCH 13
+HASH 5
+BRANCH 12
+HASH 1
+BRANCH 01
+BRANCH 03
+BRANCH 0123
+HASH 5
+BRANCH 012
+BRANCH 013
+HASH 1
+BRANCH 0123 
+```
+
 It can then be readily observed that the first item in any prefix group has this property that its common prefix
 with the item immediately to the right (or empty string if the item is the very last) is longer than its common
 prefix with the item immediately to the left (or empty string if the item is the very first).
 Analogously, the last item in any prefix group has the property that its common prefix with the item
-immediately to the left is longer than its common prefix with the item immediately to the right.
+immediately to the left is longer than its common prefix with the item immediately to the right. The consequences
+of this observation are that if we were to keep sequences of key-value pairs and hashes in chunks,
+the modications of the sequence of key-value pairs in a chunk (insertion of new key or removal
+of an existing key) may affect the structural information of an adjusent chunk.
 
+### Multiproofs
+
+Encoding structural information separately from the sequences of key-value pairs and hashes allows
+describing so-called "multiproofs". Suppose that we know the root hash of the sequence of key-value pairs for our
+example, but we do not know any of the pairs themselves. And we ask someone to reveal keys and value for
+the leafs `3`, `8`, `22` and `23`, and enough information to proof to us that the revealed keys and values
+indeed belong to the sequence. Here is the picture that gives the idea of which hashes need to be provided
+together with the selected key-value pairs.
+![prefix_groups_8](prefix_groups_8.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_8`
+
+And here is the corresponding structural information:
+```
+HASH 2
+LEAF 5
+HASH 1
+BRANCH 023
+HASH 2
+BRANCH 0123
+HASH 1
+LEAF 4
+HASH 2
+BRANCH 023
+BRANCH 13
+HASH 3
+BRANCH 0123
+HASH 2
+LEAF 5
+LEAF 5
+HASH 1
+BRANCH 012
+BRANCH 013
+HASH 1
+BRANCH 0123
+```
+
+We can think of a multiproof as the combination of 3 things:
+
+1. Sequence of those 4 key-value pairs
+2. Sequence of 15 hashes
+3. structural information that lets us compute the root hash out of the sequences (1) and (2)
