@@ -3,12 +3,10 @@ run:
 
 linters:
   enable:
-    - depguard
     - deadcode
     - govet
     - structcheck
     - stylecheck
-    - typecheck
 
   disable-all: true
 
