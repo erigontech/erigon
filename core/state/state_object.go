@@ -122,7 +122,11 @@ func newObject(db *StateDB, address common.Address, data, original accounts.Acco
 
 // EncodeRLP implements rlp.Encoder.
 func (c *stateObject) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, c.data)
+	accountBytes, err := c.data.Encode(false)
+	if err != nil {
+		return err
+	}
+	return rlp.Write(w, accountBytes)
 }
 
 // setError remembers the first non-nil error it is called with.

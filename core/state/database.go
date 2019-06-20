@@ -539,7 +539,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				if err != nil {
 					return nil, err
 				}
-				fmt.Println(addrHash.String(), data)
+
 				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
@@ -576,11 +576,13 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
+		var err error
 		if bytes.Equal(bucket, AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
-				acc, err := accounts.Decode(value)
+				acc:=new(accounts.Account)
+				acc.Decode(value)
 				if err != nil {
 					return err
 				}
@@ -655,6 +657,10 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	return nil
 }
 
+
+
+
+
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
@@ -683,7 +689,9 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			}
 		}
 	}
-	return accounts.Decode(enc)
+	acc:=new(accounts.Account)
+	err := acc.Decode(enc)
+	return acc, err
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
