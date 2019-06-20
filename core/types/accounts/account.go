@@ -25,11 +25,18 @@ type Account struct {
 	StorageSize *uint64
 }
 
+type accountWithoutStorage struct {
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+}
+
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
-func (a *Account) Encode() ([]byte, error) {
+func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	var data []byte
 	var err error
 	if (a.CodeHash == nil || bytes.Equal(a.CodeHash, emptyCodeHash)) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
@@ -59,8 +66,8 @@ func (a *Account) Encode() ([]byte, error) {
 			acc.Root = emptyRoot
 		}
 
-		if acc.StorageSize == nil || *acc.StorageSize == 0 {
-			accBeforeEIP2027 := &Account{
+		if enableStorageSize || acc.StorageSize == nil {
+			accBeforeEIP2027 := &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
 				Root:     acc.Root,
@@ -72,9 +79,7 @@ func (a *Account) Encode() ([]byte, error) {
 				return nil, err
 			}
 
-			fmt.Println("*** 1", string(data))
-			data1, _ := rlp.EncodeToBytes(a)
-			fmt.Println("*** 2", string(data1))
+			data, _ = rlp.EncodeToBytes(a)
 		} else {
 			data, err = rlp.EncodeToBytes(a)
 			if err != nil {
