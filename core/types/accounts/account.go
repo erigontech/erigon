@@ -124,7 +124,10 @@ func Decode(enc []byte) (*Account, error) {
 
 func newAccountCopy(srcAccount *Account) *Account {
 	return new(Account).
-		fill(srcAccount)
+		fill(srcAccount).
+		setDefaultBalance().
+		setDefaultCodeHash().
+		setDefaultRoot()
 }
 
 func (a *Account) fill(srcAccount *Account) *Account {
