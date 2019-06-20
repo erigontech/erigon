@@ -87,7 +87,7 @@ func (a *Account) Decode(enc []byte) error {
 	fmt.Println("--- 5", len(enc))
 	if len(enc) == 1 {
 		a.Balance = new(big.Int)
-		a.CodeHash = emptyCodeHash
+		a.setCodeHash(emptyCodeHash)
 		a.Root = emptyRoot
 	} else if len(enc) < 60 {
 		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
@@ -96,12 +96,12 @@ func (a *Account) Decode(enc []byte) error {
 			fmt.Println("--- 6", err)
 			return err
 		}
-		a.fillFromExtAccount(extData)
 
+		a.fillFromExtAccount(extData)
 	} else {
 		dataWithoutStorage := &accountWithoutStorage{}
 		if err := rlp.DecodeBytes(enc, dataWithoutStorage); err != nil {
-			if err.Error() != "rlp: input list has too many elements for state.Account" {
+			if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
 				fmt.Println("--- 7", err)
 				return err
 			}
@@ -160,11 +160,15 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	return a
 }
 
+func (a *Account) setCodeHash(codeHash []byte) {
+	a.CodeHash = make([]byte, len(codeHash))
+	copy(a.CodeHash, codeHash)
+}
+
 func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *Account {
 	a.Root = srcAccount.Root
 
-	a.CodeHash = make([]byte, len(srcAccount.CodeHash))
-	copy(a.CodeHash, srcAccount.CodeHash)
+	a.setCodeHash(srcAccount.CodeHash)
 
 	if a.Balance == nil {
 		a.Balance = new(big.Int)
