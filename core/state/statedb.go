@@ -509,7 +509,6 @@ func (self *StateDB) getStateObject(addr common.Address) (stateObject *stateObje
 		return nil
 	}
 	account, err := self.stateReader.ReadAccountData(addr)
-	fmt.Println(account, err)
 	if err != nil {
 		self.setError(err)
 		return nil

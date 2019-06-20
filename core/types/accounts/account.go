@@ -76,6 +76,18 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	return data, err
 }
 
+func (a *Account) EncodeRawBeforeEIP2027() ([]byte, error) {
+	acc := newAccountCopy(a)
+	accBeforeEIP2027 := &accountWithoutStorage{
+		Nonce:    acc.Nonce,
+		Balance:  acc.Balance,
+		Root:     acc.Root,
+		CodeHash: acc.CodeHash,
+	}
+
+	return rlp.EncodeToBytes(accBeforeEIP2027)
+}
+
 func (a *Account) Decode(enc []byte) error {
 	if enc == nil || len(enc) == 0 {
 		return nil

@@ -535,7 +535,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := account.Encode(false)
+				data, err := account.EncodeRawBeforeEIP2027()
 				if err != nil {
 					return nil, err
 				}
@@ -580,7 +580,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
-				acc, err:=accounts.Decode(value)
+				acc, err := accounts.Decode(value)
 				if err != nil {
 					return err
 				}
@@ -654,10 +654,6 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.blockNr = blockNr
 	return nil
 }
-
-
-
-
 
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
