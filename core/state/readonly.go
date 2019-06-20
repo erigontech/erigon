@@ -131,7 +131,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (dbs *DbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {

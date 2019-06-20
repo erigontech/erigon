@@ -10,9 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-
-
-
 type ExtAccount struct {
 	Nonce   uint64
 	Balance *big.Int
@@ -140,6 +137,16 @@ func (a *Account) Decode(enc []byte) error {
 
 }
 
+func (a *Account) IsEmptyHash() bool {
+	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
+}
+
+func Decode(enc []byte) (*Account, error) {
+	acc := new(Account)
+	err := acc.Decode(enc)
+	return acc, err
+}
+
 //
 //func encodingToAccount(enc []byte) (*accounts.Account, error) {
 //	if enc == nil || len(enc) == 0 {
@@ -191,7 +198,7 @@ func (a *Account) Decode(enc []byte) error {
 //	return &data, nil
 //}
 
-//state.go
+////state.go
 //func encodingToAccount(enc []byte) (*accounts.Account, error) {
 //	if enc == nil || len(enc) == 0 {
 //		return nil, nil
