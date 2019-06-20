@@ -99,25 +99,22 @@ func (a *Account) Decode(enc []byte) error {
 		a.fillFromExtAccount(extData)
 
 	} else {
-		var dataWithoutStorage Account
-		if err := rlp.DecodeBytes(enc, &dataWithoutStorage); err != nil {
+		dataWithoutStorage := &accountWithoutStorage{}
+		if err := rlp.DecodeBytes(enc, dataWithoutStorage); err != nil {
 			if err.Error() != "rlp: input list has too many elements for state.Account" {
 				fmt.Println("--- 7", err)
 				return err
 			}
 
-			var dataWithStorage Account
+			dataWithStorage := &Account{}
 			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
 				fmt.Println("--- 8", err)
 				return err
 			}
 
-			*a = dataWithStorage
+			a.fill(dataWithStorage)
 		} else {
-			a.Nonce = dataWithoutStorage.Nonce
-			a.Balance = dataWithoutStorage.Balance
-			a.CodeHash = dataWithoutStorage.CodeHash
-			a.Root = dataWithoutStorage.Root
+			a.fillAccountWithoutStorage(dataWithoutStorage)
 		}
 	}
 
@@ -157,6 +154,24 @@ func (a *Account) fill(srcAccount *Account) *Account {
 		a.StorageSize = new(uint64)
 		*a.StorageSize = *srcAccount.StorageSize
 	}
+
+	return a
+}
+
+func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *Account {
+	a.Root = srcAccount.Root
+
+	a.CodeHash = make([]byte, len(srcAccount.CodeHash))
+	copy(a.CodeHash, srcAccount.CodeHash)
+
+	if a.Balance == nil {
+		a.Balance = new(big.Int)
+	}
+	a.Balance.Set(srcAccount.Balance)
+
+	a.Nonce = srcAccount.Nonce
+
+	a.StorageSize = nil
 
 	return a
 }
