@@ -146,6 +146,9 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.CodeHash = make([]byte, len(srcAccount.CodeHash))
 	copy(a.CodeHash, srcAccount.CodeHash)
 
+	if a.Balance == nil {
+		a.Balance = new(big.Int)
+	}
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
@@ -158,6 +161,9 @@ func (a *Account) fill(srcAccount *Account) *Account {
 func (a *Account) fillFromExtAccount(srcExtAccount ExtAccount) *Account {
 	a.Nonce = srcExtAccount.Nonce
 
+	if a.Balance == nil {
+		a.Balance = new(big.Int)
+	}
 	a.Balance.Set(srcExtAccount.Balance)
 
 	a.CodeHash = emptyCodeHash
@@ -196,8 +202,14 @@ func (a *Account) IsEmptyHash() bool {
 }
 
 func (extAcc *ExtAccount) fill(srcAccount *Account) *ExtAccount {
+	if extAcc.Balance == nil {
+		extAcc.Balance = new(big.Int)
+	}
+
 	extAcc.Balance.Set(srcAccount.Balance)
+
 	extAcc.Nonce = srcAccount.Nonce
+
 	return extAcc
 }
 
