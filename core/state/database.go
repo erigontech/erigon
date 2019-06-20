@@ -30,7 +30,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"golang.org/x/crypto/sha3"
 )
@@ -536,10 +535,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := rlp.EncodeToBytes(account)
+				data, err := account.Encode(false)
 				if err != nil {
 					return nil, err
 				}
+				fmt.Println(addrHash.String(),data)
 				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
