@@ -32,15 +32,15 @@ func TestAccountEncodeWithCode(t *testing.T) {
 
 func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
 	a := &Account{
-		Nonce:    2,
-		Balance:  new(big.Int).SetInt64(1000),
-		Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
+		Nonce:       2,
+		Balance:     new(big.Int).SetInt64(1000),
+		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash:    crypto.Keccak256([]byte{1, 2, 3}),
 		StorageSize: new(uint64),
 	}
 	*a.StorageSize = 10
 
-	encodedAccount, err := a.Encode(true)
+	encodedAccount, err := a.Encode(false)
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}
@@ -57,6 +57,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	a := &Account{
 		Nonce:    2,
 		Balance:  new(big.Int).SetInt64(1000),
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedAccount, err := a.Encode(false)
