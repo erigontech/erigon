@@ -88,7 +88,7 @@ func (tds *TraceDbState) UpdateAccountData(address common.Address, original, acc
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	data, err := account.Encode()
+	data, err := account.Encode(false)
 	if err != nil {
 		return err
 	}

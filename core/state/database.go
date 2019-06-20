@@ -632,7 +632,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				return err
 			}
 		} else {
-			value, err := account.Encode()
+			value, err := account.Encode(false)
 			if err != nil {
 				return err
 			}
@@ -943,7 +943,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	data, err := account.Encode()
+	data, err := account.Encode(false)
 	if err != nil {
 		return err
 	}
@@ -965,7 +965,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode()
+		originalData, err = original.Encode(false)
 		if err != nil {
 			return err
 		}
@@ -999,7 +999,7 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode()
+		originalData, err = original.Encode(false)
 		if err != nil {
 			return err
 		}

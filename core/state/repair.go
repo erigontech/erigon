@@ -309,7 +309,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
-	data, err := account.Encode()
+	data, err := account.Encode(false)
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode()
+		originalData, err = original.Encode(false)
 		if err != nil {
 			return err
 		}
@@ -354,7 +354,7 @@ func (rds *RepairDbState) DeleteAccount(address common.Address, original *accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode()
+		originalData, err = original.Encode(false)
 		if err != nil {
 			return err
 		}
