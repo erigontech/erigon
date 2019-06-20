@@ -153,7 +153,10 @@ func (a *Account) fill(srcAccount *Account) *Account {
 
 	a.Nonce = srcAccount.Nonce
 
-	*a.StorageSize = *srcAccount.StorageSize
+	if srcAccount.StorageSize != nil {
+		a.StorageSize = new(uint64)
+		*a.StorageSize = *srcAccount.StorageSize
+	}
 
 	return a
 }
