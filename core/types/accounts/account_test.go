@@ -28,6 +28,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
 }
 
 func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
@@ -51,6 +52,10 @@ func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
+
+	if decodedAccount.StorageSize != nil {
+		t.Fatal("cant decode the account StorageSize - should not nil", decodedAccount)
+	}
 }
 
 func TestAccountEncodeWithoutCode(t *testing.T) {
@@ -72,19 +77,12 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
 }
 
 func isAccountsEqual(t *testing.T, src, dst *Account) {
 	if !bytes.Equal(dst.CodeHash, src.CodeHash) {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
-	}
-
-	if src.StorageSize == nil {
-		if dst.StorageSize != nil {
-			t.Fatal("cant decode the account StorageSize - should be nil", dst.StorageSize)
-		}
-	} else if *dst.StorageSize != *src.StorageSize {
-		t.Fatal("cant decode the account StorageSize", src.StorageSize, dst.StorageSize)
 	}
 
 	if !bytes.Equal(dst.Root.Bytes(), src.Root.Bytes()) {
@@ -97,5 +95,21 @@ func isAccountsEqual(t *testing.T, src, dst *Account) {
 
 	if dst.Nonce != src.Nonce {
 		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
+	}
+}
+
+func isStorageSizeEqual(t *testing.T, src, dst *Account) {
+	if src.StorageSize == nil {
+		if dst.StorageSize != nil {
+			t.Fatal("cant decode the account StorageSize - should be nil", src.StorageSize, dst.StorageSize)
+		}
+	} else {
+		if dst.StorageSize == nil {
+			t.Fatal("cant decode the account StorageSize - should be not nil", src.StorageSize, dst.StorageSize)
+		}
+
+		if *dst.StorageSize != *src.StorageSize {
+			t.Fatal("cant decode the account StorageSize", src.StorageSize, dst.StorageSize)
+		}
 	}
 }
