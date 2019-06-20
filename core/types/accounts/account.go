@@ -10,9 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-
-
-
 type ExtAccount struct {
 	Nonce   uint64
 	Balance *big.Int
@@ -129,6 +126,12 @@ func (a *Account) Decode(enc []byte) error {
 
 }
 
+func Decode(enc []byte) (*Account, error) {
+	acc := new(Account)
+	err := acc.Decode(enc)
+	return acc, err
+}
+
 func newAccountCopy(srcAccount *Account) *Account {
 	return new(Account).
 		fill(srcAccount).
@@ -188,6 +191,9 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
+func (a *Account) IsEmptyHash() bool {
+	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
+}
 
 func (extAcc *ExtAccount) fill(srcAccount *Account) *ExtAccount {
 	extAcc.Balance.Set(srcAccount.Balance)

@@ -97,7 +97,7 @@ func NewStateless(stateRoot common.Hash,
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := encodingToAccount(enc)
+		account, err := accounts.Decode(enc)
 		if err != nil {
 			return nil, err
 		}
@@ -309,7 +309,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		if !ok {
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := encodingToAccount(enc)
+		account, err := accounts.Decode(enc)
 		if err != nil {
 			return err
 		}
@@ -353,7 +353,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
@@ -466,7 +466,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		}
 		hashes := make(Hashes, len(m))
 		i := 0
-		for keyHash, _ := range m {
+		for keyHash := range m {
 			hashes[i] = keyHash
 			i++
 		}
@@ -485,7 +485,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	}
 	addrs := make(Hashes, len(s.accountUpdates))
 	i := 0
-	for addrHash, _ := range s.accountUpdates {
+	for addrHash := range s.accountUpdates {
 		addrs[i] = addrHash
 		i++
 	}
@@ -590,7 +590,7 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		delete(s.storageTries, address)
 	}
 	if m, ok := s.timeToCodeHash[oldest-1]; ok {
-		for codeHash, _ := range m {
+		for codeHash := range m {
 			if trace {
 				fmt.Printf("Pruning codehash %x at time %d\n", codeHash, oldest-1)
 			}

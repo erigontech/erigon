@@ -17,11 +17,11 @@
 package state
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
 type DumpAccount struct {
@@ -47,24 +47,26 @@ func (self *TrieDbState) RawDump() Dump {
 	var prefix [32]byte
 	err := self.db.Walk(AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
-		data, err := encodingToAccount(v)
+		acc := new(accounts.Account)
+		err := acc.Decode(v)
 		if err != nil {
 			return false, err
 		}
 		var code []byte
-		if !bytes.Equal(data.CodeHash[:], emptyCodeHash) {
-			if code, err = self.db.Get(CodeBucket, data.CodeHash[:]); err != nil {
+
+		if !acc.IsEmptyHash() {
+			if code, err = self.db.Get(CodeBucket, acc.CodeHash[:]); err != nil {
 				return false, err
 			}
 		}
 		account := DumpAccount{
-			Balance:     data.Balance.String(),
-			Nonce:       data.Nonce,
-			Root:        common.Bytes2Hex(data.Root[:]),
-			CodeHash:    common.Bytes2Hex(data.CodeHash),
+			Balance:     acc.Balance.String(),
+			Nonce:       acc.Nonce,
+			Root:        common.Bytes2Hex(acc.Root[:]),
+			CodeHash:    common.Bytes2Hex(acc.CodeHash),
 			Code:        common.Bytes2Hex(code),
 			Storage:     make(map[string]string),
-			StorageSize: data.StorageSize,
+			StorageSize: acc.StorageSize,
 		}
 		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
 			account.Storage[common.Bytes2Hex(self.GetKey(ks))] = common.Bytes2Hex(vs)

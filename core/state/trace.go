@@ -45,7 +45,7 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (tds *TraceDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -88,7 +88,7 @@ func (tds *TraceDbState) UpdateAccountData(address common.Address, original, acc
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	data, err := accountToEncoding(account)
+	data, err := account.Encode(false)
 	if err != nil {
 		return err
 	}
