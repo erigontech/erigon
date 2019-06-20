@@ -54,7 +54,7 @@ func (self *TrieDbState) RawDump() Dump {
 		}
 		var code []byte
 
-		if !acc.IsEmptyHash() {
+		if !acc.IsEmptyCodeHash() {
 			if code, err = self.db.Get(CodeBucket, acc.CodeHash[:]); err != nil {
 				return false, err
 			}

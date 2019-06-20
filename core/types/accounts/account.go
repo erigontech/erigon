@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"bytes"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -39,7 +38,7 @@ var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cad
 func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	var data []byte
 	var err error
-	if (a.CodeHash == nil || bytes.Equal(a.CodeHash, emptyCodeHash)) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
+	if (a.CodeHash == nil || a.IsEmptyCodeHash()) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
 			data = []byte{byte(192)}
 		} else {
@@ -79,12 +78,10 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 
 func (a *Account) Decode(enc []byte) error {
 	if enc == nil || len(enc) == 0 {
-		//fmt.Println("--- 1")
 		return nil
 	}
 
 	// Kind of hacky
-	fmt.Println("--- 5", len(enc))
 	if len(enc) == 1 {
 		a.Balance = new(big.Int)
 		a.setCodeHash(emptyCodeHash)
@@ -93,7 +90,6 @@ func (a *Account) Decode(enc []byte) error {
 		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
-			fmt.Println("--- 6", err)
 			return err
 		}
 
@@ -102,13 +98,11 @@ func (a *Account) Decode(enc []byte) error {
 		dataWithoutStorage := &accountWithoutStorage{}
 		if err := rlp.DecodeBytes(enc, dataWithoutStorage); err != nil {
 			if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
-				fmt.Println("--- 7", err)
 				return err
 			}
 
 			dataWithStorage := &Account{}
 			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
-				fmt.Println("--- 8", err)
 				return err
 			}
 
@@ -118,7 +112,6 @@ func (a *Account) Decode(enc []byte) error {
 		}
 	}
 
-	fmt.Println("--- 9", a)
 	return nil
 
 }
@@ -131,10 +124,7 @@ func Decode(enc []byte) (*Account, error) {
 
 func newAccountCopy(srcAccount *Account) *Account {
 	return new(Account).
-		fill(srcAccount).
-		setDefaultBalance().
-		setDefaultCodeHash().
-		setDefaultRoot()
+		fill(srcAccount)
 }
 
 func (a *Account) fill(srcAccount *Account) *Account {
@@ -151,8 +141,6 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.Nonce = srcAccount.Nonce
 
 	if srcAccount.StorageSize != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 1")
-
 		a.StorageSize = new(uint64)
 		*a.StorageSize = *srcAccount.StorageSize
 	}
@@ -221,7 +209,7 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
-func (a *Account) IsEmptyHash() bool {
+func (a *Account) IsEmptyCodeHash() bool {
 	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
 }
 
@@ -244,4 +232,3 @@ func (extAcc *ExtAccount) setDefaultBalance() *ExtAccount {
 
 	return extAcc
 }
-
