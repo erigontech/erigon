@@ -477,7 +477,7 @@ func (self *StateDB) changeStorageSize(addr common.Address, sizeDiff int64) {
 	}
 
 	size := self.StorageSize(addr)
-	if size == nil  {
+	if size == nil {
 		size = new(uint64)
 		*size = HugeNumber
 	}
@@ -509,6 +509,7 @@ func (self *StateDB) getStateObject(addr common.Address) (stateObject *stateObje
 		return nil
 	}
 	account, err := self.stateReader.ReadAccountData(addr)
+	fmt.Println(account, err)
 	if err != nil {
 		self.setError(err)
 		return nil
@@ -694,7 +695,7 @@ func (a *Addresses) Swap(i, j int) {
 }
 
 func (s *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) error {
-	for addr, _ := range s.journal.dirties {
+	for addr := range s.journal.dirties {
 		stateObject, exist := s.stateObjects[addr]
 		if !exist {
 			// ripeMD is 'touched' at block 1714175, in tx 0x1237f737031e40bcde4a8b7e717b2d15e3ecadfe49bb1bbc71ee9deb09c6fcf2

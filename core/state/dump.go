@@ -47,8 +47,7 @@ func (self *TrieDbState) RawDump() Dump {
 	var prefix [32]byte
 	err := self.db.Walk(AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
-		acc := new(accounts.Account)
-		err := acc.Decode(v)
+		acc, err := accounts.Decode(v)
 		if err != nil {
 			return false, err
 		}

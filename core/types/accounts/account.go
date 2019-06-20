@@ -25,10 +25,10 @@ type Account struct {
 }
 
 type accountWithoutStorage struct {
-	Nonce       uint64
-	Balance     *big.Int
-	Root        common.Hash // merkle root of the storage trie
-	CodeHash    []byte
+	Nonce    uint64
+	Balance  *big.Int
+	Root     common.Hash // merkle root of the storage trie
+	CodeHash []byte
 }
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -117,6 +117,10 @@ func (a *Account) Decode(enc []byte) error {
 }
 
 func Decode(enc []byte) (*Account, error) {
+	if enc == nil || len(enc) == 0 {
+		return nil, nil
+	}
+
 	acc := new(Account)
 	err := acc.Decode(enc)
 	return acc, err
