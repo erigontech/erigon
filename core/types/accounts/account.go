@@ -55,7 +55,7 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	} else {
 		acc := newAccountCopy(a)
 
-		if enableStorageSize || acc.StorageSize == nil {
+		if !enableStorageSize || acc.StorageSize == nil {
 			accBeforeEIP2027 := &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -151,6 +151,8 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.Nonce = srcAccount.Nonce
 
 	if srcAccount.StorageSize != nil {
+		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 1")
+
 		a.StorageSize = new(uint64)
 		*a.StorageSize = *srcAccount.StorageSize
 	}
