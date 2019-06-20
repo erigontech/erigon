@@ -79,7 +79,6 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 
 func (a *Account) Decode(enc []byte) error {
 	if enc == nil || len(enc) == 0 {
-		//fmt.Println("--- 1")
 		return nil
 	}
 
@@ -93,7 +92,6 @@ func (a *Account) Decode(enc []byte) error {
 		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
-			fmt.Println("--- 6", err)
 			return err
 		}
 		a.fillFromExtAccount(extData)
@@ -102,13 +100,11 @@ func (a *Account) Decode(enc []byte) error {
 		dataWithoutStorage := &accountWithoutStorage{}
 		if err := rlp.DecodeBytes(enc, dataWithoutStorage); err != nil {
 			if err.Error() != "rlp: input list has too many elements for state.Account" {
-				fmt.Println("--- 7", err)
 				return err
 			}
 
 			dataWithStorage := &Account{}
 			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
-				fmt.Println("--- 8", err)
 				return err
 			}
 
@@ -118,7 +114,6 @@ func (a *Account) Decode(enc []byte) error {
 		}
 	}
 
-	fmt.Println("--- 9", a)
 	return nil
 
 }
@@ -151,8 +146,6 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.Nonce = srcAccount.Nonce
 
 	if srcAccount.StorageSize != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! 1")
-
 		a.StorageSize = new(uint64)
 		*a.StorageSize = *srcAccount.StorageSize
 	}
@@ -240,4 +233,3 @@ func (extAcc *ExtAccount) setDefaultBalance() *ExtAccount {
 
 	return extAcc
 }
-
