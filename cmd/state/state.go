@@ -1406,32 +1406,7 @@ func oldStorage() {
 	}
 }
 
-func encodingToAccount(enc []byte) (*accounts.Account, error) {
-	if enc == nil || len(enc) == 0 {
-		return nil, nil
-	}
-	var data accounts.Account
-	// Kind of hacky
-	if len(enc) == 1 {
-		data.Balance = new(big.Int)
-		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
-	} else if len(enc) < 60 {
-		var extData accounts.ExtAccount
-		if err := rlp.DecodeBytes(enc, &extData); err != nil {
-			return nil, err
-		}
-		data.Nonce = extData.Nonce
-		data.Balance = extData.Balance
-		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
-	} else {
-		if err := rlp.DecodeBytes(enc, &data); err != nil {
-			return nil, err
-		}
-	}
-	return &data, nil
-}
+
 
 func dustEOA() {
 	startTime := time.Now()

@@ -588,10 +588,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
-				b.accountUpdates[addrHash], err = encodingToAccount(value)
+				acc:=new(accounts.Account)
+				acc.Decode(value)
 				if err != nil {
 					return err
 				}
+				b.accountUpdates[addrHash] = acc
 				accountPutKeys = append(accountPutKeys, key)
 				accountPutVals = append(accountPutVals, value)
 			} else {
@@ -630,7 +632,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				return err
 			}
 		} else {
-			value, err := accountToEncoding(account)
+			value, err := account.Encode()
 			if err != nil {
 				return err
 			}
@@ -662,121 +664,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	return nil
 }
 
-// Account before EIP-2027
-type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash
-	CodeHash []byte
-}
 
-func accountToEncoding(account *accounts.Account) ([]byte, error) {
-	var data []byte
-	var err error
-	if (account.CodeHash == nil || bytes.Equal(account.CodeHash, emptyCodeHash)) && (account.Root == emptyRoot || account.Root == common.Hash{}) {
-		if (account.Balance == nil || account.Balance.Sign() == 0) && account.Nonce == 0 {
-			data = []byte{byte(192)}
-		} else {
-			var extAccount accounts.ExtAccount
-			extAccount.Nonce = account.Nonce
-			extAccount.Balance = account.Balance
-			if extAccount.Balance == nil {
-				extAccount.Balance = new(big.Int)
-			}
-			data, err = rlp.EncodeToBytes(extAccount)
-			if err != nil {
-				return nil, err
-			}
-		}
-	} else {
-		a := *account
-		if a.Balance == nil {
-			a.Balance = new(big.Int)
-		}
-		if a.CodeHash == nil {
-			a.CodeHash = emptyCodeHash
-		}
-		if a.Root == (common.Hash{}) {
-			a.Root = emptyRoot
-		}
 
-		if a.StorageSize == nil || *a.StorageSize == 0 {
-			accBeforeEIP2027 := &Account{
-				Nonce:    a.Nonce,
-				Balance:  a.Balance,
-				Root:     a.Root,
-				CodeHash: a.CodeHash,
-			}
 
-			data, err = rlp.EncodeToBytes(accBeforeEIP2027)
-			if err != nil {
-				return nil, err
-			}
 
-			fmt.Println("*** 1", string(data))
-			data1, _ := rlp.EncodeToBytes(a)
-			fmt.Println("*** 2", string(data1))
-		} else {
-			data, err = rlp.EncodeToBytes(a)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-	return data, err
-}
-
-func encodingToAccount(enc []byte) (*accounts.Account, error) {
-	if enc == nil || len(enc) == 0 {
-		//fmt.Println("--- 1")
-		return nil, nil
-	}
-	var data accounts.Account
-	// Kind of hacky
-	fmt.Println("--- 5", len(enc))
-	if len(enc) == 1 {
-		data.Balance = new(big.Int)
-		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
-	} else if len(enc) < 60 {
-		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
-		var extData accounts.ExtAccount
-		if err := rlp.DecodeBytes(enc, &extData); err != nil {
-			fmt.Println("--- 6", err)
-			return nil, err
-		}
-		data.Nonce = extData.Nonce
-		data.Balance = extData.Balance
-		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
-	} else {
-		var dataWithoutStorage Account
-		if err := rlp.DecodeBytes(enc, &dataWithoutStorage); err != nil {
-			if err.Error() != "rlp: input list has too many elements for state.Account" {
-				fmt.Println("--- 7", err)
-				return nil, err
-			}
-
-			var dataWithStorage accounts.Account
-			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
-				fmt.Println("--- 8", err)
-				return nil, err
-			}
-
-			data = dataWithStorage
-		} else {
-			data.Nonce = dataWithoutStorage.Nonce
-			data.Balance = dataWithoutStorage.Balance
-			data.CodeHash = dataWithoutStorage.CodeHash
-			data.Root = dataWithoutStorage.Root
-		}
-	}
-
-	fmt.Println("--- 9", data)
-	return &data, nil
-}
-
-func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error) {
+func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -804,7 +696,9 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*Account, error
 			}
 		}
 	}
-	return encodingToAccount(enc)
+	acc:=new(accounts.Account)
+	err := acc.Decode(enc)
+	return acc, err
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -1049,7 +943,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	data, err := accountToEncoding(account)
+	data, err := account.Encode()
 	if err != nil {
 		return err
 	}
@@ -1071,7 +965,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = accountToEncoding(original)
+		originalData, err = original.Encode()
 		if err != nil {
 			return err
 		}
@@ -1105,7 +999,7 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = accountToEncoding(original)
+		originalData, err = original.Encode()
 		if err != nil {
 			return err
 		}
