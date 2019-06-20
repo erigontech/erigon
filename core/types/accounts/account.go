@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"bytes"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -39,7 +38,7 @@ var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cad
 func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	var data []byte
 	var err error
-	if (a.CodeHash == nil || bytes.Equal(a.CodeHash, emptyCodeHash)) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
+	if (a.CodeHash == nil || a.IsEmptyCodeHash()) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
 			data = []byte{byte(192)}
 		} else {
@@ -83,7 +82,6 @@ func (a *Account) Decode(enc []byte) error {
 	}
 
 	// Kind of hacky
-	fmt.Println("--- 5", len(enc))
 	if len(enc) == 1 {
 		a.Balance = new(big.Int)
 		a.CodeHash = emptyCodeHash
@@ -126,10 +124,7 @@ func Decode(enc []byte) (*Account, error) {
 
 func newAccountCopy(srcAccount *Account) *Account {
 	return new(Account).
-		fill(srcAccount).
-		setDefaultBalance().
-		setDefaultCodeHash().
-		setDefaultRoot()
+		fill(srcAccount)
 }
 
 func (a *Account) fill(srcAccount *Account) *Account {
@@ -210,7 +205,7 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
-func (a *Account) IsEmptyHash() bool {
+func (a *Account) IsEmptyCodeHash() bool {
 	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
 }
 
