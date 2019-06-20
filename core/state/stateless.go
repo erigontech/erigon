@@ -24,7 +24,6 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -493,7 +492,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			data, err := rlp.EncodeToBytes(account)
+			data, err := account.Encode(false)
 			if err != nil {
 				return err
 			}
