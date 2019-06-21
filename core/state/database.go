@@ -535,7 +535,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := account.EncodeRawBeforeEIP2027()
+				data, err := account.EncodeRLP(false)
 				if err != nil {
 					return nil, err
 				}

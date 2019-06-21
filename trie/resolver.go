@@ -368,7 +368,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, err
 			}
 
-			tr.value, err = value.EncodeRawBeforeEIP2027()
+			tr.value, err = value.EncodeRLP(false)
 			if err != nil {
 				return false, err
 			}

@@ -31,6 +31,7 @@ type accountWithoutStorage struct {
 	CodeHash []byte
 }
 
+const ApproxSizeOfCompressedAccount = 60
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -76,16 +77,18 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	return data, err
 }
 
-func (a *Account) EncodeRawBeforeEIP2027() ([]byte, error) {
+func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 	acc := newAccountCopy(a)
-	accBeforeEIP2027 := &accountWithoutStorage{
-		Nonce:    acc.Nonce,
-		Balance:  acc.Balance,
-		Root:     acc.Root,
-		CodeHash: acc.CodeHash,
+	if !enableStorageSize {
+		accBeforeEIP2027 := &accountWithoutStorage{
+			Nonce:    acc.Nonce,
+			Balance:  acc.Balance,
+			Root:     acc.Root,
+			CodeHash: acc.CodeHash,
+		}
+		return rlp.EncodeToBytes(accBeforeEIP2027)
 	}
-
-	return rlp.EncodeToBytes(accBeforeEIP2027)
+	return rlp.EncodeToBytes(acc)
 }
 
 func (a *Account) Decode(enc []byte) error {
@@ -98,8 +101,7 @@ func (a *Account) Decode(enc []byte) error {
 		a.Balance = new(big.Int)
 		a.setCodeHash(emptyCodeHash)
 		a.Root = emptyRoot
-	} else if len(enc) < 60 {
-		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
+	} else if len(enc) < ApproxSizeOfCompressedAccount {
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return err
