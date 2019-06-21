@@ -156,8 +156,6 @@ as well as for the composition of chunks. This structural information can be a s
 
 The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
 
-`LEAFVAL` opcode consumes the next value in the key-value pair, and pushes it on top of the stack.
-
 `LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
 `length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
 in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
