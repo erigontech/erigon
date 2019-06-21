@@ -40,58 +40,47 @@ var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
-	var data []byte
-	var err error
-	if (a.CodeHash == nil || a.IsEmptyCodeHash()) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
-		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
-			data = []byte{byte(192)}
-		} else {
-			extAccount := new(ExtAccount).
-				fill(a).
-				setDefaultBalance()
+	var toEncode interface{}
 
-			data, err = rlp.EncodeToBytes(extAccount)
-			if err != nil {
-				return nil, err
-			}
+	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
+		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
+			return []byte{byte(192)}, nil
 		}
+
+		toEncode = new(ExtAccount).
+			fill(a).
+			setDefaultBalance()
 	} else {
 		acc := newAccountCopy(a)
+		toEncode = acc
 
 		if !enableStorageSize || acc.StorageSize == nil {
-			accBeforeEIP2027 := &accountWithoutStorage{
+			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
 				Root:     acc.Root,
 				CodeHash: acc.CodeHash,
 			}
-
-			data, err = rlp.EncodeToBytes(accBeforeEIP2027)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			data, err = rlp.EncodeToBytes(a)
-			if err != nil {
-				return nil, err
-			}
 		}
 	}
-	return data, err
+
+	return rlp.EncodeToBytes(toEncode)
 }
 
 func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 	acc := newAccountCopy(a)
+	toEncode := interface{}(acc)
+
 	if !enableStorageSize {
-		accBeforeEIP2027 := &accountWithoutStorage{
+		toEncode = &accountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,
 			Root:     acc.Root,
 			CodeHash: acc.CodeHash,
 		}
-		return rlp.EncodeToBytes(accBeforeEIP2027)
 	}
-	return rlp.EncodeToBytes(acc)
+
+	return rlp.EncodeToBytes(toEncode)
 }
 
 func (a *Account) Decode(enc []byte) error {
@@ -158,9 +147,7 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.CodeHash = make([]byte, len(srcAccount.CodeHash))
 	copy(a.CodeHash, srcAccount.CodeHash)
 
-	if a.Balance == nil {
-		a.Balance = new(big.Int)
-	}
+	a.setDefaultBalance()
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
@@ -183,9 +170,7 @@ func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *
 
 	a.setCodeHash(srcAccount.CodeHash)
 
-	if a.Balance == nil {
-		a.Balance = new(big.Int)
-	}
+	a.setDefaultBalance()
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
@@ -198,9 +183,7 @@ func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *
 func (a *Account) fillFromExtAccount(srcExtAccount ExtAccount) *Account {
 	a.Nonce = srcExtAccount.Nonce
 
-	if a.Balance == nil {
-		a.Balance = new(big.Int)
-	}
+	a.setDefaultBalance()
 	a.Balance.Set(srcExtAccount.Balance)
 
 	a.CodeHash = emptyCodeHash
@@ -219,7 +202,7 @@ func (a *Account) setDefaultBalance() *Account {
 }
 
 func (a *Account) setDefaultCodeHash() *Account {
-	if a.CodeHash == nil {
+	if a.IsEmptyCodeHash() {
 		a.CodeHash = emptyCodeHash
 	}
 
@@ -227,7 +210,7 @@ func (a *Account) setDefaultCodeHash() *Account {
 }
 
 func (a *Account) setDefaultRoot() *Account {
-	if a.Root == (common.Hash{}) {
+	if a.IsEmptyRoot() {
 		a.Root = emptyRoot
 	}
 
@@ -235,14 +218,15 @@ func (a *Account) setDefaultRoot() *Account {
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
+	return a.CodeHash == nil || bytes.Equal(a.CodeHash[:], emptyCodeHash)
+}
+
+func (a *Account) IsEmptyRoot() bool {
+	return a.Root == emptyRoot || a.Root == common.Hash{}
 }
 
 func (extAcc *ExtAccount) fill(srcAccount *Account) *ExtAccount {
-	if extAcc.Balance == nil {
-		extAcc.Balance = new(big.Int)
-	}
-
+	extAcc.setDefaultBalance()
 	extAcc.Balance.Set(srcAccount.Balance)
 
 	extAcc.Nonce = srcAccount.Nonce
