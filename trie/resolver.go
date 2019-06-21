@@ -25,6 +25,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
+		fmt.Println("Trie.Rebuild",err)
 		return err
 	}
 	log.Info("Rebuilt hashfile and verified", "root hash", n)
@@ -367,7 +368,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, err
 			}
 
-			tr.value, err = value.Encode(false)
+			tr.value, err = value.EncodeRawBeforeEIP2027()
 			if err != nil {
 				return false, err
 			}
