@@ -59,7 +59,7 @@ func TestUpdateLeaks(t *testing.T) {
 		}
 		state.Finalise(false, tds.TrieStateWriter())
 	}
-	tds.ComputeTrieRoots()
+	tds.ComputeTrieRoots(false)
 	// Ensure that no data was leaked into the database
 	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
 		if bytes.Equal(keys[i], trie.SecureKeyPrefix) {
@@ -111,15 +111,15 @@ func TestIntermediateLeaks(t *testing.T) {
 
 	// Commit and cross check the databases.
 	transState.Finalise(false, transTds.TrieStateWriter())
-	transTds.ComputeTrieRoots()
+	transTds.ComputeTrieRoots(false)
 	transTds.SetBlockNr(1)
-	if err := transState.Commit(false, transTds.DbStateWriter()); err != nil {
+	if err := transState.Commit(false,false, transTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit transition state: %v", err)
 	}
 	finalState.Finalise(false, finalTds.TrieStateWriter())
-	finalTds.ComputeTrieRoots()
+	finalTds.ComputeTrieRoots(false)
 	finalTds.SetBlockNr(1)
-	if err := finalState.Commit(false, finalTds.DbStateWriter()); err != nil {
+	if err := finalState.Commit(false, false, finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
@@ -161,9 +161,9 @@ func testCopy(t *testing.T) {
 		}
 	}
 	orig.Finalise(false, origTds.TrieStateWriter())
-	origTds.ComputeTrieRoots()
+	origTds.ComputeTrieRoots(false)
 	origTds.SetBlockNr(1)
-	orig.Commit(false, origTds.DbStateWriter())
+	orig.Commit(false, false, origTds.DbStateWriter())
 
 	// Copy the state, modify both in-memory
 	copy := orig.Copy()
@@ -191,15 +191,15 @@ func testCopy(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		orig.Finalise(true, origTds.TrieStateWriter())
-		origTds.ComputeTrieRoots()
+		origTds.ComputeTrieRoots(false)
 		origTds.SetBlockNr(2)
-		orig.Commit(true, origTds.DbStateWriter())
+		orig.Commit(true, false, origTds.DbStateWriter())
 		close(done)
 	}()
 	copy.Finalise(true, copyTds.TrieStateWriter())
-	copyTds.ComputeTrieRoots()
+	copyTds.ComputeTrieRoots(false)
 	copyTds.SetBlockNr(2)
-	copy.Commit(true, copyTds.DbStateWriter())
+	copy.Commit(true, false, copyTds.DbStateWriter())
 	<-done
 
 	// Verify that the two states have been updated independently
@@ -468,9 +468,9 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.ComputeTrieRoots()
+	s.tds.ComputeTrieRoots(false)
 	s.tds.SetBlockNr(1)
-	s.state.Commit(false, s.tds.DbStateWriter())
+	s.state.Commit(false,false, s.tds.DbStateWriter())
 
 	s.state.Reset()
 

@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	checker "gopkg.in/check.v1"
+	"fmt"
 )
 
 type StateSuite struct {
@@ -40,22 +41,36 @@ var toAddr = common.BytesToAddress
 
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
+	fmt.Println("GetOrNewStateObject1")
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	fmt.Println("GetOrNewStateObject1.addBalance")
 	obj1.AddBalance(big.NewInt(22))
+	fmt.Println("GetOrNewStateObject2")
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	fmt.Println("GetOrNewStateObject1.setCode")
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	fmt.Println("GetOrNewStateObject3")
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	fmt.Println("GetOrNewStateObject3.setBalance")
 	obj3.SetBalance(big.NewInt(44))
+	fmt.Println("finish")
 
+	fmt.Println("UpdateAccountData")
 	// write some of them to the trie
 	err := s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
+	fmt.Println("UpdateAccountData2")
 	err = s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
+	fmt.Println("Finalise")
 	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.ComputeTrieRoots()
+	fmt.Println("Comute trie roots")
+	s.tds.ComputeTrieRoots(false)
+	fmt.Println("set blockNr")
 	s.tds.SetBlockNr(1)
-	s.state.Commit(false, s.tds.DbStateWriter())
+	fmt.Println("commit")
+	s.state.Commit(false, false, s.tds.DbStateWriter())
+	fmt.Println("after commit")
 
 	// check that dump contains the state objects that are in trie
 	got := string(s.tds.Dump())
@@ -109,7 +124,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	s.state.SetState(address, common.Hash{}, value)
 	s.state.Finalise(false, s.tds.TrieStateWriter())
 	s.tds.SetBlockNr(1)
-	s.state.Commit(false, s.tds.DbStateWriter())
+	s.state.Commit(false, false, s.tds.DbStateWriter())
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -173,9 +188,9 @@ func TestSnapshot2(t *testing.T) {
 	state.setStateObject(so0)
 
 	state.Finalise(false, tds.TrieStateWriter())
-	tds.ComputeTrieRoots()
+	tds.ComputeTrieRoots(false)
 	tds.SetBlockNr(1)
-	state.Commit(false, tds.DbStateWriter())
+	state.Commit(false,false, tds.DbStateWriter())
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)

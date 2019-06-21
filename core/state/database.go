@@ -285,8 +285,8 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	roots, err := tds.computeTrieRoots(true)
+func (tds *TrieDbState) ComputeTrieRoots(isAccountWithStorageEIPEnabled bool) ([]common.Hash, error) {
+	roots, err := tds.computeTrieRoots(true, isAccountWithStorageEIPEnabled)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -451,7 +451,9 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 	}
 }
 
-func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
+//todo what is forward?
+// isAccountWithStorageEIPEnabled - EIP2027 adds storage size field to account
+func (tds *TrieDbState) computeTrieRoots(forward, isAccountWithStorageEIPEnabled bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -614,7 +616,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(false); err != nil {
+	if _, err := tds.computeTrieRoots(false, false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {

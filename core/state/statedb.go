@@ -787,7 +787,7 @@ func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) e
 
 // Finalise finalises the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) error {
+func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bool, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -803,16 +803,22 @@ func (sdb *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) err
 		} else if isDirty {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
+				fmt.Println("+stateWriter.UpdateAccountCode")
 				if err := stateWriter.UpdateAccountCode(common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 					return err
 				}
+				fmt.Println("-stateWriter.UpdateAccountCode")
 			}
+			fmt.Println("+updateTrie")
 			if err := stateObject.updateTrie(stateWriter); err != nil {
 				return err
 			}
+			fmt.Println("-updateTrie")
+			fmt.Println("+stateWriter.UpdateAccountData")
 			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
+			fmt.Println("+stateWriter.UpdateAccountData")
 		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
