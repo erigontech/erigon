@@ -20,6 +20,8 @@ Changes in this revision:
 - `StateRanges` & `StorageRanges` may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
 - Added `GetStorageSizes` & `StorageSizes`
+- Accept either raw (20 byte) addresses or their hashes
+- Add account address (hash) to `GetBytecode`
 
 ## Casual Examples of Firehose Sync
 
@@ -272,8 +274,8 @@ The requests can be batched so that multiple prefixes and multiple root hashes m
     (
         # Each list item is a three-element tuple
         (
-            # The first element is the hash of the account address
-            address_hash, # 32 bytes
+            # The first element is the account address or the hash thereof
+            account_address, # 20 or 32 bytes
             
             # The second element is the hash of the requested storage trie root
             storage_root_hash, # 32 bytes
@@ -289,7 +291,7 @@ The requests can be batched so that multiple prefixes and multiple root hashes m
 
 #### Example
 Say you want the storage keys that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at storage root `0xbbb...bbb` (in hashed account address `0xaaa...aaa`).
-Additionally, you want all the values in the storage trie with root `0xddd...ddd` (in hashed account address `0xccc...ccc`).
+Additionally, you want all the values in the storage trie with root `0xddd...ddd` (in account address `0xbb9bc244d798123fde783fcc1c72d3bb8c189413`).
 Your request would look like:
 ```
 (
@@ -297,18 +299,18 @@ Your request would look like:
     
     (
         (
-            # account address hash
+            # first account address hash (32 bytes)
             0xaaa...aaa,
             
-            # storage root hash
+            # first storage root hash
             0xbbb...bbb,
             
             # even-length 0xbeef and odd-length 0x0ddba11, encoded
             (0x00beef, 0x10ddba11)
         ),
         (
-            # second account address hash
-            0xccc...ccc,
+            # second account address (20 bytes)
+            0xbb9bc244d798123fde783fcc1c72d3bb8c189413,
             
             # second storage root hash
             0xddd...ddd,
@@ -517,8 +519,8 @@ Analogue of `GetStateNodes` for storage nodes.
     
         # Each list item is a three-element tuple
         (
-            # The first element is the hash of the account address
-            address_hash, # 32 bytes
+            # The first element is the account address or the hash thereof
+            account_address, # 20 or 32 bytes
             
             # The second element is the hash of the requested storage trie root
             storage_root_hash, # 32 bytes
@@ -574,7 +576,8 @@ In such cases available blocks should be populated.
 
 Just like `GetNodeData` [eth/63], except:
 1. Includes a request ID
-2. Will only return bytecode with the corresponding hash, not arbitrary nodes data
+2. May only request bytecode, not arbitrary nodes data
+3. Includes account information since some Ethereum clients (e.g. Turbo-Geth) use it for indexing.
 
 
 ```
@@ -582,13 +585,19 @@ Just like `GetNodeData` [eth/63], except:
     # The ID to be used by the requestor to match the response
     id, # int
     
-    # Requesting bytecode with the following hashes
+    # Requests are batched in a list
     (
-    
-        # 32-byte hash of requested bytecode
-        bytecode_hash,
-        
+
+        # Each list item is a two-element tuple
+        (
+            # The first element is the account address or the hash thereof
+            account_address_0, # 20 or 32 bytes
+            
+            # The second element is the hash of the requested bytecode
+            bytecode_hash_0 # 32 bytes
+        ),
         ...
+
     )
 )
 ```
@@ -610,7 +619,7 @@ Just like `NodeData` [eth/63], except:
     (
     
         # arbitrary byte length bytecode
-        bytecode,
+        bytecode_0,
         
         ...
     )
@@ -634,8 +643,8 @@ Request storage trie sizes (the number of leaves).
     
         # Each list item is a two-element tuple
         (
-            # The first element is the hash of the account address
-            address_hash_0, # 32 bytes
+            # The first element is the account address or the hash thereof
+            account_address_0, # 20 or 32 bytes
             
             # The second element is the hash of the requested storage trie root
             storage_root_hash_0 # 32 bytes
