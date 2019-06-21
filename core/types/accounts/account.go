@@ -36,6 +36,10 @@ var emptyCodeHashH = common.BytesToHash(emptyCodeHash)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
+	if !enableStorageSize {
+		return a.encodeRawBeforeEIP2027()
+	}
+
 	var data []byte
 	var err error
 	if (a.CodeHash == nil || a.IsEmptyCodeHash()) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
@@ -76,7 +80,7 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	return data, err
 }
 
-func (a *Account) EncodeRawBeforeEIP2027() ([]byte, error) {
+func (a *Account) encodeRawBeforeEIP2027() ([]byte, error) {
 	acc := newAccountCopy(a)
 	accBeforeEIP2027 := &accountWithoutStorage{
 		Nonce:    acc.Nonce,
@@ -99,7 +103,6 @@ func (a *Account) Decode(enc []byte) error {
 		a.setCodeHash(emptyCodeHash)
 		a.Root = emptyRoot
 	} else if len(enc) < 60 {
-		//fixme возможно размер после добавления поля изменился. откуда взялась константа 60?
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return err
