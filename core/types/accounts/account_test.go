@@ -102,6 +102,84 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	isStorageSizeEqual(t, a, decodedAccount)
 }
 
+func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
+	a := &Account{
+		Nonce:    2,
+		Balance:  new(big.Int).SetInt64(1000),
+		Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
+	}
+
+	encodedAccount, err := a.Encode(true)
+	if err != nil {
+		t.Fatal("cant encode the account", err, a)
+	}
+
+	decodedAccount, err := Decode(encodedAccount)
+	if err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
+}
+
+func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
+	const HugeNumber = uint64(1 << 63)
+
+	storageSizes := []uint64{0, 1, 2, 3, 10, 100,
+		HugeNumber, HugeNumber + 1, HugeNumber + 2, HugeNumber + 10, HugeNumber + 100, HugeNumber + 10000000}
+
+	for _, storageSize := range storageSizes {
+		a := &Account{
+			Nonce:       2,
+			Balance:     new(big.Int).SetInt64(1000),
+			Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
+			CodeHash:    crypto.Keccak256([]byte{1, 2, 3}),
+			StorageSize: new(uint64),
+		}
+		*a.StorageSize = storageSize
+
+		encodedAccount, err := a.Encode(true)
+		if err != nil {
+			t.Fatal("cant encode the account", err, a)
+		}
+
+		decodedAccount, err := Decode(encodedAccount)
+		if err != nil {
+			t.Fatal("cant decode the account", err, encodedAccount)
+		}
+
+		isAccountsEqual(t, a, decodedAccount)
+
+		if *decodedAccount.StorageSize != *a.StorageSize {
+			t.Fatal("cant decode the account StorageSize", *decodedAccount.StorageSize, *a.StorageSize)
+		}
+	}
+}
+
+func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
+	a := &Account{
+		Nonce:    2,
+		Balance:  new(big.Int).SetInt64(1000),
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+	}
+
+	encodedAccount, err := a.Encode(true)
+	if err != nil {
+		t.Fatal("cant encode the account", err, a)
+	}
+
+	decodedAccount, err := Decode(encodedAccount)
+	if err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
+}
+
 func isAccountsEqual(t *testing.T, src, dst *Account) {
 	if !bytes.Equal(dst.CodeHash, src.CodeHash) {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)

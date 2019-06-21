@@ -31,7 +31,10 @@ type accountWithoutStorage struct {
 	CodeHash []byte
 }
 
-const ApproxSizeOfCompressedAccount = 60
+const (
+	accountSizeWithoutData            = 1
+	minAccountSizeWithRootAndCodeHash = 60
+)
 
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -92,42 +95,43 @@ func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 }
 
 func (a *Account) Decode(enc []byte) error {
-	if len(enc) == 0 {
+	switch encodedLength := len(enc); {
+	case encodedLength == 0:
 		return nil
-	}
 
-	// Kind of hacky
-	if len(enc) == 1 {
+	case encodedLength == accountSizeWithoutData:
 		a.Balance = new(big.Int)
 		a.setCodeHash(emptyCodeHash)
 		a.Root = emptyRoot
-	} else if len(enc) < ApproxSizeOfCompressedAccount {
+
+	case encodedLength < minAccountSizeWithRootAndCodeHash:
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return err
 		}
 
 		a.fillFromExtAccount(extData)
-	} else {
+	default:
 		dataWithoutStorage := &accountWithoutStorage{}
-		if err := rlp.DecodeBytes(enc, dataWithoutStorage); err != nil {
-			if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
-				return err
-			}
-
-			dataWithStorage := &Account{}
-			if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
-				return err
-			}
-
-			a.fill(dataWithStorage)
-		} else {
+		err := rlp.DecodeBytes(enc, dataWithoutStorage)
+		if err == nil {
 			a.fillAccountWithoutStorage(dataWithoutStorage)
+			return nil
 		}
+
+		if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
+			return err
+		}
+
+		dataWithStorage := &Account{}
+		if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
+			return err
+		}
+
+		a.fill(dataWithStorage)
 	}
 
 	return nil
-
 }
 
 func Decode(enc []byte) (*Account, error) {
