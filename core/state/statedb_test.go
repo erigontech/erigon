@@ -465,7 +465,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 	return nil
 }
 
-func (s *StateSuite) testTouchDelete(c *check.C) {
+func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 	s.state.Finalise(false, s.tds.TrieStateWriter())
 	s.tds.ComputeTrieRoots()

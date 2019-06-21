@@ -205,7 +205,7 @@ func (sdb *StateDB) Exist(addr common.Address) bool {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	//fmt.Printf("Checking existence of %s\n", hex.EncodeToString(addr[:]))
@@ -218,7 +218,7 @@ func (sdb *StateDB) Empty(addr common.Address) bool {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	so := sdb.getStateObject(addr)
@@ -230,7 +230,7 @@ func (sdb *StateDB) GetBalance(addr common.Address) *big.Int {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -244,7 +244,7 @@ func (sdb *StateDB) GetNonce(addr common.Address) uint64 {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -259,7 +259,7 @@ func (sdb *StateDB) GetCode(addr common.Address) []byte {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -279,7 +279,7 @@ func (sdb *StateDB) GetCodeSize(addr common.Address) int {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -300,7 +300,7 @@ func (sdb *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -384,7 +384,7 @@ func (sdb *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
 	stateObject := sdb.GetOrNewStateObject(addr)
@@ -401,7 +401,7 @@ func (sdb *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 
 	}
@@ -415,7 +415,7 @@ func (sdb *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 
 	}
@@ -429,7 +429,7 @@ func (sdb *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 
 	}
@@ -443,7 +443,7 @@ func (sdb *StateDB) SetCode(addr common.Address, code []byte) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 
 	}
@@ -469,11 +469,11 @@ func (sdb *StateDB) Suicide(addr common.Address) bool {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 		err = sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
 	stateObject := sdb.getStateObject(addr)
@@ -645,11 +645,11 @@ func (sdb *StateDB) CreateAccount(addr common.Address, checkPrev bool) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountRead err", err)
+			fmt.Println("CaptureAccountRead err", err)
 		}
 		err = sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Printf("CaptureAccountWrite err", err)
+			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
 	var previous *stateObject
