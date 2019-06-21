@@ -25,7 +25,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
-		fmt.Println("Trie.Rebuild",err)
+		fmt.Println("Trie.Rebuild", err)
 		return err
 	}
 	log.Info("Rebuilt hashfile and verified", "root hash", n)
@@ -299,13 +299,13 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			root = tr.vertical[req.extResolvePos].copy()
 		}
 		if root == nil {
-			return errors.New("Resolve returned nil root")
+			return errors.New("resolve returned nil root")
 		}
 		var gotHash common.Hash
 		hashLen := tr.h.hash(root, req.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
 			if !bytes.Equal(req.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for contract '%x', key '%x', pos %d, \nexpected %q, got %q\n",
+				return fmt.Errorf("resolving wrong hash for contract '%x', key '%x', pos %d, expected %q, got %q",
 					req.contract,
 					req.resolveHex,
 					req.resolvePos,

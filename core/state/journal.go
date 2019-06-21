@@ -116,8 +116,8 @@ type (
 		prevcode, prevhash []byte
 	}
 	storageSizeChange struct {
-		account     *common.Address
-		prevsize    *uint64
+		account  *common.Address
+		prevsize *uint64
 	}
 
 	// Changes to other state values.

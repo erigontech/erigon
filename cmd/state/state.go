@@ -702,9 +702,9 @@ func stateGrowthChart3() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -796,9 +796,9 @@ func stateGrowthChart4() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -894,9 +894,9 @@ func stateGrowthChart5() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -1367,7 +1367,7 @@ func oldStorage() {
 			return nil
 		}
 		c := b.Cursor()
-		for addr, _ := range itemsByAddress {
+		for addr := range itemsByAddress {
 			addrHash := crypto.Keccak256(addr[:])
 			copy(histKey[:], addrHash)
 			c.Seek(histKey)
@@ -1432,8 +1432,6 @@ func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	}
 	return &data, nil
 }
-
-
 
 func dustEOA() {
 	startTime := time.Now()

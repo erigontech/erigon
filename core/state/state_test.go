@@ -48,8 +48,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(big.NewInt(44))
 
 	// write some of them to the trie
-	s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
-	s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	err := s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+	err = s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
 	s.state.Finalise(false, s.tds.TrieStateWriter())
 	s.tds.ComputeTrieRoots()
 	s.tds.SetBlockNr(1)

@@ -155,7 +155,10 @@ func testCopy(t *testing.T) {
 	for i := byte(0); i < 255; i++ {
 		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
 		obj.AddBalance(big.NewInt(int64(i)))
-		origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(accounts.Account))
+		err := origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
 	}
 	orig.Finalise(false, origTds.TrieStateWriter())
 	origTds.ComputeTrieRoots()
@@ -175,8 +178,14 @@ func testCopy(t *testing.T) {
 		origObj.AddBalance(big.NewInt(2 * int64(i)))
 		copyObj.AddBalance(big.NewInt(3 * int64(i)))
 
-		origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(accounts.Account))
-		copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(accounts.Account))
+		err := origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
+		err = copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
 	}
 	// Finalise the changes on both concurrently
 	done := make(chan struct{})
