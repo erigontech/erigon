@@ -93,7 +93,7 @@ func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 }
 
 func (a *Account) Decode(enc []byte) error {
-	if enc == nil || len(enc) == 0 {
+	if len(enc) == 0 {
 		return nil
 	}
 
@@ -132,7 +132,7 @@ func (a *Account) Decode(enc []byte) error {
 }
 
 func Decode(enc []byte) (*Account, error) {
-	if enc == nil || len(enc) == 0 {
+	if len(enc) == 0 {
 		return nil, nil
 	}
 
