@@ -125,7 +125,7 @@ shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go
 Sometimes, nested prefix groups have longer prefixes than 1-digit extension of their encompassing prefix group, as it is the case
 in the group of items `12, 13` or in the group of items `29, 30, 31`. Such cases give rise to so-called "extension nodes".
 They correspond to `shortNode` type in [trie/node.go](../../trie/node.go), the same type as leaf nodes. However, the value
-in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of the branch node,
+in an extension node is always the representation of a prefix group, rather than a leaf. To produce the hash of an extension node,
 one applies the hash function to the two piece RLP. First piece is the representation of the non-redundant part of the key.
 The second part is the hash of the branch node representing the prefix group. This shown in the member function `hashChildren` of the
 type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
@@ -149,20 +149,29 @@ to combine the hashes of the chunks into the root hash.
 
 Our approach would be to generate some additional information, which we will call "structural information", for each chunk,
 as well as for the composition of chunks. This structural information can be a sequence of these "opcodes":
+
 1. `LEAF length-of-key`
 2. `BRANCH set-of-digits`
 3. `EXTENSION key`
 
 The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
 
+`LEAFVAL` opcode consumes the next value in the key-value pair, and pushes it on top of the stack.
+
 `LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
 `length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
-in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits.
+in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
+being zero, pushes the value onto the stack and discards the key.
 
 `BRANCH` opcode has a set of digits as its operand. This set can be encoded as a bitset, for example. The action of
 this opcode is to pop the same
-number of items from the stack as the number of digits in the operand's set, creates a branch node, and pushes it
+number of items from the stack as the number of digits in the operand's set, create a branch node, and push it
 onto the stack. Sets of digits can be seen as the horizonal rectangles on the picture `prefix_groups_4`.
+The correspondence between digits in the operand's set and the items poped from the stack is as follows.
+If the special, 17th digit is not present in the set, then the top of the stack (item being popped off first)
+corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
+If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
+item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
 
 `EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
 of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
@@ -223,15 +232,6 @@ HASH 1
 BRANCH 0123 
 ```
 
-It can then be readily observed that the first item in any prefix group has this property that its common prefix
-with the item immediately to the right (or empty string if the item is the very last) is longer than its common
-prefix with the item immediately to the left (or empty string if the item is the very first).
-Analogously, the last item in any prefix group has the property that its common prefix with the item
-immediately to the left is longer than its common prefix with the item immediately to the right. The consequences
-of this observation are that if we were to keep sequences of key-value pairs and hashes in chunks,
-the modications of the sequence of key-value pairs in a chunk (insertion of new key or removal
-of an existing key) may affect the structural information of an adjusent chunk.
-
 ### Multiproofs
 
 Encoding structural information separately from the sequences of key-value pairs and hashes allows
@@ -273,3 +273,73 @@ We can think of a multiproof as the combination of 3 things:
 1. Sequence of those 4 key-value pairs
 2. Sequence of 15 hashes
 3. Structural information that lets us compute the root hash out of the sequences (1) and (2)
+
+### Generating the structural information from the sequence of keys
+
+In order to devise an algorithm for generating the structural information, we return to this picture
+![prefix_groups_3](prefix_groups_3.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
+
+It can then be readily observed that the first item in any prefix group has this property that its common prefix
+with the item immediately to the right (or empty string if the item is the very last) is longer than its common
+prefix with the item immediately to the left (or empty string if the item is the very first).
+Analogously, the last item in any prefix group has the property that its common prefix with the item
+immediately to the left is longer than its common prefix with the item immediately to the right.
+
+The algorithm proceeds in steps, one step for each key-value pair, in the lexicographic order of the keys. At each step,
+it observes three keys (sequences of digits) - current, preceeding, and suceeding. It also has access to the
+dictionary of prefix groups, which starts off empty, and gets populated with entries of the form:
+`prefix => {set of digits}`.
+Algorithm's step can also be invoked recursively from another step, with current and preceeding keys specified by the
+caller.
+
+A step starts with computing the prefix of the smallest prefix group that the current key belongs to. It is either
+the common prefix of current key and the preceeding key or the common prefix of current key and the suceeding key,
+whichever is longer (if they are the same length, then they are also equal, so no ambiguity there).
+This max common prefix is looked up in the groups dictionary, to get the corresponding set of digits.
+If there no entries with such prefix, an entry with an empty set of digits is assumed.
+An extra digit is added to the set of digits. It is the digit in the current key immediately following the max
+common prefix, or the special 17th digit, if the max common prefix is the entire current key.
+The sequence of digits of the current key following that extra digit is the remainder (which could be empty).
+If this step of the algorithm was invoked on a key-value pair (non-recursively), then a `LEAF`
+opcode is emitted, with the operand being the length of the remainder (zero if the remainder is empty).
+If the step of the algorithm was invoked recursively, and the remainder is not empty, an `EXTENSION` opcode
+is emitted instead, with the operand being the remainder.
+For example, for leaf `12`, the lengths of common prefix with neighbours are 1 and 3. Therefore, this key will emit the opcode
+`LEAF 4`, where 4 = 8 (original length) - 3 (max common prefix length) - 1 (one digit goes to the branch node for the prefix group).
+
+The following, optional, part of the step only happens if the common prefix of the current key and the preceeding key is longer or equal than
+the common prefix of the current key and the suceeding key, in other words, at least one prefix group needs to be "closed".
+The prefix group that will be closed directly in this step (before recursion) can be found by the common prefix of the current and the
+preceeding keys. An opcode `BRANCH` is emitted, with the operand being the set of digits that is looked up in the groups dictionary
+for the prefix group being closed.
+
+After closing one prefix group, the algorithm invokes its step recursively (unless the group that was closed was the one with the
+empty prefix, wich encompasses all the keys), using prefix of the closed group as the current key,
+and the succeeding key simply passed on. Preceeding key is found by searching (in the groups dictionary) for the smallest group
+that contains the one that was just closed. This means the longest sub-prefix of the prefix of the closed group. If no such entry
+exists int the group map, empty string is used as the preceeding key.
+
+We will walk through the steps of the algorithm for the leaf `30`, and then for the leaf `31`.
+For `30`, the key is `33113123`. Its max common prefix with neighbours is `3311`. The digit immediately
+following this prefix is `3`. Therefore, entry `3311 => {2}` is found in the group dictionary, and
+replaced with `3311 => {2, 3}`. Since this is a non-recursive invocation, and the remainder `123` is 3 digits long,
+opcode `LEAF 3` is emitted. Optional part of the step happens, opcode `BRANCH 23` is emitted, and the step gets
+invoked recursively with current key being `3311`, and preceeding key identified as `3`
+(there were no prefix group with prefix `33` or `331` yet).
+
+In the recursive step, max common prefix is `331`, therefore a new entry `331 => {1}` is created in the groups dictionary.
+No more recursion.
+
+For leaf `31` (key `33132002`), max common prefix is `331`, so the groups dictionary gets updated with the entry
+`331 => {1, 3}`. Opcode `LEAF 4` is emitted (4 is the length of the remainder `2002`). Optional part of the step
+happens, opcode `BRANCH 13` is emitted, and the step gets invoked recursively with current key being `331`, and
+preceeding key identified as `3` (there were no prefix group with prefix `33`).
+
+In the recursive step, max common prefix is `3`, therefore the entry in groups dictionary gets updated to
+`3 => {0, 2, 3}`. The remainder `1` is non-empty, and since this is a recursive invocation, opcode
+`EXTENSION 1` is emitted. Next, `BRANCH 023` is emitted, and the step gets invoked recursively with current
+key being `3`, and preceeding key empty.
+
+In the deeper recursive step, max common prefix is empty, therefore the entry in groups dictionary is updated to
+` => {0, 1, 2, 3}`. Optional part of the step happens, and emits `BRANCH 0123`, but no recursive invocation follows.
