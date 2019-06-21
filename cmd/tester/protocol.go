@@ -99,7 +99,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
-			fmt.Printf("Failed to recevied state message from peer: %v\n", err)
+			fmt.Printf("Failed to receive state message from peer: %v\n", err)
 			return err
 		}
 		switch {
