@@ -31,6 +31,28 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	isStorageSizeEqual(t, a, decodedAccount)
 }
 
+func TestAccountDecodeEmpty(t *testing.T) {
+	decodedAccount, err := Decode([]byte{})
+	if err != nil {
+		t.Fatal("cant decode the account")
+	}
+
+	if decodedAccount != nil {
+		t.Fatal("account should be nil")
+	}
+}
+
+func TestAccountDecodeNil(t *testing.T) {
+	decodedAccount, err := Decode(nil)
+	if err != nil {
+		t.Fatal("cant decode the account")
+	}
+
+	if decodedAccount != nil {
+		t.Fatal("account should be nil")
+	}
+}
+
 func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
 	a := &Account{
 		Nonce:       2,
