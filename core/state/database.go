@@ -567,7 +567,7 @@ func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.tp.SetBlockNr(blockNr)
 }
 
-func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+func (tds *TrieDbState) UnwindTo(blockNr uint64, computeTrieRoots bool) error {
 	fmt.Printf("Rewinding from block %d to block %d\n", tds.blockNr, blockNr)
 	var accountPutKeys [][]byte
 	var accountPutVals [][]byte
