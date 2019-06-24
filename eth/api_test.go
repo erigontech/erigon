@@ -52,10 +52,23 @@ func TestStorageRangeAt(t *testing.T) {
 	for _, entry := range storage {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
-	statedb.Finalise(false, tds.TrieStateWriter())
-	tds.ComputeTrieRoots(false)
+
+	err := statedb.Finalise(false, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalising state", err)
+	}
+
+	_, err = tds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Fatal("error while computing trie roots of the state", err)
+	}
+
 	tds.SetBlockNr(1)
-	statedb.Commit(false, false, tds.DbStateWriter())
+
+	err = statedb.Commit(false, false, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// Check a few combinations of limit and start/end.
 	tests := []struct {

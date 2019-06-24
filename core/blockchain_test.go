@@ -48,7 +48,7 @@ var (
 func newCanonical(engine consensus.Engine, n int, full bool) (ethdb.Database, *BlockChain, error) {
 	var (
 		db      = ethdb.NewMemDatabase()
-		genesis = new(Genesis).MustCommit(db)
+		genesis = (&Genesis{Config: params.AllEthashProtocolChanges}).MustCommit(db)
 	)
 
 	// Initialize a fresh chain with only a genesis block
@@ -170,7 +170,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		blockchain.chainmu.Lock()
 		tds.SetBlockNr(block.NumberU64())
-		if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+		if err := statedb.Commit(false, blockchain.chainConfig.IsEIP2027(block.Number()), tds.DbStateWriter()); err != nil {
 			return err
 		}
 		if _, err := blockchain.db.Commit(); err != nil {
@@ -1256,7 +1256,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
-	genesis := new(Genesis).MustCommit(db)
+	genesis := (&Genesis{Config: params.TestChainConfig}).MustCommit(db)
 	//genesisDb := db.MemCopy()
 	blocks, _ := GenerateChain(params.TestChainConfig, genesis, engine, db.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 
@@ -1278,7 +1278,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
 	diskdb := ethdb.NewMemDatabase()
-	new(Genesis).MustCommit(diskdb)
+	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
 	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
@@ -1309,7 +1309,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
-	genesis := new(Genesis).MustCommit(db)
+	genesis := (&Genesis{Config: params.TestChainConfig}).MustCommit(db)
 
 	shared, _ := GenerateChain(params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	original, _ := GenerateChain(params.TestChainConfig, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
@@ -1320,7 +1320,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 
 	// Import the shared chain and the original canonical one
 	diskdb := ethdb.NewMemDatabase()
-	new(Genesis).MustCommit(diskdb)
+	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
 	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {

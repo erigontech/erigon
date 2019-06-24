@@ -216,10 +216,8 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		return nil, err
 	}
 	t := trie.New(root, false)
-	tp, err := trie.NewTriePruning(blockNr)
-	if err != nil {
-		return nil, err
-	}
+	tp := trie.NewTriePruning(blockNr)
+
 	tds := TrieDbState{
 		t:             t,
 		db:            db,
@@ -250,11 +248,15 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
+
+	tp := trie.NewTriePruning(tds.blockNr)
+
 	cpy := TrieDbState{
 		t:            &tcopy,
 		db:           tds.db,
 		blockNr:      tds.blockNr,
 		storageTries: make(map[common.Address]*trie.Trie),
+		tp:           tp,
 	}
 	return &cpy
 }

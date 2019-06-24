@@ -1210,7 +1210,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			if err := bc.trieDbState.UnwindTo(readBlockNr, bc.chainConfig.IsEIP2027(big.NewInt(int64(readBlockNr)))); err != nil {
+			if err = bc.trieDbState.UnwindTo(readBlockNr, bc.chainConfig.IsEIP2027(big.NewInt(int64(readBlockNr)))); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err

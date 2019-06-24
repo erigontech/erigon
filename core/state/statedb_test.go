@@ -32,6 +32,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -510,4 +511,120 @@ func TestStateDBNewContractAccount(t *testing.T) {
 		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize-HugeNumber)
 	}
 
+}
+
+// TestCopy tests that copying a statedb object indeed makes the original and
+// the copy independent of each other. This test is a regression test against
+// https://github.com/ethereum/go-ethereum/pull/15549.
+func TestCopy(t *testing.T) {
+	// Create a random state test to copy and modify "independently"
+	db := ethdb.NewMemDatabase()
+	origTds, err := NewTrieDbState(common.Hash{}, db, 0)
+	if err != nil {
+		t.Log(err)
+	}
+
+	orig := New(origTds)
+	origTds.StartNewBuffer()
+
+	for i := byte(0); i < 255; i++ {
+		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+		obj.AddBalance(big.NewInt(int64(i)))
+		err = origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
+	}
+
+	err = orig.Finalise(false, origTds.TrieStateWriter())
+	if err != nil {
+		t.Log("error while finalize", err)
+	}
+
+	_, err = origTds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Log("error while ComputeTrieRoots", err)
+	}
+
+	origTds.SetBlockNr(1)
+
+	err = orig.Commit(false, false, origTds.DbStateWriter())
+	if err != nil {
+		t.Log("error while commit", err)
+	}
+
+	// Copy the state, modify both in-memory
+	copy := orig.Copy()
+	copyTds := origTds.Copy()
+	origTds.StartNewBuffer()
+	copyTds.StartNewBuffer()
+
+	for i := byte(0); i < 255; i++ {
+		origObj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+		copyObj := copy.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+
+		origObj.AddBalance(big.NewInt(2 * int64(i)))
+		copyObj.AddBalance(big.NewInt(3 * int64(i)))
+
+		err = origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
+		err = copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(accounts.Account))
+		if err != nil {
+			t.Log(err)
+		}
+	}
+	// Finalise the changes on both concurrently
+	done := make(chan struct{}, 1)
+	go func() {
+		err = orig.Finalise(true, origTds.TrieStateWriter())
+		if err != nil {
+			t.Log("error while finalize", err)
+		}
+
+		_, err = origTds.ComputeTrieRoots(false)
+		if err != nil {
+			t.Log("error while ComputeTrieRoots", err)
+		}
+
+		origTds.SetBlockNr(2)
+
+		err = orig.Commit(true, false, origTds.DbStateWriter())
+		if err != nil {
+			t.Log("error while commit", err)
+		}
+
+		close(done)
+	}()
+
+	err = copy.Finalise(true, copyTds.TrieStateWriter())
+	if err != nil {
+		t.Log("error while finalize", err)
+	}
+
+	_, err = copyTds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Log("error while ComputeTrieRoots", err)
+	}
+
+	copyTds.SetBlockNr(2)
+	err = copy.Commit(true, false, copyTds.DbStateWriter())
+	if err != nil {
+		t.Log("error while commit", err)
+	}
+	<-done
+
+	// Verify that the two states have been updated independently
+	for i := byte(0); i < 255; i++ {
+		origObj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+		copyObj := copy.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
+
+		if want := big.NewInt(3 * int64(i)); origObj.Balance().Cmp(want) != 0 {
+			t.Errorf("orig obj %d: balance mismatch: have %v, want %v", i, origObj.Balance(), want)
+		}
+		if want := big.NewInt(4 * int64(i)); copyObj.Balance().Cmp(want) != 0 {
+			t.Errorf("copy obj %d: balance mismatch: have %v, want %v", i, copyObj.Balance(), want)
+		}
+	}
 }

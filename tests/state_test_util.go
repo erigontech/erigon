@@ -158,7 +158,9 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
 	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
-	roots, err := tds.ComputeTrieRoots()
+
+	isEIP2027 := config.IsEIP2027(block.Number())
+	roots, err := tds.ComputeTrieRoots(isEIP2027)
 	if err != nil {
 		return nil, nil, fmt.Errorf("Error calculating state root: %v", err)
 	}
@@ -197,11 +199,11 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 	if err := statedb.Finalise(false, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tds.ComputeTrieRoots(); err != nil {
+	if _, err := tds.ComputeTrieRoots(false); err != nil {
 		return nil, nil, err
 	}
 	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+	if err := statedb.Commit(false, false, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

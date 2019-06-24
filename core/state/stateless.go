@@ -53,10 +53,8 @@ func NewStateless(stateRoot common.Hash,
 ) (*Stateless, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
-	tp, err := trie.NewTriePruning(blockNr)
-	if err != nil {
-		return nil, err
-	}
+	tp := trie.NewTriePruning(blockNr)
+
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}

@@ -58,11 +58,13 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("Finalize of block %d failed: %v", block.NumberU64(), err)
+		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 	dbstate.SetBlockNr(block.NumberU64())
-	if err := statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate); err != nil {
-		return fmt.Errorf("Commiting block %d failed: %v", block.NumberU64(), err)
+
+	isEIP2027 := chainConfig.IsEIP2027(header.Number)
+	if err := statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, dbstate); err != nil {
+		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
 	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
@@ -71,7 +73,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 			defer f.Close()
 			tds.PrintTrie(f)
 		}
-		return fmt.Errorf("Error processing block %d: %v", block.NumberU64(), err)
+		return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
 	}
 	return nil
 }
@@ -219,7 +221,10 @@ func stateless(genLag, consLag int) {
 			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
 			return
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		isEIP2027 := chainConfig.IsEIP2027(header.Number)
+
+		roots, err := tds.ComputeTrieRoots(isEIP2027)
 		if err != nil {
 			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
 			return
@@ -235,7 +240,8 @@ func stateless(genLag, consLag int) {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
 		tds.SetBlockNr(blockNum)
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
+
+		err = statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
 		if err != nil {
 			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
 			return

@@ -27,10 +27,7 @@ import (
 )
 
 func TestOnePerTimestamp(t *testing.T) {
-	tp, err := NewTriePruning(0)
-	if err != nil {
-		t.Errorf("Error creating trie pruning: %v", err)
-	}
+	tp := NewTriePruning(0)
 	tr := New(common.Hash{}, false)
 	tr.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)

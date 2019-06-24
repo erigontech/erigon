@@ -5,7 +5,6 @@ import (
 	"math/big"
 
 	"bytes"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -41,8 +40,6 @@ var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
-	fmt.Println("---------Encode")
-
 	var data []byte
 	var err error
 	if (a.CodeHash == nil || a.IsEmptyCodeHash()) && (a.Root == emptyRoot || a.Root == common.Hash{}) {
@@ -84,7 +81,6 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 }
 
 func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
-	fmt.Println("---------EncodeRLP")
 	acc := newAccountCopy(a)
 	if !enableStorageSize {
 		accBeforeEIP2027 := &accountWithoutStorage{
@@ -99,8 +95,6 @@ func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 }
 
 func (a *Account) Decode(enc []byte) error {
-	fmt.Println("---------Decode")
-
 	switch encodedLength := len(enc); {
 	case encodedLength == 0:
 

@@ -172,7 +172,10 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		isEIP2027 := chainConfig.IsEIP2027(header.Number)
+		var roots []common.Hash
+		roots, err = tds.ComputeTrieRoots(isEIP2027)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +187,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
 		tds.SetBlockNr(uint64(height))
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
+		err = statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
@@ -272,12 +275,15 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		if err := statedb.Finalise(config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		isEIP2027 := config.IsEIP2027(header.Number)
+		var roots []common.Hash
+		roots, err = tds.ComputeTrieRoots(isEIP2027)
 		if err != nil {
 			return nil, err
 		}
 		header.Root = roots[len(roots)-1]
-		err = statedb.Commit(config.IsEIP158(header.Number), tds.DbStateWriter())
+		err = statedb.Commit(config.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}

@@ -803,22 +803,18 @@ func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bo
 		} else if isDirty {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
-				fmt.Println("+stateWriter.UpdateAccountCode")
 				if err := stateWriter.UpdateAccountCode(common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 					return err
 				}
-				fmt.Println("-stateWriter.UpdateAccountCode")
 			}
-			fmt.Println("+updateTrie")
+
 			if err := stateObject.updateTrie(stateWriter); err != nil {
 				return err
 			}
-			fmt.Println("-updateTrie")
-			fmt.Println("+stateWriter.UpdateAccountData")
+
 			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
-			fmt.Println("+stateWriter.UpdateAccountData")
 		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
