@@ -6,9 +6,10 @@ linters:
     - gosec
     - ineffassign
     - gocyclo
-    - gosimple
     - depguard
     - typecheck
+    - megacheck
+
   disable-all: true
 
 linters-settings:

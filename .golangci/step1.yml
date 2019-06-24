@@ -10,7 +10,6 @@ linters:
     - golint
     - interfacer
 
-
   disable-all: true
 
 linters-settings:
