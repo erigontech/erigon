@@ -5,9 +5,9 @@ import (
 	"math/big"
 
 	"bytes"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"fmt"
 )
 
 type ExtAccount struct {

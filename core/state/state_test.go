@@ -18,15 +18,15 @@ package state
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	checker "gopkg.in/check.v1"
-	"fmt"
 )
 
 type StateSuite struct {
@@ -62,14 +62,22 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	fmt.Println("UpdateAccountData2")
 	err = s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
+
 	fmt.Println("Finalise")
-	s.state.Finalise(false, s.tds.TrieStateWriter())
+	err = s.state.Finalise(false, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
 	fmt.Println("Comute trie roots")
-	s.tds.ComputeTrieRoots(false)
+	_, err = s.tds.ComputeTrieRoots(false)
+	c.Check(err, checker.IsNil)
+
 	fmt.Println("set blockNr")
 	s.tds.SetBlockNr(1)
+
 	fmt.Println("commit")
-	s.state.Commit(false, false, s.tds.DbStateWriter())
+	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
+
 	fmt.Println("after commit")
 
 	// check that dump contains the state objects that are in trie
@@ -122,9 +130,15 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	var value common.Hash
 
 	s.state.SetState(address, common.Hash{}, value)
-	s.state.Finalise(false, s.tds.TrieStateWriter())
+
+	err := s.state.Finalise(false, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
 	s.tds.SetBlockNr(1)
-	s.state.Commit(false, false, s.tds.DbStateWriter())
+
+	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
+
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -187,10 +201,22 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	state.Finalise(false, tds.TrieStateWriter())
-	tds.ComputeTrieRoots(false)
+	err := state.Finalise(false, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalise state", err)
+	}
+
+	_, err = tds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Fatal("error while computing trie roots", err)
+	}
+
 	tds.SetBlockNr(1)
-	state.Commit(false,false, tds.DbStateWriter())
+
+	err = state.Commit(false, false, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)

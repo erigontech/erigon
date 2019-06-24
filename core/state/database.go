@@ -537,7 +537,7 @@ func (tds *TrieDbState) computeTrieRoots(forward, isAccountWithStorageEIPEnabled
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := account.EncodeRLP(false)
+				data, err := account.EncodeRLP(isAccountWithStorageEIPEnabled)
 				if err != nil {
 					return nil, err
 				}

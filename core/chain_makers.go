@@ -207,7 +207,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := statedb.Finalise(config.IsEIP158(b.header.Number), tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
-			roots, err := tds.ComputeTrieRoots()
+			roots, err := tds.ComputeTrieRoots(config.IsEIP2027(b.header.Number))
 			if err != nil {
 				panic(err)
 			}
@@ -221,7 +221,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
-			if err := statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter()); err != nil {
+			if err := statedb.Commit(config.IsEIP158(b.header.Number), config.IsEIP2027(b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts

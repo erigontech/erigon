@@ -257,7 +257,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	roots, err := tds.ComputeTrieRoots()
+	roots, err := tds.ComputeTrieRoots(g.Config.IsEIP2027(big.NewInt(int64(g.Number))))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -297,7 +297,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	tds.SetBlockNr(0)
-	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+	if err := statedb.Commit(false, g.Config.IsEIP2027(block.Number()), tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
 	if _, err := batch.Commit(); err != nil {

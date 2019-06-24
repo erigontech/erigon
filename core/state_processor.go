@@ -143,7 +143,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds
 	if err := statedb.Finalise(p.config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
-	roots, err := tds.ComputeTrieRoots()
+	roots, err := tds.ComputeTrieRoots(p.config.IsEIP2027(header.Number))
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}

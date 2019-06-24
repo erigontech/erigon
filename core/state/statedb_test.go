@@ -32,7 +32,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -59,7 +58,12 @@ func TestUpdateLeaks(t *testing.T) {
 		}
 		state.Finalise(false, tds.TrieStateWriter())
 	}
-	tds.ComputeTrieRoots(false)
+
+	_, err := tds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Fatal("error while ComputeTrieRoots", err)
+	}
+
 	// Ensure that no data was leaked into the database
 	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
 		if bytes.Equal(keys[i], trie.SecureKeyPrefix) {
@@ -99,8 +103,13 @@ func TestIntermediateLeaks(t *testing.T) {
 	for i := byte(0); i < 255; i++ {
 		modify(transState, common.Address{byte(i)}, i, 0)
 	}
+
 	// Write modifications to trie.
-	transState.Finalise(false, transTds.TrieStateWriter())
+	err := transState.Finalise(false, transTds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalizing state", err)
+	}
+
 	transTds.StartNewBuffer()
 
 	// Overwrite all the data with new values in the transient database.
@@ -110,14 +119,33 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	transState.Finalise(false, transTds.TrieStateWriter())
-	transTds.ComputeTrieRoots(false)
-	transTds.SetBlockNr(1)
-	if err := transState.Commit(false,false, transTds.DbStateWriter()); err != nil {
-		t.Fatalf("failed to commit transition state: %v", err)
+	err = transState.Finalise(false, transTds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalizing state", err)
 	}
-	finalState.Finalise(false, finalTds.TrieStateWriter())
-	finalTds.ComputeTrieRoots(false)
+
+	_, err = transTds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Fatal("error while ComputeTrieRoots", err)
+	}
+
+	transTds.SetBlockNr(1)
+
+	err = transState.Commit(false, false, transTds.DbStateWriter())
+	if err != nil {
+		t.Fatal("failed to commit transition state", err)
+	}
+
+	err = finalState.Finalise(false, finalTds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalizing state", err)
+	}
+
+	_, err = finalTds.ComputeTrieRoots(false)
+	if err != nil {
+		t.Fatal("error while ComputeTrieRoots", err)
+	}
+
 	finalTds.SetBlockNr(1)
 	if err := finalState.Commit(false, false, finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
@@ -138,80 +166,6 @@ func TestIntermediateLeaks(t *testing.T) {
 		if _, err := finalDb.Get(transKeys[i], transKeys[i+1]); err != nil {
 			val, _ := transDb.Get(transKeys[i], transKeys[i+1])
 			t.Errorf("entry missing in the transition database: %x:%x -> %x", transKeys[i], transKeys[i+1], val)
-		}
-	}
-}
-
-// TestCopy tests that copying a statedb object indeed makes the original and
-// the copy independent of each other. This test is a regression test against
-// https://github.com/ethereum/go-ethereum/pull/15549.
-func testCopy(t *testing.T) {
-	// Create a random state test to copy and modify "independently"
-	db := ethdb.NewMemDatabase()
-	origTds, _ := NewTrieDbState(common.Hash{}, db, 0)
-	orig := New(origTds)
-	origTds.StartNewBuffer()
-
-	for i := byte(0); i < 255; i++ {
-		obj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
-		obj.AddBalance(big.NewInt(int64(i)))
-		err := origTds.TrieStateWriter().UpdateAccountData(obj.address, &obj.data, new(accounts.Account))
-		if err != nil {
-			t.Log(err)
-		}
-	}
-	orig.Finalise(false, origTds.TrieStateWriter())
-	origTds.ComputeTrieRoots(false)
-	origTds.SetBlockNr(1)
-	orig.Commit(false, false, origTds.DbStateWriter())
-
-	// Copy the state, modify both in-memory
-	copy := orig.Copy()
-	copyTds := origTds.Copy()
-	origTds.StartNewBuffer()
-	copyTds.StartNewBuffer()
-
-	for i := byte(0); i < 255; i++ {
-		origObj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
-		copyObj := copy.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
-
-		origObj.AddBalance(big.NewInt(2 * int64(i)))
-		copyObj.AddBalance(big.NewInt(3 * int64(i)))
-
-		err := origTds.TrieStateWriter().UpdateAccountData(origObj.address, &origObj.data, new(accounts.Account))
-		if err != nil {
-			t.Log(err)
-		}
-		err = copyTds.TrieStateWriter().UpdateAccountData(copyObj.address, &copyObj.data, new(accounts.Account))
-		if err != nil {
-			t.Log(err)
-		}
-	}
-	// Finalise the changes on both concurrently
-	done := make(chan struct{})
-	go func() {
-		orig.Finalise(true, origTds.TrieStateWriter())
-		origTds.ComputeTrieRoots(false)
-		origTds.SetBlockNr(2)
-		orig.Commit(true, false, origTds.DbStateWriter())
-		close(done)
-	}()
-	copy.Finalise(true, copyTds.TrieStateWriter())
-	copyTds.ComputeTrieRoots(false)
-	copyTds.SetBlockNr(2)
-	copy.Commit(true, false, copyTds.DbStateWriter())
-	<-done
-
-	// Verify that the two states have been updated independently
-	for i := byte(0); i < 255; i++ {
-		origObj := orig.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
-		copyObj := copy.GetOrNewStateObject(common.BytesToAddress([]byte{i}))
-
-		if want := big.NewInt(3 * int64(i)); origObj.Balance().Cmp(want) != 0 {
-			t.Errorf("orig obj %d: balance mismatch: have %v, want %v", i, origObj.Balance(), want)
-		}
-		if want := big.NewInt(4 * int64(i)); copyObj.Balance().Cmp(want) != 0 {
-			t.Errorf("copy obj %d: balance mismatch: have %v, want %v", i, copyObj.Balance(), want)
 		}
 	}
 }
@@ -467,10 +421,23 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
-	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.ComputeTrieRoots(false)
+
+	err := s.state.Finalise(false, s.tds.TrieStateWriter())
+	if err != nil {
+		c.Fatal("error while finalize", err)
+	}
+
+	_, err = s.tds.ComputeTrieRoots(false)
+	if err != nil {
+		c.Fatal("error while ComputeTrieRoots", err)
+	}
+
 	s.tds.SetBlockNr(1)
-	s.state.Commit(false,false, s.tds.DbStateWriter())
+
+	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	if err != nil {
+		c.Fatal("error while commit", err)
+	}
 
 	s.state.Reset()
 
