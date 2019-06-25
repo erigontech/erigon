@@ -87,9 +87,14 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	contractAddress := receipts[2][0].ContractAddress
-	t.Log("contract addr:", contractAddress.String())
+	contractReceipt := receipts[2][0]
+	if contractReceipt == nil {
+		t.Error("expected contractReceipt to exist")
+	}
 
+	contractAddress := contractReceipt.ContractAddress
+
+	// BLOCK 0
 	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
@@ -99,23 +104,38 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
+
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
+	}
+
 	storageSize := st.StorageSize(address)
 	if storageSize != nil {
 		t.Fatal("storage size should be nil")
 	}
 
+
+	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
+
 	st, _, _ = blockchain.State()
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
+
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
+	}
+
 	storageSize = st.StorageSize(address)
 	if storageSize != nil {
 		t.Fatal("storage size should be nil")
 	}
 
+
+	// BLOCK 2
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +146,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist")
+		t.Error("expected contractAddress to exist at the block 2")
 	}
 
 	t.Log(string(tr.Dump()))
