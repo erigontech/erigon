@@ -64,7 +64,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	blocks, rec := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	blocks, receipts := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
@@ -87,7 +87,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	contractAddress := interface{}(rec[2][0]).(*types.Receipt).ContractAddress
+	contractAddress := interface{}(receipts[2][0]).(*types.Receipt).ContractAddress
 	t.Log(contractAddress.String())
 
 	// account must exist pre eip 161
@@ -125,11 +125,11 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	st, tr, _ := blockchain.State()
-	//spew.Dump(st)
-	t.Log(string(tr.Dump()))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
+
+	t.Log(string(tr.Dump()))
 	storageSize = st.StorageSize(address)
 	if storageSize == nil {
 		t.Fatal("storage size should be XXX")
