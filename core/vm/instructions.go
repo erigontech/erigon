@@ -634,6 +634,7 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+	fmt.Println("opSstore")
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
@@ -694,6 +695,7 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *
 }
 
 func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+	fmt.Println("opCreate")
 	var (
 		value        = stack.pop()
 		offset, size = stack.pop(), stack.pop()
@@ -717,6 +719,11 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	} else {
 		stack.push(addr.Big())
 	}
+
+	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
+		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
+	}
+
 	contract.Gas += returnGas
 	interpreter.intPool.put(value, offset, size)
 
@@ -727,6 +734,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 }
 
 func opCreate2(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
+	fmt.Println("opCreate2")
 	var (
 		endowment    = stack.pop()
 		offset, size = stack.pop(), stack.pop()
@@ -747,6 +755,10 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memo
 	}
 	contract.Gas += returnGas
 	interpreter.intPool.put(endowment, offset, size, salt)
+
+	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
+		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
+	}
 
 	if suberr == errExecutionReverted {
 		return res, nil
