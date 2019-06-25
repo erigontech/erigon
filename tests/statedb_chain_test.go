@@ -87,8 +87,8 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	contractAddress := interface{}(receipts[2][0]).(*types.Receipt).ContractAddress
-	t.Log(contractAddress.String())
+	contractAddress := receipts[2][0].ContractAddress
+	t.Log("contract addr:", contractAddress.String())
 
 	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -120,13 +120,13 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist")
-	}
-
 	st, tr, _ := blockchain.State()
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
+	}
+
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist")
 	}
 
 	t.Log(string(tr.Dump()))
