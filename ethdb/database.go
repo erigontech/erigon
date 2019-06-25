@@ -78,6 +78,8 @@ func (db *BoltDatabase) Path() string {
 
 // Put puts the given key / value to the queue
 func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
+	fmt.Println("BoltDatabase Put", common.Bytes2Hex(key))
+
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucket, true)
 		if err != nil {
@@ -108,6 +110,8 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 	composite, suffix := compositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
+
+	fmt.Println("BoltDatabase PutS", common.Bytes2Hex(key))
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 		if err != nil {
@@ -139,6 +143,8 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	var savedTx *bolt.Tx
+
+	fmt.Println("BoltDatabase MultiPut", len(tuples))
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
 			bucketEnd := bucketStart
@@ -189,6 +195,9 @@ func (db *BoltDatabase) Size() int {
 
 // Get returns the given key if it's present.
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+
+	fmt.Println("BoltDatabase Get", common.Bytes2Hex(key))
+
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -209,6 +218,7 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	fmt.Println("BoltDatabase GetS", common.Bytes2Hex(key))
 	composite, _ := compositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
 }
@@ -216,6 +226,8 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 // GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
 // if there are not such (k, v)
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	fmt.Println("BoltDatabase GetAsOf", common.Bytes2Hex(key))
+
 	composite, _ := compositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -261,6 +273,9 @@ func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
 }
 
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+	fmt.Println("BoltDatabase Walk", common.Bytes2Hex(startkey))
+
+
 	fixedbytes, mask := bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -285,9 +300,11 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 }
 
 func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+	fmt.Println("BoltDatabase MultiWalk", common.Bytes2Hex(startkeys[0]))
 	if len(startkeys) == 0 {
 		return nil
 	}
+
 	keyIdx := 0 // What is the current key we are extracting
 	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
@@ -591,6 +608,7 @@ func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hB
 
 // Delete deletes the key from the queue and database
 func (db *BoltDatabase) Delete(bucket, key []byte) error {
+	fmt.Println("BoltDatabase Delete", common.Bytes2Hex(key))
 	// Execute the actual operation
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)

@@ -47,6 +47,8 @@ func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) (common.Hash, uint64
 func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
 	fmt.Println("WriteTxLookupEntries", block.Number().String(), len(block.Transactions()))
 	for i, tx := range block.Transactions() {
+		fmt.Println("WriteTxLookupEntries loop", block.Number().String(), len(block.Transactions()), tx.Hash().String())
+
 		entry := TxLookupEntry{
 			BlockHash:  block.Hash(),
 			BlockIndex: block.NumberU64(),
