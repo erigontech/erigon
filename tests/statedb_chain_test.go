@@ -127,6 +127,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	fmt.Println("!!!", contractTx.Hash().String())
 
 	var contractAddress common.Address
@@ -139,7 +140,8 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}()
 
 	time.Sleep(2*time.Second)
-	cancel()
+	backend.SendTransaction(ctx, contractTx)
+	backend.Commit()
 	time.Sleep(2*time.Second)
 
 	fmt.Println("!!!! 2", contractAddress.String())

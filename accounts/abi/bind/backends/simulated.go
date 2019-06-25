@@ -213,7 +213,7 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
 
 	fmt.Println("SimulatedBackend.TransactionReceipt txHash", txHash.String())
-	fmt.Println("SimulatedBackend.TransactionReceipt", receipt.ContractAddress.String())
+	fmt.Println("SimulatedBackend.TransactionReceipt", receipt == nil)
 	return receipt, nil
 }
 
