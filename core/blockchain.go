@@ -915,7 +915,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 
 	tds.SetBlockNr(block.NumberU64())
-	if err := state.Commit(bc.chainConfig.IsEIP158(block.Number()), tds.DbStateWriter()); err != nil {
+	if err := state.Commit(bc.chainConfig.IsEIP158(block.Number()), bc.chainConfig.IsEIP2027(block.Number()), tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
 	}
 	if bc.enableReceipts {
@@ -1210,7 +1210,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			if err := bc.trieDbState.UnwindTo(readBlockNr); err != nil {
+			if err = bc.trieDbState.UnwindTo(readBlockNr, bc.chainConfig.IsEIP2027(big.NewInt(int64(readBlockNr)))); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err

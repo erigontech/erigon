@@ -787,7 +787,7 @@ func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) e
 
 // Finalise finalises the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) error {
+func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bool, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -807,9 +807,11 @@ func (sdb *StateDB) Commit(deleteEmptyObjects bool, stateWriter StateWriter) err
 					return err
 				}
 			}
+
 			if err := stateObject.updateTrie(stateWriter); err != nil {
 				return err
 			}
+
 			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}

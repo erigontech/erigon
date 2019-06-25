@@ -86,7 +86,6 @@ func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
 func (a *Account) Decode(enc []byte) error {
 	switch encodedLength := len(enc); {
 	case encodedLength == 0:
-		return nil
 
 	case encodedLength == accountSizeWithoutData:
 		a.Balance = new(big.Int)

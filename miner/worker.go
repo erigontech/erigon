@@ -968,7 +968,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	if err := s.Finalise(w.chain.Config().IsEIP158(w.current.header.Number), w.current.tds.TrieStateWriter()); err != nil {
 		return err
 	}
-	roots, err := w.current.tds.ComputeTrieRoots()
+	roots, err := w.current.tds.ComputeTrieRoots(w.chain.Config().IsEIP2027(w.current.header.Number))
 	if err != nil {
 		return err
 	}

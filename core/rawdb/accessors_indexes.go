@@ -17,6 +17,7 @@
 package rawdb
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -26,13 +27,16 @@ import (
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) (common.Hash, uint64, uint64) {
-	data, _ := db.Get(txLookupPrefix, hash.Bytes())
+	fmt.Println("ReadTxLookupEntry", hash.String())
+	data, err := db.Get(txLookupPrefix, hash.Bytes())
 	if len(data) == 0 {
+		fmt.Println("ReadTxLookupEntry err 1", err)
 		return common.Hash{}, 0, 0
 	}
 	var entry TxLookupEntry
 	if err := rlp.DecodeBytes(data, &entry); err != nil {
 		log.Error("Invalid transaction lookup entry RLP", "hash", hash, "err", err)
+		fmt.Println("ReadTxLookupEntry err 2", err)
 		return common.Hash{}, 0, 0
 	}
 	return entry.BlockHash, entry.BlockIndex, entry.Index
@@ -41,7 +45,10 @@ func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) (common.Hash, uint64
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
+	fmt.Println("WriteTxLookupEntries", block.Number().String(), len(block.Transactions()))
 	for i, tx := range block.Transactions() {
+		fmt.Println("WriteTxLookupEntries loop", block.Number().String(), len(block.Transactions()), tx.Hash().String())
+
 		entry := TxLookupEntry{
 			BlockHash:  block.Hash(),
 			BlockIndex: block.NumberU64(),
@@ -80,15 +87,20 @@ func ReadTransaction(db DatabaseReader, hash common.Hash) (*types.Transaction, c
 // ReadReceipt retrieves a specific transaction receipt from the database, along with
 // its added positional metadata.
 func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Hash, uint64, uint64) {
+	fmt.Println("ReadReceipt", hash.String())
 	blockHash, blockNumber, receiptIndex := ReadTxLookupEntry(db, hash)
 	if blockHash == (common.Hash{}) {
+		fmt.Println("ReadReceipt err 1", hash.String())
 		return nil, common.Hash{}, 0, 0
 	}
 	receipts := ReadReceipts(db, blockHash, blockNumber)
 	if len(receipts) <= int(receiptIndex) {
+		fmt.Println("ReadReceipt err 2", hash.String())
 		log.Error("Receipt refereced missing", "number", blockNumber, "hash", blockHash, "index", receiptIndex)
 		return nil, common.Hash{}, 0, 0
 	}
+
+	fmt.Println("ReadReceipt 1", hash.String(), blockNumber, receiptIndex)
 	return receipts[receiptIndex], blockHash, blockNumber, receiptIndex
 }
 

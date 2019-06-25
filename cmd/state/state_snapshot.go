@@ -470,7 +470,9 @@ func state_snapshot() {
 	if err := statedb.Finalise(chainConfig.IsEIP158(nextHeader.Number), tds.TrieStateWriter()); err != nil {
 		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
 	}
-	roots, err := tds.ComputeTrieRoots()
+
+	isEIP2027 := chainConfig.IsEIP2027(nextHeader.Number)
+	roots, err := tds.ComputeTrieRoots(isEIP2027)
 	if err != nil {
 		panic(err)
 	}
@@ -478,7 +480,8 @@ func state_snapshot() {
 		receipt.PostState = roots[i].Bytes()
 	}
 	fmt.Printf("Next root %x\n", roots[len(roots)-1])
-	if err := statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), tds.DbStateWriter()); err != nil {
+
+	if err := statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), isEIP2027, tds.DbStateWriter()); err != nil {
 		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
 	}
 	if _, err := batch.Commit(); err != nil {

@@ -211,7 +211,12 @@ func runCmd(ctx *cli.Context) error {
 	execTime := time.Since(tstart)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		if err := statedb.Commit(true, state.NewNoopWriter()); err != nil {
+		var isEIP2027 bool
+		if chainConfig != nil {
+			isEIP2027 = chainConfig.IsEIP2027(runtimeConfig.BlockNumber)
+		}
+
+		if err = statedb.Commit(true, isEIP2027, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}

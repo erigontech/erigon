@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -42,9 +41,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
-
-// This nil assignment ensures compile time that SimulatedBackend implements bind.ContractBackend.
-var _ bind.ContractBackend = (*SimulatedBackend)(nil)
 
 var errBlockNumberUnsupported = errors.New("SimulatedBackend cannot access blocks other than the latest block")
 var errGasEstimationFailed = errors.New("gas required exceeds allowance or always failing transaction")
@@ -90,6 +86,22 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 		engine:       engine,
 		blockchain:   blockchain,
 		config:       genesis.Config,
+		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
+	}
+	backend.emptyPendingBlock()
+	return backend
+}
+
+func NewSimulatedBackendMock(genesisBlock *types.Block, config *params.ChainConfig,
+	blockchain *core.BlockChain, engine consensus.Engine, database ethdb.Database) *SimulatedBackend {
+
+	backend := &SimulatedBackend{
+		prependBlock: genesisBlock,
+		prependDb:    database.MemCopy(),
+		database:     database,
+		engine:       engine,
+		blockchain:   blockchain,
+		config:       config,
 		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
 	}
 	backend.emptyPendingBlock()
@@ -199,6 +211,9 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 // TransactionReceipt returns the receipt of a transaction.
 func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
+
+	fmt.Println("SimulatedBackend.TransactionReceipt txHash", txHash.String())
+	fmt.Println("SimulatedBackend.TransactionReceipt", receipt == nil)
 	return receipt, nil
 }
 
