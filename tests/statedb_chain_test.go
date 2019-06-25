@@ -17,14 +17,10 @@
 package tests
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"testing"
-	"time"
 
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -68,11 +64,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	backend := backends.NewSimulatedBackendMock(genesis, gspec.Config, blockchain, engine, genesisDb)
-	defer blockchain.Stop()
-
-	var contractTx *types.Transaction
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	blocks, rec := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
@@ -88,13 +80,15 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		case 2:
 			tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
 			fmt.Println("tx 3", tx.Hash().String())
-			contractTx = tx
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
 		block.AddTx(tx)
 	})
+
+	contractAddress := interface{}(rec[2][0]).(*types.Receipt).ContractAddress
+	t.Log(contractAddress.String())
 
 	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -126,30 +120,13 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	fmt.Println("!!!", contractTx.Hash().String())
-
-	var contractAddress common.Address
-	go func() {
-		contractAddress, err = bind.WaitDeployed(ctx, backend, contractTx)
-		if err != nil {
-			t.Fatal(err)
-		}
-		fmt.Println("!!! 1")
-	}()
-
-	time.Sleep(2*time.Second)
-	backend.SendTransaction(ctx, contractTx)
-	backend.Commit()
-	time.Sleep(2*time.Second)
-
-	fmt.Println("!!!! 2", contractAddress.String())
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist")
 	}
 
-	st, _, _ = blockchain.State()
+	st, tr, _ := blockchain.State()
+	//spew.Dump(st)
+	t.Log(string(tr.Dump()))
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
