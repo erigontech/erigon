@@ -1,3 +1,2 @@
-core/state/stateless.go:494
 core/state/database.go:632
 core/state/state_object.go:127
