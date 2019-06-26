@@ -58,7 +58,11 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		acc := newAccountCopy(a)
 		toEncode = acc
 
-		if !params.CtxValueToBool(ctx, params.IsEIP2027Enabled) || acc.StorageSize == nil {
+		if acc.StorageSize != nil {
+			return rlp.EncodeToBytes(toEncode)
+		}
+
+		if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
 			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -74,6 +78,10 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 	acc := newAccountCopy(a)
 	toEncode := interface{}(acc)
+
+	if acc.StorageSize != nil {
+		return rlp.EncodeToBytes(toEncode)
+	}
 
 	if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
 		toEncode = &accountWithoutStorage{
