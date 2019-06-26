@@ -206,7 +206,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		return nil, nil, err
 	}
 	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.Commit(ctx, false, tds.DbStateWriter()); err != nil {
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)
