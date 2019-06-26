@@ -1,7 +1,9 @@
 package accounts
 
 import (
+	"context"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
 
 	"bytes"
@@ -39,7 +41,7 @@ const (
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
-func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
+func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 	var toEncode interface{}
 
 	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
@@ -54,7 +56,7 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 		acc := newAccountCopy(a)
 		toEncode = acc
 
-		if !enableStorageSize || acc.StorageSize == nil {
+		if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) || acc.StorageSize == nil {
 			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -67,11 +69,11 @@ func (a *Account) Encode(enableStorageSize bool) ([]byte, error) {
 	return rlp.EncodeToBytes(toEncode)
 }
 
-func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
+func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 	acc := newAccountCopy(a)
 	toEncode := interface{}(acc)
 
-	if !enableStorageSize {
+	if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
 		toEncode = &accountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,

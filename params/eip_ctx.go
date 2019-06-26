@@ -30,8 +30,8 @@ func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int)
 	return ctx
 }
 
-func CtxValueToBool(ctx context.Context, name string) bool {
-	b := ctx.Value(IsEWASM)
+func CtxGetValue(ctx context.Context, name string) bool {
+	b := ctx.Value(name)
 	if b == nil {
 		return false
 	}
