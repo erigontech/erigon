@@ -58,10 +58,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	fmt.Println("UpdateAccountData")
 	// write some of them to the trie
-	err := s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
+	err := s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 	fmt.Println("UpdateAccountData2")
-	err = s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
+	err = s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("Finalise")
@@ -298,6 +298,10 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func stubCTXWitEIPs(num ...string) context.Context {
-
+func stubEnableForksCTX(forks ...string) context.Context {
+	ctx:=context.Background()
+	for i:=range forks {
+		ctx = context.WithValue(ctx, forks[i], true)
+	}
+	return ctx
 }
