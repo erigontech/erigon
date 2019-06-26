@@ -17,6 +17,7 @@
 package tests
 
 import (
+	ct "context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -149,7 +150,7 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
+	statedb.Finalise(config.WithEIPsEnabledCTX(ct.Background(), block.Number()), tds.TrieStateWriter())
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -196,14 +197,14 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.Finalise(false, tds.TrieStateWriter()); err != nil {
+	if err := statedb.Finalise(ct.Background(), tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tds.ComputeTrieRoots(false); err != nil {
+	if _, err := tds.ComputeTrieRoots(ct.Background()); err != nil {
 		return nil, nil, err
 	}
 	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.Commit(false, false, tds.DbStateWriter()); err != nil {
+	if err := statedb.Commit(ct.Background(), tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

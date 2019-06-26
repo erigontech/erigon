@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"testing"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -64,18 +65,18 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("Finalise")
-	err = s.state.Finalise(false, s.tds.TrieStateWriter())
+	err = s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("Comute trie roots")
-	_, err = s.tds.ComputeTrieRoots(false)
+	_, err = s.tds.ComputeTrieRoots(context.Background())
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("set blockNr")
 	s.tds.SetBlockNr(1)
 
 	fmt.Println("commit")
-	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("after commit")
@@ -131,12 +132,12 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.state.SetState(address, common.Hash{}, value)
 
-	err := s.state.Finalise(false, s.tds.TrieStateWriter())
+	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
 	s.tds.SetBlockNr(1)
 
-	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
@@ -201,19 +202,19 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.Finalise(false, tds.TrieStateWriter())
+	err := state.Finalise(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalise state", err)
 	}
 
-	_, err = tds.ComputeTrieRoots(false)
+	_, err = tds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Fatal("error while computing trie roots", err)
 	}
 
 	tds.SetBlockNr(1)
 
-	err = state.Commit(false, false, tds.DbStateWriter())
+	err = state.Commit(context.Background(), tds.DbStateWriter())
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -295,4 +296,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 			t.Errorf("Origin storage key %x mismatch: have %v, want none.", k, v)
 		}
 	}
+}
+
+func stubCTXWitEIPs(num ...string) context.Context {
+
 }

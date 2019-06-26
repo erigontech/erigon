@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"sort"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -241,7 +242,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 	return t, nil
 }
 
-func (rds *RepairDbState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	// Perform resolutions first
 	var resolver *trie.TrieResolver
 	var storageTrie *trie.Trie
@@ -309,7 +310,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
-	data, err := account.Encode(false)
+	data, err := account.Encode(ctx)
 	if err != nil {
 		return err
 	}
@@ -320,7 +321,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(false)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}
@@ -334,7 +335,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	return nil
 }
 
-func (rds *RepairDbState) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -354,7 +355,7 @@ func (rds *RepairDbState) DeleteAccount(address common.Address, original *accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(false)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}

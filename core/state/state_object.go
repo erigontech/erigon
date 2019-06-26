@@ -22,6 +22,7 @@ import (
 	"io"
 	"math/big"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -122,6 +123,7 @@ func newObject(db *StateDB, address common.Address, data, original accounts.Acco
 
 // EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
+	//todo we can't change rlp.Encoder
 	accountBytes, err := so.data.Encode(false)
 	if err != nil {
 		return err

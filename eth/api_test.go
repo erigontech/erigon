@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"testing"
 
+	"context"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -53,7 +54,7 @@ func TestStorageRangeAt(t *testing.T) {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
 
-	err := statedb.Finalise(false, tds.TrieStateWriter())
+	err := statedb.Finalise(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalising state", err)
 	}

@@ -5,8 +5,10 @@ import (
 	"math/big"
 	"testing"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestAccountEncodeWithCode(t *testing.T) {
@@ -17,7 +19,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
 	}
 
-	encodedAccount, err := a.Encode(false)
+	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, false))
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}
@@ -63,7 +65,7 @@ func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
 	}
 	*a.StorageSize = 10
 
-	encodedAccount, err := a.Encode(false)
+	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, false))
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}
@@ -88,7 +90,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
-	encodedAccount, err := a.Encode(false)
+	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, false))
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}
@@ -110,7 +112,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
 	}
 
-	encodedAccount, err := a.Encode(true)
+	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}
@@ -140,7 +142,7 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 		}
 		*a.StorageSize = storageSize
 
-		encodedAccount, err := a.Encode(true)
+		encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 		if err != nil {
 			t.Fatal("cant encode the account", err, a)
 		}
@@ -166,7 +168,7 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
-	encodedAccount, err := a.Encode(true)
+	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 	if err != nil {
 		t.Fatal("cant encode the account", err, a)
 	}

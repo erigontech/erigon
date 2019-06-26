@@ -30,10 +30,12 @@ import (
 
 	"gopkg.in/check.v1"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -57,10 +59,10 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		state.Finalise(false, tds.TrieStateWriter())
+		state.Finalise(context.Background(), tds.TrieStateWriter())
 	}
 
-	_, err := tds.ComputeTrieRoots(false)
+	_, err := tds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
@@ -106,7 +108,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Write modifications to trie.
-	err := transState.Finalise(false, transTds.TrieStateWriter())
+	err := transState.Finalise(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -120,35 +122,35 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	err = transState.Finalise(false, transTds.TrieStateWriter())
+	err = transState.Finalise(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = transTds.ComputeTrieRoots(false)
+	_, err = transTds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
 	transTds.SetBlockNr(1)
 
-	err = transState.Commit(false, false, transTds.DbStateWriter())
+	err = transState.Commit(context.Background(), transTds.DbStateWriter())
 	if err != nil {
 		t.Fatal("failed to commit transition state", err)
 	}
 
-	err = finalState.Finalise(false, finalTds.TrieStateWriter())
+	err = finalState.Finalise(context.Background(), finalTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = finalTds.ComputeTrieRoots(false)
+	_, err = finalTds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
 	finalTds.SetBlockNr(1)
-	if err := finalState.Commit(false, false, finalTds.DbStateWriter()); err != nil {
+	if err := finalState.Commit(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
@@ -423,19 +425,19 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.Finalise(false, s.tds.TrieStateWriter())
+	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
 
-	_, err = s.tds.ComputeTrieRoots(false)
+	_, err = s.tds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		c.Fatal("error while ComputeTrieRoots", err)
 	}
 
 	s.tds.SetBlockNr(1)
 
-	err = s.state.Commit(false, false, s.tds.DbStateWriter())
+	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
@@ -536,19 +538,19 @@ func TestCopy(t *testing.T) {
 		}
 	}
 
-	err = orig.Finalise(false, origTds.TrieStateWriter())
+	err = orig.Finalise(context.Background(), origTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
 
-	_, err = origTds.ComputeTrieRoots(false)
+	_, err = origTds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
 	origTds.SetBlockNr(1)
 
-	err = orig.Commit(false, false, origTds.DbStateWriter())
+	err = orig.Commit(context.Background(), origTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}
@@ -578,19 +580,20 @@ func TestCopy(t *testing.T) {
 	// Finalise the changes on both concurrently
 	done := make(chan struct{}, 1)
 	go func() {
-		err = orig.Finalise(true, origTds.TrieStateWriter())
+		ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
+		err = orig.Finalise(ctx, origTds.TrieStateWriter())
 		if err != nil {
 			t.Log("error while finalize", err)
 		}
 
-		_, err = origTds.ComputeTrieRoots(false)
+		_, err = origTds.ComputeTrieRoots(ctx)
 		if err != nil {
 			t.Log("error while ComputeTrieRoots", err)
 		}
 
 		origTds.SetBlockNr(2)
 
-		err = orig.Commit(true, false, origTds.DbStateWriter())
+		err = orig.Commit(ctx, origTds.DbStateWriter())
 		if err != nil {
 			t.Log("error while commit", err)
 		}
@@ -598,18 +601,20 @@ func TestCopy(t *testing.T) {
 		close(done)
 	}()
 
-	err = copy.Finalise(true, copyTds.TrieStateWriter())
+	ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
+
+	err = copy.Finalise(ctx, copyTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
 
-	_, err = copyTds.ComputeTrieRoots(false)
+	_, err = copyTds.ComputeTrieRoots(ctx)
 	if err != nil {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
 	copyTds.SetBlockNr(2)
-	err = copy.Commit(true, false, copyTds.DbStateWriter())
+	err = copy.Commit(ctx, copyTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}

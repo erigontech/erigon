@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -77,7 +78,7 @@ func (tds *TraceDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) 
 	return len(code), nil
 }
 
-func (tds *TraceDbState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
 		return nil
@@ -88,7 +89,7 @@ func (tds *TraceDbState) UpdateAccountData(address common.Address, original, acc
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	data, err := account.Encode(false)
+	data, err := account.Encode(ctx)
 	if err != nil {
 		return err
 	}

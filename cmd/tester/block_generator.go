@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -169,7 +170,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 			return nil, err
 		}
-		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+		if err := statedb.Finalise(chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number), tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
@@ -272,18 +273,17 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		statedb := state.New(tds)
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
-		if err := statedb.Finalise(config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+		if err := statedb.Finalise(config.WithEIPsEnabledCTX(context.Background(), header.Number), tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
-		isEIP2027 := config.IsEIP2027(header.Number)
 		var roots []common.Hash
-		roots, err = tds.ComputeTrieRoots(isEIP2027)
+		roots, err = tds.ComputeTrieRoots(config.IsEIP2027(header.Number))
 		if err != nil {
 			return nil, err
 		}
 		header.Root = roots[len(roots)-1]
-		err = statedb.Commit(config.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
+		err = statedb.Commit(config.WithEIPsEnabledCTX(context.Background(), header.Number), tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -467,12 +468,13 @@ func state_snapshot() {
 	if _, err := engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts); err != nil {
 		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
 	}
-	if err := statedb.Finalise(chainConfig.IsEIP158(nextHeader.Number), tds.TrieStateWriter()); err != nil {
+
+	ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), nextHeader.Number)
+	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
 	}
 
-	isEIP2027 := chainConfig.IsEIP2027(nextHeader.Number)
-	roots, err := tds.ComputeTrieRoots(isEIP2027)
+	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -481,7 +483,7 @@ func state_snapshot() {
 	}
 	fmt.Printf("Next root %x\n", roots[len(roots)-1])
 
-	if err := statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), isEIP2027, tds.DbStateWriter()); err != nil {
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
 	}
 	if _, err := batch.Commit(); err != nil {

@@ -25,6 +25,7 @@ import (
 	"runtime"
 	"sort"
 
+	"context"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -60,7 +61,7 @@ type StateReader interface {
 }
 
 type StateWriter interface {
-	UpdateAccountData(address common.Address, original, account *accounts.Account) error
+	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(address common.Address, original *accounts.Account) error
 	WriteAccountStorage(address common.Address, key, original, value *common.Hash) error
@@ -287,8 +288,8 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
 
-func (tds *TrieDbState) ComputeTrieRoots(isAccountWithStorageEIPEnabled bool) ([]common.Hash, error) {
-	roots, err := tds.computeTrieRoots(true, isAccountWithStorageEIPEnabled)
+func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
+	roots, err := tds.computeTrieRoots(true, ctx)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -455,7 +456,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 
 //todo what is forward?
 // isAccountWithStorageEIPEnabled - EIP2027 adds storage size field to account
-func (tds *TrieDbState) computeTrieRoots(forward, isAccountWithStorageEIPEnabled bool) ([]common.Hash, error) {
+func (tds *TrieDbState) computeTrieRoots(forward bool, ctx context.Context) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -627,6 +628,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64, computeTrieRoots bool) error {
 				return err
 			}
 		} else {
+			//todo is aggregateBuffer collect data from one block?
 			value, err := account.Encode(false)
 			if err != nil {
 				return err
@@ -931,8 +933,8 @@ func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, 
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
-	data, err := account.Encode(false)
+func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	data, err := account.Encode(ctx)
 	if err != nil {
 		return err
 	}
@@ -954,7 +956,7 @@ func (dsw *DbStateWriter) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(false)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}
@@ -972,7 +974,7 @@ func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *acco
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
 	if err != nil {
 		return err
@@ -988,7 +990,7 @@ func (dsw *DbStateWriter) DeleteAccount(address common.Address, original *accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(false)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}

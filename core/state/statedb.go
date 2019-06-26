@@ -30,6 +30,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 
+	"context"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -752,7 +754,7 @@ func (a *Addresses) Swap(i, j int) {
 	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
-func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) error {
+func (sdb *StateDB) Finalise(ctx context.Context, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -765,7 +767,7 @@ func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) e
 			continue
 		}
 
-		if stateObject.suicided || (deleteEmptyObjects && stateObject.empty()) {
+		if stateObject.suicided || (params.CtxValueToBool(ctx, params.IsEIP2027Enabled) && stateObject.empty()) {
 			if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 				return err
 			}
@@ -774,7 +776,7 @@ func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) e
 			if err := stateObject.updateTrie(stateWriter); err != nil {
 				return err
 			}
-			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
 		}
@@ -787,7 +789,7 @@ func (sdb *StateDB) Finalise(deleteEmptyObjects bool, stateWriter StateWriter) e
 
 // Finalise finalises the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bool, stateWriter StateWriter) error {
+func (sdb *StateDB) Commit(ctx context.Context, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -795,7 +797,7 @@ func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bo
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 
-		if stateObject.suicided || (isDirty && deleteEmptyObjects && stateObject.empty()) {
+		if stateObject.suicided || (isDirty && params.CtxValueToBool(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
 			if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
 				return err
 			}
@@ -812,7 +814,7 @@ func (sdb *StateDB) Commit(deleteEmptyObjects, isAccountWithStorageEIPEnabled bo
 				return err
 			}
 
-			if err := stateWriter.UpdateAccountData(addr, &stateObject.original, &stateObject.data); err != nil {
+			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
 		}
