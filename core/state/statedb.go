@@ -768,7 +768,7 @@ func (sdb *StateDB) Finalise(ctx context.Context, stateWriter StateWriter) error
 		}
 
 		if stateObject.suicided || (params.GetForkFlag(ctx, params.IsEIP2027Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
+			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 				return err
 			}
 			stateObject.deleted = true
@@ -798,7 +798,7 @@ func (sdb *StateDB) Commit(ctx context.Context, stateWriter StateWriter) error {
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 
 		if stateObject.suicided || (isDirty && params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(addr, &stateObject.original); err != nil {
+			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 				return err
 			}
 			stateObject.deleted = true

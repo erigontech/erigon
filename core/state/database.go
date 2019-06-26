@@ -26,7 +26,6 @@ import (
 	"runtime"
 	"sort"
 
-	"context"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -64,7 +63,7 @@ type StateReader interface {
 type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
-	DeleteAccount(address common.Address, original *accounts.Account) error
+	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(address common.Address, key, original, value *common.Hash) error
 }
 
@@ -924,7 +923,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	return true
 }
 
-func (tsw *TrieStateWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != nil {
 		return err
@@ -964,7 +963,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
-func (tsw *TrieStateWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (tsw *TrieStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != err {
 		return err
