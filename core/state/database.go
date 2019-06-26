@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash"
 	"io"
@@ -289,7 +290,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 }
 
 func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
-	roots, err := tds.computeTrieRoots(true, ctx)
+	roots, err := tds.computeTrieRoots(ctx, true)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -455,8 +456,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 }
 
 //todo what is forward?
-// isAccountWithStorageEIPEnabled - EIP2027 adds storage size field to account
-func (tds *TrieDbState) computeTrieRoots(forward bool, ctx context.Context) ([]common.Hash, error) {
+func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -540,7 +540,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool, ctx context.Context) ([]c
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := account.EncodeRLP(isAccountWithStorageEIPEnabled)
+				data, err := account.EncodeRLP(ctx)
 				if err != nil {
 					return nil, err
 				}
@@ -570,7 +570,7 @@ func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.tp.SetBlockNr(blockNr)
 }
 
-func (tds *TrieDbState) UnwindTo(blockNr uint64, computeTrieRoots bool) error {
+func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 	fmt.Printf("Rewinding from block %d to block %d\n", tds.blockNr, blockNr)
 	var accountPutKeys [][]byte
 	var accountPutVals [][]byte
@@ -619,7 +619,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64, computeTrieRoots bool) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(false, false); err != nil {
+	if _, err := tds.computeTrieRoots(ctx,false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {

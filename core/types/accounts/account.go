@@ -1,7 +1,9 @@
 package accounts
 
 import (
+	"context"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"math/big"
 
 	"bytes"
@@ -69,11 +71,11 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 	return rlp.EncodeToBytes(toEncode)
 }
 
-func (a *Account) EncodeRLP(enableStorageSize bool) ([]byte, error) {
+func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 	acc := newAccountCopy(a)
 	toEncode := interface{}(acc)
 
-	if !enableStorageSize {
+	if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
 		toEncode = &accountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,

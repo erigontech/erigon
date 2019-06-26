@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -697,7 +698,9 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	startTime = time.Now()
 	rewindLen := uint64(rewind)
-	err = tds.UnwindTo(baseBlockNr-rewindLen, bc.Config().IsEIP2027(big.NewInt(int64(baseBlockNr-rewindLen))))
+
+	ctx := bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(baseBlockNr-rewindLen)))
+	err = tds.UnwindTo(ctx, baseBlockNr-rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
 	check(err)
 	rewoundBlock_1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
