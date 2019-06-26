@@ -17,8 +17,7 @@ const (
 	IsEWASM                 = "IsEWASM"
 )
 
-func (c *ChainConfig) EipCTX(blockNum *big.Int) context.Context {
-	ctx := context.Background()
+func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = context.WithValue(ctx, IsHomesteadEnabled, c.IsHomestead(blockNum))
 	ctx = context.WithValue(ctx, IsEIP150Enabled, c.IsEIP150(blockNum))
 	ctx = context.WithValue(ctx, IsEIP155Enabled, c.IsEIP155(blockNum))
