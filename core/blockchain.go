@@ -22,12 +22,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+
 	//mrand "math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -675,9 +676,11 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 	return uncles
 }
 
-// TrieNode retrieves a blob of data associated with a trie node (or code hash)
+// ByteCode retrieves the byte code associated with an account
 // either from ephemeral in-memory cache, or from persistent storage.
-func (bc *BlockChain) TrieNode(hash common.Hash) ([]byte, error) {
+func (bc *BlockChain) ByteCode(addr common.Address) ([]byte, error) {
+	// TODO [yperbasis] call State().GetCode() with preimage
+	// TODO [yperbasis] cache vs persistent storage (check vs geth)
 	return nil, nil
 }
 

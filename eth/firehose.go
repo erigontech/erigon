@@ -1,6 +1,7 @@
 package eth
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 )
 
@@ -35,4 +36,25 @@ const (
 type firehosePeer struct {
 	*p2p.Peer
 	rw p2p.MsgReadWriter
+}
+
+type accountAndHash struct {
+	Account []byte      // account address or hash thereof
+	Hash    common.Hash // TODO [yperbasis] potentially allow nil Hash in getBytecodeMsg
+}
+
+type getBytecodeMsg struct {
+	ID  uint64
+	Ref []accountAndHash
+}
+
+type bytecodeMsg struct {
+	ID   uint64
+	Code [][]byte
+}
+
+// SendByteCode sends a BytecodeCode message.
+func (p *firehosePeer) SendByteCode(id uint64, data [][]byte) error {
+	msg := bytecodeMsg{ID: id, Code: data}
+	return p2p.Send(p.rw, BytecodeCode, msg)
 }

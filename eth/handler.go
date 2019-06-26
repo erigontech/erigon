@@ -173,9 +173,14 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 		Length:  FirehoseLengths[0],
 		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
 			peer := &firehosePeer{Peer: p, rw: rw}
-			manager.wg.Add(1)
-			defer manager.wg.Done()
-			return manager.handleFirehose(peer)
+			select {
+			case <-manager.quitSync:
+				return p2p.DiscQuitting
+			default:
+				manager.wg.Add(1)
+				defer manager.wg.Done()
+				return manager.handleFirehose(peer)
+			}
 		},
 		NodeInfo: func() interface{} {
 			return manager.NodeInfo()
@@ -727,7 +732,46 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case msg.Code == GetBytecodeCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		// Decode the retrieval message
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+		var reqID uint64
+		if err := msgStream.Decode(&reqID); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		// Gather bytecodes until the fetch or network limits is reached
+		var (
+			responseSize int
+			code         [][]byte
+		)
+		for responseSize < softResponseLimit && len(code) < downloader.MaxStateFetch {
+			var requested accountAndHash
+			if err := msgStream.Decode(&requested); err == rlp.EOL {
+				break
+			} else if err != nil {
+				return errResp(ErrDecode, "msg %v: %v", msg, err)
+			}
+
+			if len(requested.Account) == 32 {
+				return errResp(ErrNotImplemented, "address hash isn't supported yet")
+			} else if len(requested.Account) != 20 {
+				return errResp(ErrDecode, "not an account address or its hash")
+			}
+			address := common.BytesToAddress(requested.Account)
+
+			// Retrieve requested byte code, stopping if enough was found
+			if entry, err := pm.blockchain.ByteCode(address); err == nil {
+				code = append(code, entry)
+				responseSize += len(entry)
+			}
+		}
+		return p.SendByteCode(reqID, code)
 
 	case msg.Code == BytecodeCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")

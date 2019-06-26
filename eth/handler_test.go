@@ -509,12 +509,33 @@ outer:
 		}
 	}
 	for _, peer := range peers {
-		peer.app.Close()
+		peer.close()
 	}
 	if err != nil {
 		t.Errorf("error matching block by peer: %v", err)
 	}
 	if receivedCount != broadcastExpected {
 		t.Errorf("block broadcast to %d peers, expected %d", receivedCount, broadcastExpected)
+	}
+}
+
+func TestFirehoseBytecode(t *testing.T) {
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 1, nil, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	var reqID uint64 = 3758329
+	accountAddress := common.FromHex("bb9bc244d798123fde783fcc1c72d3bb8c189413")
+	codeHash := common.HexToHash("dddddddddddddddd")
+	var request getBytecodeMsg
+	request.ID = reqID
+	request.Ref = []accountAndHash{{Account: accountAddress, Hash: codeHash}}
+
+	// TODO [yperbasis] create a couple of smart contracts and check that their codes are retrieved correctly
+	codes := bytecodeMsg{ID: reqID, Code: [][]byte{nil}}
+
+	p2p.Send(peer.app, GetBytecodeCode, request)
+	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {
+		t.Errorf("unexpected BytecodeCode response: %v", err)
 	}
 }

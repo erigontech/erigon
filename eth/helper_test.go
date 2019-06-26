@@ -153,6 +153,12 @@ type testPeer struct {
 	*peer
 }
 
+type testFirehosePeer struct {
+	net  p2p.MsgReadWriter // Network layer reader/writer to simulate remote messaging
+	app  *p2p.MsgPipeRW    // Application layer reader/writer to simulate the local side
+	peer *firehosePeer
+}
+
 // newTestPeer creates a new peer registered at the given protocol manager.
 func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*testPeer, <-chan error) {
 	// Create a message pipe to communicate through
@@ -187,6 +193,31 @@ func newTestPeer(name string, version int, pm *ProtocolManager, shake bool) (*te
 	return tp, errc
 }
 
+func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <-chan error) {
+	// Create a message pipe to communicate through
+	app, net := p2p.MsgPipe()
+
+	// Generate a random id and create the peer
+	var id enode.ID
+	rand.Read(id[:])
+
+	peer := &firehosePeer{Peer: p2p.NewPeer(id, name, nil), rw: net}
+
+	// Start the peer on a new thread
+	errc := make(chan error, 1)
+	go func() {
+		select {
+		case <-pm.quitSync:
+			errc <- p2p.DiscQuitting
+		default:
+			errc <- pm.handleFirehose(peer)
+		}
+	}()
+
+	tp := &testFirehosePeer{app: app, net: net, peer: peer}
+	return tp, errc
+}
+
 // handshake simulates a trivial handshake that expects the same state from the
 // remote side as we are simulating locally.
 func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesis common.Hash) {
@@ -208,5 +239,9 @@ func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesi
 // close terminates the local side of the peer, notifying the remote protocol
 // manager of termination.
 func (p *testPeer) close() {
+	p.app.Close()
+}
+
+func (p *testFirehosePeer) close() {
 	p.app.Close()
 }
