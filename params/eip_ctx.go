@@ -15,6 +15,7 @@ const (
 	IsConstantinopleEnabled = "IsConstantinopleEnabled"
 	IsPetersburgEnabled     = "IsPetersburgEnabled"
 	IsEWASM                 = "IsEWASM"
+	BlockNumber				= "BlockNumber"
 )
 
 func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int) context.Context {
@@ -27,6 +28,7 @@ func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int)
 	ctx = context.WithValue(ctx, IsConstantinopleEnabled, c.IsConstantinople(blockNum))
 	ctx = context.WithValue(ctx, IsPetersburgEnabled, c.IsPetersburg(blockNum))
 	ctx = context.WithValue(ctx, IsEWASM, c.IsEWASM(blockNum))
+	ctx = context.WithValue(ctx, BlockNumber, blockNum)
 	return ctx
 }
 
