@@ -129,8 +129,10 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	block, _, _, _ := t.genesis(config).ToBlock(nil)
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr+1
+	ctx = config.WithEIPsEnabledCTX(ctx, big.NewInt(int64(writeBlockNr)))
+
 	db := ethdb.NewMemDatabase()
-	statedb, tds, err := MakePreState(config.WithEIPsEnabledCTX(ctx, big.NewInt(int64(writeBlockNr))), db, t.json.Pre, readBlockNr)
+	statedb, tds, err := MakePreState(ctx, db, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("Error in MakePreState: %v", err)
 	}
@@ -140,9 +142,9 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if err != nil {
 		return nil, nil, common.Hash{}, err
 	}
-	context := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
-	context.GetHash = vmTestBlockHash
-	evm := vm.NewEVM(context, statedb, config, vmconfig)
+	evmCtx := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
+	evmCtx.GetHash = vmTestBlockHash
+	evm := vm.NewEVM(evmCtx, statedb, config, vmconfig)
 
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
@@ -151,7 +153,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	statedb.Finalise(config.WithEIPsEnabledCTX(ct.Background(), block.Number()), tds.TrieStateWriter())
+	statedb.Finalise(ctx, tds.TrieStateWriter())
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -159,7 +161,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
+	statedb.Finalise(ctx, tds.TrieStateWriter())
 
 	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
@@ -197,7 +199,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.Finalise(ct.Background(), tds.TrieStateWriter()); err != nil {
+	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
