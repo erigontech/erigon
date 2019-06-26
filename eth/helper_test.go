@@ -22,6 +22,7 @@ package eth
 import (
 	"crypto/ecdsa"
 	"crypto/rand"
+	"log"
 	"math/big"
 	"sort"
 	"sync"
@@ -199,7 +200,9 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 
 	// Generate a random id and create the peer
 	var id enode.ID
-	rand.Read(id[:])
+	if _, err := rand.Read(id[:]); err != nil {
+		log.Fatal(err)
+	}
 
 	peer := &firehosePeer{Peer: p2p.NewPeer(id, name, nil), rw: net}
 

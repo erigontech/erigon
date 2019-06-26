@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -534,7 +536,7 @@ func TestFirehoseBytecode(t *testing.T) {
 	// TODO [yperbasis] create a couple of smart contracts and check that their codes are retrieved correctly
 	codes := bytecodeMsg{ID: reqID, Code: [][]byte{nil}}
 
-	p2p.Send(peer.app, GetBytecodeCode, request)
+	assert.NoError(t, p2p.Send(peer.app, GetBytecodeCode, request))
 	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {
 		t.Errorf("unexpected BytecodeCode response: %v", err)
 	}
