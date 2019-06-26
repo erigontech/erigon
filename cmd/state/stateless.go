@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -62,11 +63,11 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	}
 	dbstate.SetBlockNr(block.NumberU64())
 
-	isEIP2027 := chainConfig.IsEIP2027(header.Number)
-	if err := statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, dbstate); err != nil {
+	ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
+	if err := statedb.Commit(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
+	if err := dbstate.CheckRoot(ctx, header.Root, checkRoot); err != nil {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		f, err1 := os.Create(filename)
 		if err1 == nil {
@@ -217,14 +218,14 @@ func stateless(genLag, consLag int) {
 			fmt.Printf("Finalize of block %d failed: %v\n", blockNum, err)
 			return
 		}
-		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+
+		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
+		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
 			return
 		}
 
-		isEIP2027 := chainConfig.IsEIP2027(header.Number)
-
-		roots, err := tds.ComputeTrieRoots(isEIP2027)
+		roots, err := tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
 			return
@@ -241,7 +242,7 @@ func stateless(genLag, consLag int) {
 		}
 		tds.SetBlockNr(blockNum)
 
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
 			return

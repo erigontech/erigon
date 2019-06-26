@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"os"
@@ -434,7 +435,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 	return nil
 }
 
-func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
+func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	// Process updates first, deletes next
@@ -490,7 +491,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			data, err := account.Encode(false)
+			data, err := account.Encode(ctx)
 			if err != nil {
 				return err
 			}
