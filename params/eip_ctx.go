@@ -32,7 +32,7 @@ func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int)
 	return ctx
 }
 
-func CtxGetValue(ctx context.Context, name string) bool {
+func GetForkFlag(ctx context.Context, name string) bool {
 	b := ctx.Value(name)
 	if b == nil {
 		return false

@@ -1,14 +1,12 @@
 package accounts
 
 import (
-	"context"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
-	"math/big"
-
 	"bytes"
 	"context"
+	"math/big"
+
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -62,7 +60,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 			return rlp.EncodeToBytes(toEncode)
 		}
 
-		if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
+		if !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
 			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -83,7 +81,7 @@ func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 		return rlp.EncodeToBytes(toEncode)
 	}
 
-	if !params.CtxGetValue(ctx, params.IsEIP2027Enabled) {
+	if !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
 		toEncode = &accountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,

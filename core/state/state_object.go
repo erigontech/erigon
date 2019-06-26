@@ -22,7 +22,6 @@ import (
 	"io"
 	"math/big"
 
-	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
