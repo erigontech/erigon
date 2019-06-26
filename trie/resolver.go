@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"runtime/debug"
@@ -368,7 +369,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, err
 			}
 
-			tr.value, err = value.EncodeRLP(false)
+			tr.value, err = value.EncodeRLP(context.Background())
 			if err != nil {
 				return false, err
 			}
