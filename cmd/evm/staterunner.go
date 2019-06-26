@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -96,12 +97,9 @@ func stateTestCmd(ctx *cli.Context) error {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
 			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
-			statedb, tds, err := test.Run(st, cfg)
+			statedb, tds, root, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
 			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				statedb.Finalise(false, tds.TrieStateWriter())
-				roots, _ := tds.ComputeTrieRoots(false)
-				root := roots[len(roots)-1]
 				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root)
 			}
 			if err != nil {

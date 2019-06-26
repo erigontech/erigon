@@ -18,6 +18,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -1084,6 +1085,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 	var offset int
 	var parent *types.Block
 	var parentNumber uint64 = chain[0].NumberU64() - 1
+	parentBlockCtx := bc.chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(parentNumber)))
 	// Find correct insertion point for this chain
 	if !bc.noHistory {
 		preBlocks := []*types.Block{}
@@ -1210,7 +1212,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			if err = bc.trieDbState.UnwindTo(readBlockNr, bc.chainConfig.IsEIP2027(big.NewInt(int64(readBlockNr)))); err != nil {
+			if err = bc.trieDbState.UnwindTo(parentBlockCtx, readBlockNr); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
