@@ -767,7 +767,7 @@ func (sdb *StateDB) Finalise(ctx context.Context, stateWriter StateWriter) error
 			continue
 		}
 
-		if stateObject.suicided || (params.GetForkFlag(ctx, params.IsEIP2027Enabled) && stateObject.empty()) {
+		if stateObject.suicided || (params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
 			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
 				return err
 			}
