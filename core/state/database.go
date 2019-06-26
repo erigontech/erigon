@@ -628,7 +628,7 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 			}
 		} else {
 			//todo is aggregateBuffer collect data from one block?
-			value, err := account.Encode(false)
+			value, err := account.Encode(ctx)
 			if err != nil {
 				return err
 			}
