@@ -17,7 +17,6 @@
 package tests
 
 import (
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -72,14 +71,10 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		switch i {
 		case 0:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-
-			fmt.Println("tx 1", tx.Hash().String())
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-			fmt.Println("tx 2", tx.Hash().String())
 		case 2:
 			tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
-			fmt.Println("tx 3", tx.Hash().String())
 		}
 		if err != nil {
 			t.Fatal(err)
@@ -111,7 +106,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	storageSize := st.StorageSize(address)
 	if storageSize != nil {
-		t.Fatal("storage size should be nil")
+		t.Fatal("storage size should be nil at the block 0")
 	}
 
 
@@ -131,7 +126,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	storageSize = st.StorageSize(address)
 	if storageSize != nil {
-		t.Fatal("storage size should be nil")
+		t.Fatal("storage size should be nil at the block 1")
 	}
 
 
@@ -150,11 +145,11 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	t.Log(string(tr.Dump()))
-	storageSize = st.StorageSize(address)
+	storageSize = st.StorageSize(contractAddress)
 	if storageSize == nil {
-		t.Fatal("storage size should be XXX")
+		t.Fatal("storage size should not be nil")
 	}
-	if *storageSize != 0 {
-		t.Fatal("storage size should be XXX")
+	if *storageSize == 0 {
+		t.Fatal("storage size should not be 0", *storageSize)
 	}
 }
