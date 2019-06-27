@@ -6,7 +6,6 @@ linters:
     - deadcode
     - govet
     - structcheck
-    - stylecheck
 
   disable-all: true
 
