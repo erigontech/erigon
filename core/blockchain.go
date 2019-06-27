@@ -916,7 +916,8 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 
 	tds.SetBlockNr(block.NumberU64())
-	if err := state.Commit(bc.chainConfig.IsEIP158(block.Number()), bc.chainConfig.IsEIP2027(block.Number()), tds.DbStateWriter()); err != nil {
+	ctx := bc.chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number())
+	if err := state.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
 	}
 	if bc.enableReceipts {

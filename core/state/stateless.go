@@ -421,7 +421,7 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	}
 }
 
-func (s *Stateless) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -524,7 +524,7 @@ func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (s *Stateless) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

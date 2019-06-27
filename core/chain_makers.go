@@ -205,10 +205,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
-			if err := statedb.Finalise(config.WithEIPsEnabledCTX(context.Background(), b.header.Number), tds.TrieStateWriter()); err != nil {
+			ctx := config.WithEIPsEnabledCTX(context.Background(), b.header.Number)
+			if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
-			roots, err := tds.ComputeTrieRoots(config.IsEIP2027(b.header.Number))
+			roots, err := tds.ComputeTrieRoots(ctx)
 			if err != nil {
 				panic(err)
 			}

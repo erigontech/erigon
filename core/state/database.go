@@ -106,11 +106,11 @@ func NewNoopWriter() *NoopWriter {
 	return &NoopWriter{}
 }
 
-func (nw *NoopWriter) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (nw *NoopWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -963,7 +963,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
-func (tsw *TrieStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
+func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != err {
 		return err

@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -122,12 +121,17 @@ func newObject(db *StateDB, address common.Address, data, original accounts.Acco
 
 // EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
-	//todo we can't change rlp.Encoder
-	accountBytes, err := so.data.Encode(false)
+	//fixme we need to decide if we need stateObject.EncodeRLP
+	panic("stateObject.EncodeRLP")
+
+	/*
+	accountBytes, err := so.data.Encode(ctx)
 	if err != nil {
 		return err
 	}
 	return rlp.Write(w, accountBytes)
+	*/
+	return nil
 }
 
 // setError remembers the first non-nil error it is called with.

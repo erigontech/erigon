@@ -96,7 +96,7 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	return tds.currentDb.Put(AccountsBucket, addrHash[:], data)
 }
 
-func (tds *TraceDbState) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

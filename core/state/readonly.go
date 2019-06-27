@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -163,11 +164,11 @@ func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	return len(code), nil
 }
 
-func (dbs *DbState) UpdateAccountData(address common.Address, original, account *accounts.Account) error {
+func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *DbState) DeleteAccount(address common.Address, original *accounts.Account) error {
+func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
