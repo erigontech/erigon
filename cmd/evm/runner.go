@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -211,12 +212,12 @@ func runCmd(ctx *cli.Context) error {
 	execTime := time.Since(tstart)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		var isEIP2027 bool
+		ctx := context.Background()
 		if chainConfig != nil {
-			isEIP2027 = chainConfig.IsEIP2027(runtimeConfig.BlockNumber)
+			ctx = chainConfig.WithEIPsEnabledCTX(context.Background(), runtimeConfig.BlockNumber)
 		}
 
-		if err = statedb.Commit(true, isEIP2027, state.NewNoopWriter()); err != nil {
+		if err = statedb.Commit(ctx, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}

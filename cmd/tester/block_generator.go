@@ -170,13 +170,13 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 			return nil, err
 		}
-		if err := statedb.Finalise(chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number), tds.TrieStateWriter()); err != nil {
+		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
+		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
-		isEIP2027 := chainConfig.IsEIP2027(header.Number)
 		var roots []common.Hash
-		roots, err = tds.ComputeTrieRoots(isEIP2027)
+		roots, err = tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -188,7 +188,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
 		tds.SetBlockNr(uint64(height))
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), isEIP2027, tds.DbStateWriter())
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
@@ -273,17 +273,18 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		statedb := state.New(tds)
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
-		if err := statedb.Finalise(config.WithEIPsEnabledCTX(context.Background(), header.Number), tds.TrieStateWriter()); err != nil {
+		ctx := config.WithEIPsEnabledCTX(context.Background(), header.Number)
+		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
 		var roots []common.Hash
-		roots, err = tds.ComputeTrieRoots(config.IsEIP2027(header.Number))
+		roots, err = tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			return nil, err
 		}
 		header.Root = roots[len(roots)-1]
-		err = statedb.Commit(config.WithEIPsEnabledCTX(context.Background(), header.Number), tds.DbStateWriter())
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}

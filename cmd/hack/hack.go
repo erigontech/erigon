@@ -1181,7 +1181,8 @@ func repair() {
 		// apply mining rewards to the geth stateDB
 		accumulateRewards(chainConfig, statedb, header, block.Uncles())
 		dbstate.SetBlockNr(block.NumberU64())
-		if err = statedb.Commit(chainConfig.IsEIP158(block.Number()), chainConfig.IsEIP2027(block.Number()), dbstate); err != nil {
+		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number())
+		if err = statedb.Commit(ctx, dbstate); err != nil {
 			panic(err)
 		}
 		dbstate.CheckKeys()

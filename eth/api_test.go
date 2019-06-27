@@ -59,14 +59,14 @@ func TestStorageRangeAt(t *testing.T) {
 		t.Fatal("error while finalising state", err)
 	}
 
-	_, err = tds.ComputeTrieRoots(false)
+	_, err = tds.ComputeTrieRoots(context.Background())
 	if err != nil {
 		t.Fatal("error while computing trie roots of the state", err)
 	}
 
 	tds.SetBlockNr(1)
 
-	err = statedb.Commit(false, false, tds.DbStateWriter())
+	err = statedb.Commit(context.Background(), tds.DbStateWriter())
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}

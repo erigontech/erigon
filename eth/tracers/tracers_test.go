@@ -17,6 +17,7 @@
 package tracers
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
@@ -143,7 +144,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	    result: 0x60f3f640a8508fC6a86d45DF051962668E1e8AC7
 	*/
 	origin, _ := signer.Sender(tx)
-	context := vm.Context{
+	evmContext := vm.Context{
 		CanTransfer: core.CanTransfer,
 		Transfer:    core.Transfer,
 		Origin:      origin,
@@ -167,7 +168,8 @@ func TestPrestateTracerCreate2(t *testing.T) {
 		Code:    []byte{},
 		Balance: big.NewInt(500000000000000),
 	}
-	statedb, _, err := tests.MakePreState(ethdb.NewMemDatabase(), alloc, 0)
+	ctx := params.MainnetChainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(1))
+	statedb, _, err := tests.MakePreState(ctx, ethdb.NewMemDatabase(), alloc, 0)
 	if err != nil {
 		t.Errorf("Could not make prestate: %v", err)
 	}
@@ -176,7 +178,7 @@ func TestPrestateTracerCreate2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create call tracer: %v", err)
 	}
-	evm := vm.NewEVM(context, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
+	evm := vm.NewEVM(evmContext, statedb, params.MainnetChainConfig, vm.Config{Debug: true, Tracer: tracer})
 
 	msg, err := tx.AsMessage(signer)
 	if err != nil {
@@ -232,7 +234,7 @@ func TestCallTracer(t *testing.T) {
 			signer := types.MakeSigner(test.Genesis.Config, new(big.Int).SetUint64(uint64(test.Context.Number)))
 			origin, _ := signer.Sender(tx)
 
-			context := vm.Context{
+			evmContext := vm.Context{
 				CanTransfer: core.CanTransfer,
 				Transfer:    core.Transfer,
 				Origin:      origin,
@@ -244,7 +246,9 @@ func TestCallTracer(t *testing.T) {
 				GasPrice:    tx.GasPrice(),
 			}
 			db := ethdb.NewMemDatabase()
-			statedb, _, err := tests.MakePreState(db, test.Genesis.Alloc, 0)
+
+			ctx := test.Genesis.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(1))
+			statedb, _, err := tests.MakePreState(ctx, db, test.Genesis.Alloc, 0)
 			if err != nil {
 				t.Errorf("Could not make prestate: %v", err)
 			}
@@ -254,7 +258,7 @@ func TestCallTracer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to create call tracer: %v", err)
 			}
-			evm := vm.NewEVM(context, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
+			evm := vm.NewEVM(evmContext, statedb, test.Genesis.Config, vm.Config{Debug: true, Tracer: tracer})
 
 			msg, err := tx.AsMessage(signer)
 			if err != nil {
