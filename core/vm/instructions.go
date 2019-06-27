@@ -639,6 +639,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
+	fmt.Println("EVM opSstore", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
 	if interpreter.evm.ChainConfig().IsEIP2027(interpreter.evm.BlockNumber) {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
 	}
@@ -720,6 +721,7 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 		stack.push(addr.Big())
 	}
 
+	fmt.Println("EVM Create", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
 	}
@@ -756,6 +758,7 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memo
 	contract.Gas += returnGas
 	interpreter.intPool.put(endowment, offset, size, salt)
 
+	fmt.Println("EVM Create2", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
 	}

@@ -147,9 +147,9 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	t.Log(string(tr.Dump()))
 	storageSize = st.StorageSize(contractAddress)
 	if storageSize == nil {
-		t.Fatal("storage size should not be nil")
+		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
 	}
 	if *storageSize == 0 {
-		t.Fatal("storage size should not be 0", *storageSize)
+		t.Fatal("storage size should not be 0", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 }

@@ -330,6 +330,9 @@ func (so *stateObject) setNonce(nonce uint64) {
 }
 
 func (so *stateObject) StorageSize() *uint64 {
+	if so.data.StorageSize != nil {
+		fmt.Println("stateObject.StorageSize", common.Bytes2Hex(so.data.CodeHash), *so.data.StorageSize)
+	}
 	return so.data.StorageSize
 }
 
@@ -338,6 +341,9 @@ func (so *stateObject) SetStorageSize(size *uint64) {
 		account:  &so.address,
 		prevsize: so.data.StorageSize,
 	})
+	if size != nil {
+		fmt.Println("stateObject.SetStorageSize", common.Bytes2Hex(so.data.CodeHash), *size)
+	}
 	so.setStorageSize(size)
 }
 

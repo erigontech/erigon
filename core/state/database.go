@@ -145,6 +145,10 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
+			if account != nil && account.StorageSize != nil {
+				fmt.Println("Buffer.detachAccounts", common.Bytes2Hex(account.CodeHash), *account.StorageSize)
+			}
+
 			b.accountUpdates[addrHash] = &accounts.Account{
 				Nonce:       account.Nonce,
 				Balance:     new(big.Int).Set(account.Balance),
@@ -588,6 +592,9 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 				if err != nil {
 					return err
 				}
+				if acc != nil && acc.StorageSize != nil {
+					fmt.Println("TrieDbState.UnwindTo", common.Bytes2Hex(acc.CodeHash), *acc.StorageSize)
+				}
 				b.accountUpdates[addrHash] = acc
 				accountPutKeys = append(accountPutKeys, key)
 				accountPutVals = append(accountPutVals, value)
@@ -927,6 +934,9 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != nil {
 		return err
+	}
+	if account != nil && account.StorageSize != nil {
+		fmt.Println("TrieStateWriter.UpdateAccountData", common.Bytes2Hex(account.CodeHash), *account.StorageSize)
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	return nil

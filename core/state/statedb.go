@@ -506,19 +506,23 @@ var nullLocation = common.Hash{}
 var nullValue = common.Big0
 
 func (sdb *StateDB) SetStorageSize(addr common.Address, loc common.Hash, val *big.Int) {
-	if loc == nullLocation && val == nullValue {
+	fmt.Println("!!!! 1", addr.Hex())
+
+	if loc == nullLocation && val != nullValue {
+		fmt.Println("!!!! inc", addr.Hex())
 		sdb.IncreaseStorageSize(addr)
 	}
 	if loc != nullLocation && val == nullValue {
+		fmt.Println("!!!! dec", addr.Hex())
 		sdb.DecreaseStorageSize(addr)
+	}
+	if loc == nullLocation && val == nullValue {
+		sdb.changeStorageSize(addr, 0)
+		fmt.Println("third", addr.Hex(), *sdb.StorageSize(addr))
 	}
 }
 
 func (sdb *StateDB) changeStorageSize(addr common.Address, sizeDiff int64) {
-	if sizeDiff == 0 {
-		return
-	}
-
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
