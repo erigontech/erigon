@@ -55,7 +55,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		genesisDb = db.MemCopy()
 		// this code generates a log
 		signer = types.NewEIP155Signer(gspec.Config.ChainID)
-		code   = common.Hex2Bytes("60606040525b7f24ec1d3ff24c2f6ff210738839dbc339cd45a5294d85c79361016243157aae7b60405180905060405180910390a15b600a8060416000396000f360606040526008565b00")
 	)
 
 	engine := ethash.NewFaker()
@@ -66,11 +65,13 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-
-	contractBackend := backends.NewSimulatedBackendMock(genesis, gspec.Config, blockchain, engine, genesisDb)
+	contractBackend := backends.NewSimulatedBackendMock(genesis, gspec.Config, blockchain, engine, db)
 	transactOpts := bind.NewKeyedTransactor(key)
 
-	blocks, receipts := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	var contractAddress common.Address
+	var eipContract *contracts.Eip2027
+
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
@@ -82,11 +83,9 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
 			//tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
-			eipContactAddress, tx, eipContract, err := contracts.DeployEip2027(transactOpts, contractBackend)
-			if err != nil {
-				t.Fatalf("can't deploy root registry: %v", err)
-			}
-			contractBackend.Commit()
+			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
+
+			//contractBackend.Commit()
 
 		}
 		if err != nil {
@@ -94,13 +93,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		}
 		block.AddTx(tx)
 	})
-
-	contractReceipt := receipts[2][0]
-	if contractReceipt == nil {
-		t.Error("expected contractReceipt to exist")
-	}
-
-	contractAddress := contractReceipt.ContractAddress
 
 	// BLOCK 0
 	// account must exist pre eip 161
@@ -165,4 +157,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if *storageSize == 0 {
 		t.Fatal("storage size should not be 0", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
+
+	_ = eipContract
 }
