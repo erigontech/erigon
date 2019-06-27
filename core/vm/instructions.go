@@ -639,7 +639,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	val := stack.pop()
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
-	if interpreter.evm.ChainConfig().IsEIP158(interpreter.evm.BlockNumber) {
+	if interpreter.evm.ChainConfig().IsEIP2027(interpreter.evm.BlockNumber) {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
 	}
 
