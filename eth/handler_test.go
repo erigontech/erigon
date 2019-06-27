@@ -303,7 +303,7 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 func TestGetReceipt63(t *testing.T) { testGetReceipt(t, 63) }
 
 func testGetReceipt(t *testing.T, protocol int) {
-	// Define three accounts to simulate transactions with
+	// Define two accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
@@ -522,19 +522,60 @@ outer:
 }
 
 func TestFirehoseBytecode(t *testing.T) {
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 1, nil, nil)
+	// Define two accounts to simulate transactions with
+	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
+	acc2Addr := crypto.PubkeyToAddress(acc2Key.PublicKey)
+
+	// Two byte codes
+	runtimeCode1 := common.FromHex("60606040525b600080fd00a165627a7a7230582012c9bd00152fa1c480f6827f81515bb19c3e63bf7ed9ffbb5fda0265983ac7980029")
+	contractCode1 := append(common.FromHex("606060405260186000553415601357600080fd5b5b60368060216000396000f300"), runtimeCode1...)
+	runtimeCode2 := common.FromHex("60606040525bfe00a165627a7a72305820c442e8fb2f1f8c3e73151a596376ff0f8da7f4de18ed79a6471c1ec584a14b080029")
+	contractCode2 := append(common.FromHex("606060405260046000553415601057fe5b5b603380601e6000396000f300"), runtimeCode2...)
+
+	signer := types.HomesteadSigner{}
+	// Chain generator with a couple of dummy contracts
+	generator := func(i int, block *core.BlockGen) {
+		switch i {
+		case 0:
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err1)
+			block.AddTx(tx1)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc1Addr), new(big.Int), 1e5, nil, contractCode1), signer, acc1Key)
+			assert.NoError(t, err2)
+			block.AddTx(tx2)
+		case 1:
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc2Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err1)
+			block.AddTx(tx1)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc2Addr), new(big.Int), 1e5, nil, contractCode2), signer, acc2Key)
+			assert.NoError(t, err2)
+			block.AddTx(tx2)
+		}
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
+	block1 := pm.blockchain.GetBlockByNumber(1)
+	receipts1 := pm.blockchain.GetReceiptsByHash(block1.Hash())
+	contract1Addr := receipts1[1].ContractAddress
+
+	block2 := pm.blockchain.GetBlockByNumber(2)
+	receipts2 := pm.blockchain.GetReceiptsByHash(block2.Hash())
+	contract2Addr := receipts2[1].ContractAddress
+
 	var reqID uint64 = 3758329
-	accountAddress := common.FromHex("bb9bc244d798123fde783fcc1c72d3bb8c189413")
-	codeHash := common.HexToHash("dddddddddddddddd")
 	var request getBytecodeMsg
 	request.ID = reqID
-	request.Ref = []accountAndHash{{Account: accountAddress, Hash: codeHash}}
+	request.Ref = []accountAndHash{
+		{Account: contract1Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode1)},
+		{Account: contract2Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode2)},
+	}
 
-	// TODO [yperbasis] create a couple of smart contracts and check that their codes are retrieved correctly
-	codes := bytecodeMsg{ID: reqID, Code: [][]byte{nil}}
+	codes := bytecodeMsg{ID: reqID, Code: [][]byte{runtimeCode1, runtimeCode2}}
 
 	assert.NoError(t, p2p.Send(peer.app, GetBytecodeCode, request))
 	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {

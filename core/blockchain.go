@@ -676,12 +676,13 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 	return uncles
 }
 
-// ByteCode retrieves the byte code associated with an account
-// either from ephemeral in-memory cache, or from persistent storage.
+// ByteCode retrieves the runtime byte code associated with an account.
 func (bc *BlockChain) ByteCode(addr common.Address) ([]byte, error) {
-	// TODO [yperbasis] call State().GetCode() with preimage
-	// TODO [yperbasis] cache vs persistent storage (check vs geth)
-	return nil, nil
+	stateDB, _, err := bc.State()
+	if err != nil {
+		return nil, err
+	}
+	return stateDB.GetCode(addr), nil
 }
 
 // Stop stops the blockchain service. If any imports are currently in progress
