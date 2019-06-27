@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -170,7 +171,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		blockchain.chainmu.Lock()
 		tds.SetBlockNr(block.NumberU64())
-		if err := statedb.Commit(false, blockchain.chainConfig.IsEIP2027(block.Number()), tds.DbStateWriter()); err != nil {
+		if err := statedb.Commit(blockchain.chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number()), tds.DbStateWriter()); err != nil {
 			return err
 		}
 		if _, err := blockchain.db.Commit(); err != nil {
