@@ -200,7 +200,7 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 
 	// Generate a random id and create the peer
 	var id enode.ID
-	if _, err := rand.Read(id[:]); err != nil {
+	if _, err := rand.Read(id[:]); err != nil { // #nosec G404
 		log.Fatal(err)
 	}
 
