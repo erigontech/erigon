@@ -55,7 +55,7 @@ func TestAccountDecodeNil(t *testing.T) {
 	}
 }
 
-func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
+func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	a := &Account{
 		Nonce:       2,
 		Balance:     new(big.Int).SetInt64(1000),
@@ -77,8 +77,12 @@ func TestAccountEncodeWithCodeWithStorageSize(t *testing.T) {
 
 	isAccountsEqual(t, a, decodedAccount)
 
-	if decodedAccount.StorageSize != nil {
-		t.Fatal("cant decode the account StorageSize - should not nil", decodedAccount)
+	if decodedAccount.StorageSize == nil {
+		t.Fatal("storage size for decoded account shouldn't be nil")
+	}
+
+	if *decodedAccount.StorageSize != *a.StorageSize {
+		t.Fatal("cant decode the account StorageSize - should not nil", decodedAccount.StorageSize, a.StorageSize)
 	}
 }
 
@@ -105,16 +109,16 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 }
 
 func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
-	a := &Account{
+	account := &Account{
 		Nonce:    2,
 		Balance:  new(big.Int).SetInt64(1000),
 		Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
 	}
 
-	encodedAccount, err := a.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
+	encodedAccount, err := account.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 	if err != nil {
-		t.Fatal("cant encode the account", err, a)
+		t.Fatal("cant encode the account", err, account)
 	}
 
 	decodedAccount, err := Decode(encodedAccount)
@@ -122,8 +126,10 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
-	isAccountsEqual(t, a, decodedAccount)
-	isStorageSizeEqual(t, a, decodedAccount)
+	//after enable eip2027 storage size for account with empty storage size equals to 0
+	account.StorageSize = new(uint64)
+	isAccountsEqual(t, account, decodedAccount)
+	isStorageSizeEqual(t, account, decodedAccount)
 }
 
 func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {

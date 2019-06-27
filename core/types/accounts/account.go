@@ -56,6 +56,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		acc := newAccountCopy(a)
 		toEncode = acc
 
+		//fixme we have an assumpiton that if we receive
 		if acc.StorageSize != nil {
 			return rlp.EncodeToBytes(toEncode)
 		}
