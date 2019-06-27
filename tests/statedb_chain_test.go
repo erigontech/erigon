@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"context"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"math/big"
@@ -85,13 +86,15 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 			//tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
 
+			block.TxNonce(address)
 			//contractBackend.Commit()
 
 		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		block.AddTx(tx)
+		contractBackend.SendTransaction(gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number()), tx)
+		//block.AddTx(tx)
 	})
 
 	// BLOCK 0
