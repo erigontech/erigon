@@ -17,6 +17,8 @@
 package tests
 
 import (
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"math/big"
 	"testing"
 
@@ -28,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/tests/contracts"
 )
 
 func TestEIP2027AccountStorageSize(t *testing.T) {
@@ -63,6 +66,10 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
+
+	contractBackend := backends.NewSimulatedBackendMock(genesis, gspec.Config, blockchain, engine, genesisDb)
+	transactOpts := bind.NewKeyedTransactor(key)
+
 	blocks, receipts := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
@@ -74,7 +81,13 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
+			//tx, err = types.SignTx(types.NewContractCreation(block.TxNonce(address), new(big.Int), 1000000, new(big.Int), code), signer, key)
+			eipContactAddress, tx, eipContract, err := contracts.DeployEip2027(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatalf("can't deploy root registry: %v", err)
+			}
+			contractBackend.Commit()
+
 		}
 		if err != nil {
 			t.Fatal(err)
