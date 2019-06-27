@@ -18,6 +18,7 @@ package tests
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -80,7 +81,8 @@ type vmExecMarshaling struct {
 
 func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	db := ethdb.NewMemDatabase()
-	statedb, tds, err := MakePreState(db, t.json.Pre, blockNr)
+	ctx := params.MainnetChainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNr)))
+	statedb, tds, err := MakePreState(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
 		return fmt.Errorf("Error in MakePreState: %v", err)
 	}
@@ -89,7 +91,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 		return fmt.Errorf("Execution error: %v", err)
 	}
 
-	statedb.Finalise(false, tds.TrieStateWriter())
+	statedb.Finalise(ctx, tds.TrieStateWriter())
 	if t.json.GasRemaining == nil {
 		if err == nil {
 			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")
@@ -113,7 +115,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	_, err = tds.ComputeTrieRoots(false)
+	_, err = tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}
