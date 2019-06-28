@@ -56,7 +56,11 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 				EIP2027Block:   big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
-			Alloc: core.GenesisAlloc{address: {Balance: funds}, address1: {Balance: funds}, address2: {Balance: funds}},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+				address1: {Balance: funds},
+				address2: {Balance: funds},
+			},
 		}
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
@@ -132,7 +136,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		}
 
 		block.AddTx(tx)
-		//contractBackend.SendTransaction(gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number()), tx)
 		contractBackend.Commit()
 	})
 
