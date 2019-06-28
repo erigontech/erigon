@@ -92,6 +92,32 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 	return backend
 }
 
+// NewSimulatedBackend creates a new binding backend using a simulated blockchain
+// for testing purposes.
+func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
+	database := ethdb.NewMemDatabase()
+	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+	genesisBlock := genesis.MustCommit(database)
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		panic(fmt.Sprintf("%v", err))
+	}
+	blockchain.EnableReceipts(true)
+
+	backend := &SimulatedBackend{
+		prependBlock: genesisBlock,
+		prependDb:    database.MemCopy(),
+		database:     database,
+		engine:       engine,
+		blockchain:   blockchain,
+		config:       genesis.Config,
+		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
+	}
+	backend.emptyPendingBlock()
+	return backend
+}
+
 func NewSimulatedBackendMock(genesisBlock *types.Block, config *params.ChainConfig,
 	blockchain *core.BlockChain, engine consensus.Engine, database ethdb.Database) *SimulatedBackend {
 

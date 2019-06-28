@@ -634,13 +634,13 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 }
 
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
-	fmt.Println("opSstore")
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
+	fmt.Println("opSstore", loc.String(), val.String())
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
 	fmt.Println("EVM opSstore", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
-	if interpreter.evm.ChainConfig().IsEIP2027(interpreter.evm.BlockNumber) {
+	if true {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
 	}
 
@@ -721,10 +721,10 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 		stack.push(addr.Big())
 	}
 
-	fmt.Println("EVM Create", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
-	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
-		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
-	}
+	//fmt.Println("EVM Create", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
+	//if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
+	//	interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
+	//}
 
 	contract.Gas += returnGas
 	interpreter.intPool.put(value, offset, size)
@@ -758,10 +758,10 @@ func opCreate2(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memo
 	contract.Gas += returnGas
 	interpreter.intPool.put(endowment, offset, size, salt)
 
-	fmt.Println("EVM Create2", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
-	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
-		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
-	}
+	//fmt.Println("EVM Create2", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
+	//if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
+	//	interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, big.NewInt(0))
+	//}
 
 	if suberr == errExecutionReverted {
 		return res, nil
