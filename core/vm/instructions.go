@@ -638,15 +638,12 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	val := stack.pop()
 
 	locFromState := interpreter.evm.StateDB.GetState(contract.Address(), loc)
-	fmt.Println("opSstore", loc.String(), val.String(), locFromState.String())
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) && locFromState == (common.Hash{}) {
 		// new value case
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), common.Hash{}, val)
 	}
 
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
-
-	fmt.Println("EVM opSstore", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
 		// existing value case
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)

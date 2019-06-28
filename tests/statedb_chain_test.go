@@ -53,7 +53,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 				HomesteadBlock: new(big.Int),
 				EIP155Block:    new(big.Int),
 				EIP158Block:    big.NewInt(1),
-				EIP2027Block:   big.NewInt(1),
+				EIP2027Block:   big.NewInt(0),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{address: {Balance: funds}, address1: {Balance: funds}, address2: {Balance: funds}},
@@ -72,7 +72,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	//contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
@@ -90,8 +89,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		)
 
 		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
-
-		fmt.Println("!!!", block.Number().String(), block.TxNonce(address))
 
 		switch i {
 		case 0:
@@ -132,7 +129,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		}
 
 		block.AddTx(tx)
-		//contractBackend.SendTransaction(gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number()), tx)
 		contractBackend.Commit()
 	})
 
@@ -203,7 +199,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	st, tr, _ := blockchain.State()
+	st, _, _ = blockchain.State()
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
@@ -212,7 +208,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 2")
 	}
 
-	t.Log(string(tr.Dump()))
+	//t.Log(string(tr.Dump()))
 	storageSize = st.StorageSize(contractAddress)
 	if storageSize == nil {
 		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())

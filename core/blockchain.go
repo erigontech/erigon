@@ -225,7 +225,7 @@ func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		log.Info("Creating StateDB from latest state", "block", currentBlockNr)
 		var err error
-		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr, bc.chainConfig.WithEIPsEnabledCTX(context.Background(), bc.CurrentBlock().Number()))
 		if err != nil {
 			panic(err)
 		}
@@ -423,7 +423,7 @@ func (bc *BlockChain) State() (*state.StateDB, *state.TrieDbState, error) {
 
 // StateAt returns a new mutable state based on a particular point in time.
 func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(root, bc.db, blockNr)
+	tds, err := state.NewTrieDbState(root, bc.db, blockNr, bc.chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNr))))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1190,7 +1190,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		if bc.trieDbState == nil {
 			currentBlockNr := bc.CurrentBlock().NumberU64()
 			log.Info("Creating StateDB from latest state", "block", currentBlockNr)
-			bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+			bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr, bc.chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(currentBlockNr))))
 			if err != nil {
 				return k, events, coalescedLogs, err
 			}

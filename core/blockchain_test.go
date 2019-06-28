@@ -149,7 +149,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			return err
 		}
 		parent := blockchain.GetBlockByHash(block.ParentHash())
-		tds, err := state.NewTrieDbState(parent.Root(), blockchain.db, parent.NumberU64())
+		tds, err := state.NewTrieDbState(parent.Root(), blockchain.db, parent.NumberU64(), blockchain.chainConfig.WithEIPsEnabledCTX(context.Background(), parent.Number()))
 		if err != nil {
 			return err
 		}

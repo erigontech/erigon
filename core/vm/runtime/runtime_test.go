@@ -27,6 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"context"
 )
 
 func TestDefaults(t *testing.T) {
@@ -96,7 +97,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	state := state.New(tds)
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
@@ -153,7 +154,7 @@ func BenchmarkCall(b *testing.B) {
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	var (
-		tds, _   = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		tds, _   = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0, context.Background())
 		statedb  = state.New(tds)
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))

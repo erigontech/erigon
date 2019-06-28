@@ -44,7 +44,7 @@ import (
 func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	state := New(tds)
 
 	// Update it with some accounts
@@ -83,10 +83,10 @@ func TestIntermediateLeaks(t *testing.T) {
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
 	finalDb := ethdb.NewMemDatabase()
-	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0)
+	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0, context.Background())
 	transState := New(transTds)
 	transTds.StartNewBuffer()
-	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0)
+	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0, context.Background())
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
@@ -460,7 +460,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 // See https://github.com/ledgerwatch/turbo-geth/pull/15225#issuecomment-380191512
 func TestCopyOfCopy(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sdbTds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	sdbTds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	sdb := New(sdbTds)
 	sdbTds.StartNewBuffer()
 	addr := common.HexToAddress("aaaa")
@@ -476,7 +476,7 @@ func TestCopyOfCopy(t *testing.T) {
 
 func TestStateDBNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	state := New(tds)
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
@@ -488,7 +488,7 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 
 func TestStateDBNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	state := New(tds)
 	addr := common.Address{2}
 	newObj, _ := state.createObject(addr, nil)
@@ -521,7 +521,7 @@ func TestStateDBNewContractAccount(t *testing.T) {
 func TestCopy(t *testing.T) {
 	// Create a random state test to copy and modify "independently"
 	db := ethdb.NewMemDatabase()
-	origTds, err := NewTrieDbState(common.Hash{}, db, 0)
+	origTds, err := NewTrieDbState(common.Hash{}, db, 0, context.Background())
 	if err != nil {
 		t.Log(err)
 	}

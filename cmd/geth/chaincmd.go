@@ -36,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"gopkg.in/urfave/cli.v1"
+	"context"
 )
 
 var (
@@ -415,7 +416,7 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			tds, err := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64())
+			tds, err := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64(), chain.Config().WithEIPsEnabledCTX(context.Background(), block.Number()))
 			if err != nil {
 				utils.Fatalf("could not create new state: %v", err)
 			}

@@ -145,10 +145,6 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
-			if account != nil && account.StorageSize != nil {
-				fmt.Println("Buffer.detachAccounts", common.Bytes2Hex(account.CodeHash), *account.StorageSize)
-			}
-
 			b.accountUpdates[addrHash] = &accounts.Account{
 				Nonce:       account.Nonce,
 				Balance:     new(big.Int).Set(account.Balance),
@@ -211,7 +207,7 @@ type TrieDbState struct {
 	tp              *trie.TriePruning
 }
 
-func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, ctx context.Context) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -376,7 +372,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(false, false, tds.blockNr)
+					resolver = trie.NewResolver(false, false, tds.blockNr, tds.ct)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -934,9 +930,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
 	if err != nil {
 		return err
-	}
-	if account != nil && account.StorageSize != nil {
-		fmt.Println("TrieStateWriter.UpdateAccountData", common.Bytes2Hex(account.CodeHash), *account.StorageSize)
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	return nil

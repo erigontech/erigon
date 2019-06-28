@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"math/big"
 )
 
 var chartColors = []drawing.Color{
@@ -164,7 +165,7 @@ func stateless(genLag, consLag int) {
 		check_roots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
+	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1,bcb.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum-1))))
 	check(err)
 	if blockNum > 1 {
 		tds.Rebuild()

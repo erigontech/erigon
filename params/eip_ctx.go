@@ -33,10 +33,6 @@ func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int)
 }
 
 func GetForkFlag(ctx context.Context, name string) bool {
-	if name == IsEIP2027Enabled {
-		return true
-	}
-
 	b := ctx.Value(name)
 	if b == nil {
 		return false

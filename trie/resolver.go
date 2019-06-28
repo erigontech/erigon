@@ -26,7 +26,6 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
-		fmt.Println("Trie.Rebuild", err)
 		return err
 	}
 	log.Info("Rebuilt hashfile and verified", "root hash", n)
@@ -73,9 +72,10 @@ type TrieResolver struct {
 	h          *hasher
 	historical bool
 	blockNr    uint64
+	ctx 		context.Context
 }
 
-func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(hashes bool, accounts bool, blockNr uint64, ctx context.Context) *TrieResolver {
 	tr := TrieResolver{
 		accounts:     accounts,
 		hashes:       hashes,
@@ -85,6 +85,7 @@ func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 		rhIndexGt:    0,
 		reqIndices:   []int{},
 		blockNr:      blockNr,
+		ctx:ctx,
 	}
 	return &tr
 }
@@ -338,7 +339,8 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 }
 
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Printf("%d %x %x\n", keyIdx, k, v)
+	//fmt.Println("trie/resolver.go:341")
+	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if tr.key_set {
 			if err := tr.finishPreviousKey(nil); err != nil {
@@ -368,7 +370,11 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-
+			//v1,_ := value.EncodeRLP(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
+			//v2, _:= value.EncodeRLP(context.Background())
+			//fmt.Println()
+			//fmt.Println("trie/resolver.go:375", v1)
+			//fmt.Println("trie/resolver.go:375", v2)
 			tr.value, err = value.EncodeRLP(context.Background())
 			if err != nil {
 				return false, err
@@ -412,7 +418,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(true, accounts, blockNr)
+	r := NewResolver(true, accounts, blockNr, t.)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
 }

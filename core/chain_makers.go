@@ -230,7 +230,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		return nil, nil
 	}
-	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
+	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64(), config.WithEIPsEnabledCTX(context.Background(), parent.Number()))
 	if err != nil {
 		panic(err)
 	}

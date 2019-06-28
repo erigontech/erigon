@@ -160,13 +160,13 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64(), b.blockchain.Config().WithEIPsEnabledCTX(context.Background(), b.prependBlock.Number()))
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {
-	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64(), b.blockchain.Config().WithEIPsEnabledCTX(context.Background(), b.prependBlock.Number()))
 	if err != nil {
 		return nil, err
 	}

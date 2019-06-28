@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"math/big"
 )
 
 func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.DB, blockNum uint64) {
@@ -441,7 +442,7 @@ func state_snapshot() {
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(block.Root(), batch, blockNum)
+	tds, err := state.NewTrieDbState(block.Root(), batch, blockNum, bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum))))
 	tds.SetNoHistory(true)
 	statedb := state.New(tds)
 	fmt.Printf("Gas limit: %d\n", nextBlock.GasLimit())
