@@ -53,7 +53,8 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 				HomesteadBlock: new(big.Int),
 				EIP155Block:    new(big.Int),
 				EIP158Block:    big.NewInt(1),
-				EIP2027Block:   big.NewInt(2),
+				EIP2027Block:   big.NewInt(1),
+				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{address: {Balance: funds}, address1: {Balance: funds}, address2: {Balance: funds}},
 		}
@@ -71,8 +72,8 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
-	//contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	//contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
@@ -119,8 +120,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 			fmt.Printf("\n\n")
 		}
 
-		// opSstore 0x0f65c97e1243150f72af5cf90f13ad2b1ec5bb9019ccc6687a71010c6eba252d 0 0x0000000000000000000000000000000000000000000000000000000000000003
-		// opSstore 0x0f65c97e1243150f72af5cf90f13ad2b1ec5bb9019ccc6687a71010c6eba252d 0 0x0000000000000000000000000000000000000000000000000000000000000000
 		if err != nil {
 			t.Fatal(err)
 		}
