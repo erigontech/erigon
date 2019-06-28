@@ -28,10 +28,10 @@ var (
 )
 
 // Eip2027ABI is the input ABI used to generate the binding from.
-const Eip2027ABI = "[{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"balances\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"create\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"update\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"remove\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
+const Eip2027ABI = "[{\"constant\":true,\"inputs\":[{\"name\":\"\",\"type\":\"address\"}],\"name\":\"balances\",\"outputs\":[{\"name\":\"\",\"type\":\"uint256\"}],\"payable\":false,\"stateMutability\":\"view\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"removeAndException\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"create\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"update\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"remove\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"createAndException\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"createAndRevert\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"updateAndRevert\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"removeAndRevert\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[{\"name\":\"newBalance\",\"type\":\"uint256\"}],\"name\":\"updateAndException\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"}]"
 
 // Eip2027Bin is the compiled bytecode used for deploying new contracts.
-const Eip2027Bin = `608060405234801561001057600080fd5b5061022c806100206000396000f3fe608060405234801561001057600080fd5b506004361061004c5760003560e01c806327e235e314610051578063780900dc146100a957806382ab890a146100d7578063a7f4377914610105575b600080fd5b6100936004803603602081101561006757600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff16906020019092919050505061010f565b6040518082815260200191505060405180910390f35b6100d5600480360360208110156100bf57600080fd5b8101908080359060200190929190505050610127565b005b610103600480360360208110156100ed57600080fd5b810190808035906020019092919050505061016d565b005b61010d6101b3565b005b60006020528060005260406000206000915090505481565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b6000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000206000905556fea265627a7a723058209960e5da0131497e17423847a2ed0b0871ade62e6349249ae9dd5833bdedbbb064736f6c63430005090032`
+const Eip2027Bin = `608060405234801561001057600080fd5b50610509806100206000396000f3fe608060405234801561001057600080fd5b506004361061009e5760003560e01c8063c2ce0ef711610066578063c2ce0ef71461016b578063c53e5ae314610199578063cb946a07146101c7578063d592ed1f146101f5578063f64c050d146101ff5761009e565b806327e235e3146100a3578063660cc200146100fb578063780900dc1461010557806382ab890a14610133578063a7f4377914610161575b600080fd5b6100e5600480360360208110156100b957600080fd5b81019080803573ffffffffffffffffffffffffffffffffffffffff16906020019092919050505061022d565b6040518082815260200191505060405180910390f35b610103610245565b005b6101316004803603602081101561011b57600080fd5b8101908080359060200190929190505050610291565b005b61015f6004803603602081101561014957600080fd5b81019080803590602001909291905050506102d7565b005b61016961031d565b005b6101976004803603602081101561018157600080fd5b8101908080359060200190929190505050610361565b005b6101c5600480360360208110156101af57600080fd5b81019080803590602001909291905050506103af565b005b6101f3600480360360208110156101dd57600080fd5b81019080803590602001909291905050506103f7565b005b6101fd61043f565b005b61022b6004803603602081101561021557600080fd5b8101908080359060200190929190505050610486565b005b60006020528060005260406000206000915090505481565b6000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060009055600061028f57fe5b565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555050565b6000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060009055565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555060006103ac57fe5b50565b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002081905550600080fd5b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002081905550600080fd5b6000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16815260200190815260200160002060009055600080fd5b806000803373ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff1681526020019081526020016000208190555060006104d157fe5b5056fea265627a7a723058204444cc1468b61e18605a2856194316fe432df22cee6b6df286a704bedb53be0964736f6c63430005090032`
 
 // DeployEip2027 deploys a new Ethereum contract, binding an instance of Eip2027 to it.
 func DeployEip2027(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Eip2027, error) {
@@ -235,6 +235,48 @@ func (_Eip2027 *Eip2027TransactorSession) Create(newBalance *big.Int) (*types.Tr
 	return _Eip2027.Contract.Create(&_Eip2027.TransactOpts, newBalance)
 }
 
+// CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
+//
+// Solidity: function createAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Transactor) CreateAndException(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "createAndException", newBalance)
+}
+
+// CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
+//
+// Solidity: function createAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Session) CreateAndException(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.CreateAndException(&_Eip2027.TransactOpts, newBalance)
+}
+
+// CreateAndException is a paid mutator transaction binding the contract method 0xc2ce0ef7.
+//
+// Solidity: function createAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027TransactorSession) CreateAndException(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.CreateAndException(&_Eip2027.TransactOpts, newBalance)
+}
+
+// CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
+//
+// Solidity: function createAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Transactor) CreateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "createAndRevert", newBalance)
+}
+
+// CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
+//
+// Solidity: function createAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Session) CreateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.CreateAndRevert(&_Eip2027.TransactOpts, newBalance)
+}
+
+// CreateAndRevert is a paid mutator transaction binding the contract method 0xc53e5ae3.
+//
+// Solidity: function createAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027TransactorSession) CreateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.CreateAndRevert(&_Eip2027.TransactOpts, newBalance)
+}
+
 // Remove is a paid mutator transaction binding the contract method 0xa7f43779.
 //
 // Solidity: function remove() returns()
@@ -256,6 +298,48 @@ func (_Eip2027 *Eip2027TransactorSession) Remove() (*types.Transaction, error) {
 	return _Eip2027.Contract.Remove(&_Eip2027.TransactOpts)
 }
 
+// RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
+//
+// Solidity: function removeAndException() returns()
+func (_Eip2027 *Eip2027Transactor) RemoveAndException(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "removeAndException")
+}
+
+// RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
+//
+// Solidity: function removeAndException() returns()
+func (_Eip2027 *Eip2027Session) RemoveAndException() (*types.Transaction, error) {
+	return _Eip2027.Contract.RemoveAndException(&_Eip2027.TransactOpts)
+}
+
+// RemoveAndException is a paid mutator transaction binding the contract method 0x660cc200.
+//
+// Solidity: function removeAndException() returns()
+func (_Eip2027 *Eip2027TransactorSession) RemoveAndException() (*types.Transaction, error) {
+	return _Eip2027.Contract.RemoveAndException(&_Eip2027.TransactOpts)
+}
+
+// RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
+//
+// Solidity: function removeAndRevert() returns()
+func (_Eip2027 *Eip2027Transactor) RemoveAndRevert(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "removeAndRevert")
+}
+
+// RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
+//
+// Solidity: function removeAndRevert() returns()
+func (_Eip2027 *Eip2027Session) RemoveAndRevert() (*types.Transaction, error) {
+	return _Eip2027.Contract.RemoveAndRevert(&_Eip2027.TransactOpts)
+}
+
+// RemoveAndRevert is a paid mutator transaction binding the contract method 0xd592ed1f.
+//
+// Solidity: function removeAndRevert() returns()
+func (_Eip2027 *Eip2027TransactorSession) RemoveAndRevert() (*types.Transaction, error) {
+	return _Eip2027.Contract.RemoveAndRevert(&_Eip2027.TransactOpts)
+}
+
 // Update is a paid mutator transaction binding the contract method 0x82ab890a.
 //
 // Solidity: function update(uint256 newBalance) returns()
@@ -275,4 +359,46 @@ func (_Eip2027 *Eip2027Session) Update(newBalance *big.Int) (*types.Transaction,
 // Solidity: function update(uint256 newBalance) returns()
 func (_Eip2027 *Eip2027TransactorSession) Update(newBalance *big.Int) (*types.Transaction, error) {
 	return _Eip2027.Contract.Update(&_Eip2027.TransactOpts, newBalance)
+}
+
+// UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
+//
+// Solidity: function updateAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Transactor) UpdateAndException(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "updateAndException", newBalance)
+}
+
+// UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
+//
+// Solidity: function updateAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Session) UpdateAndException(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.UpdateAndException(&_Eip2027.TransactOpts, newBalance)
+}
+
+// UpdateAndException is a paid mutator transaction binding the contract method 0xf64c050d.
+//
+// Solidity: function updateAndException(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027TransactorSession) UpdateAndException(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.UpdateAndException(&_Eip2027.TransactOpts, newBalance)
+}
+
+// UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
+//
+// Solidity: function updateAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Transactor) UpdateAndRevert(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.contract.Transact(opts, "updateAndRevert", newBalance)
+}
+
+// UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
+//
+// Solidity: function updateAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027Session) UpdateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.UpdateAndRevert(&_Eip2027.TransactOpts, newBalance)
+}
+
+// UpdateAndRevert is a paid mutator transaction binding the contract method 0xcb946a07.
+//
+// Solidity: function updateAndRevert(uint256 newBalance) returns()
+func (_Eip2027 *Eip2027TransactorSession) UpdateAndRevert(newBalance *big.Int) (*types.Transaction, error) {
+	return _Eip2027.Contract.UpdateAndRevert(&_Eip2027.TransactOpts, newBalance)
 }

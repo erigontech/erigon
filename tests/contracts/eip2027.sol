@@ -13,4 +13,34 @@ contract eip2027 {
     function remove() public {
         delete balances[msg.sender];
     }
+
+    function createAndRevert(uint newBalance) public {
+        balances[msg.sender] = newBalance;
+        revert();
+    }
+
+    function updateAndRevert(uint newBalance) public {
+        balances[msg.sender] = newBalance;
+        revert();
+    }
+
+    function removeAndRevert() public {
+        delete balances[msg.sender];
+        revert();
+    }
+
+    function createAndException(uint newBalance) public {
+        balances[msg.sender] = newBalance;
+        assert(false);
+    }
+
+    function updateAndException(uint newBalance) public {
+        balances[msg.sender] = newBalance;
+        assert(false);
+    }
+
+    function removeAndException() public {
+        delete balances[msg.sender];
+        assert(false);
+    }
 }

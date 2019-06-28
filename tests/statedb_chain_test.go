@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"math/big"
 	"testing"
 
@@ -186,19 +187,57 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	st, _, _ = blockchain.State()
+	storageSize = st.StorageSize(contractAddress)
+	if storageSize == nil {
+		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
+	}
+	if *storageSize != 0 {
+		t.Fatal("storage size should be 0", *storageSize, st.GetCodeHash(contractAddress).Hex())
+	}
+
 	// BLock 3
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
+
+	st, _, _ = blockchain.State()
+	storageSize = st.StorageSize(contractAddress)
+	if storageSize == nil {
+		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
+	}
+	if *storageSize != state.HugeNumber+1 {
+		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
+	}
+
 
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
+	st, _, _ = blockchain.State()
+	storageSize = st.StorageSize(contractAddress)
+	if storageSize == nil {
+		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
+	}
+	if *storageSize != state.HugeNumber+2 {
+		t.Fatal("storage size should be HugeNumber+2", *storageSize, st.GetCodeHash(contractAddress).Hex())
+	}
+
+
 	// BLock 5
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
+	}
+
+	st, _, _ = blockchain.State()
+	storageSize = st.StorageSize(contractAddress)
+	if storageSize == nil {
+		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
+	}
+	if *storageSize != state.HugeNumber+1 {
+		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 
 	// BLock 6
@@ -220,7 +259,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if storageSize == nil {
 		t.Fatal("storage size should not be nil", st.GetCodeHash(contractAddress).Hex())
 	}
-	if *storageSize == 0 {
-		t.Fatal("storage size should not be 0", *storageSize, st.GetCodeHash(contractAddress).Hex())
+	if *storageSize != state.HugeNumber+1 {
+		t.Fatal("storage size should be state.HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 }
