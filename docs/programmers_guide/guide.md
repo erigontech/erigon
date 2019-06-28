@@ -355,23 +355,24 @@ the common prefix of current key and the preceeding key or the common prefix of 
 whichever is longer (if they are the same length, then they are also equal, so no ambiguity there).
 This max common prefix is looked up in the groups dictionary, to get the corresponding set of digits.
 If there no entries with such prefix, an entry with an empty set of digits is assumed.
-An extra digit is added to the set of digits. It is the digit in the current key immediately following the max
-common prefix, or the special 17th digit, if the max common prefix is the entire current key.
-The sequence of digits of the current key following that extra digit is the remainder (which could be empty).
+An extra digit will be added to the set of digits. It is the digit in the current key immediately following the max
+common prefix. The sequence of digits of the current key following that extra digit is the remainder (which could be empty).
 If this step of the algorithm was invoked on a key-value pair (non-recursively), then a `LEAF`
 opcode is emitted, with the operand being the length of the remainder (zero if the remainder is empty).
 If the step of the algorithm was invoked recursively, and the remainder is not empty, an `EXTENSION` opcode
 is emitted instead, with the operand being the remainder.
 For example, for leaf `12`, the lengths of common prefix with neighbours are 1 and 3. Therefore, this key will emit the opcode
 `LEAF 4`, where 4 = 8 (original length) - 3 (max common prefix length) - 1 (one digit goes to the branch node for the prefix group).
+Following the emitting of the `LEAF`, or `EXTENSION`, or no opcode, another opcode is emitted, which corresponds to
+adding an extra digit to the digit set of the groups dictionary item. If this step has resulted in the creation of a new
+entry, then `BRANCH` or `HASHER` opcode is emitted, with the operand being the the extra digit. If this step just added
+a new digit to an existing entry, then `ADD` opcode is emitted, with the operand being the exta digit. The choice
+between emitting `BRANCH` and emitting `HASHER` depends on whether the structural information is used to produce the root hash
+or to build the trie.
 
 The following, optional, part of the step only happens if the common prefix of the current key and the preceeding key is longer or equal than
 the common prefix of the current key and the suceeding key, in other words, at least one prefix group needs to be "closed".
-The prefix group that will be closed directly in this step (before recursion) can be found by the common prefix of the current and the
-preceeding keys. An opcode `BRANCH` is emitted, with the operand being the set of digits that is looked up in the groups dictionary
-for the prefix group being closed.
-
-After closing one prefix group, the algorithm invokes its step recursively (unless the group that was closed was the one with the
+Closing a prefix group means that the algorithm invokes its step recursively (unless the group that was closed was the one with the
 empty prefix, wich encompasses all the keys), using prefix of the closed group as the current key,
 and the succeeding key simply passed on. Preceeding key is found by searching (in the groups dictionary) for the smallest group
 that contains the one that was just closed. This means the longest sub-prefix of the prefix of the closed group. If no such entry
@@ -381,22 +382,22 @@ We will walk through the steps of the algorithm for the leaf `30`, and then for 
 For `30`, the key is `33113123`. Its max common prefix with neighbours is `3311`. The digit immediately
 following this prefix is `3`. Therefore, entry `3311 => {2}` is found in the group dictionary, and
 replaced with `3311 => {2, 3}`. Since this is a non-recursive invocation, and the remainder `123` is 3 digits long,
-opcode `LEAF 3` is emitted. Optional part of the step happens, opcode `BRANCH 23` is emitted, and the step gets
+opcode `LEAF 3` is emitted, followed by `ADD 3`. Optional part of the step happens, and the step gets
 invoked recursively with current key being `3311`, and preceeding key identified as `3`
 (there were no prefix group with prefix `33` or `331` yet).
 
-In the recursive step, max common prefix is `331`, therefore a new entry `331 => {1}` is created in the groups dictionary.
-No more recursion.
+In the recursive step, max common prefix is `331`, therefore a new entry `331 => {1}` is created in the groups dictionary,
+resulting in emitting `HASHER 1` or `BRANCH 1`. No more recursion.
 
 For leaf `31` (key `33132002`), max common prefix is `331`, so the groups dictionary gets updated with the entry
-`331 => {1, 3}`. Opcode `LEAF 4` is emitted (4 is the length of the remainder `2002`). Optional part of the step
-happens, opcode `BRANCH 13` is emitted, and the step gets invoked recursively with current key being `331`, and
+`331 => {1, 3}`. Opcode `LEAF 4` is emitted (4 is the length of the remainder `2002`), followed by `ADD 3`.
+Optional part of the step happens, and the step gets invoked recursively with current key being `331`, and
 preceeding key identified as `3` (there were no prefix group with prefix `33`).
 
 In the recursive step, max common prefix is `3`, therefore the entry in groups dictionary gets updated to
 `3 => {0, 2, 3}`. The remainder `1` is non-empty, and since this is a recursive invocation, opcode
-`EXTENSION 1` is emitted. Next, `BRANCH 023` is emitted, and the step gets invoked recursively with current
+`EXTENSION 1` is emitted, followed by `ADD 3`. Next, the step gets invoked recursively with current
 key being `3`, and preceeding key empty.
 
 In the deeper recursive step, max common prefix is empty, therefore the entry in groups dictionary is updated to
-` => {0, 1, 2, 3}`. Optional part of the step happens, and emits `BRANCH 0123`, but no recursive invocation follows.
+` => {0, 1, 2, 3}`. Opcode `ADD 3` is emitted. Optional part of the step happens, but no recursive invocation follows.
