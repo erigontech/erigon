@@ -71,12 +71,14 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
-	//contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	//contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
 
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
+
+	fmt.Println("========================================================================")
 
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 5, func(i int, block *core.BlockGen) {
 		var (

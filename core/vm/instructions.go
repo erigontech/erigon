@@ -640,7 +640,7 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	interpreter.evm.StateDB.SetState(contract.Address(), loc, common.BigToHash(val))
 
 	fmt.Println("EVM opSstore", interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber), interpreter.evm.BlockNumber.String(), contract.Address().Hex())
-	if true {
+	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
 		interpreter.evm.StateDB.SetStorageSize(contract.Address(), loc, val)
 	}
 
