@@ -310,6 +310,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 		return
 	}
 	switch n := origNode.(type) {
+	case nil:
+		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
+		s.flags.dirty = true
+		newNode = s
+		updated = true
+		return
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		matchlen := prefixLen(key[pos:], nKey)

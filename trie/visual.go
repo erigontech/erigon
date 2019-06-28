@@ -27,12 +27,15 @@ import (
 )
 
 // Visual creates visualisation of trie with highlighting
-func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string) {
+func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool) {
 	var highlightsHex [][]byte
 	for _, h := range highlights {
 		highlightsHex = append(highlightsHex, keybytesToHex(h))
 	}
-	leaves := make(map[string]struct{})
+	var leaves map[string]struct{}
+	if values {
+		leaves = make(map[string]struct{})
+	}
 	hashes := make(map[string]struct{})
 	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes)
 	fmt.Fprintf(w, "{rank = same;")
@@ -77,11 +80,13 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 			}
 			visualNode(n.Val, concat(hex, nKey...), newHighlights, w, indexColors, fontColors, leaves, hashes)
 		} else {
-			leaves[string(hex)] = struct{}{}
-			visual.Circle(w, fmt.Sprintf("e_%s", string(v)), string(v))
-			fmt.Fprintf(w,
-				`n_%x -> e_%s;
+			if leaves != nil {
+				leaves[string(hex)] = struct{}{}
+				visual.Circle(w, fmt.Sprintf("e_%s", string(v)), string(v))
+				fmt.Fprintf(w,
+					`n_%x -> e_%s;
 	`, hex, string(v))
+			}
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()

@@ -203,7 +203,7 @@ func prefix_groups_4() {
 		hightlights = append(hightlights, hexKey)
 	}
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -236,7 +236,7 @@ func prefix_groups_5() {
 	}
 	tr.Fold(hightlights[:8])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -270,7 +270,7 @@ func prefix_groups_6() {
 	tr.Fold(hightlights[:8])
 	tr.Fold(hightlights[8:16])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -306,7 +306,7 @@ func prefix_groups_7() {
 	tr.Fold(hightlights[16:24])
 	tr.Fold(hightlights[24:])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -347,7 +347,7 @@ func prefix_groups_8() {
 	}
 	tr.Fold(folds)
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
