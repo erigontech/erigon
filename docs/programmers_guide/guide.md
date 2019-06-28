@@ -150,44 +150,60 @@ to combine the hashes of the chunks into the root hash.
 Our approach would be to generate some additional information, which we will call "structural information", for each chunk,
 as well as for the composition of chunks. This structural information can be a sequence of these "opcodes":
 
-1. `LEAF length-of-key`
-2. `BRANCH set-of-digits`
-3. `EXTENSION key`
+1. `BRANCH digit`
+2. `HASHER digit`
+3. `LEAF length-of-key`
+4. `EXTENSION key`
+5. `ADD digit`
 
-The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
+The description of semantics would require the introduction of a stack, which can contain hashes, leaf or extension
+nodes, or branch nodes being assembled. The maximum number of items in the stack corresponds to the depth of the
+tree.
+
+`BRANCH` opcode pops an item from the stack, then pushes an new branch node onto the stack. The item popped from
+the stack becomes a child node of the new branch node. Position of this child node is determined by the value
+of the operand `digit`.
+
+`HASHER` opcode pops an item from the stack, then pushes a Keccak-256 state onto the stack
+(plus a counter of how many items have been fed to it). The item popped from the stack is getting hashed
+and the resuling hash is fed into the Keccak-256 state. The value of the operand specified how many
+empty strings are fed to the Keccak-256 state prior to the popped item's hash.
 
 `LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
 `length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
 in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
 being zero, pushes the value onto the stack and discards the key.
 
-`BRANCH` opcode has a set of digits as its operand. This set can be encoded as a bitset, for example. The action of
-this opcode is to pop the same
-number of items from the stack as the number of digits in the operand's set, create a branch node, and push it
-onto the stack. Sets of digits can be seen as the horizonal rectangles on the picture `prefix_groups_4`.
-The correspondence between digits in the operand's set and the items poped from the stack is as follows.
-If the special, 17th digit is not present in the set, then the top of the stack (item being popped off first)
-corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
-If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
-item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
-
 `EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
 of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
 an extension node with the key provided in the operand, and the value being the item popped from the stack, and
 push this extension node onto the stack.
 
-This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
+`ADD` opcode expects a node or a hash on top of the stack, which it pops. It then expects a pending branch node or
+a Keccak state on top of the stack. Depending what it is, it either adds the popped node or hash as a child node,
+or feeds the hash of the popped node or its serialisation (if it is less than 32 bytes long) to the Keccak state
+sponge. The operand of this opcode, digit, is used as the index of the added child node within the pending branch
+node, or is used to determine (using the counter of items) how many empty items to feed before the popped one.
+
+This is the structural information for the chunk containing leafs from `0` to `7` (inclusive), assuming that we
+would like to produce the root hash and not build the trie:
 ```
 LEAF 5
+HASHER 1
 LEAF 5
-BRANCH 12
+ADD 2
+HASHER 0
 LEAF 5
+HASHER 0
 LEAF 5
+ADD 2
 LEAF 5
-BRANCH 023
+ADD 3
+ADD 1
 LEAF 6
+ADD 2
 LEAF 6
-BRANCH 0123
+ADD 3
 LEAF 5
 ```
 After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
@@ -209,25 +225,45 @@ And, after hashing the two remaning chunks.
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
 
 Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
-This needs an introduction on an extra opcode, which takes specified number hash from the sequence (now we can have
-two sequences, one with key-value pairs, and another - with hashes), and places them on the stack
+This needs an introduction on an extra opcode, which takes a hash value from the sequence (now we can have
+two sequences, one with key-value pairs, and another - with hashes), and places it on the stack
 
-4. `HASH number_of_hashes`
+6. `HASH`
 
 ```
-HASH 3
-BRANCH 13
-HASH 5
-BRANCH 12
-HASH 1
-BRANCH 01
-BRANCH 03
-BRANCH 0123
-HASH 5
-BRANCH 012
-BRANCH 013
-HASH 1
-BRANCH 0123 
+HASH
+HASHER 0
+HASH
+HASHER 1
+HASH
+ADD 3
+HASHER 0
+HASH
+ADD 1
+HASH
+ADD 2
+HASH
+HASHER 0
+HASH
+HASHER 1
+HASH
+ADD 2
+HASHER 0
+HASH
+ADD 1
+ADD 3
+ADD 3
+ADD 1
+HASH
+HASHER 0
+HASH
+ADD 1
+HASH
+ADD 2
+ADD 3
+ADD 2
+HASH
+ADD 3
 ```
 
 ### Multiproofs
@@ -243,27 +279,50 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_8`
 
 And here is the corresponding structural information:
 ```
-HASH 2
+HASH
+BRANCH 0
+HASH
+BRANCH 0
 LEAF 5
-HASH 1
-BRANCH 023
-HASH 2
-BRANCH 0123
-HASH 1
+ADD 2
+HASH
+ADD 3
+ADD 1
+HASH
+ADD 2
+HASH
+ADD 3
+HASH
+BRANCH 1
 LEAF 4
-HASH 2
-BRANCH 023
-BRANCH 13
-HASH 3
-BRANCH 0123
-HASH 2
+BRANCH 0
+HASH
+ADD 2
+HASH
+ADD 3
+ADD 3
+BRANCH 0
+HASH
+ADD 1
+HASH
+ADD 2
+HASH
+ADD 3
+ADD 1
+HASH
+BRANCH 0
+HASH
+ADD 1
 LEAF 5
+BRANCH 0
 LEAF 5
-HASH 1
-BRANCH 012
-BRANCH 013
-HASH 1
-BRANCH 0123
+ADD 1
+HASH
+ADD 2
+ADD 3
+ADD 2
+HASH
+ADD 3
 ```
 
 We can think of a multiproof as the combination of 3 things:
