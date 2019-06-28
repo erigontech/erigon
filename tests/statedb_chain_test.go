@@ -77,7 +77,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	//contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
@@ -95,8 +94,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		)
 
 		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
-
-		fmt.Println("!!!", block.Number().String(), block.TxNonce(address))
 
 		switch i {
 		case 0:
@@ -142,7 +139,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 
 
 	// BLOCK 0
-	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
@@ -319,8 +315,6 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 
 		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
 
-		fmt.Println("!!!", block.Number().String(), block.TxNonce(address))
-
 		switch i {
 		case 0:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
@@ -369,7 +363,6 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 
 
 	// BLOCK 0
-	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
@@ -545,8 +538,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		)
 
 		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
-
-		fmt.Println("!!!", block.Number().String(), block.TxNonce(address))
 
 		switch i {
 		case 0:
@@ -731,7 +722,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	//contractBackend := backends.NewSimulatedBackend(gspec.Alloc, gspec.GasLimit)
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts1 := bind.NewKeyedTransactor(key1)
@@ -749,8 +739,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 		)
 
 		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
-
-		fmt.Println("!!!", block.Number().String(), block.TxNonce(address))
 
 		switch i {
 		case 0:
@@ -795,7 +783,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 
 
 	// BLOCK 0
-	// account must exist pre eip 161
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
