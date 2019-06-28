@@ -270,7 +270,7 @@ func (c *ChainConfig) IsEIP158(num *big.Int) bool {
 
 // IsEIP2027 returns whether num is either equal to the EIP2027 fork block or greater.
 func (c *ChainConfig) IsEIP2027(num *big.Int) bool {
-	return isForked(c.EIP2027Block, num)
+	return true
 }
 
 // IsByzantium returns whether num is either equal to the Byzantium fork block or greater.

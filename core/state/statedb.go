@@ -518,10 +518,6 @@ func (sdb *StateDB) SetStorageSize(addr common.Address, loc common.Hash, val *bi
 		fmt.Println("!!!! SetStorageSize dec", addr.Hex())
 		sdb.DecreaseStorageSize(addr)
 	}
-	if loc == nullLocation && val.Cmp(nullValue) != 0 {
-		sdb.changeStorageSize(addr, 0)
-		fmt.Println("!!!! SetStorageSize third", addr.Hex(), *sdb.StorageSize(addr))
-	}
 }
 
 func (sdb *StateDB) changeStorageSize(addr common.Address, sizeDiff int64) {

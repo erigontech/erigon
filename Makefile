@@ -206,4 +206,4 @@ geth-windows-amd64:
 	@ls -ld $(GOBIN)/geth-windows-* | grep amd64
 
 bindings:
-	go generate ./test/contracts/...
+	go generate ./tests/contracts/
