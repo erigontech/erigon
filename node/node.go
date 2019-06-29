@@ -255,7 +255,7 @@ func (n *Node) openDataDir() error {
 		return nil // ephemeral
 	}
 
-	instdir := filepath.Join(n.config.DataDir, n.config.name())
+	instdir := n.config.instanceDir()
 	if err := os.MkdirAll(instdir, 0700); err != nil {
 		return err
 	}
