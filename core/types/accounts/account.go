@@ -82,7 +82,7 @@ func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 		return rlp.EncodeToBytes(toEncode)
 	}
 
-	if !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
+	if acc.StorageSize == nil || !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
 		toEncode = &accountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,

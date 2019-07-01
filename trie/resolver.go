@@ -372,9 +372,12 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			}
 			//v1,_ := value.EncodeRLP(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 			//v2, _:= value.EncodeRLP(context.Background())
-			//fmt.Println()
 			//fmt.Println("trie/resolver.go:375", v1)
 			//fmt.Println("trie/resolver.go:375", v2)
+			if value.StorageSize != nil && *value.StorageSize == 0 {
+				value.StorageSize = nil
+			}
+
 			tr.value, err = value.EncodeRLP(tr.ctx)
 			if err != nil {
 				return false, err
