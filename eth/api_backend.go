@@ -57,6 +57,19 @@ func (b *EthAPIBackend) SetHead(number uint64) {
 	b.eth.blockchain.SetHead(number)
 }
 
+func (b *EthAPIBackend) resolveBlockNumber(blockNr rpc.BlockNumber) uint64 {
+	// Pending block is only known by the miner
+	if blockNr == rpc.PendingBlockNumber {
+		block := b.eth.miner.PendingBlock()
+		return block.NumberU64()
+	}
+
+	if blockNr == rpc.LatestBlockNumber {
+		return b.eth.blockchain.CurrentBlock().NumberU64()
+	}
+	return uint64(blockNr)
+}
+
 func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
 	if blockNr == rpc.PendingBlockNumber {
@@ -64,10 +77,8 @@ func (b *EthAPIBackend) HeaderByNumber(ctx context.Context, blockNr rpc.BlockNum
 		return block.Header(), nil
 	}
 	// Otherwise resolve and return the block
-	if blockNr == rpc.LatestBlockNumber {
-		return b.eth.blockchain.CurrentBlock().Header(), nil
-	}
-	return b.eth.blockchain.GetHeaderByNumber(uint64(blockNr)), nil
+	bn := b.resolveBlockNumber(blockNr)
+	return b.eth.blockchain.GetHeaderByNumber(bn), nil
 }
 
 func (b *EthAPIBackend) HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
@@ -81,10 +92,8 @@ func (b *EthAPIBackend) BlockByNumber(ctx context.Context, blockNr rpc.BlockNumb
 		return block, nil
 	}
 	// Otherwise resolve and return the block
-	if blockNr == rpc.LatestBlockNumber {
-		return b.eth.blockchain.CurrentBlock(), nil
-	}
-	return b.eth.blockchain.GetBlockByNumber(uint64(blockNr)), nil
+	bn := b.resolveBlockNumber(blockNr)
+	return b.eth.blockchain.GetBlockByNumber(bn), nil
 }
 
 func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.BlockNumber) (*state.StateDB, *types.Header, error) {
@@ -94,11 +103,12 @@ func (b *EthAPIBackend) StateAndHeaderByNumber(ctx context.Context, blockNr rpc.
 		return state, block.Header(), nil
 	}
 	// Otherwise resolve the block number and return its state
+	bn := b.resolveBlockNumber(blockNr)
 	header, err := b.HeaderByNumber(ctx, blockNr)
 	if header == nil || err != nil {
 		return nil, nil, err
 	}
-	ds := state.NewDbState(b.eth.chainDb, uint64(blockNr))
+	ds := state.NewDbState(b.eth.chainDb, bn)
 	stateDb := state.New(ds)
 	return stateDb, header, nil
 }
