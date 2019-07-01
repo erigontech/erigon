@@ -505,11 +505,13 @@ func (sdb *StateDB) DecreaseStorageSize(addr common.Address) {
 var nullLocation = common.Hash{}
 var nullValue = common.Big0
 
-func (sdb *StateDB) SetStorageSize(addr common.Address, loc common.Hash, val *big.Int) {
-	if loc == nullLocation && val.Cmp(nullValue) != 0 {
+func (sdb *StateDB) SetStorageSize(addr common.Address, currentLocation common.Hash, newLocation common.Hash, val *big.Int) {
+	switch {
+	case currentLocation == nullLocation && val.Cmp(nullValue) != 0:
+		// new value case
 		sdb.IncreaseStorageSize(addr)
-	}
-	if loc != nullLocation && val.Cmp(nullValue) == 0 {
+	case newLocation != nullLocation && currentLocation != nullLocation && val.Cmp(nullValue) == 0:
+		// remove value case
 		sdb.DecreaseStorageSize(addr)
 	}
 }
