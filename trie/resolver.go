@@ -375,7 +375,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			//fmt.Println()
 			//fmt.Println("trie/resolver.go:375", v1)
 			//fmt.Println("trie/resolver.go:375", v2)
-			tr.value, err = value.EncodeRLP(context.Background())
+			tr.value, err = value.EncodeRLP(tr.ctx)
 			if err != nil {
 				return false, err
 			}
