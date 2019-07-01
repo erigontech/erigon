@@ -205,6 +205,7 @@ type TrieDbState struct {
 	resolveReads    bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
+	ctx             context.Context
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, ctx context.Context) (*TrieDbState, error) {
@@ -228,6 +229,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, ctx con
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
 		tp:            tp,
+		ctx:           ctx,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -372,7 +374,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(false, false, tds.blockNr, tds.ct)
+					resolver = trie.NewResolver(false, false, tds.blockNr, tds.ctx)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -433,7 +435,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(false, true, tds.blockNr)
+				resolver = trie.NewResolver(false, true, tds.blockNr, tds.ctx)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)
@@ -561,12 +563,13 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	return tds.AccountTrie().Rebuild(tds.db, tds.blockNr)
+	return tds.AccountTrie().Rebuild(tds.db, tds.blockNr, tds.ctx)
 }
 
-func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
+func (tds *TrieDbState) SetBlockNr(blockNr uint64, ctx context.Context) {
 	tds.blockNr = blockNr
 	tds.tp.SetBlockNr(blockNr)
+	tds.ctx = ctx
 }
 
 func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
@@ -621,7 +624,7 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(ctx,false); err != nil {
+	if _, err := tds.computeTrieRoots(ctx, false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {

@@ -135,7 +135,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(parent.NumberU64())
+		tds.SetBlockNr(parent.NumberU64(), chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(height))))
 		statedb := state.New(tds)
 		// Add more transactions
 		signedTxs := []*types.Transaction{}

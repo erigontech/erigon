@@ -915,7 +915,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		rawdb.WriteHeader(bc.db, block.Header())
 	}
 
-	tds.SetBlockNr(block.NumberU64())
+	tds.SetBlockNr(block.NumberU64(), bc.chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number()))
 	ctx := bc.chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number())
 	if err := state.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return NonStatTy, err

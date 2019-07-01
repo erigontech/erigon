@@ -298,8 +298,9 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
-	tds.SetBlockNr(0)
-	if err := statedb.Commit(g.Config.WithEIPsEnabledCTX(context.Background(), block.Number()), tds.DbStateWriter()); err != nil {
+	ctx := g.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+	tds.SetBlockNr(0, ctx)
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
 	if _, err := batch.Commit(); err != nil {

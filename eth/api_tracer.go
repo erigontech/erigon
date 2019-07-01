@@ -156,7 +156,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			return nil, fmt.Errorf("parent block #%d not found", number-1)
 		}
 	}
-	tds, err := state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64())
+	tds, err := state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64(), ctx)
 	if err != nil {
 		// If the starting state is missing, allow some number of blocks to be reexecuted
 		reexec := defaultTraceReexec
@@ -169,7 +169,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			if start == nil {
 				break
 			}
-			if tds, err = state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64()); err == nil {
+			if tds, err = state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64(), ctx); err == nil {
 				break
 			}
 		}
@@ -296,8 +296,8 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				break
 			}
 			// Finalize the state so any modifications are written to the trie
-			tds.SetBlockNr(number)
 			ctx := api.eth.chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(number)))
+			tds.SetBlockNr(number, ctx)
 			err = statedb.Commit(ctx, tds.DbStateWriter())
 			if err != nil {
 				failed = err

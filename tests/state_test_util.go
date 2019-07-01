@@ -128,7 +128,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	}
 	block, _, _, _ := t.genesis(config).ToBlock(nil)
 	readBlockNr := block.Number().Uint64()
-	writeBlockNr := readBlockNr+1
+	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsEnabledCTX(ctx, big.NewInt(int64(writeBlockNr)))
 
 	db := ethdb.NewMemDatabase()
@@ -205,7 +205,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
 		return nil, nil, err
 	}
-	tds.SetBlockNr(blockNr + 1)
+	tds.SetBlockNr(blockNr+1, ctx)
 	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
