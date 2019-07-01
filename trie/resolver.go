@@ -17,7 +17,7 @@ import (
 
 var emptyHash [32]byte
 
-func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64, ctx context.Context) error {
+func (t *Trie) Rebuild(ctx context.Context, db ethdb.Database, blockNr uint64) error {
 	if t.root == nil {
 		return nil
 	}
@@ -25,7 +25,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64, ctx context.Context) e
 	if !ok {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
-	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n, ctx); err != nil {
+	if err := t.rebuildHashes(ctx, db, nil, 0, blockNr, true, n); err != nil {
 		return err
 	}
 	log.Info("Rebuilt hashfile and verified", "root hash", n)
@@ -75,7 +75,7 @@ type TrieResolver struct {
 	ctx        context.Context
 }
 
-func NewResolver(hashes bool, accounts bool, blockNr uint64, ctx context.Context) *TrieResolver {
+func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:     accounts,
 		hashes:       hashes,
@@ -419,9 +419,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	return err
 }
 
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode, ctx context.Context) error {
+func (t *Trie) rebuildHashes(ctx context.Context, db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(true, accounts, blockNr, ctx)
+	r := NewResolver(ctx, true, accounts, blockNr)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
 }

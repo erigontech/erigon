@@ -208,7 +208,7 @@ type TrieDbState struct {
 	ctx             context.Context
 }
 
-func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, ctx context.Context) (*TrieDbState, error) {
+func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(false, false, tds.blockNr, tds.ctx)
+					resolver = trie.NewResolver(tds.ctx, false, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -435,7 +435,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(false, true, tds.blockNr, tds.ctx)
+				resolver = trie.NewResolver(tds.ctx, false, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)
@@ -563,10 +563,10 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	return tds.AccountTrie().Rebuild(tds.db, tds.blockNr, tds.ctx)
+	return tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr)
 }
 
-func (tds *TrieDbState) SetBlockNr(blockNr uint64, ctx context.Context) {
+func (tds *TrieDbState) SetBlockNr(ctx context.Context, blockNr uint64) {
 	tds.blockNr = blockNr
 	tds.tp.SetBlockNr(blockNr)
 	tds.ctx = ctx

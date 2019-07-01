@@ -21,13 +21,13 @@ import (
 	"math/big"
 	"time"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"context"
 )
 
 // Config is a basic type specifying certain configuration flags for running
@@ -102,7 +102,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.St
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
-		cfg.TrieDbSt, _ = state.NewTrieDbState(common.Hash{}, db, blockNr, context.Background())
+		cfg.TrieDbSt, _ = state.NewTrieDbState(context.Background(), common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (
@@ -134,7 +134,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
-		cfg.TrieDbSt, _ = state.NewTrieDbState(common.Hash{}, db, blockNr, context.Background())
+		cfg.TrieDbSt, _ = state.NewTrieDbState(context.Background(), common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (

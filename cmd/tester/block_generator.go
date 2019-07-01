@@ -135,7 +135,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(parent.NumberU64(), chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(height))))
+		tds.SetBlockNr(chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(height))), parent.NumberU64())
 		statedb := state.New(tds)
 		// Add more transactions
 		signedTxs := []*types.Transaction{}
@@ -187,7 +187,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		}
 		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
-		tds.SetBlockNr(uint64(height))
+		tds.SetBlockNr(ctx, uint64(height))
 		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
@@ -269,7 +269,7 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(config, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(parent.NumberU64())
+		tds.SetBlockNr(config.WithEIPsEnabledCTX(context.Background(), parent.Number()), parent.NumberU64())
 		statedb := state.New(tds)
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})

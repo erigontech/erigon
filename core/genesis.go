@@ -240,7 +240,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
-	tds, err := state.NewTrieDbState(common.Hash{}, db, 0, g.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(0)))
+	tds, err := state.NewTrieDbState(g.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(0)), common.Hash{}, db, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -299,7 +299,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	ctx := g.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
-	tds.SetBlockNr(0, ctx)
+	tds.SetBlockNr(ctx, 0)
 	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}

@@ -221,7 +221,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			b.header.Root = roots[len(roots)-1]
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
-			tds.SetBlockNr(block.NumberU64(), ctx)
+			tds.SetBlockNr(ctx, block.NumberU64())
 			// Write state changes to db
 			if err := statedb.Commit(config.WithEIPsEnabledCTX(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
@@ -230,7 +230,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		return nil, nil
 	}
-	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64(), config.WithEIPsEnabledCTX(context.Background(), parent.Number()))
+	tds, err := state.NewTrieDbState(config.WithEIPsEnabledCTX(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
 	if err != nil {
 		panic(err)
 	}

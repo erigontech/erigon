@@ -126,11 +126,11 @@ func (so *stateObject) EncodeRLP(w io.Writer) error {
 	panic("stateObject.EncodeRLP")
 
 	/*
-	accountBytes, err := so.data.Encode(ctx)
-	if err != nil {
-		return err
-	}
-	return rlp.Write(w, accountBytes)
+		accountBytes, err := so.data.Encode(ctx)
+		if err != nil {
+			return err
+		}
+		return rlp.Write(w, accountBytes)
 	*/
 	return nil
 }

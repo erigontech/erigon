@@ -103,12 +103,12 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig = gen
 		db := ethdb.NewMemDatabase()
 		genesis, _, tds, _ := gen.ToBlock(db)
-		tds, _ = state.NewTrieDbState(genesis.Root(), db, 0, gen.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(0)))
+		tds, _ = state.NewTrieDbState(gen.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(0)), genesis.Root(), db, 0)
 		statedb = state.New(tds)
 		chainConfig = gen.Config
 	} else {
 		db := ethdb.NewMemDatabase()
-		tds, _ = state.NewTrieDbState(common.Hash{}, db, 0,context.Background())
+		tds, _ = state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		genesisConfig = new(core.Genesis)
 	}

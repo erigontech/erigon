@@ -44,7 +44,7 @@ import (
 func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
 
 	// Update it with some accounts
@@ -83,10 +83,10 @@ func TestIntermediateLeaks(t *testing.T) {
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
 	finalDb := ethdb.NewMemDatabase()
-	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0, context.Background())
+	transTds, _ := NewTrieDbState(context.Background(), common.Hash{}, transDb, 0)
 	transState := New(transTds)
 	transTds.StartNewBuffer()
-	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0, context.Background())
+	finalTds, _ := NewTrieDbState(context.Background(), common.Hash{}, finalDb, 0)
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
@@ -132,7 +132,7 @@ func TestIntermediateLeaks(t *testing.T) {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	transTds.SetBlockNr(1)
+	transTds.SetBlockNr(context.Background(), 1)
 
 	err = transState.Commit(context.Background(), transTds.DbStateWriter())
 	if err != nil {
@@ -149,7 +149,7 @@ func TestIntermediateLeaks(t *testing.T) {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	finalTds.SetBlockNr(1)
+	finalTds.SetBlockNr(context.Background(), 1)
 	if err := finalState.Commit(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
@@ -435,7 +435,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 		c.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	s.tds.SetBlockNr(1)
+	s.tds.SetBlockNr(context.Background(), 1)
 
 	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	if err != nil {
@@ -460,7 +460,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 // See https://github.com/ledgerwatch/turbo-geth/pull/15225#issuecomment-380191512
 func TestCopyOfCopy(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sdbTds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	sdbTds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	sdb := New(sdbTds)
 	sdbTds.StartNewBuffer()
 	addr := common.HexToAddress("aaaa")
@@ -476,7 +476,7 @@ func TestCopyOfCopy(t *testing.T) {
 
 func TestStateDBNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
@@ -488,7 +488,7 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 
 func TestStateDBNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{2}
 	newObj, _ := state.createObject(addr, nil)
@@ -521,7 +521,7 @@ func TestStateDBNewContractAccount(t *testing.T) {
 func TestCopy(t *testing.T) {
 	// Create a random state test to copy and modify "independently"
 	db := ethdb.NewMemDatabase()
-	origTds, err := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	origTds, err := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	if err != nil {
 		t.Log(err)
 	}
@@ -548,7 +548,7 @@ func TestCopy(t *testing.T) {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
-	origTds.SetBlockNr(1)
+	origTds.SetBlockNr(context.Background(), 1)
 
 	err = orig.Commit(context.Background(), origTds.DbStateWriter())
 	if err != nil {
@@ -591,7 +591,7 @@ func TestCopy(t *testing.T) {
 			t.Log("error while ComputeTrieRoots", err)
 		}
 
-		origTds.SetBlockNr(2)
+		origTds.SetBlockNr(ctx, 2)
 
 		err = orig.Commit(ctx, origTds.DbStateWriter())
 		if err != nil {
@@ -613,7 +613,7 @@ func TestCopy(t *testing.T) {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
-	copyTds.SetBlockNr(2)
+	copyTds.SetBlockNr(ctx, 2)
 	err = copy.Commit(ctx, copyTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)

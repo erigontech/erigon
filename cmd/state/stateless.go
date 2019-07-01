@@ -165,7 +165,7 @@ func stateless(genLag, consLag int) {
 		check_roots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1,bcb.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum-1))))
+	tds, err := state.NewTrieDbState(bcb.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum-1))), preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
 		tds.Rebuild()
@@ -241,7 +241,7 @@ func stateless(genLag, consLag int) {
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
-		tds.SetBlockNr(blockNum)
+		tds.SetBlockNr(ctx, blockNum)
 
 		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {

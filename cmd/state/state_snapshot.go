@@ -359,7 +359,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash, false)
-	r := trie.NewResolver(false, true, blockNum)
+	r := trie.NewResolver(context.Background(), false, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -397,7 +397,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != emptyRoot {
 			st := trie.New(root, true)
-			sr := trie.NewResolver(false, false, blockNum)
+			sr := trie.NewResolver(context.Background(), false, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)
@@ -442,7 +442,7 @@ func state_snapshot() {
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(block.Root(), batch, blockNum, bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum))))
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum))), block.Root(), batch, blockNum)
 	tds.SetNoHistory(true)
 	statedb := state.New(tds)
 	fmt.Printf("Gas limit: %d\n", nextBlock.GasLimit())

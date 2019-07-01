@@ -73,7 +73,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	c.Check(err, checker.IsNil)
 
 	fmt.Println("set blockNr")
-	s.tds.SetBlockNr(1)
+	s.tds.SetBlockNr(context.Background(), 1)
 
 	fmt.Println("commit")
 	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
@@ -119,7 +119,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0, context.Background())
+	s.tds, _ = NewTrieDbState(context.Background(), common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
 }
@@ -135,7 +135,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(1)
+	s.tds.SetBlockNr(context.Background(), 1)
 
 	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
@@ -179,7 +179,7 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0, context.Background())
+	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 
@@ -212,7 +212,7 @@ func TestSnapshot2(t *testing.T) {
 		t.Fatal("error while computing trie roots", err)
 	}
 
-	tds.SetBlockNr(1)
+	tds.SetBlockNr(context.Background(), 1)
 
 	err = state.Commit(context.Background(), tds.DbStateWriter())
 	if err != nil {
@@ -299,8 +299,8 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 }
 
 func stubEnableForksCTX(forks ...string) context.Context {
-	ctx:=context.Background()
-	for i:=range forks {
+	ctx := context.Background()
+	for i := range forks {
 		ctx = context.WithValue(ctx, forks[i], true)
 	}
 	return ctx

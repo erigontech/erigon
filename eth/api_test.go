@@ -33,7 +33,7 @@ func TestStorageRangeAt(t *testing.T) {
 	// Create a state where account 0x010000... has a few storage entries.
 	var (
 		db      = ethdb.NewMemDatabase()
-		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _  = state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		addr    = common.Address{0x01}
 		keys    = []common.Hash{ // hashes of Keys of storage
@@ -64,7 +64,7 @@ func TestStorageRangeAt(t *testing.T) {
 		t.Fatal("error while computing trie roots of the state", err)
 	}
 
-	tds.SetBlockNr(1)
+	tds.SetBlockNr(context.Background(), 1)
 
 	err = statedb.Commit(context.Background(), tds.DbStateWriter())
 	if err != nil {

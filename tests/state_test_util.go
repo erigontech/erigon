@@ -184,7 +184,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(common.Hash{}, db, blockNr, ctx)
+	tds, err := state.NewTrieDbState(ctx, common.Hash{}, db, blockNr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -205,7 +205,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
 		return nil, nil, err
 	}
-	tds.SetBlockNr(blockNr+1, ctx)
+	tds.SetBlockNr(ctx, blockNr+1)
 	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}

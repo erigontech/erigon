@@ -25,6 +25,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/console"
@@ -36,7 +37,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"gopkg.in/urfave/cli.v1"
-	"context"
 )
 
 var (
@@ -416,7 +416,7 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			tds, err := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64(), chain.Config().WithEIPsEnabledCTX(context.Background(), block.Number()))
+			tds, err := state.NewTrieDbState(chain.Config().WithEIPsEnabledCTX(context.Background(), block.Number()), block.Root(), chainDb, block.NumberU64())
 			if err != nil {
 				utils.Fatalf("could not create new state: %v", err)
 			}
