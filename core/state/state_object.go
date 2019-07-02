@@ -95,8 +95,7 @@ func (so *stateObject) empty() bool {
 }
 
 // huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
-//const HugeNumber = uint64(1 << 63)
-const HugeNumber = 1000
+const HugeNumber = uint64(1 << 63)
 
 // newObject creates a state object.
 func newObject(db *StateDB, address common.Address, data, original accounts.Account) *stateObject {
