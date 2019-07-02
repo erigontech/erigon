@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -655,7 +656,7 @@ func extractTrie(block int) {
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds, err := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	check(err)
 	startTime := time.Now()
 	tds.Rebuild()
@@ -687,7 +688,7 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
 	db := ethDb.NewBatch()
 	defer db.Rollback()
-	tds, err := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
 	check(err)
 	startTime := time.Now()
@@ -697,7 +698,9 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	startTime = time.Now()
 	rewindLen := uint64(rewind)
-	err = tds.UnwindTo(baseBlockNr - rewindLen)
+
+	ctx := bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(baseBlockNr-rewindLen)))
+	err = tds.UnwindTo(ctx, baseBlockNr-rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
 	check(err)
 	rewoundBlock_1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
@@ -749,7 +752,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{}, false)
-	r := trie.NewResolver(false, true, currentBlockNr)
+	r := trie.NewResolver(context.Background(), false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -770,7 +773,7 @@ func testResolve() {
 	defer ethDb.Close()
 	contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
 	t := trie.New(common.Hash{}, true)
-	r := trie.NewResolver(false, false, 2701646)
+	r := trie.NewResolver(context.Background(), false, false, 2701646)
 	key := common.FromHex("0x0305040a0e0100050907000c0109020906000304050c090700010b0a060f09080b03050707080c0908060d090103040d060f06010a09060d0b0d06040c07070410")
 	resolveHash := common.FromHex("0x2a470525dff3d3cf9b9cff1e7cea78c762a9d390e7c67a13400cdbe3071e4e1f")
 	req := t.NewResolveRequest(contract, key, 0, resolveHash)
@@ -1178,7 +1181,8 @@ func repair() {
 		// apply mining rewards to the geth stateDB
 		accumulateRewards(chainConfig, statedb, header, block.Uncles())
 		dbstate.SetBlockNr(block.NumberU64())
-		if err := statedb.Commit(chainConfig.IsEIP158(block.Number()), dbstate); err != nil {
+		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
+		if err = statedb.Commit(ctx, dbstate); err != nil {
 			panic(err)
 		}
 		dbstate.CheckKeys()

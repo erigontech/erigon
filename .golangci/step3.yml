@@ -5,11 +5,10 @@ linters:
   enable:
     - unconvert
     - unparam
-    - unused
     - varcheck
     - scopelint
-    - staticcheck
     - nakedret
     - prealloc
+    - deadcode
 
   disable-all: true

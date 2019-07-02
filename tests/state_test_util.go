@@ -17,6 +17,7 @@
 package tests
 
 import (
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -120,27 +121,30 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest.
-func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateDB, *state.TrieDbState, error) {
+func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.StateDB, *state.TrieDbState, common.Hash, error) {
 	config, ok := Forks[subtest.Fork]
 	if !ok {
-		return nil, nil, UnsupportedForkError{subtest.Fork}
+		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
 	block, _, _, _ := t.genesis(config).ToBlock(nil)
 	readBlockNr := block.Number().Uint64()
+	writeBlockNr := readBlockNr + 1
+	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
+
 	db := ethdb.NewMemDatabase()
-	statedb, tds, err := MakePreState(db, t.json.Pre, readBlockNr)
+	statedb, tds, err := MakePreState(ctx, db, t.json.Pre, readBlockNr)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error in MakePreState: %v", err)
+		return nil, nil, common.Hash{}, fmt.Errorf("error in MakePreState: %v", err)
 	}
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, common.Hash{}, err
 	}
-	context := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
-	context.GetHash = vmTestBlockHash
-	evm := vm.NewEVM(context, statedb, config, vmconfig)
+	evmCtx := core.NewEVMContext(msg, block.Header(), nil, &t.json.Env.Coinbase)
+	evmCtx.GetHash = vmTestBlockHash
+	evm := vm.NewEVM(evmCtx, statedb, config, vmconfig)
 
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
@@ -149,7 +153,7 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
+	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -157,29 +161,30 @@ func (t *StateTest) Run(subtest StateSubtest, vmconfig vm.Config) (*state.StateD
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	statedb.Finalise(config.IsEIP158(block.Number()), tds.TrieStateWriter())
-	roots, err := tds.ComputeTrieRoots()
+	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
+
+	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error calculating state root: %v", err)
+		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
 	root := roots[len(roots)-1]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
 	if root != common.Hash(post.Root) {
-		return statedb, tds, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
+		return statedb, tds, common.Hash{}, fmt.Errorf("post state root mismatch: got %x, want %x", root, post.Root)
 	}
 	if logs := rlpHash(statedb.Logs()); logs != common.Hash(post.Logs) {
-		return statedb, tds, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
+		return statedb, tds, common.Hash{}, fmt.Errorf("post state logs hash mismatch: got %x, want %x", logs, post.Logs)
 	}
-	return statedb, tds, nil
+	return statedb, tds, root, nil
 }
 
 func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(common.Hash{}, db, blockNr)
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
+	tds, err := state.NewTrieDbState(ctx, common.Hash{}, db, blockNr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -194,14 +199,14 @@ func MakePreState(db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64)
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.Finalise(false, tds.TrieStateWriter()); err != nil {
+	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tds.ComputeTrieRoots(); err != nil {
+	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
 		return nil, nil, err
 	}
-	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+	tds.SetBlockNr(ctx, blockNr+1)
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

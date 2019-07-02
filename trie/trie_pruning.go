@@ -21,6 +21,7 @@ package trie
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -28,12 +29,14 @@ import (
 type TriePruning struct {
 	storageTimestamps map[common.Address]map[string]uint64
 	accountTimestamps map[string]uint64
+	accountTimestampsMutex sync.RWMutex
 
 	// Maps timestamp (uint64) to address of the contract to set of prefixes of nodes (string)
 	storage map[uint64]map[common.Address]map[string]struct{}
 
 	// Maps timestamp (uint64) to set of prefixes of nodees (string)
 	accounts map[uint64]map[string]struct{}
+	accountsMutex sync.RWMutex
 
 	// For each timestamp, keeps number of branch nodes belonging to it
 	generationCounts map[uint64]int
@@ -48,7 +51,7 @@ type TriePruning struct {
 	blockNr uint64
 }
 
-func NewTriePruning(oldestGeneration uint64) (*TriePruning, error) {
+func NewTriePruning(oldestGeneration uint64) *TriePruning {
 	return &TriePruning{
 		oldestGeneration:  oldestGeneration,
 		blockNr:           oldestGeneration,
@@ -57,7 +60,7 @@ func NewTriePruning(oldestGeneration uint64) (*TriePruning, error) {
 		storage:           make(map[uint64]map[common.Address]map[string]struct{}),
 		accounts:          make(map[uint64]map[string]struct{}),
 		generationCounts:  make(map[uint64]int),
-	}, nil
+	}
 }
 
 func (tp *TriePruning) SetBlockNr(blockNr uint64) {
@@ -134,6 +137,7 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 		return
 	}
 	if !del {
+		tp.accountsMutex.Lock()
 		var newMap map[string]struct{}
 		if m, ok := tp.accounts[newTimestamp]; ok {
 			newMap = m
@@ -141,15 +145,19 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 			newMap = make(map[string]struct{})
 			tp.accounts[newTimestamp] = newMap
 		}
+
 		newMap[hexS] = struct{}{}
+		tp.accountsMutex.Unlock()
 	}
 	if exists {
+		tp.accountsMutex.Lock()
 		if m, ok := tp.accounts[prevTimestamp]; ok {
 			delete(m, hexS)
 			if len(m) == 0 {
 				delete(tp.accounts, prevTimestamp)
 			}
 		}
+		tp.accountsMutex.Unlock()
 	}
 	// Update generation count
 	if !del {
@@ -166,7 +174,10 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 }
 
 func (tp *TriePruning) Timestamp(hex []byte) uint64 {
-	return tp.accountTimestamps[string(hex)]
+	tp.accountTimestampsMutex.RLock()
+	ts := tp.accountTimestamps[string(hex)]
+	tp.accountTimestampsMutex.RUnlock()
+	return ts
 }
 
 // Returns timestamp for the given prunable node
@@ -211,6 +222,8 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	var exists = false
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
+
+	tp.accountTimestampsMutex.Lock()
 	if m, ok := tp.accountTimestamps[hexS]; ok {
 		prevTimestamp = m
 		exists = true
@@ -221,6 +234,8 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	if !del {
 		tp.accountTimestamps[hexS] = tp.blockNr
 	}
+	tp.accountTimestampsMutex.Unlock()
+
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 	return nil
 }
@@ -272,12 +287,15 @@ func (tp *TriePruning) PruneToTimestamp(
 			}
 		}
 		delete(tp.storage, gen)
+
+		tp.accountsMutex.Lock()
 		if m, ok := tp.accounts[gen]; ok {
 			for hexS := range m {
 				aggregateAccounts[hexS] = struct{}{}
 			}
 		}
 		delete(tp.accounts, gen)
+		tp.accountsMutex.Unlock()
 	}
 	var emptyAddresses []common.Address
 	h := newHasher(true) // Create hasher appropriate for storage tries first
@@ -296,6 +314,8 @@ func (tp *TriePruning) PruneToTimestamp(
 	h.encodeToBytes = false
 	pruneMap(mainTrie, aggregateAccounts, h)
 	// Remove fom the timestamp structure
+
+	tp.accountTimestampsMutex.Lock()
 	for hexS := range aggregateAccounts {
 		delete(tp.accountTimestamps, hexS)
 	}
@@ -309,6 +329,8 @@ func (tp *TriePruning) PruneToTimestamp(
 			}
 		}
 	}
+	tp.accountTimestampsMutex.Unlock()
+
 	tp.oldestGeneration = targetTimestamp
 	return emptyAddresses, nil
 }

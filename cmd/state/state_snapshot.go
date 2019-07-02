@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -19,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"math/big"
 )
 
 func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.DB, blockNum uint64) {
@@ -357,7 +359,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash, false)
-	r := trie.NewResolver(false, true, blockNum)
+	r := trie.NewResolver(context.TODO(), false, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -395,7 +397,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != emptyRoot {
 			st := trie.New(root, true)
-			sr := trie.NewResolver(false, false, blockNum)
+			sr := trie.NewResolver(context.TODO(), false, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)
@@ -440,7 +442,8 @@ func state_snapshot() {
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(block.Root(), batch, blockNum)
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum))), block.Root(), batch, blockNum)
+	check(err)
 	tds.SetNoHistory(true)
 	statedb := state.New(tds)
 	fmt.Printf("Gas limit: %d\n", nextBlock.GasLimit())
@@ -467,10 +470,13 @@ func state_snapshot() {
 	if _, err := engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts); err != nil {
 		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
 	}
-	if err := statedb.Finalise(chainConfig.IsEIP158(nextHeader.Number), tds.TrieStateWriter()); err != nil {
+
+	ctx := chainConfig.WithEIPsFlags(context.Background(), nextHeader.Number)
+	if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
 	}
-	roots, err := tds.ComputeTrieRoots()
+
+	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -478,7 +484,8 @@ func state_snapshot() {
 		receipt.PostState = roots[i].Bytes()
 	}
 	fmt.Printf("Next root %x\n", roots[len(roots)-1])
-	if err := statedb.Commit(chainConfig.IsEIP158(nextHeader.Number), tds.DbStateWriter()); err != nil {
+
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
 	}
 	if _, err := batch.Commit(); err != nil {

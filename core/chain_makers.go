@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -204,10 +205,11 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
-			if err := statedb.Finalise(config.IsEIP158(b.header.Number), tds.TrieStateWriter()); err != nil {
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
+			if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
-			roots, err := tds.ComputeTrieRoots()
+			roots, err := tds.ComputeTrieRoots(ctx)
 			if err != nil {
 				panic(err)
 			}
@@ -219,16 +221,16 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			b.header.Root = roots[len(roots)-1]
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
-			tds.SetBlockNr(block.NumberU64())
+			tds.SetBlockNr(ctx, block.NumberU64())
 			// Write state changes to db
-			if err := statedb.Commit(config.IsEIP158(b.header.Number), tds.DbStateWriter()); err != nil {
+			if err := statedb.Commit(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
 		}
 		return nil, nil
 	}
-	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
+	tds, err := state.NewTrieDbState(config.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
 	if err != nil {
 		panic(err)
 	}

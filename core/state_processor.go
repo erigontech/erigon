@@ -22,6 +22,7 @@ import (
 	//"bytes"
 	"fmt"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -140,10 +141,11 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.StateDB, tds
 	if _, err := p.engine.Finalize(p.config, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
-	if err := statedb.Finalise(p.config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+	ctx := p.config.WithEIPsFlags(context.Background(), header.Number)
+	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
-	roots, err := tds.ComputeTrieRoots()
+	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
@@ -165,6 +167,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	if err != nil {
 		return nil, 0, err
 	}
+	ctx := config.WithEIPsFlags(context.Background(), header.Number)
 	// Create a new context to be used in the EVM environment
 	context := NewEVMContext(msg, header, bc, author)
 	// Create a new environment which holds all relevant information
@@ -176,7 +179,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		return nil, 0, err
 	}
 	// Update the state with pending changes
-	if err := statedb.Finalise(config.IsEIP158(header.Number), stateWriter); err != nil {
+	if err = statedb.Finalise(ctx, stateWriter); err != nil {
 		return nil, 0, err
 	}
 

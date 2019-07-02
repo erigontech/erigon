@@ -10,14 +10,13 @@ linters:
     - golint
     - interfacer
 
-
   disable-all: true
 
 linters-settings:
-    golint:
-      min-confidence: 0
-    goconst:
-      min-len: 2
-      min-occurrences: 2
-    gofmt:
-      auto-fix: false
+  golint:
+    min-confidence: 0
+  goconst:
+    min-len: 2
+    min-occurrences: 2
+  gofmt:
+    auto-fix: false

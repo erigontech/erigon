@@ -75,19 +75,20 @@ lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --config ./.golangci/step1.yml -v
+	    --config ./.golangci/step1.yml \
+	    --exclude "which can be annoying to use"
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --config ./.golangci/step2.yml -v
+	    --config ./.golangci/step2.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --config ./.golangci/step3.yml -v
+	    --config ./.golangci/step3.yml
 
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
-	    --config ./.golangci/step4.yml -v
+	    --config ./.golangci/step4.yml
 
 lintci-deps:
 	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.16.0
@@ -203,3 +204,6 @@ geth-windows-amd64:
 	build/env.sh go run build/ci.go xgo -- --go=$(GO) --targets=windows/amd64 -v ./cmd/geth
 	@echo "Windows amd64 cross compilation done:"
 	@ls -ld $(GOBIN)/geth-windows-* | grep amd64
+
+bindings:
+	go generate ./tests/contracts/

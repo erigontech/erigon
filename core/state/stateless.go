@@ -18,12 +18,13 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"os"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -41,7 +42,7 @@ type Stateless struct {
 	timeToCodeHash map[uint64]map[common.Hash]struct{}
 	trace          bool
 	storageUpdates map[common.Address]map[common.Hash][]byte
-	accountUpdates map[common.Hash]*Account
+	accountUpdates map[common.Hash]*accounts.Account
 	deleted        map[common.Hash]struct{}
 	tp             *trie.TriePruning
 }
@@ -53,10 +54,8 @@ func NewStateless(stateRoot common.Hash,
 ) (*Stateless, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
-	tp, err := trie.NewTriePruning(blockNr)
-	if err != nil {
-		return nil, err
-	}
+	tp := trie.NewTriePruning(blockNr)
+
 	if trace {
 		fmt.Printf("ACCOUNT TRIE ==============================================\n")
 	}
@@ -96,7 +95,7 @@ func NewStateless(stateRoot common.Hash,
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := encodingToAccount(enc)
+		account, err := accounts.Decode(enc)
 		if err != nil {
 			return nil, err
 		}
@@ -145,7 +144,7 @@ func NewStateless(stateRoot common.Hash,
 		timeToCodeHash: timeToCodeHash,
 		trace:          trace,
 		storageUpdates: make(map[common.Address]map[common.Hash][]byte),
-		accountUpdates: make(map[common.Hash]*Account),
+		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
 		tp:             tp,
 	}, nil
@@ -308,7 +307,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		if !ok {
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := encodingToAccount(enc)
+		account, err := accounts.Decode(enc)
 		if err != nil {
 			return err
 		}
@@ -341,7 +340,7 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.tp.SetBlockNr(blockNr)
 }
 
-func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
+func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -352,7 +351,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*Account, error) {
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
@@ -422,7 +421,7 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	}
 }
 
-func (s *Stateless) UpdateAccountData(address common.Address, original, account *Account) error {
+func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -436,7 +435,7 @@ func (s *Stateless) UpdateAccountData(address common.Address, original, account 
 	return nil
 }
 
-func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
+func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	// Process updates first, deletes next
@@ -465,7 +464,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		}
 		hashes := make(Hashes, len(m))
 		i := 0
-		for keyHash, _ := range m {
+		for keyHash := range m {
 			hashes[i] = keyHash
 			i++
 		}
@@ -484,7 +483,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	}
 	addrs := make(Hashes, len(s.accountUpdates))
 	i := 0
-	for addrHash, _ := range s.accountUpdates {
+	for addrHash := range s.accountUpdates {
 		addrs[i] = addrHash
 		i++
 	}
@@ -492,7 +491,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			data, err := rlp.EncodeToBytes(account)
+			data, err := account.Encode(ctx)
 			if err != nil {
 				return err
 			}
@@ -514,7 +513,7 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 		}
 	}
 	s.storageUpdates = make(map[common.Address]map[common.Hash][]byte)
-	s.accountUpdates = make(map[common.Hash]*Account)
+	s.accountUpdates = make(map[common.Hash]*accounts.Account)
 	s.deleted = make(map[common.Hash]struct{})
 	return nil
 }
@@ -525,7 +524,7 @@ func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (s *Stateless) DeleteAccount(address common.Address, original *Account) error {
+func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -589,7 +588,7 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		delete(s.storageTries, address)
 	}
 	if m, ok := s.timeToCodeHash[oldest-1]; ok {
-		for codeHash, _ := range m {
+		for codeHash := range m {
 			if trace {
 				fmt.Printf("Pruning codehash %x at time %d\n", codeHash, oldest-1)
 			}

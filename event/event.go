@@ -36,8 +36,6 @@ type TypeMuxEvent struct {
 // called after mux is stopped will return ErrMuxClosed.
 //
 // The zero value is ready to use.
-//
-// Deprecated: use Feed
 type TypeMux struct {
 	mutex   sync.RWMutex
 	subm    map[reflect.Type][]*TypeMuxSubscription

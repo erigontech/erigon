@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"math/big"
 )
 
 var chartColors = []drawing.Color{
@@ -58,20 +60,22 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.Finalize(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
-		return fmt.Errorf("Finalize of block %d failed: %v", block.NumberU64(), err)
+		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
 	dbstate.SetBlockNr(block.NumberU64())
-	if err := statedb.Commit(chainConfig.IsEIP158(header.Number), dbstate); err != nil {
-		return fmt.Errorf("Commiting block %d failed: %v", block.NumberU64(), err)
+
+	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+	if err := statedb.Commit(ctx, dbstate); err != nil {
+		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
+	if err := dbstate.CheckRoot(ctx, header.Root, checkRoot); err != nil {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		f, err1 := os.Create(filename)
 		if err1 == nil {
 			defer f.Close()
 			tds.PrintTrie(f)
 		}
-		return fmt.Errorf("Error processing block %d: %v", block.NumberU64(), err)
+		return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
 	}
 	return nil
 }
@@ -161,7 +165,7 @@ func stateless(genLag, consLag int) {
 		check_roots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
+	tds, err := state.NewTrieDbState(bcb.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum-1))), preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
 		tds.Rebuild()
@@ -215,11 +219,14 @@ func stateless(genLag, consLag int) {
 			fmt.Printf("Finalize of block %d failed: %v\n", blockNum, err)
 			return
 		}
-		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
 			return
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		roots, err := tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
 			return
@@ -234,8 +241,9 @@ func stateless(genLag, consLag int) {
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
-		tds.SetBlockNr(blockNum)
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
+		tds.SetBlockNr(ctx, blockNum)
+
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
 			return
