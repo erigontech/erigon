@@ -25,6 +25,7 @@ jobs:
           command: |
             trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
             make test | tee ${TEST_RESULTS}/go-test.out
+          no_output_timeout: 10m
 
       - run: make
 
@@ -45,3 +46,4 @@ jobs:
       - run:
           name: Run extra linters
           command: make lintci
+          no_output_timeout: 10m
