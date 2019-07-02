@@ -9,5 +9,6 @@ linters:
     - scopelint
     - nakedret
     - prealloc
+    - deadcode
 
   disable-all: true

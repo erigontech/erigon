@@ -3,7 +3,6 @@ run:
 
 linters:
   enable:
-    - deadcode
     - govet
     - structcheck
     - stylecheck
