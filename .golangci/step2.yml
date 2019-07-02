@@ -5,7 +5,6 @@ linters:
   enable:
     - govet
     - structcheck
-    - stylecheck
 
   disable-all: true
 
