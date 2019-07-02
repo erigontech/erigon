@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"testing"
 
+	"context"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -32,7 +33,7 @@ func TestStorageRangeAt(t *testing.T) {
 	// Create a state where account 0x010000... has a few storage entries.
 	var (
 		db      = ethdb.NewMemDatabase()
-		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _  = state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		addr    = common.Address{0x01}
 		keys    = []common.Hash{ // hashes of Keys of storage
@@ -52,10 +53,23 @@ func TestStorageRangeAt(t *testing.T) {
 	for _, entry := range storage {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
-	statedb.Finalise(false, tds.TrieStateWriter())
-	tds.ComputeTrieRoots()
-	tds.SetBlockNr(1)
-	statedb.Commit(false, tds.DbStateWriter())
+
+	err := statedb.Finalise(context.Background(), tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalising state", err)
+	}
+
+	_, err = tds.ComputeTrieRoots(context.Background())
+	if err != nil {
+		t.Fatal("error while computing trie roots of the state", err)
+	}
+
+	tds.SetBlockNr(context.Background(), 1)
+
+	err = statedb.Commit(context.Background(), tds.DbStateWriter())
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// Check a few combinations of limit and start/end.
 	tests := []struct {

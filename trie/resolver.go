@@ -2,22 +2,22 @@ package trie
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
-	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var emptyHash [32]byte
 
-func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
+func (t *Trie) Rebuild(ctx context.Context, db ethdb.Database, blockNr uint64) error {
 	if t.root == nil {
 		return nil
 	}
@@ -25,7 +25,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	if !ok {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
-	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
+	if err := t.rebuildHashes(ctx, db, nil, 0, blockNr, true, n); err != nil {
 		return err
 	}
 	log.Info("Rebuilt hashfile and verified", "root hash", n)
@@ -72,9 +72,10 @@ type TrieResolver struct {
 	h          *hasher
 	historical bool
 	blockNr    uint64
+	ctx        context.Context
 }
 
-func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:     accounts,
 		hashes:       hashes,
@@ -84,6 +85,7 @@ func NewResolver(hashes bool, accounts bool, blockNr uint64) *TrieResolver {
 		rhIndexGt:    0,
 		reqIndices:   []int{},
 		blockNr:      blockNr,
+		ctx:          ctx,
 	}
 	return &tr
 }
@@ -299,13 +301,13 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			root = tr.vertical[req.extResolvePos].copy()
 		}
 		if root == nil {
-			return fmt.Errorf("Resolve returned nil root")
+			return errors.New("resolve returned nil root")
 		}
 		var gotHash common.Hash
 		hashLen := tr.h.hash(root, req.resolvePos == 0, gotHash[:])
 		if hashLen == 32 {
 			if !bytes.Equal(req.resolveHash, gotHash[:]) {
-				return fmt.Errorf("Resolving wrong hash for contract %x, key %x, pos %d, \nexpected %s, got %s\n",
+				return fmt.Errorf("resolving wrong hash for contract '%x', key '%x', pos %d, expected %q, got %q",
 					req.contract,
 					req.resolveHex,
 					req.resolvePos,
@@ -336,21 +338,9 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 	return nil
 }
 
-type ExtAccount struct {
-	Nonce   uint64
-	Balance *big.Int
-}
-type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
-}
-
-var emptyCodeHash = crypto.Keccak256(nil)
-
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Printf("%d %x %x\n", keyIdx, k, v)
+	//fmt.Println("trie/resolver.go:341")
+	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if tr.key_set {
 			if err := tr.finishPreviousKey(nil); err != nil {
@@ -376,29 +366,14 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			tr.key = tr.key_array[:52]
 		}
 		if tr.accounts {
-			var data Account
-			var err error
-			if len(v) == 1 {
-				data.Balance = new(big.Int)
-				data.CodeHash = emptyCodeHash
-				data.Root = emptyRoot
-				if tr.value, err = rlp.EncodeToBytes(data); err != nil {
-					return false, err
-				}
-			} else if len(v) < 60 {
-				var extData ExtAccount
-				if err = rlp.DecodeBytes(v, &extData); err != nil {
-					return false, err
-				}
-				data.Nonce = extData.Nonce
-				data.Balance = extData.Balance
-				data.CodeHash = emptyCodeHash
-				data.Root = emptyRoot
-				if tr.value, err = rlp.EncodeToBytes(data); err != nil {
-					return false, err
-				}
-			} else {
-				tr.value = common.CopyBytes(v)
+			value, err := accounts.Decode(v)
+			if err != nil {
+				return false, err
+			}
+
+			tr.value, err = value.EncodeRLP(tr.ctx)
+			if err != nil {
+				return false, err
 			}
 		} else {
 			tr.value = common.CopyBytes(v)
@@ -437,9 +412,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	return err
 }
 
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
+func (t *Trie) rebuildHashes(ctx context.Context, db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(true, accounts, blockNr)
+	r := NewResolver(ctx, true, accounts, blockNr)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
 }

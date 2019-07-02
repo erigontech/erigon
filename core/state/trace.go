@@ -18,7 +18,9 @@ package state
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -33,7 +35,7 @@ func NewTraceDbState(db ethdb.Database) *TraceDbState {
 	}
 }
 
-func (tds *TraceDbState) ReadAccountData(address common.Address) (*Account, error) {
+func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -44,7 +46,7 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*Account, erro
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (tds *TraceDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -76,7 +78,7 @@ func (tds *TraceDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) 
 	return len(code), nil
 }
 
-func (tds *TraceDbState) UpdateAccountData(address common.Address, original, account *Account) error {
+func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
 		return nil
@@ -87,14 +89,14 @@ func (tds *TraceDbState) UpdateAccountData(address common.Address, original, acc
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	data, err := accountToEncoding(account)
+	data, err := account.Encode(ctx)
 	if err != nil {
 		return err
 	}
 	return tds.currentDb.Put(AccountsBucket, addrHash[:], data)
 }
 
-func (tds *TraceDbState) DeleteAccount(address common.Address, original *Account) error {
+func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

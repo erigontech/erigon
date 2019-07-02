@@ -20,21 +20,21 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
-	"github.com/wcharczuk/go-chart"
-	"github.com/wcharczuk/go-chart/drawing"
-	util "github.com/wcharczuk/go-chart/util"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart/drawing"
+	"github.com/wcharczuk/go-chart/util"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -702,9 +702,9 @@ func stateGrowthChart3() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -796,9 +796,9 @@ func stateGrowthChart4() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -894,9 +894,9 @@ func stateGrowthChart5() {
 		chart.ColorYellow,
 		chart.ColorGreen,
 		chart.ColorBlue,
-		drawing.Color{R: 255, G: 0, B: 255, A: 255},
+		{R: 255, G: 0, B: 255, A: 255},
 		chart.ColorBlack,
-		drawing.Color{R: 165, G: 42, B: 42, A: 255},
+		{R: 165, G: 42, B: 42, A: 255},
 	}
 	seriesList := []chart.Series{}
 	colorIdx := 0
@@ -1367,7 +1367,7 @@ func oldStorage() {
 			return nil
 		}
 		c := b.Cursor()
-		for addr, _ := range itemsByAddress {
+		for addr := range itemsByAddress {
 			addrHash := crypto.Keccak256(addr[:])
 			copy(histKey[:], addrHash)
 			c.Seek(histKey)
@@ -1406,29 +1406,18 @@ func oldStorage() {
 	}
 }
 
-type ExtAccount struct {
-	Nonce   uint64
-	Balance *big.Int
-}
-type Account struct {
-	Nonce    uint64
-	Balance  *big.Int
-	Root     common.Hash // merkle root of the storage trie
-	CodeHash []byte
-}
-
-func encodingToAccount(enc []byte) (*Account, error) {
+func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	if enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	var data Account
+	var data accounts.Account
 	// Kind of hacky
 	if len(enc) == 1 {
 		data.Balance = new(big.Int)
 		data.CodeHash = emptyCodeHash
 		data.Root = emptyRoot
 	} else if len(enc) < 60 {
-		var extData ExtAccount
+		var extData accounts.ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return nil, err
 		}

@@ -7,7 +7,7 @@ On the high level, Ethereum state is a collection of accounts. An account can be
 (also known as "Externally Owned Account", or EOA), or a smart contract.
 
 ### Content of an account
-Type `Account` [core/state/state_object.go](../../core/state/state_object.go) lists the main components
+Type `Account` [core/types/accounts/account.go](../../core/types/accounts/account.go) lists the main components
 of an account's content (not identifier):
 
 1. Nonce

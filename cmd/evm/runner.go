@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -102,12 +103,12 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig = gen
 		db := ethdb.NewMemDatabase()
 		genesis, _, tds, _ := gen.ToBlock(db)
-		tds, _ = state.NewTrieDbState(genesis.Root(), db, 0)
+		tds, _ = state.NewTrieDbState(gen.Config.WithEIPsFlags(context.Background(), big.NewInt(0)), genesis.Root(), db, 0)
 		statedb = state.New(tds)
 		chainConfig = gen.Config
 	} else {
 		db := ethdb.NewMemDatabase()
-		tds, _ = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _ = state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		genesisConfig = new(core.Genesis)
 	}
@@ -211,7 +212,12 @@ func runCmd(ctx *cli.Context) error {
 	execTime := time.Since(tstart)
 
 	if ctx.GlobalBool(DumpFlag.Name) {
-		if err := statedb.Commit(true, state.NewNoopWriter()); err != nil {
+		ctx := context.Background()
+		if chainConfig != nil {
+			ctx = chainConfig.WithEIPsFlags(context.Background(), runtimeConfig.BlockNumber)
+		}
+
+		if err = statedb.Commit(ctx, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}

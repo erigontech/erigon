@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -42,9 +41,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
-
-// This nil assignment ensures compile time that SimulatedBackend implements bind.ContractBackend.
-var _ bind.ContractBackend = (*SimulatedBackend)(nil)
 
 var errBlockNumberUnsupported = errors.New("SimulatedBackend cannot access blocks other than the latest block")
 var errGasEstimationFailed = errors.New("gas required exceeds allowance or always failing transaction")
@@ -96,6 +92,32 @@ func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBac
 	return backend
 }
 
+// NewSimulatedBackend creates a new binding backend using a simulated blockchain
+// for testing purposes.
+func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.ChainConfig, gasLimit uint64) *SimulatedBackend {
+	database := ethdb.NewMemDatabase()
+	genesis := core.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
+	genesisBlock := genesis.MustCommit(database)
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(database, nil, genesis.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		panic(fmt.Sprintf("%v", err))
+	}
+	blockchain.EnableReceipts(true)
+
+	backend := &SimulatedBackend{
+		prependBlock: genesisBlock,
+		prependDb:    database.MemCopy(),
+		database:     database,
+		engine:       engine,
+		blockchain:   blockchain,
+		config:       genesis.Config,
+		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
+	}
+	backend.emptyPendingBlock()
+	return backend
+}
+
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
@@ -122,13 +144,13 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds, _ = state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {
-	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds, err := state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	if err != nil {
 		return nil, err
 	}

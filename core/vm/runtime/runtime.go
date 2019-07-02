@@ -21,6 +21,7 @@ import (
 	"math/big"
 	"time"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -101,7 +102,7 @@ func Execute(code, input []byte, cfg *Config, blockNr uint64) ([]byte, *state.St
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
-		cfg.TrieDbSt, _ = state.NewTrieDbState(common.Hash{}, db, blockNr)
+		cfg.TrieDbSt, _ = state.NewTrieDbState(context.TODO(), common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (
@@ -133,7 +134,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 
 	if cfg.State == nil {
 		db := ethdb.NewMemDatabase()
-		cfg.TrieDbSt, _ = state.NewTrieDbState(common.Hash{}, db, blockNr)
+		cfg.TrieDbSt, _ = state.NewTrieDbState(context.TODO(), common.Hash{}, db, blockNr)
 		cfg.State = state.New(cfg.TrieDbSt)
 	}
 	var (

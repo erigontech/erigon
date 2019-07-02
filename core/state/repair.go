@@ -20,9 +20,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"runtime"
 	"sort"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -102,7 +104,7 @@ func (rds *RepairDbState) CheckKeys() {
 	}
 	aDiff := len(aSet) != len(rds.accountsKeys)
 	if !aDiff {
-		for a, _ := range aSet {
+		for a := range aSet {
 			if _, ok := rds.accountsKeys[a]; !ok {
 				aDiff = true
 				break
@@ -112,13 +114,13 @@ func (rds *RepairDbState) CheckKeys() {
 	if aDiff {
 		fmt.Printf("Accounts key set does not match for block %d\n", rds.blockNr)
 		newlen := 4 + len(rds.accountsKeys)
-		for key, _ := range rds.accountsKeys {
+		for key := range rds.accountsKeys {
 			newlen += len(key)
 		}
 		dv := make([]byte, newlen)
 		binary.BigEndian.PutUint32(dv, uint32(len(rds.accountsKeys)))
 		i := 4
-		for key, _ := range rds.accountsKeys {
+		for key := range rds.accountsKeys {
 			dv[i] = byte(len(key))
 			i++
 			copy(dv[i:], key)
@@ -149,7 +151,7 @@ func (rds *RepairDbState) CheckKeys() {
 	}
 	sDiff := len(sSet) != len(rds.storageKeys)
 	if !sDiff {
-		for s, _ := range sSet {
+		for s := range sSet {
 			if _, ok := rds.storageKeys[s]; !ok {
 				sDiff = true
 				break
@@ -159,13 +161,13 @@ func (rds *RepairDbState) CheckKeys() {
 	if sDiff {
 		fmt.Printf("Storage key set does not match for block %d\n", rds.blockNr)
 		newlen := 4 + len(rds.storageKeys)
-		for key, _ := range rds.storageKeys {
+		for key := range rds.storageKeys {
 			newlen += len(key)
 		}
 		dv := make([]byte, newlen)
 		binary.BigEndian.PutUint32(dv, uint32(len(rds.storageKeys)))
 		i := 4
-		for key, _ := range rds.storageKeys {
+		for key := range rds.storageKeys {
 			dv[i] = byte(len(key))
 			i++
 			copy(dv[i:], key)
@@ -180,7 +182,7 @@ func (rds *RepairDbState) CheckKeys() {
 	}
 }
 
-func (rds *RepairDbState) ReadAccountData(address common.Address) (*Account, error) {
+func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -191,7 +193,7 @@ func (rds *RepairDbState) ReadAccountData(address common.Address) (*Account, err
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (rds *RepairDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -240,7 +242,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 	return t, nil
 }
 
-func (rds *RepairDbState) UpdateAccountData(address common.Address, original, account *Account) error {
+func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	// Perform resolutions first
 	var resolver *trie.TrieResolver
 	var storageTrie *trie.Trie
@@ -252,7 +254,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		}
 		hashes := make(Hashes, len(m))
 		i := 0
-		for keyHash, _ := range m {
+		for keyHash := range m {
 			hashes[i] = keyHash
 			i++
 		}
@@ -260,7 +262,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(false, false, rds.blockNr)
+					resolver = trie.NewResolver(ctx, false, false, rds.blockNr)
 				}
 				resolver.AddRequest(req)
 			}
@@ -279,7 +281,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 		}
 		hashes := make(Hashes, len(m))
 		i := 0
-		for keyHash, _ := range m {
+		for keyHash := range m {
 			hashes[i] = keyHash
 			i++
 		}
@@ -308,7 +310,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
-	data, err := accountToEncoding(account)
+	data, err := account.Encode(ctx)
 	if err != nil {
 		return err
 	}
@@ -319,7 +321,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	if original.Balance == nil {
 		originalData = []byte{}
 	} else {
-		originalData, err = accountToEncoding(original)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}
@@ -333,7 +335,7 @@ func (rds *RepairDbState) UpdateAccountData(address common.Address, original, ac
 	return nil
 }
 
-func (rds *RepairDbState) DeleteAccount(address common.Address, original *Account) error {
+func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -353,7 +355,7 @@ func (rds *RepairDbState) DeleteAccount(address common.Address, original *Accoun
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = accountToEncoding(original)
+		originalData, err = original.Encode(ctx)
 		if err != nil {
 			return err
 		}

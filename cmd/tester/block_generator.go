@@ -8,6 +8,7 @@ import (
 	"math/rand"
 	"os"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -134,7 +135,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(parent.NumberU64())
+		tds.SetBlockNr(chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(height))), parent.NumberU64())
 		statedb := state.New(tds)
 		// Add more transactions
 		signedTxs := []*types.Transaction{}
@@ -169,10 +170,13 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 			return nil, err
 		}
-		if err := statedb.Finalise(chainConfig.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		var roots []common.Hash
+		roots, err = tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -183,8 +187,8 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		}
 		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
-		tds.SetBlockNr(uint64(height))
-		err = statedb.Commit(chainConfig.IsEIP158(header.Number), tds.DbStateWriter())
+		tds.SetBlockNr(ctx, uint64(height))
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
@@ -265,19 +269,22 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(config, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(parent.NumberU64())
+		tds.SetBlockNr(config.WithEIPsFlags(context.Background(), parent.Number()), parent.NumberU64())
 		statedb := state.New(tds)
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
-		if err := statedb.Finalise(config.IsEIP158(header.Number), tds.TrieStateWriter()); err != nil {
+		ctx := config.WithEIPsFlags(context.Background(), header.Number)
+		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
-		roots, err := tds.ComputeTrieRoots()
+
+		var roots []common.Hash
+		roots, err = tds.ComputeTrieRoots(ctx)
 		if err != nil {
 			return nil, err
 		}
 		header.Root = roots[len(roots)-1]
-		err = statedb.Commit(config.IsEIP158(header.Number), tds.DbStateWriter())
+		err = statedb.Commit(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}

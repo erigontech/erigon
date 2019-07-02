@@ -21,7 +21,9 @@ import (
 	"math/big"
 	"testing"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	checker "gopkg.in/check.v1"
@@ -47,12 +49,22 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(big.NewInt(44))
 
 	// write some of them to the trie
-	s.tds.TrieStateWriter().UpdateAccountData(obj1.address, &obj1.data, new(Account))
-	s.tds.TrieStateWriter().UpdateAccountData(obj2.address, &obj2.data, new(Account))
-	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.ComputeTrieRoots()
-	s.tds.SetBlockNr(1)
-	s.state.Commit(false, s.tds.DbStateWriter())
+	ctx := context.TODO()
+	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	c.Check(err, checker.IsNil)
+
+	err = s.state.Finalise(ctx, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
+	_, err = s.tds.ComputeTrieRoots(ctx)
+	c.Check(err, checker.IsNil)
+
+	s.tds.SetBlockNr(ctx, 1)
+
+	err = s.state.Commit(ctx, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
 	got := string(s.tds.Dump())
@@ -92,7 +104,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
+	s.tds, _ = NewTrieDbState(context.TODO(), common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
 }
@@ -104,9 +116,16 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	var value common.Hash
 
 	s.state.SetState(address, common.Hash{}, value)
-	s.state.Finalise(false, s.tds.TrieStateWriter())
-	s.tds.SetBlockNr(1)
-	s.state.Commit(false, s.tds.DbStateWriter())
+
+	ctx := context.TODO()
+	err := s.state.Finalise(ctx, s.tds.TrieStateWriter())
+	c.Check(err, checker.IsNil)
+
+	s.tds.SetBlockNr(ctx, 1)
+
+	err = s.state.Commit(ctx, s.tds.DbStateWriter())
+	c.Check(err, checker.IsNil)
+
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
 		c.Errorf("expected empty hash. got %x", value)
 	}
@@ -146,7 +165,8 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	ctx := context.TODO()
+	tds, _ := NewTrieDbState(ctx, common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 
@@ -169,10 +189,22 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	state.Finalise(false, tds.TrieStateWriter())
-	tds.ComputeTrieRoots()
-	tds.SetBlockNr(1)
-	state.Commit(false, tds.DbStateWriter())
+	err := state.Finalise(ctx, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal("error while finalise state", err)
+	}
+
+	_, err = tds.ComputeTrieRoots(ctx)
+	if err != nil {
+		t.Fatal("error while computing trie roots", err)
+	}
+
+	tds.SetBlockNr(ctx, 1)
+
+	err = state.Commit(ctx, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal("error while committing state", err)
+	}
 
 	// and one with deleted == true
 	so1 := state.getStateObject(stateobjaddr1)
