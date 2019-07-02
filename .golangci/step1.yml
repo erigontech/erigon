@@ -9,6 +9,21 @@ linters:
     - gofmt
     - golint
     - interfacer
+    - govet
+    - structcheck
+    - stylecheck
+    - unconvert
+    - unparam
+    - varcheck
+    - scopelint
+    - nakedret
+    - prealloc
+    - deadcode
+    - gosec
+    - ineffassign
+    - depguard
+    - typecheck
+    - megacheck
 
   disable-all: true
 
@@ -20,3 +35,5 @@ linters-settings:
       min-occurrences: 2
     gofmt:
       auto-fix: false
+    govet:
+      check-shadowing: true
