@@ -51,7 +51,7 @@ func testRebuild(t *testing.T) {
 		}
 		db.Put(bucket, key, v1)
 		t1 := New(common.BytesToHash(root1), false)
-		t1.Rebuild(context.Background(), db, 0)
+		_ = t1.Rebuild(context.Background(), db, 0)
 	}
 }
 

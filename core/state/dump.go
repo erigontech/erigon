@@ -87,7 +87,6 @@ func (self *TrieDbState) Dump() []byte {
 	json, err := json.MarshalIndent(self.RawDump(), "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
-		panic(err)
 	}
 
 	return json

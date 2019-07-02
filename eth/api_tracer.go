@@ -217,7 +217,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 						break
 					}
 					// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-					task.statedb.Finalise(api.eth.blockchain.Config().WithEIPsEnabledCTX(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
+					_ = task.statedb.Finalise(api.eth.blockchain.Config().WithEIPsFlags(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
 					task.results[i] = &txTraceResult{Result: res}
 				}
 				// Stream the result back to the user or abort on teardown
@@ -296,7 +296,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				break
 			}
 			// Finalize the state so any modifications are written to the trie
-			ctx := api.eth.chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(number)))
+			ctx := api.eth.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(number)))
 			tds.SetBlockNr(ctx, number)
 			err = statedb.Commit(ctx, tds.DbStateWriter())
 			if err != nil {
@@ -488,7 +488,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 		}
 		// Finalize the state so any modifications are written to the trie
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		statedb.Finalise(vmenv.ChainConfig().WithEIPsEnabledCTX(context.Background(), block.Number()), dbstate)
+		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
 	close(jobs)
 	pend.Wait()
@@ -594,7 +594,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 		}
 		// Finalize the state so any modifications are written to the trie
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		statedb.Finalise(vmenv.ChainConfig().WithEIPsEnabledCTX(context.Background(), block.Number()), dbstate)
+		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 
 		// If we've traced the transaction we were looking for, abort
 		if tx.Hash() == txHash {
@@ -725,7 +725,7 @@ func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, ree
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		statedb.Finalise(vmenv.ChainConfig().WithEIPsEnabledCTX(context.Background(), block.Number()), dbstate)
+		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
 	return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

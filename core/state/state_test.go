@@ -18,7 +18,6 @@ package state
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -42,44 +41,29 @@ var toAddr = common.BytesToAddress
 
 func (s *StateSuite) TestDump(c *checker.C) {
 	// generate a few entries
-	fmt.Println("GetOrNewStateObject1")
 	obj1 := s.state.GetOrNewStateObject(toAddr([]byte{0x01}))
-	fmt.Println("GetOrNewStateObject1.addBalance")
 	obj1.AddBalance(big.NewInt(22))
-	fmt.Println("GetOrNewStateObject2")
 	obj2 := s.state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
-	fmt.Println("GetOrNewStateObject1.setCode")
 	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
-	fmt.Println("GetOrNewStateObject3")
 	obj3 := s.state.GetOrNewStateObject(toAddr([]byte{0x02}))
-	fmt.Println("GetOrNewStateObject3.setBalance")
 	obj3.SetBalance(big.NewInt(44))
-	fmt.Println("finish")
 
-	fmt.Println("UpdateAccountData")
 	// write some of them to the trie
 	err := s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	fmt.Println("UpdateAccountData2")
 	err = s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	fmt.Println("Finalise")
 	err = s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	fmt.Println("Comute trie roots")
 	_, err = s.tds.ComputeTrieRoots(context.Background())
 	c.Check(err, checker.IsNil)
 
-	fmt.Println("set blockNr")
 	s.tds.SetBlockNr(context.Background(), 1)
 
-	fmt.Println("commit")
 	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
-
-	fmt.Println("after commit")
 
 	// check that dump contains the state objects that are in trie
 	got := string(s.tds.Dump())
@@ -296,12 +280,4 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 			t.Errorf("Origin storage key %x mismatch: have %v, want none.", k, v)
 		}
 	}
-}
-
-func stubEnableForksCTX(forks ...string) context.Context {
-	ctx := context.Background()
-	for i := range forks {
-		ctx = context.WithValue(ctx, forks[i], true)
-	}
-	return ctx
 }

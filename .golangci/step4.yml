@@ -5,13 +5,8 @@ linters:
   enable:
     - gosec
     - ineffassign
-    - gocyclo
     - depguard
     - typecheck
     - megacheck
 
   disable-all: true
-
-linters-settings:
-  gocyclo:
-    min-complexity: 35

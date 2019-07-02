@@ -442,7 +442,8 @@ func state_snapshot() {
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum))), block.Root(), batch, blockNum)
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum))), block.Root(), batch, blockNum)
+	check(err)
 	tds.SetNoHistory(true)
 	statedb := state.New(tds)
 	fmt.Printf("Gas limit: %d\n", nextBlock.GasLimit())
@@ -470,8 +471,8 @@ func state_snapshot() {
 		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
 	}
 
-	ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), nextHeader.Number)
-	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+	ctx := chainConfig.WithEIPsFlags(context.Background(), nextHeader.Number)
+	if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
 	}
 

@@ -205,7 +205,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
-			ctx := config.WithEIPsEnabledCTX(context.Background(), b.header.Number)
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
 			if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
@@ -223,14 +223,14 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(ctx, block.NumberU64())
 			// Write state changes to db
-			if err := statedb.Commit(config.WithEIPsEnabledCTX(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
+			if err := statedb.Commit(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
 		}
 		return nil, nil
 	}
-	tds, err := state.NewTrieDbState(config.WithEIPsEnabledCTX(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
+	tds, err := state.NewTrieDbState(config.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
 	if err != nil {
 		panic(err)
 	}

@@ -135,7 +135,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(chainConfig.WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(height))), parent.NumberU64())
+		tds.SetBlockNr(chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(height))), parent.NumberU64())
 		statedb := state.New(tds)
 		// Add more transactions
 		signedTxs := []*types.Transaction{}
@@ -170,8 +170,8 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if _, err := engine.Finalize(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 			return nil, err
 		}
-		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
-		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
@@ -269,12 +269,12 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 			Coinbase:   coinbase,
 			Difficulty: ethash.CalcDifficulty(config, uint64(tstamp), parent.Header()),
 		}
-		tds.SetBlockNr(config.WithEIPsEnabledCTX(context.Background(), parent.Number()), parent.NumberU64())
+		tds.SetBlockNr(config.WithEIPsFlags(context.Background(), parent.Number()), parent.NumberU64())
 		statedb := state.New(tds)
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
-		ctx := config.WithEIPsEnabledCTX(context.Background(), header.Number)
-		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+		ctx := config.WithEIPsFlags(context.Background(), header.Number)
+		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 

@@ -103,7 +103,7 @@ func runCmd(ctx *cli.Context) error {
 		genesisConfig = gen
 		db := ethdb.NewMemDatabase()
 		genesis, _, tds, _ := gen.ToBlock(db)
-		tds, _ = state.NewTrieDbState(gen.Config.WithEIPsEnabledCTX(context.Background(), big.NewInt(0)), genesis.Root(), db, 0)
+		tds, _ = state.NewTrieDbState(gen.Config.WithEIPsFlags(context.Background(), big.NewInt(0)), genesis.Root(), db, 0)
 		statedb = state.New(tds)
 		chainConfig = gen.Config
 	} else {
@@ -214,7 +214,7 @@ func runCmd(ctx *cli.Context) error {
 	if ctx.GlobalBool(DumpFlag.Name) {
 		ctx := context.Background()
 		if chainConfig != nil {
-			ctx = chainConfig.WithEIPsEnabledCTX(context.Background(), runtimeConfig.BlockNumber)
+			ctx = chainConfig.WithEIPsFlags(context.Background(), runtimeConfig.BlockNumber)
 		}
 
 		if err = statedb.Commit(ctx, state.NewNoopWriter()); err != nil {

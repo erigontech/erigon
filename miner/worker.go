@@ -967,8 +967,8 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		return err
 	}
 
-	ctx := w.chain.Config().WithEIPsEnabledCTX(context.Background(), w.current.header.Number)
-	if err := s.Finalise(ctx, w.current.tds.TrieStateWriter()); err != nil {
+	ctx := w.chain.Config().WithEIPsFlags(context.Background(), w.current.header.Number)
+	if err = s.Finalise(ctx, w.current.tds.TrieStateWriter()); err != nil {
 		return err
 	}
 	roots, err := w.current.tds.ComputeTrieRoots(ctx)

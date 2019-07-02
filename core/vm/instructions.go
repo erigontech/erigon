@@ -697,7 +697,6 @@ func opGas(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *
 }
 
 func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
-	fmt.Println("opCreate")
 	var (
 		value        = stack.pop()
 		offset, size = stack.pop(), stack.pop()
@@ -721,7 +720,6 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	} else {
 		stack.push(addr.Big())
 	}
-
 	contract.Gas += returnGas
 	interpreter.intPool.put(value, offset, size)
 
@@ -732,7 +730,6 @@ func opCreate(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 }
 
 func opCreate2(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
-	fmt.Println("opCreate2")
 	var (
 		endowment    = stack.pop()
 		offset, size = stack.pop(), stack.pop()

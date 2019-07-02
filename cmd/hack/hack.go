@@ -656,7 +656,7 @@ func extractTrie(block int) {
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsEnabledCTX(context.Background(), baseBlock.Number()), baseBlock.Root(), stateDb, baseBlock.NumberU64())
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	check(err)
 	startTime := time.Now()
 	tds.Rebuild()
@@ -688,7 +688,7 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
 	db := ethDb.NewBatch()
 	defer db.Rollback()
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsEnabledCTX(context.Background(), baseBlock.Number()), baseBlock.Root(), db, baseBlockNr)
+	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
 	check(err)
 	startTime := time.Now()
@@ -699,7 +699,7 @@ func testRewind(block, rewind int) {
 	startTime = time.Now()
 	rewindLen := uint64(rewind)
 
-	ctx := bc.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(baseBlockNr-rewindLen)))
+	ctx := bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(baseBlockNr-rewindLen)))
 	err = tds.UnwindTo(ctx, baseBlockNr-rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
 	check(err)
@@ -1181,7 +1181,7 @@ func repair() {
 		// apply mining rewards to the geth stateDB
 		accumulateRewards(chainConfig, statedb, header, block.Uncles())
 		dbstate.SetBlockNr(block.NumberU64())
-		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
 		if err = statedb.Commit(ctx, dbstate); err != nil {
 			panic(err)
 		}
@@ -1309,7 +1309,7 @@ func main() {
 	//upgradeBlocks()
 	//compareTries()
 	//invTree("root", "right", "diff", *block, false)
-	invTree("iw", "ir", "id", *block, true)
+	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	//preimage()
 	//printBranches(uint64(*block))

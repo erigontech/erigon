@@ -108,7 +108,6 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 	composite, suffix := compositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
-
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 		if err != nil {
@@ -140,7 +139,6 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	var savedTx *bolt.Tx
-
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		for bucketStart := 0; bucketStart < len(tuples); {
 			bucketEnd := bucketStart
@@ -290,7 +288,6 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	if len(startkeys) == 0 {
 		return nil
 	}
-
 	keyIdx := 0 // What is the current key we are extracting
 	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]

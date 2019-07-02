@@ -149,7 +149,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			return err
 		}
 		parent := blockchain.GetBlockByHash(block.ParentHash())
-		tds, err := state.NewTrieDbState(blockchain.chainConfig.WithEIPsEnabledCTX(context.Background(), parent.Number()), parent.Root(), blockchain.db, parent.NumberU64())
+		tds, err := state.NewTrieDbState(blockchain.chainConfig.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), blockchain.db, parent.NumberU64())
 		if err != nil {
 			return err
 		}
@@ -170,7 +170,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			return err
 		}
 		blockchain.chainmu.Lock()
-		ctx := blockchain.chainConfig.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := blockchain.chainConfig.WithEIPsFlags(context.Background(), block.Number())
 		tds.SetBlockNr(ctx, block.NumberU64())
 		if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 			return err

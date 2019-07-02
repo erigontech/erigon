@@ -64,7 +64,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	}
 	dbstate.SetBlockNr(block.NumberU64())
 
-	ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
+	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err := statedb.Commit(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
@@ -165,7 +165,7 @@ func stateless(genLag, consLag int) {
 		check_roots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(bcb.Config().WithEIPsEnabledCTX(context.Background(), big.NewInt(int64(blockNum-1))), preRoot, batch, blockNum-1)
+	tds, err := state.NewTrieDbState(bcb.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum-1))), preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
 		tds.Rebuild()
@@ -220,7 +220,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 
-		ctx := chainConfig.WithEIPsEnabledCTX(context.Background(), header.Number)
+		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
 			return

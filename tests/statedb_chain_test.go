@@ -18,16 +18,15 @@ package tests
 
 import (
 	"context"
-	"fmt"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
-	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"math/big"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -58,7 +57,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address:  {Balance: funds},
 				address1: {Balance: funds},
 				address2: {Balance: funds},
 			},
@@ -85,15 +84,13 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	fmt.Println("========================================================================")
-
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
 
 		switch i {
 		case 0:
@@ -101,25 +98,15 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			fmt.Println("\n\nDeploy Account")
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			fmt.Printf("\n\n")
 		case 3:
-			fmt.Println("\n\nCreate Account1 value 2")
 			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-			fmt.Printf("\n\n")
 		case 4:
-			fmt.Println("\n\nCreate Account2 value 3")
 			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-			fmt.Printf("\n\n")
 		case 5:
-			fmt.Println("\n\nUpdate Account2 value 0")
 			tx, err = eipContract.Update(transactOpts2, big.NewInt(0))
-			fmt.Printf("\n\n")
 		case 6:
-			fmt.Println("\n\nRemove Account2")
 			tx, err = eipContract.Remove(transactOpts2)
-			fmt.Printf("\n\n")
 		}
 
 		if err != nil {
@@ -136,7 +123,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		block.AddTx(tx)
 		contractBackend.Commit()
 	})
-
 
 	// BLOCK 0
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -157,7 +143,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal("storage size should be nil at the block 0")
 	}
 
-
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
@@ -176,7 +161,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if storageSize != nil {
 		t.Fatal("storage size should be nil at the block 1")
 	}
-
 
 	// BLOCK 2
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
@@ -206,7 +190,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
@@ -220,7 +203,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if *storageSize != state.HugeNumber+2 {
 		t.Fatal("storage size should be HugeNumber+2", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
-
 
 	// BLock 5
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
@@ -255,7 +237,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 }
 
-
 func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -277,7 +258,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address:  {Balance: funds},
 				address1: {Balance: funds},
 				address2: {Balance: funds},
 			},
@@ -304,15 +285,13 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	fmt.Println("========================================================================")
-
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
 
 		switch i {
 		case 0:
@@ -320,25 +299,15 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			fmt.Println("\n\nDeploy Account")
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			fmt.Printf("\n\n")
 		case 3:
-			fmt.Println("\n\nCreate Account1 value 2")
 			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-			fmt.Printf("\n\n")
 		case 4:
-			fmt.Println("\n\nCreate Account2 value 3")
 			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-			fmt.Printf("\n\n")
 		case 5:
-			fmt.Println("\n\nUpdate Account2 value 0")
 			tx, err = eipContract.Update(transactOpts2, big.NewInt(0))
-			fmt.Printf("\n\n")
 		case 6:
-			fmt.Println("\n\nRemove Account2")
 			tx, err = eipContract.Remove(transactOpts2)
-			fmt.Printf("\n\n")
 		}
 
 		if err != nil {
@@ -355,7 +324,6 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 		block.AddTx(tx)
 		contractBackend.Commit()
 	})
-
 
 	// BLOCK 0
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -376,7 +344,6 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 		t.Fatal("storage size should be nil at the block 0")
 	}
 
-
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
@@ -395,7 +362,6 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	if storageSize != nil {
 		t.Fatal("storage size should be nil at the block 1")
 	}
-
 
 	// BLOCK 2
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
@@ -419,7 +385,6 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 		t.Fatal("storage size should be nil", st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
@@ -442,7 +407,6 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 		t.Fatal("storage size should be nil", st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 6
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
 		t.Fatal(err)
@@ -462,26 +426,26 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		db       = ethdb.NewMemDatabase()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address = crypto.PubkeyToAddress(key.PublicKey)
+		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr = common.Address{1}
-		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		theAddr  = common.Address{1}
+		funds    = big.NewInt(1000000000)
+		gspec    = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
-				EIP2027Block:   big.NewInt(1),
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				EIP2027Block:        big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address:  {Balance: funds},
 				address1: {Balance: funds},
 				address2: {Balance: funds},
 			},
@@ -508,45 +472,30 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	fmt.Println("========================================================================")
-
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
 
 		switch i {
 		case 0:
-			fmt.Println("\n\nTX 0")
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 1:
-			fmt.Println("\n\nTX 1")
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			fmt.Println("\n\nDeploy Account")
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			fmt.Printf("\n\n")
 		case 3:
-			fmt.Println("\n\nCreate Account1 value 2")
 			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-			fmt.Printf("\n\n")
 		case 4:
-			fmt.Println("\n\nCreate Account2 value 3")
 			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-			fmt.Printf("\n\n")
 		case 5:
-			fmt.Println("\n\nUpdate Account2 value 0")
 			tx, err = eipContract.Update(transactOpts2, big.NewInt(0))
-			fmt.Printf("\n\n")
 		case 6:
-			fmt.Println("\n\nRemove Account2")
 			tx, _ = eipContract.RemoveAndRevert(transactOpts2)
-			fmt.Printf("\n\n")
 		}
-
 
 		if err != nil {
 			t.Fatal(err)
@@ -632,7 +581,6 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
@@ -646,7 +594,6 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	if *storageSize != state.HugeNumber+2 {
 		t.Fatal("storage size should be HugeNumber+2", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
-
 
 	// BLock 5
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
@@ -684,26 +631,26 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		db       = ethdb.NewMemDatabase()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address = crypto.PubkeyToAddress(key.PublicKey)
+		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr = common.Address{1}
-		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		theAddr  = common.Address{1}
+		funds    = big.NewInt(1000000000)
+		gspec    = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
-				EIP2027Block:   big.NewInt(1),
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				EIP2027Block:        big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address:  {Balance: funds},
 				address1: {Balance: funds},
 				address2: {Balance: funds},
 			},
@@ -731,15 +678,13 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	fmt.Println("========================================================================")
-
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
 
 		switch i {
 		case 0:
@@ -747,22 +692,14 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			fmt.Println("\n\nDeploy Account")
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			fmt.Printf("\n\n")
 		case 3:
-			fmt.Println("\n\nCreate Account1 value 2")
 			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-			fmt.Printf("\n\n")
 		case 4:
-			fmt.Println("\n\nCreate Account2 value 3")
 			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-			fmt.Printf("\n\n")
 		case 5:
-			fmt.Println("\n\nUpdate Account2 value 0")
 			tx, _ = eipContract.UpdateAndRevert(transactOpts2, big.NewInt(0))
 		}
-
 
 		if err != nil {
 			t.Fatal(err)
@@ -781,7 +718,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 
 		contractBackend.Commit()
 	})
-
 
 	// BLOCK 0
 	// account must exist pre eip 161
@@ -803,7 +739,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		t.Fatal("storage size should be nil at the block 0")
 	}
 
-
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
@@ -822,7 +757,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	if storageSize != nil {
 		t.Fatal("storage size should be nil at the block 1")
 	}
-
 
 	// BLOCK 2
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
@@ -852,7 +786,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
@@ -866,7 +799,6 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	if *storageSize != state.HugeNumber+2 {
 		t.Fatal("storage size should be HugeNumber+2", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
-
 
 	// BLock 5
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
@@ -886,26 +818,26 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
-		db      = ethdb.NewMemDatabase()
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		db       = ethdb.NewMemDatabase()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address = crypto.PubkeyToAddress(key.PublicKey)
+		address  = crypto.PubkeyToAddress(key.PublicKey)
 		address1 = crypto.PubkeyToAddress(key1.PublicKey)
 		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr = common.Address{1}
-		funds   = big.NewInt(1000000000)
-		gspec   = &core.Genesis{
+		theAddr  = common.Address{1}
+		funds    = big.NewInt(1000000000)
+		gspec    = &core.Genesis{
 			Config: &params.ChainConfig{
-				ChainID:        big.NewInt(1),
-				HomesteadBlock: new(big.Int),
-				EIP155Block:    new(big.Int),
-				EIP158Block:    big.NewInt(1),
-				EIP2027Block:   big.NewInt(1),
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				EIP2027Block:        big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
+				address:  {Balance: funds},
 				address1: {Balance: funds},
 				address2: {Balance: funds},
 			},
@@ -932,15 +864,13 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	fmt.Println("========================================================================")
-
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsEnabledCTX(context.Background(), block.Number())
+		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
 
 		switch i {
 		case 0:
@@ -948,22 +878,14 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 		case 1:
 			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
 		case 2:
-			fmt.Println("\n\nDeploy Account")
 			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			fmt.Printf("\n\n")
 		case 3:
-			fmt.Println("\n\nCreate Account1 value 2")
 			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-			fmt.Printf("\n\n")
 		case 4:
-			fmt.Println("\n\nCreate Account2 value 3")
 			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-			fmt.Printf("\n\n")
 		case 5:
-			fmt.Println("\n\nUpdate Account2 value 0")
 			tx, _ = eipContract.UpdateAndException(transactOpts2, big.NewInt(0))
 		}
-
 
 		if err != nil {
 			t.Fatal(err)
@@ -982,7 +904,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 
 		contractBackend.Commit()
 	})
-
 
 	// BLOCK 0
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -1003,7 +924,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 		t.Fatal("storage size should be nil at the block 0")
 	}
 
-
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
@@ -1022,7 +942,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	if storageSize != nil {
 		t.Fatal("storage size should be nil at the block 1")
 	}
-
 
 	// BLOCK 2
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
@@ -1052,7 +971,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
 
-
 	// BLock 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
@@ -1066,7 +984,6 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	if *storageSize != state.HugeNumber+2 {
 		t.Fatal("storage size should be HugeNumber+2", *storageSize, st.GetCodeHash(contractAddress).Hex())
 	}
-
 
 	// BLock 5
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {

@@ -89,7 +89,6 @@ func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Ha
 		log.Error("Receipt refereced missing", "number", blockNumber, "hash", blockHash, "index", receiptIndex)
 		return nil, common.Hash{}, 0, 0
 	}
-
 	return receipts[receiptIndex], blockHash, blockNumber, receiptIndex
 }
 

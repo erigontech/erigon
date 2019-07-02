@@ -5,20 +5,22 @@ import (
 	"math/big"
 )
 
+type configKey int
+
 const (
-	IsHomesteadEnabled      = "IsHomesteadEnabled"
-	IsEIP150Enabled         = "IsEIP150Enabled"
-	IsEIP155Enabled         = "IsEIP155Enabled"
-	IsEIP158Enabled         = "IsEIP158Enabled"
-	IsEIP2027Enabled        = "IsEIP2027Enabled"
-	IsByzantiumEnabled      = "IsByzantiumEnabled"
-	IsConstantinopleEnabled = "IsConstantinopleEnabled"
-	IsPetersburgEnabled     = "IsPetersburgEnabled"
-	IsEWASM                 = "IsEWASM"
-	BlockNumber				= "BlockNumber"
+	IsHomesteadEnabled configKey = iota
+	IsEIP150Enabled
+	IsEIP155Enabled
+	IsEIP158Enabled
+	IsEIP2027Enabled
+	IsByzantiumEnabled
+	IsConstantinopleEnabled
+	IsPetersburgEnabled
+	IsEWASM
+	BlockNumber
 )
 
-func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int) context.Context {
+func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = context.WithValue(ctx, IsHomesteadEnabled, c.IsHomestead(blockNum))
 	ctx = context.WithValue(ctx, IsEIP150Enabled, c.IsEIP150(blockNum))
 	ctx = context.WithValue(ctx, IsEIP155Enabled, c.IsEIP155(blockNum))
@@ -32,7 +34,7 @@ func (c *ChainConfig) WithEIPsEnabledCTX(ctx context.Context, blockNum *big.Int)
 	return ctx
 }
 
-func GetForkFlag(ctx context.Context, name string) bool {
+func GetForkFlag(ctx context.Context, name configKey) bool {
 	b := ctx.Value(name)
 	if b == nil {
 		return false

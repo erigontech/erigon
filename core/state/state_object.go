@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -118,21 +117,6 @@ func newObject(db *StateDB, address common.Address, data, original accounts.Acco
 		blockOriginStorage: make(Storage),
 		dirtyStorage:       make(Storage),
 	}
-}
-
-// EncodeRLP implements rlp.Encoder.
-func (so *stateObject) EncodeRLP(w io.Writer) error {
-	//fixme we need to decide if we need stateObject.EncodeRLP
-	panic("stateObject.EncodeRLP")
-
-	/*
-		accountBytes, err := so.data.Encode(ctx)
-		if err != nil {
-			return err
-		}
-		return rlp.Write(w, accountBytes)
-	*/
-	return nil
 }
 
 // setError remembers the first non-nil error it is called with.

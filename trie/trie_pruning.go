@@ -145,9 +145,9 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 			newMap = make(map[string]struct{})
 			tp.accounts[newTimestamp] = newMap
 		}
-		tp.accountsMutex.Unlock()
 
 		newMap[hexS] = struct{}{}
+		tp.accountsMutex.Unlock()
 	}
 	if exists {
 		tp.accountsMutex.Lock()

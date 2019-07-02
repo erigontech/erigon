@@ -59,7 +59,7 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		state.Finalise(context.Background(), tds.TrieStateWriter())
+		_ = state.Finalise(context.Background(), tds.TrieStateWriter())
 	}
 
 	_, err := tds.ComputeTrieRoots(context.Background())

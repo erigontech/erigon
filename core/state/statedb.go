@@ -20,6 +20,7 @@ package state
 import (
 	"bytes"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/log"
 
 	//"errors"
 	"fmt"
@@ -501,7 +502,6 @@ func (sdb *StateDB) DecreaseStorageSize(addr common.Address) {
 	sdb.changeStorageSize(addr, -1)
 }
 
-// todo check is it correct 0 location value
 var nullLocation = common.Hash{}
 var nullValue = common.Big0
 
@@ -644,14 +644,16 @@ func (sdb *StateDB) createObject(addr common.Address, previous *stateObject) (ne
 func (sdb *StateDB) CreateAccount(addr common.Address, checkPrev bool) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
-		if sdb.trace {
-			fmt.Println("CaptureAccountRead err", err)
+		if sdb.trace && err != nil {
+			log.Error("error while CaptureAccountRead", "err", err)
 		}
+
 		err = sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
-			fmt.Println("CaptureAccountWrite err", err)
+			log.Error("error while CaptureAccountWrite", "err", err)
 		}
 	}
+
 	var previous *stateObject
 	if checkPrev {
 		previous = sdb.getStateObject(addr)

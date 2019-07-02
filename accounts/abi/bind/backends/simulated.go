@@ -118,22 +118,6 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	return backend
 }
 
-func NewSimulatedBackendMock(genesisBlock *types.Block, config *params.ChainConfig,
-	blockchain *core.BlockChain, engine consensus.Engine, database ethdb.Database) *SimulatedBackend {
-
-	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     database,
-		engine:       engine,
-		blockchain:   blockchain,
-		config:       config,
-		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
-	}
-	backend.emptyPendingBlock()
-	return backend
-}
-
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
@@ -160,13 +144,13 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds, _ = state.NewTrieDbState(b.blockchain.Config().WithEIPsEnabledCTX(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds, _ = state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {
-	tds, err := state.NewTrieDbState(b.blockchain.Config().WithEIPsEnabledCTX(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds, err := state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	if err != nil {
 		return nil, err
 	}
@@ -237,9 +221,6 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 // TransactionReceipt returns the receipt of a transaction.
 func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	receipt, _, _, _ := rawdb.ReadReceipt(b.database, txHash)
-
-	fmt.Println("SimulatedBackend.TransactionReceipt txHash", txHash.String())
-	fmt.Println("SimulatedBackend.TransactionReceipt", receipt == nil)
 	return receipt, nil
 }
 
