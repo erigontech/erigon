@@ -359,7 +359,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash, false)
-	r := trie.NewResolver(context.Background(), false, true, blockNum)
+	r := trie.NewResolver(context.TODO(), false, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -397,7 +397,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != emptyRoot {
 			st := trie.New(root, true)
-			sr := trie.NewResolver(context.Background(), false, false, blockNum)
+			sr := trie.NewResolver(context.TODO(), false, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)

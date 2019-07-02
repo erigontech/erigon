@@ -49,20 +49,21 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	obj3.SetBalance(big.NewInt(44))
 
 	// write some of them to the trie
-	err := s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj1.address, &obj1.data, new(accounts.Account))
+	ctx := context.TODO()
+	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.tds.TrieStateWriter().UpdateAccountData(context.Background(), obj2.address, &obj2.data, new(accounts.Account))
-	c.Check(err, checker.IsNil)
-
-	err = s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
+	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
-	_, err = s.tds.ComputeTrieRoots(context.Background())
+	err = s.state.Finalise(ctx, s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(context.Background(), 1)
+	_, err = s.tds.ComputeTrieRoots(ctx)
+	c.Check(err, checker.IsNil)
 
-	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
+	s.tds.SetBlockNr(ctx, 1)
+
+	err = s.state.Commit(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -103,7 +104,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.tds, _ = NewTrieDbState(context.Background(), common.Hash{}, s.db, 0)
+	s.tds, _ = NewTrieDbState(context.TODO(), common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
 }
@@ -116,12 +117,13 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.state.SetState(address, common.Hash{}, value)
 
-	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
+	ctx := context.TODO()
+	err := s.state.Finalise(ctx, s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(context.Background(), 1)
+	s.tds.SetBlockNr(ctx, 1)
 
-	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
+	err = s.state.Commit(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
 
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
@@ -163,7 +165,8 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 // printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	ctx := context.TODO()
+	tds, _ := NewTrieDbState(ctx, common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 
@@ -186,19 +189,19 @@ func TestSnapshot2(t *testing.T) {
 	so0.deleted = false
 	state.setStateObject(so0)
 
-	err := state.Finalise(context.Background(), tds.TrieStateWriter())
+	err := state.Finalise(ctx, tds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalise state", err)
 	}
 
-	_, err = tds.ComputeTrieRoots(context.Background())
+	_, err = tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		t.Fatal("error while computing trie roots", err)
 	}
 
-	tds.SetBlockNr(context.Background(), 1)
+	tds.SetBlockNr(ctx, 1)
 
-	err = state.Commit(context.Background(), tds.DbStateWriter())
+	err = state.Commit(ctx, tds.DbStateWriter())
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}

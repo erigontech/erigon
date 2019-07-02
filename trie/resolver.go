@@ -370,10 +370,6 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			if err != nil {
 				return false, err
 			}
-			//v1,_ := value.EncodeRLP(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
-			//v2, _:= value.EncodeRLP(context.Background())
-			//fmt.Println("trie/resolver.go:375", v1)
-			//fmt.Println("trie/resolver.go:375", v2)
 
 			tr.value, err = value.EncodeRLP(tr.ctx)
 			if err != nil {

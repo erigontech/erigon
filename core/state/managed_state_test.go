@@ -28,7 +28,7 @@ var addr = common.BytesToAddress([]byte("test"))
 
 func create() (*ManagedState, *account) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 1)
+	tds, _ := NewTrieDbState(context.TODO(), common.Hash{}, db, 1)
 	statedb := New(tds)
 	ms := ManageState(statedb)
 	ms.StateDB.SetNonce(addr, 100)

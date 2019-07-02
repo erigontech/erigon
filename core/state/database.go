@@ -591,9 +591,6 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 				if err != nil {
 					return err
 				}
-				if acc != nil && acc.StorageSize != nil {
-					fmt.Println("TrieDbState.UnwindTo", common.Bytes2Hex(acc.CodeHash), *acc.StorageSize)
-				}
 				b.accountUpdates[addrHash] = acc
 				accountPutKeys = append(accountPutKeys, key)
 				accountPutVals = append(accountPutVals, value)
