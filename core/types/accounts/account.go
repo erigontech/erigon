@@ -129,6 +129,11 @@ func (a *Account) Decode(enc []byte) error {
 		a.fill(dataWithStorage)
 	}
 
+	// We dont want to broke old state, so keep StorageSize nil if not set
+	if a.StorageSize != nil && *a.StorageSize == 0 {
+		a.StorageSize = nil
+	}
+
 	return nil
 }
 

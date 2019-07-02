@@ -115,6 +115,8 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 		Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash: crypto.Keccak256([]byte{1, 2, 3}),
 	}
+	account.StorageSize = new(uint64)
+	*account.StorageSize = 10
 
 	encodedAccount, err := account.Encode(context.WithValue(context.Background(), params.IsEIP2027Enabled, true))
 	if err != nil {
@@ -127,7 +129,6 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 	}
 
 	//after enable eip2027 storage size for account with empty storage size equals to 0
-	account.StorageSize = new(uint64)
 	isAccountsEqual(t, account, decodedAccount)
 	isStorageSizeEqual(t, account, decodedAccount)
 }
@@ -160,9 +161,16 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 
 		isAccountsEqual(t, a, decodedAccount)
 
-		if *decodedAccount.StorageSize != *a.StorageSize {
-			t.Fatal("cant decode the account StorageSize", *decodedAccount.StorageSize, *a.StorageSize)
+		if *a.StorageSize == 0 {
+			if decodedAccount.StorageSize != nil {
+				t.Fatal("cant decode the account StorageSize")
+			}
+		} else {
+			if *decodedAccount.StorageSize != *a.StorageSize {
+				t.Fatal("cant decode the account StorageSize", *decodedAccount.StorageSize, *a.StorageSize)
+			}
 		}
+
 	}
 }
 
@@ -207,12 +215,14 @@ func isAccountsEqual(t *testing.T, src, dst *Account) {
 }
 
 func isStorageSizeEqual(t *testing.T, src, dst *Account) {
+	t.Helper()
+
 	if src.StorageSize == nil {
 		if dst.StorageSize != nil {
 			t.Fatal("cant decode the account StorageSize - should be nil", src.StorageSize, dst.StorageSize)
 		}
 	} else {
-		if dst.StorageSize == nil {
+		if src.StorageSize != nil && dst.StorageSize == nil {
 			t.Fatal("cant decode the account StorageSize - should be not nil", src.StorageSize, dst.StorageSize)
 		}
 
