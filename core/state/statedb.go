@@ -43,6 +43,7 @@ var (
 	emptyState = crypto.Keccak256Hash(nil)
 
 	// emptyCode is the known hash of the empty EVM bytecode.
+	// DESCRIBED: docs/programmers_guide/guide.md#code-hash
 	emptyCode = crypto.Keccak256Hash(nil)
 )
 
@@ -226,6 +227,7 @@ func (sdb *StateDB) Empty(addr common.Address) bool {
 }
 
 // Retrieve the balance from the given address or 0 if object not found
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetBalance(addr common.Address) *big.Int {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
@@ -240,6 +242,7 @@ func (sdb *StateDB) GetBalance(addr common.Address) *big.Int {
 	return common.Big0
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetNonce(addr common.Address) uint64 {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
@@ -255,6 +258,7 @@ func (sdb *StateDB) GetNonce(addr common.Address) uint64 {
 	return 0
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetCode(addr common.Address) []byte {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
@@ -275,6 +279,7 @@ func (sdb *StateDB) GetCode(addr common.Address) []byte {
 	return nil
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetCodeSize(addr common.Address) int {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
@@ -296,6 +301,7 @@ func (sdb *StateDB) GetCodeSize(addr common.Address) int {
 	return len
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetCodeHash(addr common.Address) common.Hash {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
@@ -311,6 +317,7 @@ func (sdb *StateDB) GetCodeHash(addr common.Address) common.Hash {
 }
 
 // GetState retrieves a value from the given account's storage trie.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil {
@@ -340,6 +347,7 @@ func (sdb *StateDB) GetStorageProof(a common.Address, key common.Hash) ([][]byte
 }
 
 // GetCommittedState retrieves a value from the given account's committed storage trie.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
 	stateObject := sdb.getStateObject(addr)
 	if stateObject != nil {
@@ -377,6 +385,7 @@ func (sdb *StateDB) StorageSize(addr common.Address) *uint64 {
  */
 
 // AddBalance adds amount to the account associated with addr.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 	if sdb.trace {
 		fmt.Printf("AddBalance %x, %d\n", addr, amount)
@@ -394,6 +403,7 @@ func (sdb *StateDB) AddBalance(addr common.Address, amount *big.Int) {
 }
 
 // SubBalance subtracts amount from the account associated with addr.
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 	if sdb.trace {
 		fmt.Printf("SubBalance %x, %d\n", addr, amount)
@@ -411,13 +421,13 @@ func (sdb *StateDB) SubBalance(addr common.Address, amount *big.Int) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
-
 	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -425,13 +435,13 @@ func (sdb *StateDB) SetBalance(addr common.Address, amount *big.Int) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
-
 	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -439,13 +449,14 @@ func (sdb *StateDB) SetNonce(addr common.Address, nonce uint64) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#code-hash
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) SetCode(addr common.Address, code []byte) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountWrite(addr)
 		if sdb.trace {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
-
 	}
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {
@@ -453,6 +464,7 @@ func (sdb *StateDB) SetCode(addr common.Address, code []byte) {
 	}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *StateDB) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := sdb.GetOrNewStateObject(addr)
 	if stateObject != nil {

@@ -22,11 +22,6 @@ geth:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/geth\" to launch geth."
 
-swarm:
-	build/env.sh go run build/ci.go install ./cmd/swarm
-	@echo "Done building."
-	@echo "Run \"$(GOBIN)/swarm\" to launch swarm."
-
 hack:
 	build/env.sh go run build/ci.go install ./cmd/hack
 	@echo "Done building."
@@ -46,11 +41,11 @@ state:
 	build/env.sh go run build/ci.go install ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
-
-morus:
-	build/env.sh go run build/ci.go install ./cmd/morus
+	
+pics:
+	build/env.sh go run build/ci.go install ./cmd/pics
 	@echo "Done building."
-	@echo "Run \"$(GOBIN)/morus\" to launch state."
+	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 all:
 	build/env.sh go run build/ci.go install

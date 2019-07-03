@@ -43,6 +43,7 @@ const (
 )
 
 // Receipt represents the results of a transaction.
+// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Receipt struct {
 	// Consensus fields
 	PostState         []byte `json:"root"`

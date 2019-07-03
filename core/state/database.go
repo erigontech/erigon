@@ -290,6 +290,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
 	roots, err := tds.computeTrieRoots(ctx, true)
 	tds.clearUpdates()
@@ -896,6 +897,7 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{tds: tds}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#root
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func accountsEqual(a1, a2 *accounts.Account) bool {

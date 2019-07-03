@@ -34,16 +34,19 @@ type node interface {
 }
 
 type (
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	fullNode struct {
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
 		flags    nodeFlag
 	}
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	duoNode struct {
 		mask   uint32 // Bitmask. The set bits indicate the child is not nil
 		child1 node
 		child2 node
 		flags  nodeFlag
 	}
+	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
 		Key   []byte
 		Val   node
