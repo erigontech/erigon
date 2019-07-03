@@ -708,7 +708,17 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 	switch {
 	case msg.Code == GetStateRangesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStateRangesMsg
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		var response stateRangesMsg
+		response.ID = request.ID
+		// TODO [yperbasis] implement properly
+
+		return p2p.Send(p.rw, StateRangesCode, response)
 
 	case msg.Code == StateRangesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")

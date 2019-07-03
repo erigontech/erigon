@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // Tests that protocol versions and modes of operations are matched up properly.
@@ -521,6 +522,62 @@ outer:
 	}
 }
 
+func TestFirehoseStateRanges(t *testing.T) {
+	addr1 := common.HexToAddress("0x3b4fc1530da632624fa1e223a91d99dbb07c2d42")
+	addr2 := common.HexToAddress("0xb574d96f69c1324e3b49e63f4cc899736dd52789")
+	addr3 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
+	addr4 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af06")
+
+	signer := types.HomesteadSigner{}
+	numBlocks := 4
+	generator := func(i int, block *core.BlockGen) {
+		switch i {
+		case 0:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 1:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 2:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 3:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		}
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	block := pm.blockchain.CurrentBlock()
+
+	var request getStateRangesMsg
+	request.ID = 1
+	request.Root = block.Header().Root
+	request.Prefixes = []trie.Keybytes{
+		{Data: common.FromHex("b0"), Odd: true, Terminating: false},
+		{Data: common.FromHex("20"), Odd: true, Terminating: false},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	var reply stateRangesMsg
+	reply.ID = 1
+	// TODO [yperbasis] reply.Entries
+
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
+
+	// TODO [yperbasis] check that no data + available blocks are returned for old roots
+}
+
 func TestFirehoseBytecode(t *testing.T) {
 	// Define two accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -535,6 +592,7 @@ func TestFirehoseBytecode(t *testing.T) {
 	contractCode2 := append(common.FromHex("606060405260046000553415601057fe5b5b603380601e6000396000f300"), runtimeCode2...)
 
 	signer := types.HomesteadSigner{}
+	numBlocks := 2
 	// Chain generator with a couple of dummy contracts
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
@@ -555,7 +613,7 @@ func TestFirehoseBytecode(t *testing.T) {
 		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -579,6 +637,6 @@ func TestFirehoseBytecode(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetBytecodeCode, request))
 	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {
-		t.Errorf("unexpected BytecodeCode response: %v", err)
+		t.Errorf("unexpected Bytecode response: %v", err)
 	}
 }

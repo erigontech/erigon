@@ -16,6 +16,12 @@
 
 package trie
 
+import (
+	"io"
+
+	"github.com/ledgerwatch/turbo-geth/rlp"
+)
+
 // Trie keys are dealt with in three distinct encodings:
 //
 // KEYBYTES encoding contains the actual key and nothing else. This encoding is the
@@ -64,6 +70,75 @@ func compactToHex(compact []byte) []byte {
 	// apply odd flag
 	chop := 2 - base[0]&1
 	return base[chop:]
+}
+
+// Keybytes represent a packed encoding of hex sequences
+// where 2 nibbles per byte are stored in Data
+// + an additional flag for terminating nodes.
+type Keybytes struct {
+	Data        []byte
+	Odd         bool
+	Terminating bool
+}
+
+// ToCompact translates from KEYBYTES to COMPACT encoding.
+func (x *Keybytes) ToCompact() []byte {
+	l := len(x.Data)
+	if !x.Odd {
+		l++
+	}
+
+	var compact = make([]byte, l)
+
+	if x.Terminating {
+		compact[0] = 0x20
+	}
+
+	if x.Odd {
+		compact[0] += 0x10
+		compact[0] += x.Data[0] >> 4
+		for i := 1; i < len(x.Data); i++ {
+			compact[i] = (x.Data[i-1] << 4) + (x.Data[i] >> 4)
+		}
+	} else {
+		copy(compact[1:], x.Data)
+	}
+
+	return compact
+}
+
+// CompactToKeybytes translates from COMPACT to KEYBYTES encoding.
+func CompactToKeybytes(c []byte) Keybytes {
+	var k Keybytes
+	k.Odd = (c[0] & 0x10) != 0
+	k.Terminating = (c[0] & 0x20) != 0
+
+	if k.Odd {
+		k.Data = make([]byte, len(c))
+		for i := 1; i < len(c); i++ {
+			k.Data[i-1] = (c[i-1] << 4) + (c[i] >> 4)
+		}
+		k.Data[len(c)-1] = c[len(c)-1] << 4
+	} else {
+		k.Data = c[1:]
+	}
+
+	return k
+}
+
+// EncodeRLP implements rlp.Encoder and encodes Keybytes in the COMPACT encoding.
+func (kb *Keybytes) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, kb.ToCompact())
+}
+
+// DecodeRLP implements rlp.Decoder and decodes Keybytes from the COMPACT encoding.
+func (kb *Keybytes) DecodeRLP(s *rlp.Stream) error {
+	var compact []byte
+	if err := s.Decode(&compact); err != nil {
+		return err
+	}
+	*kb = CompactToKeybytes(compact)
+	return nil
 }
 
 func keybytesToHex(str []byte) []byte {

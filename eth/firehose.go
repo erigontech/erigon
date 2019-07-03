@@ -3,6 +3,7 @@ package eth
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // FirehoseName is the official short name of the protocol used during capability negotiation.
@@ -33,6 +34,18 @@ const (
 	StorageSizesCode     = 0x0b
 )
 
+// Status of Firehose results.
+type Status uint
+
+const (
+	// OK means success.
+	OK Status = 0
+	// NoData for the requested root; available blocks should be returned.
+	NoData Status = 1
+	// TooManyLeaves means that there're more than 4096 leaves matching the prefix.
+	TooManyLeaves Status = 2
+)
+
 type firehosePeer struct {
 	*p2p.Peer
 	rw p2p.MsgReadWriter
@@ -41,6 +54,28 @@ type firehosePeer struct {
 type accountAndHash struct {
 	Account []byte      // account address or hash thereof
 	Hash    common.Hash // TODO [yperbasis] potentially allow nil Hash in getBytecodeMsg
+}
+
+type keyValue struct {
+	Key []byte
+	Val []byte
+}
+
+type rangeEntry struct {
+	Status Status
+	Leaves []keyValue
+}
+
+type getStateRangesMsg struct {
+	ID       uint64
+	Root     common.Hash
+	Prefixes []trie.Keybytes
+}
+
+type stateRangesMsg struct {
+	ID              uint64
+	Entries         []rangeEntry
+	AvailableBlocks []common.Hash
 }
 
 type getBytecodeMsg struct {
