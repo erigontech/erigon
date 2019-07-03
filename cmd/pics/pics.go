@@ -16,7 +16,7 @@ import (
 var account = flag.String("pic", "", "specifies picture to regenerate")
 
 // Generate set of keys for the visualisation
-func generate_prefix_groups() []string {
+func generatePrefixGroups() []string {
 	var keys []string
 	for b := byte(0); b < 32; b++ {
 		key := crypto.Keccak256([]byte{b})[:2]
@@ -32,7 +32,7 @@ func generate_prefix_groups() []string {
 	return keys
 }
 
-func prefix_groups_1() {
+func prefixGroups1() {
 	fmt.Printf("Prefix groups 1\n")
 	filename := "prefix_groups_1.dot"
 	f, err := os.Create(filename)
@@ -40,7 +40,7 @@ func prefix_groups_1() {
 		panic(err)
 	}
 
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	visual.StartGraph(f)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
@@ -59,7 +59,7 @@ func prefix_groups_1() {
 	}
 }
 
-func prefix_groups_2() {
+func prefixGroups2() {
 	fmt.Printf("Prefix groups 2\n")
 	filename := "prefix_groups_2.dot"
 	f, err := os.Create(filename)
@@ -67,7 +67,7 @@ func prefix_groups_2() {
 		panic(err)
 	}
 
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	visual.StartGraph(f)
 	for i, key := range keys {
@@ -95,14 +95,14 @@ func commonPrefix(s1, s2 string) int {
 	return l
 }
 
-func prefix_groups_3() {
+func prefixGroups3() {
 	fmt.Printf("Prefix groups 3\n")
 	filename := "prefix_groups_3.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	// Set of all possible common prefixes
 	prefixSet := make(map[string]struct{})
@@ -182,14 +182,14 @@ q_%x->q_%x;
 	}
 }
 
-func prefix_groups_4() {
+func prefixGroups4() {
 	fmt.Printf("Prefix groups 4\n")
 	filename := "prefix_groups_4.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
 	var hightlights [][]byte
@@ -214,14 +214,14 @@ func prefix_groups_4() {
 	}
 }
 
-func prefix_groups_5() {
+func prefixGroups5() {
 	fmt.Printf("Prefix groups 5\n")
 	filename := "prefix_groups_5.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
 	var hightlights [][]byte
@@ -247,14 +247,14 @@ func prefix_groups_5() {
 	}
 }
 
-func prefix_groups_6() {
+func prefixGroups6() {
 	fmt.Printf("Prefix groups 6\n")
 	filename := "prefix_groups_6.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
 	var hightlights [][]byte
@@ -281,14 +281,14 @@ func prefix_groups_6() {
 	}
 }
 
-func prefix_groups_7() {
+func prefixGroups7() {
 	fmt.Printf("Prefix groups 7\n")
 	filename := "prefix_groups_7.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
 	var hightlights [][]byte
@@ -317,14 +317,14 @@ func prefix_groups_7() {
 	}
 }
 
-func prefix_groups_8() {
+func prefixGroups8() {
 	fmt.Printf("Prefix groups 8\n")
 	filename := "prefix_groups_8.dot"
 	f, err := os.Create(filename)
 	if err != nil {
 		panic(err)
 	}
-	keys := generate_prefix_groups()
+	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
 	var hightlights [][]byte
@@ -362,20 +362,20 @@ func main() {
 	flag.Parse()
 	switch *account {
 	case "prefix_groups_1":
-		prefix_groups_1()
+		prefixGroups1()
 	case "prefix_groups_2":
-		prefix_groups_2()
+		prefixGroups2()
 	case "prefix_groups_3":
-		prefix_groups_3()
+		prefixGroups3()
 	case "prefix_groups_4":
-		prefix_groups_4()
+		prefixGroups4()
 	case "prefix_groups_5":
-		prefix_groups_5()
+		prefixGroups5()
 	case "prefix_groups_6":
-		prefix_groups_6()
+		prefixGroups6()
 	case "prefix_groups_7":
-		prefix_groups_7()
+		prefixGroups7()
 	case "prefix_groups_8":
-		prefix_groups_8()
+		prefixGroups8()
 	}
 }

@@ -160,7 +160,7 @@ func generateStructLen(buffer []byte, l int) int {
 	return 4
 }
 
-func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) {
+func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) error {
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
 	var valPrefix [4]byte
@@ -207,15 +207,31 @@ func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) {
 		var lenPrefix [4]byte
 		pt := generateStructLen(lenPrefix[:], totalLen)
 		hb.sha.Reset()
-		hb.sha.Write(lenPrefix[:pt])
-		hb.sha.Write(keyPrefix[:kp])
-		hb.sha.Write(n.Key)
-		hb.sha.Write(valPrefix[:vp])
-		hb.sha.Write(v)
+		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+			return err
+		}
+		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+			return err
+		}
+		if _, err := hb.sha.Write(n.Key); err != nil {
+			return err
+		}
+		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
+			return err
+		}
+		if _, err := hb.sha.Write(v); err != nil {
+			return err
+		}
 		var hn common.Hash
-		hb.sha.Read(hn[:])
-		buffer.WriteByte(128 + 32)
-		buffer.Write(hn[:])
+		if _, err := hb.sha.Read(hn[:]); err != nil {
+			return err
+		}
+		if err := buffer.WriteByte(128 + 32); err != nil {
+			return err
+		}
+		if _, err := buffer.Write(hn[:]); err != nil {
+			return err
+		}
 	}
 }
 
