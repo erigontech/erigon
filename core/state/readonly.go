@@ -18,6 +18,8 @@ package state
 
 import (
 	"bytes"
+	"context"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -119,7 +121,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	})
 }
 
-func (dbs *DbState) ReadAccountData(address common.Address) (*Account, error) {
+func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -130,7 +132,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*Account, error) {
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return encodingToAccount(enc)
+	return accounts.Decode(enc)
 }
 
 func (dbs *DbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -162,11 +164,11 @@ func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	return len(code), nil
 }
 
-func (dbs *DbState) UpdateAccountData(address common.Address, original, account *Account) error {
+func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *DbState) DeleteAccount(address common.Address, original *Account) error {
+func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 

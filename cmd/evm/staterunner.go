@@ -17,6 +17,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +45,7 @@ type StatetestResult struct {
 	Name  string      `json:"name"`
 	Pass  bool        `json:"pass"`
 	Fork  string      `json:"fork"`
-	Error string      `json:"error,omitempty"`
+	Error *string     `json:"error,omitempty"`
 	State *state.Dump `json:"state,omitempty"`
 }
 
@@ -95,18 +96,15 @@ func stateTestCmd(ctx *cli.Context) error {
 	for key, test := range tests {
 		for _, st := range test.Subtests() {
 			// Run the test and aggregate the result
-			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true}
-			statedb, tds, err := test.Run(st, cfg)
+			result := &StatetestResult{Name: key, Fork: st.Fork, Pass: true, Error: new(string)}
+			statedb, tds, root, err := test.Run(context.Background(), st, cfg)
 			// print state root for evmlab tracing
 			if ctx.GlobalBool(MachineFlag.Name) && statedb != nil {
-				statedb.Finalise(false, tds.TrieStateWriter())
-				roots, _ := tds.ComputeTrieRoots()
-				root := roots[len(roots)-1]
 				fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%x\"}\n", root)
 			}
 			if err != nil {
 				// Test failed, mark as so and dump any state to aid debugging
-				result.Pass, result.Error = false, err.Error()
+				result.Pass, *result.Error = false, err.Error()
 				if ctx.GlobalBool(DumpFlag.Name) && tds != nil {
 					dump := tds.RawDump()
 					result.State = &dump

@@ -19,8 +19,10 @@ package tests
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
 
@@ -60,7 +62,12 @@ func TestState(t *testing.T) {
 			name := name + "/" + key
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-					_, _, err := test.Run(subtest, vmconfig)
+					config, ok := Forks[subtest.Fork]
+					if !ok {
+						return UnsupportedForkError{subtest.Fork}
+					}
+					ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
+					_, _, _, err := test.Run(ctx, subtest, vmconfig)
 					return st.checkFailure(t, name, err)
 				})
 			})

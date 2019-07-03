@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -80,7 +81,7 @@ func pricedTransaction(nonce uint64, gaslimit uint64, gasprice *big.Int, key *ec
 
 func setupTxPool() (*TxPool, *ecdsa.PrivateKey) {
 	diskdb := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, diskdb, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, diskdb, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -167,7 +168,7 @@ func (c *testChain) State() (*state.StateDB, error) {
 	stdb := c.statedb
 	if *c.trigger {
 		db := ethdb.NewMemDatabase()
-		c.tds, _ = state.NewTrieDbState(common.Hash{}, db, 0)
+		c.tds, _ = state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 		c.statedb = state.New(c.tds)
 		// simulate that the new head block included tx0 and tx1
 		c.statedb.SetNonce(c.address, 2)
@@ -187,7 +188,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 		db      = ethdb.NewMemDatabase()
 		key, _  = crypto.GenerateKey()
 		address = crypto.PubkeyToAddress(key.PublicKey)
-		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _  = state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		trigger = false
 	)
@@ -343,7 +344,7 @@ func TestTransactionChainFork(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
 		db := ethdb.NewMemDatabase()
-		tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 		statedb := state.New(tds)
 		statedb.AddBalance(addr, big.NewInt(100000000000000))
 
@@ -374,7 +375,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 	addr := crypto.PubkeyToAddress(key.PublicKey)
 	resetState := func() {
 		db := ethdb.NewMemDatabase()
-		tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+		tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 		statedb := state.New(tds)
 		statedb.AddBalance(addr, big.NewInt(100000000000000))
 
@@ -566,7 +567,7 @@ func TestTransactionPostponing(t *testing.T) {
 
 	// Create the pool to test the postponing with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -783,7 +784,7 @@ func testTransactionQueueGlobalLimiting(t *testing.T, nolocals bool) {
 
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -873,7 +874,7 @@ func testTransactionQueueTimeLimiting(t *testing.T, nolocals bool) {
 
 	// Create the pool to test the non-expiration enforcement
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1029,7 +1030,7 @@ func TestTransactionPendingGlobalLimiting(t *testing.T) {
 
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1077,7 +1078,7 @@ func TestTransactionCapClearsFromAll(t *testing.T) {
 
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1113,7 +1114,7 @@ func TestTransactionPendingMinimumAllowance(t *testing.T) {
 
 	// Create the pool to test the limit enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1163,7 +1164,7 @@ func TestTransactionPoolRepricing(t *testing.T) {
 
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1286,7 +1287,7 @@ func TestTransactionPoolRepricingKeepsLocals(t *testing.T) {
 
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1350,7 +1351,7 @@ func TestTransactionPoolUnderpricing(t *testing.T) {
 
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1458,7 +1459,7 @@ func TestTransactionPoolStableUnderpricing(t *testing.T) {
 
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1526,7 +1527,7 @@ func TestTransactionReplacement(t *testing.T) {
 
 	// Create the pool to test the pricing enforcement with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1622,7 +1623,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 
 	// Create the original pool to inject transaction into the journal
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 
@@ -1722,7 +1723,7 @@ func TestTransactionStatusCheck(t *testing.T) {
 
 	// Create the pool to test the status retrievals with
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState(context.TODO(), common.Hash{}, db, 0)
 	statedb := state.New(tds)
 	blockchain := &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
 

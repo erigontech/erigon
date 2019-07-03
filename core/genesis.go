@@ -25,6 +25,7 @@ import (
 	"math/big"
 	"strings"
 
+	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -239,7 +240,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
-	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds, err := state.NewTrieDbState(g.Config.WithEIPsFlags(context.Background(), big.NewInt(0)), common.Hash{}, db, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -253,11 +254,12 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 			statedb.SetState(addr, key, value)
 		}
 	}
-	err = statedb.Finalise(false, tds.TrieStateWriter())
+	ctx := g.Config.WithEIPsFlags(context.Background(), big.NewInt(int64(g.Number)))
+	err = statedb.Finalise(ctx, tds.TrieStateWriter())
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	roots, err := tds.ComputeTrieRoots()
+	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -296,8 +298,9 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
-	tds.SetBlockNr(0)
-	if err := statedb.Commit(false, tds.DbStateWriter()); err != nil {
+	ctx := g.Config.WithEIPsFlags(context.Background(), block.Number())
+	tds.SetBlockNr(ctx, 0)
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
 	if _, err := batch.Commit(); err != nil {
@@ -330,7 +333,7 @@ func (g *Genesis) MustCommit(db ethdb.Database) *types.Block {
 
 // GenesisBlockForTesting creates and writes a block in which addr has the given wei balance.
 func GenesisBlockForTesting(db ethdb.Database, addr common.Address, balance *big.Int) *types.Block {
-	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}}
+	g := Genesis{Alloc: GenesisAlloc{addr: {Balance: balance}}, Config: params.TestChainConfig}
 	block := g.MustCommit(db)
 	return block
 }

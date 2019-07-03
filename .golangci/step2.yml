@@ -3,12 +3,11 @@ run:
 
 linters:
   enable:
-    - deadcode
     - govet
     - structcheck
 
   disable-all: true
 
 linters-settings:
-    govet:
-      check-shadowing: true
+  govet:
+    check-shadowing: true
