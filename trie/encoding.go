@@ -127,17 +127,17 @@ func CompactToKeybytes(c []byte) Keybytes {
 }
 
 // EncodeRLP implements rlp.Encoder and encodes Keybytes in the COMPACT encoding.
-func (kb *Keybytes) EncodeRLP(w io.Writer) error {
-	return rlp.Encode(w, kb.ToCompact())
+func (x *Keybytes) EncodeRLP(w io.Writer) error {
+	return rlp.Encode(w, x.ToCompact())
 }
 
 // DecodeRLP implements rlp.Decoder and decodes Keybytes from the COMPACT encoding.
-func (kb *Keybytes) DecodeRLP(s *rlp.Stream) error {
+func (x *Keybytes) DecodeRLP(s *rlp.Stream) error {
 	var compact []byte
 	if err := s.Decode(&compact); err != nil {
 		return err
 	}
-	*kb = CompactToKeybytes(compact)
+	*x = CompactToKeybytes(compact)
 	return nil
 }
 
