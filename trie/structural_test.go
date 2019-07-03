@@ -365,7 +365,7 @@ func (hb *HashBuilder) root() common.Hash {
 			defer returnHasherToPool(h)
 			h.hash(hb.branchStack[len(hb.branchStack)-1], true, hn[:])
 		} else {
-			hn, _ := hb.finaliseHasher()
+			hn, _ = hb.finaliseHasher()
 			return hn
 		}
 	} else {
