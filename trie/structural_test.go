@@ -125,7 +125,7 @@ func (hb *HashBuilder) branch(digit int) {
 			hb.branchStack[len(hb.branchStack)-1] = f
 		} else {
 			// Finalise existing hasher
-			hn := hb.finaliseHasher()
+			hn, _ := hb.finaliseHasher()
 			f.Children[digit] = hashNode(hn[:])
 			hb.branchStack = append(hb.branchStack, f)
 		}
@@ -236,7 +236,7 @@ func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) error
 	return nil
 }
 
-func (hb *HashBuilder) finaliseHasher() common.Hash {
+func (hb *HashBuilder) finaliseHasher() (common.Hash, error) {
 	prevDigit := hb.digitStack[len(hb.digitStack)-1]
 	hb.digitStack = hb.digitStack[:len(hb.digitStack)-1]
 	prevBuffer := hb.bufferStack[len(hb.bufferStack)-1]
@@ -247,11 +247,17 @@ func (hb *HashBuilder) finaliseHasher() common.Hash {
 	var lenPrefix [4]byte
 	pt := generateStructLen(lenPrefix[:], prevBuffer.Len())
 	hb.sha.Reset()
-	hb.sha.Write(lenPrefix[:pt])
-	hb.sha.Write(prevBuffer.Bytes())
+	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+		return common.Hash{}, err
+	}
+	if _, err := hb.sha.Write(prevBuffer.Bytes()); err != nil {
+		return common.Hash{}, err
+	}
 	var hn common.Hash
-	hb.sha.Read(hn[:])
-	return hn
+	if _, err := hb.sha.Read(hn[:]); err != nil {
+		return common.Hash{}, err
+	}
+	return hn, nil
 }
 
 func (hb *HashBuilder) hasher(digit int) {
@@ -264,12 +270,14 @@ func (hb *HashBuilder) hasher(digit int) {
 		if len(hb.bufferStack) == 0 {
 			panic("")
 		} else {
-			hn := hb.finaliseHasher()
+			hn, _ := hb.finaliseHasher()
 			buffer.WriteByte(128 + 32)
 			buffer.Write(hn[:])
 		}
 	} else {
-		hb.addLeafToHasher(hb.top, &buffer)
+		if err := hb.addLeafToHasher(hb.top, &buffer); err != nil {
+			panic(err)
+		}
 	}
 	hb.bufferStack = append(hb.bufferStack, &buffer)
 	hb.top = nil
@@ -291,7 +299,7 @@ func (hb *HashBuilder) extension(key []byte) {
 		hb.branchStack = hb.branchStack[:len(hb.branchStack)-1]
 		s.Val = f
 	} else {
-		hn := hb.finaliseHasher()
+		hn, _ := hb.finaliseHasher()
 		s.Val = hashNode(hn[:])
 	}
 	s.flags.dirty = true
@@ -315,7 +323,7 @@ func (hb *HashBuilder) add(digit int) {
 		prevBuffer := hb.bufferStack[len(hb.bufferStack)-1]
 		prevDigit := hb.digitStack[len(hb.digitStack)-1]
 		if hb.top == nil {
-			hn := hb.finaliseHasher()
+			hn, _ := hb.finaliseHasher()
 			if len(hb.bufferStack) > 0 {
 				prevBuffer = hb.bufferStack[len(hb.bufferStack)-1]
 				prevDigit = hb.digitStack[len(hb.digitStack)-1]
@@ -333,7 +341,9 @@ func (hb *HashBuilder) add(digit int) {
 			for i := prevDigit + 1; i < digit; i++ {
 				prevBuffer.WriteByte(128)
 			}
-			hb.addLeafToHasher(hb.top, prevBuffer)
+			if err := hb.addLeafToHasher(hb.top, prevBuffer); err != nil {
+				panic(err)
+			}
 			hb.digitStack[len(hb.digitStack)-1] = digit
 			hb.top = nil
 		}
@@ -355,7 +365,8 @@ func (hb *HashBuilder) root() common.Hash {
 			defer returnHasherToPool(h)
 			h.hash(hb.branchStack[len(hb.branchStack)-1], true, hn[:])
 		} else {
-			return hb.finaliseHasher()
+			hn, _ := hb.finaliseHasher()
+			return hn
 		}
 	} else {
 		h := newHasher(hb.encodeToBytes)
