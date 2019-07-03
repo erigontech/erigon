@@ -381,10 +381,6 @@ func TestTrieBuilding(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
-	var highlights = make([][]byte, 0, len(keys))
-	for _, key := range keys {
-		highlights = append(highlights, hexToKeybytes([]byte(key)))
-	}
 	tr := New(common.Hash{}, false)
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
@@ -423,10 +419,6 @@ func TestHashBuilding(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
-	var highlights = make([][]byte, 0, len(keys))
-	for _, key := range keys {
-		highlights = append(highlights, hexToKeybytes([]byte(key)))
-	}
 	tr := New(common.Hash{}, false)
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
