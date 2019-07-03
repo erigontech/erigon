@@ -502,7 +502,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				// Deleted contracts will be dealth with later, in the next loop
 				continue
 			}
-			addrHash, err := tds.HashAddress(&address, false /*save*/)
+			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
 			}
@@ -529,7 +529,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 
 		// For the contracts that got deleted
 		for address := range b.deleted {
-			addrHash, err := tds.HashAddress(&address, false /*save*/)
+			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
 			}
@@ -711,7 +711,7 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 	return tds.db.Put(trie.SecureKeyPrefix, hash, preimage)
 }
 
-func (tds *TrieDbState) HashAddress(address *common.Address, save bool) (common.Hash, error) {
+func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -938,7 +938,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
+	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -951,7 +951,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
+	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
@@ -978,7 +978,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
+	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != err {
 		return err
 	}
@@ -988,7 +988,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 }
 
 func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
+	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
