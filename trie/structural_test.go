@@ -21,13 +21,9 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
-	"os"
-	"os/exec"
 	"sort"
 	"testing"
 
-	"github.com/ledgerwatch/turbo-geth/visual"
 	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -376,23 +372,6 @@ func (hb *HashBuilder) root() common.Hash {
 	return hn
 }
 
-func visTrie(tr *Trie, filename string, highlights [][]byte) {
-	f, err := os.Create(filename)
-	if err != nil {
-		panic(err)
-	}
-	visual.StartGraph(f)
-	Visual(tr, highlights, f, visual.HexIndexColors, visual.HexFontColors, false)
-	visual.EndGraph(f)
-	if err := f.Close(); err != nil {
-		panic(err)
-	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("error: %v, output: %s\n", err, output)
-	}
-}
-
 func TestTrieBuilding(t *testing.T) {
 	var keys []string
 	for b := uint32(0); b < 10000; b++ {
@@ -412,8 +391,6 @@ func TestTrieBuilding(t *testing.T) {
 		_, tr.root = tr.insert(tr.root, []byte(key), 0, valueNode(value), 0)
 	}
 	trieHash := tr.Hash()
-	//fmt.Printf("trie hash: %x\n", trieHash)
-	//visTrie(tr, "TestTrieBuilding_right.dot", highlights)
 
 	var tb TrieBuilder
 	var prec, curr, succ []byte
@@ -432,10 +409,6 @@ func TestTrieBuilding(t *testing.T) {
 	succ = nil
 	step(false, false, prec, curr, succ, &tb, groups)
 	builtHash := tb.root()
-	//var tr1 Trie
-	//tr1.root = tb.stack[len(tb.stack)-1]
-	//visTrie(&tr1, "TestTrieBuilding_wrong.dot", highlights)
-	//fmt.Printf("built hash: %x\n", builtHash)
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
@@ -460,8 +433,6 @@ func TestHashBuilding(t *testing.T) {
 		_, tr.root = tr.insert(tr.root, []byte(key), 0, valueNode(value), 0)
 	}
 	trieHash := tr.Hash()
-	//fmt.Printf("trie hash: %x\n", trieHash)
-	//visTrie(tr, "TestTrieBuilding_right.dot", highlights)
 
 	hb := NewHashBuilder(false)
 	var prec, curr, succ []byte
@@ -480,10 +451,6 @@ func TestHashBuilding(t *testing.T) {
 	succ = nil
 	step(true, false, prec, curr, succ, hb, groups)
 	builtHash := hb.root()
-	//var tr1 Trie
-	//tr1.root = tb.stack[len(tb.stack)-1]
-	//visTrie(&tr1, "TestTrieBuilding_wrong.dot", highlights)
-	//fmt.Printf("built hash: %x\n", builtHash)
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
