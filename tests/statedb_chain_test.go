@@ -1159,10 +1159,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	var selfDestructorContract *contracts.SelfDestructor
 
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
+		var tx *types.Transaction
 
 		switch i {
 		case 1:
@@ -1184,7 +1181,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1197,7 +1194,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
