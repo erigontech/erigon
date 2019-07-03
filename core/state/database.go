@@ -498,26 +498,13 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
 		for address, m := range b.storageUpdates {
+			if _, ok := b.deleted[address]; ok {
+				// Deleted contracts will be dealth with later, in the next loop
+				continue
+			}
 			addrHash, err := tds.HashAddress(&address, false /*save*/)
 			if err != nil {
 				return nil, err
-			}
-			if _, ok := b.deleted[address]; ok {
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					account.Root = emptyRoot
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					account.Root = emptyRoot
-				}
-				storageTrie, err := tds.getStorageTrie(address, false)
-				if err != nil {
-					return nil, err
-				}
-				if storageTrie != nil {
-					delete(tds.storageTries, address)
-					storageTrie.PrepareToRemove()
-				}
-				continue
 			}
 			storageTrie, err := tds.getStorageTrie(address, true)
 			if err != nil {
@@ -537,6 +524,28 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
 				}
+			}
+		}
+
+		// For the contracts that got deleted
+		for address := range b.deleted {
+			addrHash, err := tds.HashAddress(&address, false /*save*/)
+			if err != nil {
+				return nil, err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				account.Root = emptyRoot
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				account.Root = emptyRoot
+			}
+			storageTrie, err := tds.getStorageTrie(address, false)
+			if err != nil {
+				return nil, err
+			}
+			if storageTrie != nil {
+				delete(tds.storageTries, address)
+				storageTrie.PrepareToRemove()
 			}
 		}
 

@@ -1119,3 +1119,110 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 		t.Fatal("storage size should be HugeNumber+1", *storageSize, st.GetCodeHash(contractAddress).Hex(), *storageSize)
 	}
 }
+
+func TestSelfDestructReceive(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:        big.NewInt(1),
+				HomesteadBlock: new(big.Int),
+				EIP155Block:    new(big.Int),
+				EIP158Block:    big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis   = gspec.MustCommit(db)
+		genesisDb = db.MemCopy()
+		// this code generates a log
+		signer = types.HomesteadSigner{}
+	)
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+
+	var contractAddress common.Address
+	var selfDestructorContract *contracts.SelfDestructor
+
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+		var (
+			tx  *types.Transaction
+			err error
+		)
+
+		switch i {
+		case 1:
+			contractAddress, tx, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+			tx, err = selfDestructorContract.SelfDestruct(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+			// Send 1 wei to contract after self-destruction
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), contractAddress, big.NewInt(1000), 21000, big.NewInt(1), nil), signer, key)
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+	})
+
+	// BLOCK 1
+	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, _ := blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist at the block 0", contractAddress.String())
+	}
+
+	// BLOCK 2
+	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Reload blockchain from the database, then inserting an empty block (3) will cause rebuilding of the trie
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	// BLOCK 3
+	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, _ = blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+	}
+	if len(st.GetCode(contractAddress)) != 0 {
+		t.Error("expected empty code in contract at block 1", contractAddress.String())
+	}
+
+}
