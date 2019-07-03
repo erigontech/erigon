@@ -221,11 +221,10 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 				var hn common.Hash
 				h.hash(n, isRoot, hn[:])
 				return true, hashNode(hn[:])
-			} else {
-				pLen := prefixLen(nKey, hex)
-				if pLen > 0 {
-					newHexes = append(newHexes, hex[pLen:])
-				}
+			}
+			pLen := prefixLen(nKey, hex)
+			if pLen > 0 {
+				newHexes = append(newHexes, hex[pLen:])
 			}
 		}
 		if len(newHexes) > 0 {
