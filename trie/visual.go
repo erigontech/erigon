@@ -28,7 +28,7 @@ import (
 
 // Visual creates visualisation of trie with highlighting
 func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool) {
-	var highlightsHex [][]byte
+	var highlightsHex = make([][]byte, 0, len(highlights))
 	for _, h := range highlights {
 		highlightsHex = append(highlightsHex, keybytesToHex(h))
 	}
@@ -202,7 +202,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 }
 
 func (t *Trie) Fold(keys [][]byte) {
-	var hexes [][]byte
+	var hexes = make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		hexes = append(hexes, keybytesToHex(key))
 	}

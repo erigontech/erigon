@@ -233,6 +233,7 @@ func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) error
 			return err
 		}
 	}
+	return nil
 }
 
 func (hb *HashBuilder) finaliseHasher() common.Hash {
@@ -390,7 +391,7 @@ func TestTrieBuilding(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
-	var highlights [][]byte
+	var highlights = make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		highlights = append(highlights, hexToKeybytes([]byte(key)))
 	}
@@ -438,7 +439,7 @@ func TestHashBuilding(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
-	var highlights [][]byte
+	var highlights = make([][]byte, 0, len(keys))
 	for _, key := range keys {
 		highlights = append(highlights, hexToKeybytes([]byte(key)))
 	}

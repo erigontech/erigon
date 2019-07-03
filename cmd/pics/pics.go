@@ -192,7 +192,7 @@ func prefixGroups4() {
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
-	var hightlights [][]byte
+	var hightlights = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -224,7 +224,7 @@ func prefixGroups5() {
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
-	var hightlights [][]byte
+	var hightlights = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -257,7 +257,7 @@ func prefixGroups6() {
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{}, false)
-	var hightlights [][]byte
+	var hightlights = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
