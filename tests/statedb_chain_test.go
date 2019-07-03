@@ -1158,11 +1158,16 @@ func TestSelfDestructReceive(t *testing.T) {
 	var contractAddress common.Address
 	var selfDestructorContract *contracts.SelfDestructor
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	// There are two blocks
+	// First block deploys a contract, then makes it self-destruct, and then sends 1 wei to the address of the contract,
+	// effectively turning it from contract account to a non-contract account
+	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
+	// from the database.
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
-		case 1:
+		case 0:
 			contractAddress, tx, selfDestructorContract, err = contracts.DeploySelfDestructor(transactOpts, contractBackend)
 			if err != nil {
 				t.Fatal(err)
@@ -1180,21 +1185,16 @@ func TestSelfDestructReceive(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
-		t.Fatal(err)
-	}
-
 	st, _, _ := blockchain.State()
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
 	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.String())
+		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 	}
 
-	// BLOCK 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	// BLOCK 1
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1206,20 +1206,23 @@ func TestSelfDestructReceive(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	// BLOCK 2
+	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
+	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database
+	// and that means that the state of the accounts written in the first block was correct.
+	// This test checks that the storage root of the account is properly set to the root of the empty tree
 
 	st, _, _ = blockchain.State()
 	if !st.Exist(address) {
 		t.Error("expected account to exist")
 	}
 	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		t.Error("expected contractAddress to exist at the block 2", contractAddress.String())
 	}
 	if len(st.GetCode(contractAddress)) != 0 {
-		t.Error("expected empty code in contract at block 1", contractAddress.String())
+		t.Error("expected empty code in contract at block 2", contractAddress.String())
 	}
 
 }
