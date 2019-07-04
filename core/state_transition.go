@@ -165,6 +165,7 @@ func (st *StateTransition) buyGas() error {
 	return nil
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (st *StateTransition) preCheck() error {
 	// Make sure this transaction's nonce is correct.
 	if st.msg.CheckNonce() {

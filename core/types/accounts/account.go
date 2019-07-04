@@ -18,6 +18,7 @@ type ExtAccount struct {
 
 // Account is the Ethereum consensus representation of accounts.
 // These objects are stored in the main account trie.
+// DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
 	Nonce       uint64
 	Balance     *big.Int

@@ -290,6 +290,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
 	roots, err := tds.computeTrieRoots(ctx, true)
 	tds.clearUpdates()
@@ -497,26 +498,13 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
 		for address, m := range b.storageUpdates {
-			addrHash, err := tds.HashAddress(&address, false /*save*/)
+			if _, ok := b.deleted[address]; ok {
+				// Deleted contracts will be dealth with later, in the next loop
+				continue
+			}
+			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
-			}
-			if _, ok := b.deleted[address]; ok {
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					account.Root = emptyRoot
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					account.Root = emptyRoot
-				}
-				storageTrie, err := tds.getStorageTrie(address, false)
-				if err != nil {
-					return nil, err
-				}
-				if storageTrie != nil {
-					delete(tds.storageTries, address)
-					storageTrie.PrepareToRemove()
-				}
-				continue
 			}
 			storageTrie, err := tds.getStorageTrie(address, true)
 			if err != nil {
@@ -536,6 +524,28 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
 				}
+			}
+		}
+
+		// For the contracts that got deleted
+		for address := range b.deleted {
+			addrHash, err := tds.HashAddress(address, false /*save*/)
+			if err != nil {
+				return nil, err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				account.Root = emptyRoot
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				account.Root = emptyRoot
+			}
+			storageTrie, err := tds.getStorageTrie(address, false)
+			if err != nil {
+				return nil, err
+			}
+			if storageTrie != nil {
+				delete(tds.storageTries, address)
+				storageTrie.PrepareToRemove()
 			}
 		}
 
@@ -701,7 +711,7 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 	return tds.db.Put(trie.SecureKeyPrefix, hash, preimage)
 }
 
-func (tds *TrieDbState) HashAddress(address *common.Address, save bool) (common.Hash, error) {
+func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -896,6 +906,7 @@ func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{tds: tds}
 }
 
+// DESCRIBED: docs/programmers_guide/guide.md#root
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
@@ -927,7 +938,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 }
 
 func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
+	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
 	}
@@ -940,7 +951,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
+	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
@@ -967,7 +978,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := tsw.tds.HashAddress(&address, false /*save*/)
+	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != err {
 		return err
 	}
@@ -977,7 +988,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 }
 
 func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := dsw.tds.HashAddress(&address, true /*save*/)
+	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
 	}
