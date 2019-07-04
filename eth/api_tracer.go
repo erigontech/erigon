@@ -80,10 +80,10 @@ type txTraceResult struct {
 // being traced.
 type blockTraceTask struct {
 	tds     *state.TrieDbState
-	statedb *state.IntraBlockState   // Intermediate state prepped for tracing
-	block   *types.Block     // Block to trace the transactions from
-	rootref common.Hash      // Trie root reference held for this task
-	results []*txTraceResult // Trace results procudes by the task
+	statedb *state.IntraBlockState // Intermediate state prepped for tracing
+	block   *types.Block           // Block to trace the transactions from
+	rootref common.Hash            // Trie root reference held for this task
+	results []*txTraceResult       // Trace results procudes by the task
 }
 
 // blockTraceResult represets the results of tracing a single block when an entire
@@ -98,7 +98,7 @@ type blockTraceResult struct {
 // is being traced.
 type txTraceTask struct {
 	statedb *state.IntraBlockState // Intermediate state prepped for tracing
-	index   int            // Transaction offset in the block
+	index   int                    // Transaction offset in the block
 }
 
 // TraceChain returns the structured logs created during the execution of EVM

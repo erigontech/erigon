@@ -70,8 +70,8 @@ func New(eth Backend, config *params.ChainConfig, mux *event.TypeMux, engine con
 // It's entered once and as soon as `Done` or `Failed` has been broadcasted the events are unregistered and
 // the loop is exited. This to prevent a major security vuln where external parties can DOS you with blocks
 // and halt your mining operation for as long as the DOS continues.
-func (self *Miner) update() {
-	events := self.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
+func (mnr *Miner) update() {
+	events := mnr.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
 	defer events.Unsubscribe()
 
 	for {
@@ -82,77 +82,77 @@ func (self *Miner) update() {
 			}
 			switch ev.Data.(type) {
 			case downloader.StartEvent:
-				atomic.StoreInt32(&self.canStart, 0)
-				if self.Mining() {
-					self.Stop()
-					atomic.StoreInt32(&self.shouldStart, 1)
+				atomic.StoreInt32(&mnr.canStart, 0)
+				if mnr.Mining() {
+					mnr.Stop()
+					atomic.StoreInt32(&mnr.shouldStart, 1)
 					log.Info("Mining aborted due to sync")
 				}
 			case downloader.DoneEvent, downloader.FailedEvent:
-				shouldStart := atomic.LoadInt32(&self.shouldStart) == 1
+				shouldStart := atomic.LoadInt32(&mnr.shouldStart) == 1
 
-				atomic.StoreInt32(&self.canStart, 1)
-				atomic.StoreInt32(&self.shouldStart, 0)
+				atomic.StoreInt32(&mnr.canStart, 1)
+				atomic.StoreInt32(&mnr.shouldStart, 0)
 				if shouldStart {
-					self.Start(self.coinbase)
+					mnr.Start(mnr.coinbase)
 				}
 				// stop immediately and ignore all further pending events
 				return
 			}
-		case <-self.exitCh:
+		case <-mnr.exitCh:
 			return
 		}
 	}
 }
 
-func (self *Miner) Start(coinbase common.Address) {
-	atomic.StoreInt32(&self.shouldStart, 1)
-	self.SetEtherbase(coinbase)
+func (mnr *Miner) Start(coinbase common.Address) {
+	atomic.StoreInt32(&mnr.shouldStart, 1)
+	mnr.SetEtherbase(coinbase)
 
-	if atomic.LoadInt32(&self.canStart) == 0 {
+	if atomic.LoadInt32(&mnr.canStart) == 0 {
 		log.Info("Network syncing, will start miner afterwards")
 		return
 	}
-	self.worker.start()
+	mnr.worker.start()
 }
 
-func (self *Miner) Stop() {
-	self.worker.stop()
-	atomic.StoreInt32(&self.shouldStart, 0)
+func (mnr *Miner) Stop() {
+	mnr.worker.stop()
+	atomic.StoreInt32(&mnr.shouldStart, 0)
 }
 
-func (self *Miner) Close() {
-	self.worker.close()
-	close(self.exitCh)
+func (mnr *Miner) Close() {
+	mnr.worker.close()
+	close(mnr.exitCh)
 }
 
-func (self *Miner) Mining() bool {
-	return self.worker.isRunning()
+func (mnr *Miner) Mining() bool {
+	return mnr.worker.isRunning()
 }
 
-func (self *Miner) HashRate() uint64 {
-	if pow, ok := self.engine.(consensus.PoW); ok {
+func (mnr *Miner) HashRate() uint64 {
+	if pow, ok := mnr.engine.(consensus.PoW); ok {
 		return uint64(pow.Hashrate())
 	}
 	return 0
 }
 
-func (self *Miner) SetExtra(extra []byte) error {
+func (mnr *Miner) SetExtra(extra []byte) error {
 	if uint64(len(extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("Extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
 	}
-	self.worker.setExtra(extra)
+	mnr.worker.setExtra(extra)
 	return nil
 }
 
 // SetRecommitInterval sets the interval for sealing work resubmitting.
-func (self *Miner) SetRecommitInterval(interval time.Duration) {
-	self.worker.setRecommitInterval(interval)
+func (mnr *Miner) SetRecommitInterval(interval time.Duration) {
+	mnr.worker.setRecommitInterval(interval)
 }
 
 // Pending returns the currently pending block and associated state.
-func (self *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
-	return self.worker.pending()
+func (mnr *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
+	return mnr.worker.pending()
 }
 
 // PendingBlock returns the currently pending block.
@@ -160,11 +160,11 @@ func (self *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieD
 // Note, to access both the pending block and the pending state
 // simultaneously, please use Pending(), as the pending state can
 // change between multiple method calls
-func (self *Miner) PendingBlock() *types.Block {
-	return self.worker.pendingBlock()
+func (mnr *Miner) PendingBlock() *types.Block {
+	return mnr.worker.pendingBlock()
 }
 
-func (self *Miner) SetEtherbase(addr common.Address) {
-	self.coinbase = addr
-	self.worker.setEtherbase(addr)
+func (mnr *Miner) SetEtherbase(addr common.Address) {
+	mnr.coinbase = addr
+	mnr.worker.setEtherbase(addr)
 }
