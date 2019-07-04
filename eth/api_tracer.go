@@ -622,11 +622,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	reexec := defaultTraceReexec
-	if config != nil && config.Reexec != nil {
-		reexec = *config.Reexec
-	}
-	msg, vmctx, statedb, _, _, err := api.computeTxEnv(blockHash, int(index), reexec)
+	msg, vmctx, statedb, _, _, err := api.computeTxEnv(blockHash, int(index))
 	if err != nil {
 		return nil, err
 	}
@@ -697,7 +693,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, reexec uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
 	// Create the parent state database
 	block := api.eth.blockchain.GetBlockByHash(blockHash)
 	if block == nil {

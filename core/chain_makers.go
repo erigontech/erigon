@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -182,7 +183,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	chainreader := &fakeChainReader{config: config}
 	genblock := func(i int, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState) (*types.Block, types.Receipts) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
-		b.header = makeHeader(chainreader, parent, statedb, tds, b.engine)
+		b.header = makeHeader(chainreader, parent, tds, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
@@ -247,7 +248,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	return blocks, receipts
 }
 
-func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.IntraBlockState, tds *state.TrieDbState, engine consensus.Engine) *types.Header {
+func makeHeader(chain consensus.ChainReader, parent *types.Block, tds *state.TrieDbState, engine consensus.Engine) *types.Header {
 	var time *big.Int
 	if parent.Time() == nil {
 		time = big.NewInt(10)
