@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -37,6 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -530,22 +532,23 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 4
+	amount := big.NewInt(10000)
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, amount, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, amount, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 3:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, big.NewInt(10000), params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, amount, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -555,11 +558,9 @@ func TestFirehoseStateRanges(t *testing.T) {
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
-	block := pm.blockchain.CurrentBlock()
-
 	var request getStateRangesMsg
 	request.ID = 1
-	request.Root = block.Header().Root
+	request.Block = pm.blockchain.CurrentBlock().Hash()
 	request.Prefixes = []trie.Keybytes{
 		{Data: common.FromHex("b0"), Odd: true, Terminating: false},
 		{Data: common.FromHex("20"), Odd: true, Terminating: false},
@@ -567,15 +568,36 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
 
+	var account accounts.Account
+	account.Balance = amount
+	/*accountRLP*/ _, err := rlp.EncodeToBytes(account)
+	assert.NoError(t, err)
+
 	var reply stateRangesMsg
 	reply.ID = 1
-	// TODO [yperbasis] reply.Entries
+	reply.Entries = []rangeEntry{
+		{Status: OK, Leaves: []keyValue{}}, // TODO [yperbasis] {{addr4.Bytes(), accountRLP}, {addr2.Bytes(), accountRLP}}}
+		{Status: OK, Leaves: []keyValue{}},
+	}
 
 	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
 
-	// TODO [yperbasis] check that no data + available blocks are returned for old roots
+	nonexistentBlock := common.HexToHash("4444444444444444444444444444444444444444444444444444444444444444")
+	request.Block = nonexistentBlock
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	reply.Entries[0].Status = NoData
+	reply.Entries[1].Status = NoData
+	// TODO [yperbasis] available blocks
+
+	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
+
+	// TODO [yperbasis] check TooManyLeaves
 }
 
 func TestFirehoseBytecode(t *testing.T) {

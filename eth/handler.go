@@ -714,9 +714,25 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
 
+		n := len(request.Prefixes)
+
 		var response stateRangesMsg
 		response.ID = request.ID
-		// TODO [yperbasis] implement properly
+		response.Entries = make([]rangeEntry, n)
+
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			if _, _, err := pm.blockchain.StateAt(block.Root(), block.NumberU64()); err != nil {
+				return err
+			}
+			// TODO [yperbasis] implement
+		} else {
+			for i := 0; i < n; i++ {
+				response.Entries[i].Status = NoData
+			}
+		}
+
+		// TODO [yperbasis] softResponseLimit & TooManyLeaves
 
 		return p2p.Send(p.rw, StateRangesCode, response)
 
