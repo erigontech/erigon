@@ -38,7 +38,7 @@ const (
 var ProtocolName = "eth"
 
 // ProtocolVersions are the supported versions of the eth protocol (first is primary).
-var ProtocolVersions = []uint{eth62}
+var ProtocolVersions = []uint{eth62, eth63}
 
 // ProtocolLengths are the number of implemented message corresponding to different protocol versions.
 var ProtocolLengths = []uint64{8}
