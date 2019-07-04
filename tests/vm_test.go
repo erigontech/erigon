@@ -17,11 +17,12 @@
 package tests
 
 import (
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
-func testVM(t *testing.T) {
+func TestVM(t *testing.T) {
 	t.Parallel()
 	vmt := new(testMatcher)
 	vmt.slow("^vmPerformance")
