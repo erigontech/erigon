@@ -30,7 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
 
-func TestState(t *testing.T) {
+func testState(t *testing.T) {
 	t.Parallel()
 
 	st := new(testMatcher)
