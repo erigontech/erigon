@@ -181,7 +181,7 @@ func (l *StructLogger) CaptureState(env *EVM, pc uint64, op OpCode, gas, cost ui
 		storage = l.changedValues[contract.Address()].Copy()
 	}
 	// create a new snaptshot of the EVM.
-	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, storage, depth, env.StateDB.GetRefund(), err}
+	log := StructLog{pc, op, gas, cost, mem, memory.Len(), stck, storage, depth, env.IntraBlockState.GetRefund(), err}
 
 	l.logs = append(l.logs, log)
 	return nil

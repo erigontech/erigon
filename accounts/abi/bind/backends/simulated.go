@@ -59,7 +59,7 @@ type SimulatedBackend struct {
 	gasPool       *core.GasPool
 	pendingBlock  *types.Block // Currently pending block that will be imported on request
 	pendingTds    *state.TrieDbState
-	pendingState  *state.StateDB // Currently pending state that will be the active on on request
+	pendingState  *state.IntraBlockState // Currently pending state that will be the active on on request
 
 	events *filters.EventSystem // Event system for filtering log events live
 
@@ -149,7 +149,7 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingTds.StartNewBuffer()
 }
 
-func (b *SimulatedBackend) prependingState() (*state.StateDB, error) {
+func (b *SimulatedBackend) prependingState() (*state.IntraBlockState, error) {
 	tds, err := state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	if err != nil {
 		return nil, err
@@ -325,7 +325,7 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call ethereum.CallMs
 
 // callContract implements common code between normal and pending contract calls.
 // state is modified during execution, make sure to copy it if necessary.
-func (b *SimulatedBackend) callContract(ctx context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.StateDB) ([]byte, uint64, bool, error) {
+func (b *SimulatedBackend) callContract(ctx context.Context, call ethereum.CallMsg, block *types.Block, statedb *state.IntraBlockState) ([]byte, uint64, bool, error) {
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
 		call.GasPrice = big.NewInt(1)

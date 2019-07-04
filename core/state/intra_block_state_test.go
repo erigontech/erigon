@@ -90,7 +90,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
-	modify := func(state *StateDB, addr common.Address, i, tweak byte) {
+	modify := func(state *IntraBlockState, addr common.Address, i, tweak byte) {
 		state.SetBalance(addr, big.NewInt(int64(11*i)+int64(tweak)))
 		state.SetNonce(addr, uint64(42*i+tweak))
 		if i%2 == 0 {
@@ -184,7 +184,7 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 }
 
-// A snapshotTest checks that reverting StateDB snapshots properly undoes all changes
+// A snapshotTest checks that reverting IntraBlockState snapshots properly undoes all changes
 // captured by the snapshot. Instances of this test with pseudorandom content are created
 // by Generate.
 //
@@ -204,7 +204,7 @@ type snapshotTest struct {
 
 type testAction struct {
 	name   string
-	fn     func(testAction, *StateDB)
+	fn     func(testAction, *IntraBlockState)
 	args   []int64
 	noAddr bool
 }
@@ -214,28 +214,28 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.SetBalance(addr, big.NewInt(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.AddBalance(addr, big.NewInt(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetNonce",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.SetNonce(addr, uint64(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetState",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				var key, val common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				binary.BigEndian.PutUint16(val[:], uint16(a.args[1]))
@@ -245,7 +245,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "SetCode",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				code := make([]byte, 16)
 				binary.BigEndian.PutUint64(code, uint64(a.args[0]))
 				binary.BigEndian.PutUint64(code[8:], uint64(a.args[1]))
@@ -255,19 +255,19 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "CreateAccount",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.CreateAccount(addr, true)
 			},
 		},
 		{
 			name: "Suicide",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.Suicide(addr)
 			},
 		},
 		{
 			name: "AddRefund",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.AddRefund(uint64(a.args[0]))
 			},
 			args:   make([]int64, 1),
@@ -275,7 +275,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "AddLog",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				data := make([]byte, 2)
 				binary.BigEndian.PutUint16(data, uint16(a.args[0]))
 				s.AddLog(&types.Log{Address: addr, Data: data})
@@ -284,7 +284,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "AddPreimage",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				preimage := []byte{1}
 				hash := common.BytesToHash(preimage)
 				s.AddPreimage(hash, preimage)
@@ -379,7 +379,7 @@ func (test *snapshotTest) run() bool {
 }
 
 // checkEqual checks that methods of state and checkstate return the same values.
-func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *DbState) error {
+func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbState) error {
 	for _, addr := range test.addrs {
 		var err error
 		checkeq := func(op string, a, b interface{}) bool {
@@ -474,7 +474,7 @@ func TestCopyOfCopy(t *testing.T) {
 	}
 }
 
-func TestStateDBNewEmptyAccount(t *testing.T) {
+func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
@@ -486,7 +486,7 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 	}
 }
 
-func TestStateDBNewContractAccount(t *testing.T) {
+func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)

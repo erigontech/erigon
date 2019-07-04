@@ -121,7 +121,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest.
-func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.StateDB, *state.TrieDbState, common.Hash, error) {
+func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, common.Hash, error) {
 	config, ok := Forks[subtest.Fork]
 	if !ok {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -183,7 +183,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
 	tds, err := state.NewTrieDbState(ctx, common.Hash{}, db, blockNr)
 	if err != nil {
 		return nil, nil, err

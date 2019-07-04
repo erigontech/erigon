@@ -151,11 +151,11 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis) (*params.ChainConfig, common.Hash, *state.StateDB, error) {
+func SetupGenesisBlock(db ethdb.Database, genesis *Genesis) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	return SetupGenesisBlockWithOverride(db, genesis, nil)
 }
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, constantinopleOverride *big.Int) (*params.ChainConfig, common.Hash, *state.StateDB, error) {
-	var stateDB *state.StateDB
+func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, constantinopleOverride *big.Int) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+	var stateDB *state.IntraBlockState
 
 	if genesis != nil && genesis.Config == nil {
 		return params.AllEthashProtocolChanges, common.Hash{}, stateDB, errGenesisNoConfig
@@ -236,7 +236,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *state.TrieDbState, error) {
+func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockState, *state.TrieDbState, error) {
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
@@ -289,7 +289,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.StateDB, *sta
 
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.StateDB, error) {
+func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockState, error) {
 	batch := db.NewBatch()
 	block, statedb, tds, err := g.ToBlock(batch)
 	if err != nil {

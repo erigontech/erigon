@@ -128,22 +128,22 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	return nil
 }
 
-func (t *VMTest) exec(statedb *state.StateDB, vmconfig vm.Config) ([]byte, uint64, error) {
+func (t *VMTest) exec(statedb *state.IntraBlockState, vmconfig vm.Config) ([]byte, uint64, error) {
 	evm := t.newEVM(statedb, vmconfig)
 	e := t.json.Exec
 	return evm.Call(vm.AccountRef(e.Caller), e.Address, e.Data, e.GasLimit, e.Value)
 }
 
-func (t *VMTest) newEVM(statedb *state.StateDB, vmconfig vm.Config) *vm.EVM {
+func (t *VMTest) newEVM(statedb *state.IntraBlockState, vmconfig vm.Config) *vm.EVM {
 	initialCall := true
-	canTransfer := func(db vm.StateDB, address common.Address, amount *big.Int) bool {
+	canTransfer := func(db vm.IntraBlockState, address common.Address, amount *big.Int) bool {
 		if initialCall {
 			initialCall = false
 			return true
 		}
 		return core.CanTransfer(db, address, amount)
 	}
-	transfer := func(db vm.StateDB, sender, recipient common.Address, amount *big.Int) {}
+	transfer := func(db vm.IntraBlockState, sender, recipient common.Address, amount *big.Int) {}
 	context := vm.Context{
 		CanTransfer: canTransfer,
 		Transfer:    transfer,

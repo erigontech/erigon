@@ -80,7 +80,7 @@ type txTraceResult struct {
 // being traced.
 type blockTraceTask struct {
 	tds     *state.TrieDbState
-	statedb *state.StateDB   // Intermediate state prepped for tracing
+	statedb *state.IntraBlockState   // Intermediate state prepped for tracing
 	block   *types.Block     // Block to trace the transactions from
 	rootref common.Hash      // Trie root reference held for this task
 	results []*txTraceResult // Trace results procudes by the task
@@ -97,7 +97,7 @@ type blockTraceResult struct {
 // txTraceTask represents a single transaction trace task when an entire block
 // is being traced.
 type txTraceTask struct {
-	statedb *state.StateDB // Intermediate state prepped for tracing
+	statedb *state.IntraBlockState // Intermediate state prepped for tracing
 	index   int            // Transaction offset in the block
 }
 
@@ -437,7 +437,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 	if parent == nil {
 		return nil, fmt.Errorf("parent %#x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Execute all the transaction contained within the block concurrently
 	var (
 		signer = types.MakeSigner(api.config, block.Number())
@@ -530,7 +530,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			reexec = *config.Reexec
 		}
 	*/
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Retrieve the tracing configurations, or use default values
 	var (
 		logConfig vm.LogConfig
@@ -604,10 +604,10 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 	return dumps, nil
 }
 
-// computeStateDB retrieves the state database associated with a certain block.
+// computeIntraBlockState retrieves the state database associated with a certain block.
 // If no state is locally available for the given block, a number of blocks are
 // attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPI) computeStateDB(block *types.Block) (*state.StateDB, *state.DbState) {
+func (api *PrivateDebugAPI) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
 	dbstate := state.NewDbState(api.eth.ChainDb(), block.NumberU64())
 	statedb := state.New(dbstate)
@@ -637,7 +637,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 // traceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
-func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, vmctx vm.Context, statedb *state.StateDB,
+func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, vmctx vm.Context, statedb *state.IntraBlockState,
 	config *TraceConfig) (interface{}, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
@@ -697,7 +697,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, reexec uint64) (core.Message, vm.Context, *state.StateDB, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, reexec uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
 	// Create the parent state database
 	block := api.eth.blockchain.GetBlockByHash(blockHash)
 	if block == nil {
@@ -707,7 +707,7 @@ func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, ree
 	if parent == nil {
 		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(api.config, block.Number())
 

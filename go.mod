@@ -62,6 +62,7 @@ require (
 	github.com/stretchr/testify v0.0.0-20170809224252-890a5c3458b4
 	github.com/uber/jaeger-client-go v0.0.0-20180607151842-f7e0d4744fa6
 	github.com/uber/jaeger-lib v0.0.0-20180615202729-a51202d6f4a7
+	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	golang.org/x/crypto v0.0.0-20190103213133-ff983b9c42bc
 	golang.org/x/net v0.0.0-20180112015858-5ccada7d0a7b
 	golang.org/x/sync v0.0.0-20170517211232-f52d1811a629

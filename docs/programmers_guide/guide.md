@@ -48,7 +48,7 @@ type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract
 Binary 32-byte (256-bit) string.
 
 Hash of the bytecode (deployed code) of a smart contract. The computation of the code hash is performed in the `SetCode` member function
-of the type `StateDB` [code/state/statedb.go](../../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
+of the type `IntraBlockState` [code/state/statedb.go](../../core/state/statedb.go). Since a non-contract account has no bytecode, code hash only
 makes sense for smart contract accounts. For non-contract accounts, the code hash is assumed to be equal to the hash of `nil`, which is
 hard-coded in the variable `emptyCode` in [code/state/statedb.go](../../core/state/statedb.go)
 
@@ -67,8 +67,8 @@ supplied to the `CREATE2` invocation), and the code hash of the initialisation c
 deployed code of the new contract), as shown in the function `CreateAddress2` in the file [crypto/crypto.go](../../crypto/crypto.go)
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects representing
-the accounts themselves, for example, field `stateObjects` in the type `StateDB` [core/state/statedb.go](../../core/state/statedb.go).
-Member functions of the type `StateDB` that are for querying and modifying one of the componets of an accounts, are all accepting
+the accounts themselves, for example, field `stateObjects` in the type `IntraBlockState` [core/state/statedb.go](../../core/state/statedb.go).
+Member functions of the type `IntraBlockState` that are for querying and modifying one of the componets of an accounts, are all accepting
 address as their first argument, see functions `GetBalance`, `GetNonce`, `GetCode`, `GetCodeSize`, `GetCodeHash`, `GetState` (this
 one queries an item in the contract storage), `GetCommittedState`, `AddBalance`, `SubBalance`, `SetBalance`, `SetNonce`,
 `SetCode`, `SetState` (this one modifies an item in the contract storage) [core/state/statedb.go](../../core/state/statedb.go).

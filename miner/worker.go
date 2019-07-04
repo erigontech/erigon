@@ -81,7 +81,7 @@ const (
 type environment struct {
 	signer types.Signer
 
-	state     *state.StateDB // apply state changes here
+	state     *state.IntraBlockState // apply state changes here
 	tds       *state.TrieDbState
 	ancestors mapset.Set    // ancestor set (used for checking uncle parent validity)
 	family    mapset.Set    // family set (used for checking uncle invalidity)
@@ -97,7 +97,7 @@ type environment struct {
 // task contains all information for consensus engine sealing and result submitting.
 type task struct {
 	receipts  []*types.Receipt
-	state     *state.StateDB
+	state     *state.IntraBlockState
 	tds       *state.TrieDbState
 	block     *types.Block
 	createdAt time.Time
@@ -165,7 +165,7 @@ type worker struct {
 
 	snapshotMu    sync.RWMutex // The lock used to protect the block snapshot and state snapshot
 	snapshotBlock *types.Block
-	snapshotState *state.StateDB
+	snapshotState *state.IntraBlockState
 	snapshotTds   *state.TrieDbState
 
 	// atomic status counters
@@ -250,7 +250,7 @@ func (w *worker) setRecommitInterval(interval time.Duration) {
 }
 
 // pending returns the pending state and corresponding block.
-func (w *worker) pending() (*types.Block, *state.StateDB, *state.TrieDbState) {
+func (w *worker) pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
 	// return a snapshot to avoid contention on currentMu mutex
 	w.snapshotMu.RLock()
 	defer w.snapshotMu.RUnlock()

@@ -31,7 +31,7 @@ import (
 
 type StateSuite struct {
 	db    ethdb.Database
-	state *StateDB
+	state *IntraBlockState
 	tds   *TrieDbState
 }
 
