@@ -153,7 +153,9 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
+	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -161,7 +163,9 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
+	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 
 	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
