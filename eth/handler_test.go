@@ -580,7 +580,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 		{Status: OK, Leaves: []keyValue{}},
 	}
 
-	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
 
