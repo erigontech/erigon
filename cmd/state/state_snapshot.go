@@ -469,12 +469,12 @@ func state_snapshot() {
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
 	if _, err := engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts); err != nil {
-		panic(fmt.Errorf("Finalize of block %d failed: %v", blockNum+1, err))
+		panic(fmt.Errorf("finalize of block %d failed: %v", blockNum+1, err))
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), nextHeader.Number)
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		panic(fmt.Errorf("FinalizeTx of block %d failed: %v", blockNum+1, err))
+		panic(fmt.Errorf("finalizeTx of block %d failed: %v", blockNum+1, err))
 	}
 
 	roots, err := tds.ComputeTrieRoots(ctx)
