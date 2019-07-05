@@ -1055,11 +1055,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
+		v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
+		vOrig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
