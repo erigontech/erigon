@@ -44,11 +44,27 @@ func TestBlockchain(t *testing.T) {
 	//bt.fails(`^bcStateTests/suicideStorageCheckVCreate.json/suicideStorageCheckVCreate_Constantinople`, "TODO: investigate")
 	//bt.fails(`^bcStateTests/suicideStorageCheck.json/suicideStorageCheck_Constantinople`, "TODO: investigate")
 
-	/*
-		bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
-			if err := bt.checkFailure(t, name, test.Run()); err != nil {
-				t.Error(err)
-			}
-		})
-	*/
+	// Work in progress
+	bt.fails(`^bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Constantinople`, "Work in progress")
+	bt.fails(`^bcStateTests/suicideStorageCheck.json/suicideStorageCheck_Byzantium`, "Work in progress")
+	bt.fails(`^bcStateTests/suicideStorageCheck.json/suicideStorageCheck_Constantinople`, "Work in progress")
+	bt.fails(`^bcStateTests/suicideStorageCheckVCreate.json/suicideStorageCheckVCreate_Byzantium`, "Work in progress")
+	bt.fails(`^bcStateTests/suicideStorageCheckVCreate.json/suicideStorageCheckVCreate_Constantinople`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/BlockGasLimit2p63m1.json/BlockGasLimit2p63m1_Byzantium`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/BlockGasLimit2p63m1.json/BlockGasLimit2p63m1_Constantinople`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/BlockGasLimit2p63m1.json/BlockGasLimit2p63m1_EIP158`, "Work in progress")
+	bt.fails(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`, "Work in progress")
+	bt.fails(`^TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1_2.json/TransactionGasHigherThanLimit2p63m1_2_Byzantium`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1_2.json/TransactionGasHigherThanLimit2p63m1_2_Constantinople`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1_2.json/TransactionGasHigherThanLimit2p63m1_2_EIP158`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1.json/TransactionGasHigherThanLimit2p63m1_Byzantium`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1.json/TransactionGasHigherThanLimit2p63m1_Constantinople`, "Work in progress")
+	bt.fails(`^bcBlockGasLimitTest/TransactionGasHigherThanLimit2p63m1.json/TransactionGasHigherThanLimit2p63m1_EIP158`, "Work in progress")
+
+	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
+		if err := bt.checkFailure(t, name, test.Run()); err != nil {
+			t.Error(err)
+		}
+	})
 }
