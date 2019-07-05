@@ -29,8 +29,8 @@ type DumpAccount struct {
 	Nonce       uint64            `json:"nonce"`
 	Root        string            `json:"root"`
 	CodeHash    string            `json:"codeHash"`
-	Code        string            `json:"code"`
-	Storage     map[string]string `json:"storage"`
+	Code        string            `json:"code,omitempty"`
+	Storage     map[string]string `json:"storage,omitempty"`
 	StorageSize *uint64           `json:",omitempty"`
 }
 
@@ -68,13 +68,13 @@ func (self *TrieDbState) RawDump() Dump {
 			StorageSize: acc.StorageSize,
 		}
 		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
-			account.Storage[common.Bytes2Hex(self.GetKey(ks))] = common.Bytes2Hex(vs)
+			account.Storage[common.BytesToHash(self.GetKey(ks)).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})
 		if err != nil {
 			return false, err
 		}
-		dump.Accounts[common.Bytes2Hex(addr)] = account
+		dump.Accounts["0x"+common.Bytes2Hex(addr)] = account
 		return true, nil
 	})
 	if err != nil {
@@ -84,10 +84,10 @@ func (self *TrieDbState) RawDump() Dump {
 }
 
 func (self *TrieDbState) Dump() []byte {
-	json, err := json.MarshalIndent(self.RawDump(), "", "    ")
+	b, err := json.MarshalIndent(self.RawDump(), "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
 	}
 
-	return json
+	return b
 }
