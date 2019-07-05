@@ -730,6 +730,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			for i := 0; i < n; i++ {
 				response.Entries[i].Status = NoData
 			}
+			response.AvailableBlocks = pm.blockchain.CachedBlocks()
 		}
 
 		// TODO [yperbasis] softResponseLimit & TooManyLeaves

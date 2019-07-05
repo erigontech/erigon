@@ -595,6 +595,16 @@ func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
 	return true
 }
 
+// CachedBlocks returns the hashes of the cached blocks.
+func (bc *BlockChain) CachedBlocks() []common.Hash {
+	a := bc.blockCache.Keys()
+	b := make([]common.Hash, len(a))
+	for i := range a {
+		b[i] = a[i].(common.Hash)
+	}
+	return b
+}
+
 // GetBlock retrieves a block from the database by hash and number,
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {

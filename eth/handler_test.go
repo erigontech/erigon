@@ -558,9 +558,11 @@ func TestFirehoseStateRanges(t *testing.T) {
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
+	block4 := pm.blockchain.GetBlockByNumber(4)
+
 	var request getStateRangesMsg
 	request.ID = 1
-	request.Block = pm.blockchain.CurrentBlock().Hash()
+	request.Block = block4.Hash()
 	request.Prefixes = []trie.Keybytes{
 		{Data: common.FromHex("b0"), Odd: true, Terminating: false},
 		{Data: common.FromHex("20"), Odd: true, Terminating: false},
@@ -589,9 +591,14 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
 
+	block0 := pm.blockchain.GetBlockByNumber(0)
+	block1 := pm.blockchain.GetBlockByNumber(1)
+	block2 := pm.blockchain.GetBlockByNumber(2)
+	block3 := pm.blockchain.GetBlockByNumber(3)
+
 	reply.Entries[0].Status = NoData
 	reply.Entries[1].Status = NoData
-	// TODO [yperbasis] available blocks
+	reply.AvailableBlocks = []common.Hash{block2.Hash(), block1.Hash(), block0.Hash(), block3.Hash(), block4.Hash()}
 
 	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)

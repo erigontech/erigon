@@ -175,7 +175,7 @@ For prefixes with the success status the response **must** include all the keys 
 
 "Too many leaves" (`status_code = 2`) may only be returned is there are more than 4096 leaves matching the prefix.
 
-The keys and values within a prefix may be returned in any order.
+The keys and values within a prefix may be returned in any order; the same for available blocks.
 
 #### Example
 A response to the example request above might look like:
