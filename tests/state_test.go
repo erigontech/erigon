@@ -55,6 +55,8 @@ func TestState(t *testing.T) {
 	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/0`, "bug in test")
 	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/3`, "bug in test")
 
+	//st.whitelist(`^stSStoreTest/InitCollision.json`)
+
 	// Work in progress
 	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/0`, "work in progress")
 	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/1`, "work in progress")
