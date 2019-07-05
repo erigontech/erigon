@@ -241,7 +241,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
-	tds, err := state.NewTrieDbState(g.Config.WithEIPsFlags(context.Background(), big.NewInt(0)), common.Hash{}, db, 0)
+	tds, err := state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -255,8 +255,8 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 			statedb.SetState(addr, key, value)
 		}
 	}
-	ctx := g.Config.WithEIPsFlags(context.Background(), big.NewInt(int64(g.Number)))
-	err = statedb.FinalizeTx(ctx, tds.TrieStateWriter())
+	ctx := context.Background()
+	err = statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		return nil, nil, nil, err
 	}

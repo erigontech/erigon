@@ -132,10 +132,11 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
 
 	db := ethdb.NewMemDatabase()
-	statedb, tds, err := MakePreState(ctx, db, t.json.Pre, readBlockNr)
+	statedb, tds, err := MakePreState(context.Background(), db, t.json.Pre, readBlockNr)
 	if err != nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("error in MakePreState: %v", err)
 	}
+	tds.StartNewBuffer()
 
 	post := t.json.Post[subtest.Fork][subtest.Index]
 	msg, err := t.json.Tx.toMessage(post)
@@ -156,16 +157,23 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
+	// And _now_ get the state root
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
 	// - there are only 'bad' transactions, which aren't executed. In those cases,
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
-	// And _now_ get the state root
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
+	//fmt.Printf("\n%s\n", tds.Dump())
 
 	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
