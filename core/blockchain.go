@@ -23,12 +23,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+
 	//mrand "math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/hashicorp/golang-lru"
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -917,7 +918,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	tds.SetBlockNr(bc.chainConfig.WithEIPsFlags(context.Background(), block.Number()), block.NumberU64())
 	ctx := bc.chainConfig.WithEIPsFlags(context.Background(), block.Number())
-	if err := state.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
 	}
 	if bc.enableReceipts {

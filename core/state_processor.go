@@ -142,7 +142,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 		return receipts, allLogs, *usedGas, err
 	}
 	ctx := p.config.WithEIPsFlags(context.Background(), header.Number)
-	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
 	roots, err := tds.ComputeTrieRoots(ctx)
@@ -179,7 +179,7 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		return nil, 0, err
 	}
 	// Update the state with pending changes
-	if err = statedb.Finalise(ctx, stateWriter); err != nil {
+	if err = statedb.FinalizeTx(ctx, stateWriter); err != nil {
 		return nil, 0, err
 	}
 

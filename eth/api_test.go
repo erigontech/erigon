@@ -54,7 +54,7 @@ func TestStorageRangeAt(t *testing.T) {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
 
-	err := statedb.Finalise(context.Background(), tds.TrieStateWriter())
+	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalising state", err)
 	}
@@ -66,7 +66,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 	tds.SetBlockNr(context.Background(), 1)
 
-	err = statedb.Commit(context.Background(), tds.DbStateWriter())
+	err = statedb.CommitBlock(context.Background(), tds.DbStateWriter())
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}

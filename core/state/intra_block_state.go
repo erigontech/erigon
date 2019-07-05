@@ -91,7 +91,7 @@ type IntraBlockState struct {
 	// Snapshot and RevertToSnapshot.
 	journal        *journal
 	validRevisions []revision
-	nextRevisionId int
+	nextRevisionID int
 	tracer         StateTracer
 	trace          bool
 }
@@ -223,7 +223,7 @@ func (sdb *IntraBlockState) Empty(addr common.Address) bool {
 	return so == nil || so.empty()
 }
 
-// Retrieve the balance from the given address or 0 if object not found
+// GetBalance retrieves the balance from the given address or 0 if object not found
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetBalance(addr common.Address) *big.Int {
 	if sdb.tracer != nil {
@@ -323,7 +323,7 @@ func (sdb *IntraBlockState) GetState(addr common.Address, hash common.Hash) comm
 	return common.Hash{}
 }
 
-// GetProof returns the MerkleProof for a given Account
+// GetProof returns the Merkle proof for a given account
 func (sdb *IntraBlockState) GetProof(a common.Address) ([][]byte, error) {
 	//var proof proofList
 	//err := sdb.trie.Prove(crypto.Keccak256(a.Bytes()), 0, &proof)
@@ -331,7 +331,7 @@ func (sdb *IntraBlockState) GetProof(a common.Address) ([][]byte, error) {
 	return nil, nil
 }
 
-// GetProof returns the StorageProof for given key
+// GetStorageProof returns the storage proof for a given key
 func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) ([][]byte, error) {
 	//var proof proofList
 	//trie := sdb.StorageTrie(a)
@@ -688,7 +688,7 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 	// Copy the dirty states, logs, and preimages
 	for addr := range sdb.journal.dirties {
 		// As documented [here](https://github.com/ledgerwatch/turbo-geth/pull/16485#issuecomment-380438527),
-		// and in the Finalise-method, there is a case where an object is in the journal but not
+		// and in the FinalizeTx method, there is a case where an object is in the journal but not
 		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
 		// nil
 		if object, exist := sdb.stateObjects[addr]; exist {
@@ -721,8 +721,8 @@ func (sdb *IntraBlockState) Copy() *IntraBlockState {
 
 // Snapshot returns an identifier for the current revision of the state.
 func (sdb *IntraBlockState) Snapshot() int {
-	id := sdb.nextRevisionId
-	sdb.nextRevisionId++
+	id := sdb.nextRevisionID
+	sdb.nextRevisionID++
 	sdb.validRevisions = append(sdb.validRevisions, revision{id, sdb.journal.length()})
 	return id
 }
@@ -760,7 +760,8 @@ func (a *Addresses) Swap(i, j int) {
 	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
-func (sdb *IntraBlockState) Finalise(ctx context.Context, stateWriter StateWriter) error {
+// FinalizeTx should be called after every transaction.
+func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		stateObject, exist := sdb.stateObjects[addr]
 		if !exist {
@@ -793,9 +794,9 @@ func (sdb *IntraBlockState) Finalise(ctx context.Context, stateWriter StateWrite
 	return nil
 }
 
-// Finalise finalises the state by removing the self destructed objects
+// CommitBlock finalizes the state by removing the self destructed objects
 // and clears the journal as well as the refunds.
-func (sdb *IntraBlockState) Commit(ctx context.Context, stateWriter StateWriter) error {
+func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWriter) error {
 	for addr := range sdb.journal.dirties {
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
@@ -835,7 +836,7 @@ func (sdb *IntraBlockState) Commit(ctx context.Context, stateWriter StateWriter)
 // goes into transaction receipts.
 /*
 func (tds *TrieDbState) IntermediateRoot(s *IntraBlockState, deleteEmptyObjects bool) (common.Hash, error) {
-	if err := s.Finalise(deleteEmptyObjects, tds.TrieStateWriter()); err != nil {
+	if err := s.FinalizeTx(deleteEmptyObjects, tds.TrieStateWriter()); err != nil {
 		return common.Hash{}, err
 	}
 	return tds.TrieRoot()

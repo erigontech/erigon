@@ -217,7 +217,7 @@ func runCmd(ctx *cli.Context) error {
 			ctx = chainConfig.WithEIPsFlags(context.Background(), runtimeConfig.BlockNumber)
 		}
 
-		if err = statedb.Commit(ctx, state.NewNoopWriter()); err != nil {
+		if err = statedb.CommitBlock(ctx, state.NewNoopWriter()); err != nil {
 			fmt.Println("Could not commit state: ", err)
 			os.Exit(1)
 		}

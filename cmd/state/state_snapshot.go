@@ -9,6 +9,8 @@ import (
 	"github.com/ledgerwatch/bolt"
 
 	"context"
+	"math/big"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -20,7 +22,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"math/big"
 )
 
 func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.DB, blockNum uint64) {
@@ -472,8 +473,8 @@ func state_snapshot() {
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), nextHeader.Number)
-	if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
-		panic(fmt.Errorf("Finalise of block %d failed: %v", blockNum+1, err))
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		panic(fmt.Errorf("FinalizeTx of block %d failed: %v", blockNum+1, err))
 	}
 
 	roots, err := tds.ComputeTrieRoots(ctx)
@@ -485,7 +486,7 @@ func state_snapshot() {
 	}
 	fmt.Printf("Next root %x\n", roots[len(roots)-1])
 
-	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
 	}
 	if _, err := batch.Commit(); err != nil {

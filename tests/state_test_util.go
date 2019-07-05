@@ -153,7 +153,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
 	// Add 0-value mining reward. This only makes a difference in the cases
@@ -163,7 +163,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	if err = statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
 
@@ -203,14 +203,14 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
 		return nil, nil, err
 	}
 	tds.SetBlockNr(ctx, blockNr+1)
-	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -255,7 +256,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 		}
 	}
 	ctx := g.Config.WithEIPsFlags(context.Background(), big.NewInt(int64(g.Number)))
-	err = statedb.Finalise(ctx, tds.TrieStateWriter())
+	err = statedb.FinalizeTx(ctx, tds.TrieStateWriter())
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -300,7 +301,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 	}
 	ctx := g.Config.WithEIPsFlags(context.Background(), block.Number())
 	tds.SetBlockNr(ctx, 0)
-	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}
 	if _, err := batch.Commit(); err != nil {

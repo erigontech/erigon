@@ -163,7 +163,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			blockchain.reportBlock(block, receipts, err)
 			return err
 		}
-		//statedb.Finalise(false, tds.TrieStateWriter())
+		//statedb.FinalizeTx(false, tds.TrieStateWriter())
 		err = blockchain.validator.ValidateState(block, parent, statedb, tds, receipts, usedGas)
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
@@ -172,7 +172,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		blockchain.chainmu.Lock()
 		ctx := blockchain.chainConfig.WithEIPsFlags(context.Background(), block.Number())
 		tds.SetBlockNr(ctx, block.NumberU64())
-		if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 			return err
 		}
 		if _, err := blockchain.db.Commit(); err != nil {

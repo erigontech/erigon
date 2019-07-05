@@ -31,6 +31,7 @@ import (
 	"gopkg.in/check.v1"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -59,7 +60,7 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		_ = state.Finalise(context.Background(), tds.TrieStateWriter())
+		_ = state.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	}
 
 	_, err := tds.ComputeTrieRoots(context.Background())
@@ -108,7 +109,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Write modifications to trie.
-	err := transState.Finalise(context.Background(), transTds.TrieStateWriter())
+	err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -122,7 +123,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	err = transState.Finalise(context.Background(), transTds.TrieStateWriter())
+	err = transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -134,12 +135,12 @@ func TestIntermediateLeaks(t *testing.T) {
 
 	transTds.SetBlockNr(context.Background(), 1)
 
-	err = transState.Commit(context.Background(), transTds.DbStateWriter())
+	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter())
 	if err != nil {
 		t.Fatal("failed to commit transition state", err)
 	}
 
-	err = finalState.Finalise(context.Background(), finalTds.TrieStateWriter())
+	err = finalState.FinalizeTx(context.Background(), finalTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -150,7 +151,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	finalTds.SetBlockNr(context.Background(), 1)
-	if err := finalState.Commit(context.Background(), finalTds.DbStateWriter()); err != nil {
+	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
@@ -425,7 +426,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(context.Background(), s.tds.TrieStateWriter())
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
@@ -437,7 +438,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 	s.tds.SetBlockNr(context.Background(), 1)
 
-	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
+	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
@@ -538,7 +539,7 @@ func TestCopy(t *testing.T) {
 		}
 	}
 
-	err = orig.Finalise(context.Background(), origTds.TrieStateWriter())
+	err = orig.FinalizeTx(context.Background(), origTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
@@ -550,7 +551,7 @@ func TestCopy(t *testing.T) {
 
 	origTds.SetBlockNr(context.Background(), 1)
 
-	err = orig.Commit(context.Background(), origTds.DbStateWriter())
+	err = orig.CommitBlock(context.Background(), origTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}
@@ -581,7 +582,7 @@ func TestCopy(t *testing.T) {
 	done := make(chan struct{}, 1)
 	go func() {
 		ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
-		err = orig.Finalise(ctx, origTds.TrieStateWriter())
+		err = orig.FinalizeTx(ctx, origTds.TrieStateWriter())
 		if err != nil {
 			t.Log("error while finalize", err)
 		}
@@ -593,7 +594,7 @@ func TestCopy(t *testing.T) {
 
 		origTds.SetBlockNr(ctx, 2)
 
-		err = orig.Commit(ctx, origTds.DbStateWriter())
+		err = orig.CommitBlock(ctx, origTds.DbStateWriter())
 		if err != nil {
 			t.Log("error while commit", err)
 		}
@@ -603,7 +604,7 @@ func TestCopy(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
 
-	err = copy.Finalise(ctx, copyTds.TrieStateWriter())
+	err = copy.FinalizeTx(ctx, copyTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
@@ -614,7 +615,7 @@ func TestCopy(t *testing.T) {
 	}
 
 	copyTds.SetBlockNr(ctx, 2)
-	err = copy.Commit(ctx, copyTds.DbStateWriter())
+	err = copy.CommitBlock(ctx, copyTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}

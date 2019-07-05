@@ -1195,7 +1195,7 @@ func repair() {
 		accumulateRewards(chainConfig, statedb, header, block.Uncles())
 		dbstate.SetBlockNr(block.NumberU64())
 		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
-		if err = statedb.Commit(ctx, dbstate); err != nil {
+		if err = statedb.CommitBlock(ctx, dbstate); err != nil {
 			panic(err)
 		}
 		dbstate.CheckKeys()
