@@ -84,11 +84,11 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	ctx := params.MainnetChainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr)))
 	statedb, tds, err := MakePreState(ctx, db, t.json.Pre, blockNr)
 	if err != nil {
-		return fmt.Errorf("Error in MakePreState: %v", err)
+		return fmt.Errorf("error in MakePreState: %v", err)
 	}
 	ret, gasRemaining, err := t.exec(statedb, vmconfig)
 	if err != nil {
-		return fmt.Errorf("Execution error: %v", err)
+		return fmt.Errorf("execution error: %v", err)
 	}
 
 	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
