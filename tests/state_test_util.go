@@ -121,7 +121,7 @@ func (t *StateTest) Subtests() []StateSubtest {
 }
 
 // Run executes a specific subtest.
-func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.StateDB, *state.TrieDbState, common.Hash, error) {
+func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.Config) (*state.IntraBlockState, *state.TrieDbState, common.Hash, error) {
 	config, ok := Forks[subtest.Fork]
 	if !ok {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
@@ -149,11 +149,13 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	gaspool := new(core.GasPool)
 	gaspool.AddGas(block.GasLimit())
 	snapshot := statedb.Snapshot()
-	if _, _, _, err := core.ApplyMessage(evm, msg, gaspool); err != nil {
+	if _, _, _, err = core.ApplyMessage(evm, msg, gaspool); err != nil {
 		statedb.RevertToSnapshot(snapshot)
 	}
 	// Commit block
-	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -161,7 +163,9 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	//   the coinbase gets no txfee, so isn't created, and thus needs to be touched
 	statedb.AddBalance(block.Coinbase(), new(big.Int))
 	// And _now_ get the state root
-	_ = statedb.Finalise(ctx, tds.TrieStateWriter())
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		return nil, nil, common.Hash{}, err
+	}
 
 	roots, err := tds.ComputeTrieRoots(ctx)
 	if err != nil {
@@ -183,7 +187,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 	return t.json.Tx.GasLimit[t.json.Post[subtest.Fork][subtest.Index].Indexes.Gas]
 }
 
-func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
+func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
 	tds, err := state.NewTrieDbState(ctx, common.Hash{}, db, blockNr)
 	if err != nil {
 		return nil, nil, err
@@ -199,14 +203,14 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 		}
 	}
 	// Commit and re-open to start with a clean state.
-	if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
 		return nil, nil, err
 	}
 	tds.SetBlockNr(ctx, blockNr+1)
-	if err := statedb.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

@@ -21,6 +21,7 @@ import (
 	"math/big"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -38,7 +39,7 @@ type BlockGen struct {
 	parent      *types.Block
 	chain       []*types.Block
 	header      *types.Header
-	statedb     *state.StateDB
+	statedb     *state.IntraBlockState
 	triedbstate *state.TrieDbState
 
 	gasPool  *GasPool
@@ -180,9 +181,9 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	}
 	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
 	chainreader := &fakeChainReader{config: config}
-	genblock := func(i int, parent *types.Block, statedb *state.StateDB, tds *state.TrieDbState) (*types.Block, types.Receipts) {
+	genblock := func(i int, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState) (*types.Block, types.Receipts) {
 		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
-		b.header = makeHeader(chainreader, parent, statedb, tds, b.engine)
+		b.header = makeHeader(chainreader, parent, b.engine)
 		// Mutate the state and block according to any hard-fork specs
 		if daoBlock := config.DAOForkBlock; daoBlock != nil {
 			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
@@ -206,7 +207,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
 			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
-			if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
 			roots, err := tds.ComputeTrieRoots(ctx)
@@ -223,7 +224,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(ctx, block.NumberU64())
 			// Write state changes to db
-			if err := statedb.Commit(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
+			if err := statedb.CommitBlock(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
@@ -247,7 +248,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 	return blocks, receipts
 }
 
-func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.StateDB, tds *state.TrieDbState, engine consensus.Engine) *types.Header {
+func makeHeader(chain consensus.ChainReader, parent *types.Block, engine consensus.Engine) *types.Header {
 	var time *big.Int
 	if parent.Time() == nil {
 		time = big.NewInt(10)

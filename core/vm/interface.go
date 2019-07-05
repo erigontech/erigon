@@ -23,8 +23,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
-// StateDB is an EVM database for full state querying.
-type StateDB interface {
+// IntraBlockState is an EVM database for full state querying.
+type IntraBlockState interface {
 	CreateAccount(common.Address, bool)
 
 	SubBalance(common.Address, *big.Int)

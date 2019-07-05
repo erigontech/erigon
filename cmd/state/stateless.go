@@ -16,6 +16,8 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
+	"math/big"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -26,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"math/big"
 )
 
 var chartColors = []drawing.Color{
@@ -65,7 +66,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	dbstate.SetBlockNr(block.NumberU64())
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := statedb.Commit(ctx, dbstate); err != nil {
+	if err := statedb.CommitBlock(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
 	if err := dbstate.CheckRoot(ctx, header.Root, checkRoot); err != nil {
@@ -221,8 +222,8 @@ func stateless(genLag, consLag int) {
 		}
 
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-		if err := statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
-			fmt.Printf("Finalise of block %d failed: %v\n", blockNum, err)
+		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
 			return
 		}
 
@@ -243,7 +244,7 @@ func stateless(genLag, consLag int) {
 		}
 		tds.SetBlockNr(ctx, blockNum)
 
-		err = statedb.Commit(ctx, tds.DbStateWriter())
+		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
 			return

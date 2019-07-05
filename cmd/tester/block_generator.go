@@ -9,6 +9,7 @@ import (
 	"os"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -171,7 +172,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			return nil, err
 		}
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+		if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
@@ -188,7 +189,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		header.Root = roots[len(roots)-1]
 		header.GasUsed = *usedGas
 		tds.SetBlockNr(ctx, uint64(height))
-		err = statedb.Commit(ctx, tds.DbStateWriter())
+		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
@@ -274,7 +275,7 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		tds.StartNewBuffer()
 		accumulateRewards(config, statedb, header, []*types.Header{})
 		ctx := config.WithEIPsFlags(context.Background(), header.Number)
-		if err = statedb.Finalise(ctx, tds.TrieStateWriter()); err != nil {
+		if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			return nil, err
 		}
 
@@ -284,7 +285,7 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 			return nil, err
 		}
 		header.Root = roots[len(roots)-1]
-		err = statedb.Commit(ctx, tds.DbStateWriter())
+		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
 			return nil, err
 		}
@@ -326,7 +327,7 @@ var (
 // AccumulateRewards credits the coinbase of the given block with the mining
 // reward. The total reward consists of the static block reward and rewards for
 // included uncles. The coinbase of each uncle block is also rewarded.
-func accumulateRewards(config *params.ChainConfig, state *state.StateDB, header *types.Header, uncles []*types.Header) {
+func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
 	// Select the correct block reward based on chain progression
 	blockReward := ethash.FrontierBlockReward
 	if config.IsByzantium(header.Number) {

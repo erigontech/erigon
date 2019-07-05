@@ -177,7 +177,7 @@ func (sw *stackWrapper) pushObject(vm *duktape.Context) {
 
 // dbWrapper provides a JavaScript wrapper around vm.Database.
 type dbWrapper struct {
-	db vm.StateDB
+	db vm.IntraBlockState
 }
 
 // pushObject assembles a JSVM object wrapping a swappable database and pushes it
@@ -551,13 +551,13 @@ func (jst *Tracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cost 
 		jst.stackWrapper.stack = stack
 		jst.memoryWrapper.memory = memory
 		jst.contractWrapper.contract = contract
-		jst.dbWrapper.db = env.StateDB
+		jst.dbWrapper.db = env.IntraBlockState
 
 		*jst.pcValue = uint(pc)
 		*jst.gasValue = uint(gas)
 		*jst.costValue = uint(cost)
 		*jst.depthValue = uint(depth)
-		*jst.refundValue = uint(env.StateDB.GetRefund())
+		*jst.refundValue = uint(env.IntraBlockState.GetRefund())
 
 		jst.errorValue = nil
 		if err != nil {

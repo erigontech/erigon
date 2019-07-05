@@ -80,10 +80,10 @@ type txTraceResult struct {
 // being traced.
 type blockTraceTask struct {
 	tds     *state.TrieDbState
-	statedb *state.StateDB   // Intermediate state prepped for tracing
-	block   *types.Block     // Block to trace the transactions from
-	rootref common.Hash      // Trie root reference held for this task
-	results []*txTraceResult // Trace results procudes by the task
+	statedb *state.IntraBlockState // Intermediate state prepped for tracing
+	block   *types.Block           // Block to trace the transactions from
+	rootref common.Hash            // Trie root reference held for this task
+	results []*txTraceResult       // Trace results procudes by the task
 }
 
 // blockTraceResult represets the results of tracing a single block when an entire
@@ -97,8 +97,8 @@ type blockTraceResult struct {
 // txTraceTask represents a single transaction trace task when an entire block
 // is being traced.
 type txTraceTask struct {
-	statedb *state.StateDB // Intermediate state prepped for tracing
-	index   int            // Transaction offset in the block
+	statedb *state.IntraBlockState // Intermediate state prepped for tracing
+	index   int                    // Transaction offset in the block
 }
 
 // TraceChain returns the structured logs created during the execution of EVM
@@ -158,7 +158,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 	}
 	tds, err := state.NewTrieDbState(ctx, start.Root(), api.eth.ChainDb(), start.NumberU64())
 	if err != nil {
-		// If the starting state is missing, allow some number of blocks to be reexecuted
+		// If the starting state is missing, allow some number of blocks to be re-executed
 		reexec := defaultTraceReexec
 		if config != nil && config.Reexec != nil {
 			reexec = *config.Reexec
@@ -217,7 +217,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 						break
 					}
 					// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-					_ = task.statedb.Finalise(api.eth.blockchain.Config().WithEIPsFlags(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
+					_ = task.statedb.FinalizeTx(api.eth.blockchain.Config().WithEIPsFlags(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
 					task.results[i] = &txTraceResult{Result: res}
 				}
 				// Stream the result back to the user or abort on teardown
@@ -298,7 +298,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			// Finalize the state so any modifications are written to the trie
 			ctx := api.eth.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(number)))
 			tds.SetBlockNr(ctx, number)
-			err = statedb.Commit(ctx, tds.DbStateWriter())
+			err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 			if err != nil {
 				failed = err
 				break
@@ -437,7 +437,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 	if parent == nil {
 		return nil, fmt.Errorf("parent %#x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Execute all the transaction contained within the block concurrently
 	var (
 		signer = types.MakeSigner(api.config, block.Number())
@@ -488,7 +488,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 		}
 		// Finalize the state so any modifications are written to the trie
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
+		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
 	close(jobs)
 	pend.Wait()
@@ -530,7 +530,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			reexec = *config.Reexec
 		}
 	*/
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Retrieve the tracing configurations, or use default values
 	var (
 		logConfig vm.LogConfig
@@ -594,7 +594,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 		}
 		// Finalize the state so any modifications are written to the trie
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
+		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 
 		// If we've traced the transaction we were looking for, abort
 		if tx.Hash() == txHash {
@@ -604,10 +604,10 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 	return dumps, nil
 }
 
-// computeStateDB retrieves the state database associated with a certain block.
+// computeIntraBlockState retrieves the state database associated with a certain block.
 // If no state is locally available for the given block, a number of blocks are
 // attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPI) computeStateDB(block *types.Block) (*state.StateDB, *state.DbState) {
+func (api *PrivateDebugAPI) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
 	dbstate := state.NewDbState(api.eth.ChainDb(), block.NumberU64())
 	statedb := state.New(dbstate)
@@ -622,11 +622,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	reexec := defaultTraceReexec
-	if config != nil && config.Reexec != nil {
-		reexec = *config.Reexec
-	}
-	msg, vmctx, statedb, _, _, err := api.computeTxEnv(blockHash, int(index), reexec)
+	msg, vmctx, statedb, _, _, err := api.computeTxEnv(blockHash, int(index))
 	if err != nil {
 		return nil, err
 	}
@@ -637,7 +633,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 // traceTx configures a new tracer according to the provided configuration, and
 // executes the given message in the provided environment. The return value will
 // be tracer dependent.
-func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, vmctx vm.Context, statedb *state.StateDB,
+func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, vmctx vm.Context, state vm.IntraBlockState,
 	config *TraceConfig) (interface{}, error) {
 	// Assemble the structured logger or the JavaScript tracer
 	var (
@@ -672,7 +668,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 		tracer = vm.NewStructLogger(config.LogConfig)
 	}
 	// Run the transaction with tracing enabled.
-	vmenv := vm.NewEVM(vmctx, statedb, api.config, vm.Config{Debug: true, Tracer: tracer})
+	vmenv := vm.NewEVM(vmctx, state, api.config, vm.Config{Debug: true, Tracer: tracer})
 
 	ret, gas, failed, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
 	if err != nil {
@@ -697,7 +693,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, reexec uint64) (core.Message, vm.Context, *state.StateDB, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
 	// Create the parent state database
 	block := api.eth.blockchain.GetBlockByHash(blockHash)
 	if block == nil {
@@ -707,7 +703,7 @@ func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, ree
 	if parent == nil {
 		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeStateDB(parent)
+	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Recompute transactions up to the target index.
 	signer := types.MakeSigner(api.config, block.Number())
 
@@ -725,7 +721,7 @@ func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int, ree
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.Finalise(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
+		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
 	return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }

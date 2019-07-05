@@ -224,7 +224,7 @@ func (bc *BlockChain) EnableReceipts(er bool) {
 func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
 	if bc.trieDbState == nil {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
-		log.Info("Creating StateDB from latest state", "block", currentBlockNr)
+		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), bc.CurrentBlock().Number()), bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		if err != nil {
@@ -418,12 +418,12 @@ func (bc *BlockChain) Processor() Processor {
 }
 
 // State returns a new mutable state based on the current HEAD block.
-func (bc *BlockChain) State() (*state.StateDB, *state.TrieDbState, error) {
+func (bc *BlockChain) State() (*state.IntraBlockState, *state.TrieDbState, error) {
 	return bc.StateAt(bc.CurrentBlock().Root(), bc.CurrentBlock().NumberU64())
 }
 
 // StateAt returns a new mutable state based on a particular point in time.
-func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.StateDB, *state.TrieDbState, error) {
+func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
 	tds, err := state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr))), root, bc.db, blockNr)
 	if err != nil {
 		return nil, nil, err
@@ -886,7 +886,7 @@ func (bc *BlockChain) WriteBlockWithoutState(block *types.Block, td *big.Int) (e
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB, tds *state.TrieDbState) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
@@ -895,7 +895,7 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.StateDB, tds *state.TrieDbState) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
 	bc.wg.Add(1)
 	defer bc.wg.Done()
 
@@ -921,7 +921,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	tds.SetBlockNr(bc.chainConfig.WithEIPsFlags(context.Background(), block.Number()), block.NumberU64())
 	ctx := bc.chainConfig.WithEIPsFlags(context.Background(), block.Number())
-	if err := state.Commit(ctx, tds.DbStateWriter()); err != nil {
+	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
 	}
 	if bc.enableReceipts {
@@ -1193,7 +1193,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		var root common.Hash
 		if bc.trieDbState == nil {
 			currentBlockNr := bc.CurrentBlock().NumberU64()
-			log.Info("Creating StateDB from latest state", "block", currentBlockNr)
+			log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 			bc.trieDbState, err = state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(currentBlockNr))), bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 			if err != nil {
 				return k, events, coalescedLogs, err

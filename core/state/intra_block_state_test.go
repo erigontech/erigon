@@ -31,6 +31,7 @@ import (
 	"gopkg.in/check.v1"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -59,7 +60,7 @@ func TestUpdateLeaks(t *testing.T) {
 		if i%3 == 0 {
 			state.SetCode(addr, []byte{i, i, i, i, i})
 		}
-		_ = state.Finalise(context.Background(), tds.TrieStateWriter())
+		_ = state.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	}
 
 	_, err := tds.ComputeTrieRoots(context.Background())
@@ -90,7 +91,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
-	modify := func(state *StateDB, addr common.Address, i, tweak byte) {
+	modify := func(state *IntraBlockState, addr common.Address, i, tweak byte) {
 		state.SetBalance(addr, big.NewInt(int64(11*i)+int64(tweak)))
 		state.SetNonce(addr, uint64(42*i+tweak))
 		if i%2 == 0 {
@@ -108,7 +109,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Write modifications to trie.
-	err := transState.Finalise(context.Background(), transTds.TrieStateWriter())
+	err := transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -122,7 +123,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	// Commit and cross check the databases.
-	err = transState.Finalise(context.Background(), transTds.TrieStateWriter())
+	err = transState.FinalizeTx(context.Background(), transTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -134,12 +135,12 @@ func TestIntermediateLeaks(t *testing.T) {
 
 	transTds.SetBlockNr(context.Background(), 1)
 
-	err = transState.Commit(context.Background(), transTds.DbStateWriter())
+	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter())
 	if err != nil {
 		t.Fatal("failed to commit transition state", err)
 	}
 
-	err = finalState.Finalise(context.Background(), finalTds.TrieStateWriter())
+	err = finalState.FinalizeTx(context.Background(), finalTds.TrieStateWriter())
 	if err != nil {
 		t.Fatal("error while finalizing state", err)
 	}
@@ -150,7 +151,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	finalTds.SetBlockNr(context.Background(), 1)
-	if err := finalState.Commit(context.Background(), finalTds.DbStateWriter()); err != nil {
+	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
@@ -184,7 +185,7 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 }
 
-// A snapshotTest checks that reverting StateDB snapshots properly undoes all changes
+// A snapshotTest checks that reverting IntraBlockState snapshots properly undoes all changes
 // captured by the snapshot. Instances of this test with pseudorandom content are created
 // by Generate.
 //
@@ -204,7 +205,7 @@ type snapshotTest struct {
 
 type testAction struct {
 	name   string
-	fn     func(testAction, *StateDB)
+	fn     func(testAction, *IntraBlockState)
 	args   []int64
 	noAddr bool
 }
@@ -214,28 +215,28 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.SetBalance(addr, big.NewInt(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.AddBalance(addr, big.NewInt(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetNonce",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.SetNonce(addr, uint64(a.args[0]))
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetState",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				var key, val common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				binary.BigEndian.PutUint16(val[:], uint16(a.args[1]))
@@ -245,7 +246,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "SetCode",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				code := make([]byte, 16)
 				binary.BigEndian.PutUint64(code, uint64(a.args[0]))
 				binary.BigEndian.PutUint64(code[8:], uint64(a.args[1]))
@@ -255,19 +256,19 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "CreateAccount",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.CreateAccount(addr, true)
 			},
 		},
 		{
 			name: "Suicide",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.Suicide(addr)
 			},
 		},
 		{
 			name: "AddRefund",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				s.AddRefund(uint64(a.args[0]))
 			},
 			args:   make([]int64, 1),
@@ -275,7 +276,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "AddLog",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				data := make([]byte, 2)
 				binary.BigEndian.PutUint16(data, uint16(a.args[0]))
 				s.AddLog(&types.Log{Address: addr, Data: data})
@@ -284,7 +285,7 @@ func newTestAction(addr common.Address, r *rand.Rand) testAction {
 		},
 		{
 			name: "AddPreimage",
-			fn: func(a testAction, s *StateDB) {
+			fn: func(a testAction, s *IntraBlockState) {
 				preimage := []byte{1}
 				hash := common.BytesToHash(preimage)
 				s.AddPreimage(hash, preimage)
@@ -379,7 +380,7 @@ func (test *snapshotTest) run() bool {
 }
 
 // checkEqual checks that methods of state and checkstate return the same values.
-func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *DbState) error {
+func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbState) error {
 	for _, addr := range test.addrs {
 		var err error
 		checkeq := func(op string, a, b interface{}) bool {
@@ -425,7 +426,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *StateDB, ds, checkds *Db
 func (s *StateSuite) TestTouchDelete(c *check.C) {
 	s.state.GetOrNewStateObject(common.Address{})
 
-	err := s.state.Finalise(context.Background(), s.tds.TrieStateWriter())
+	err := s.state.FinalizeTx(context.Background(), s.tds.TrieStateWriter())
 	if err != nil {
 		c.Fatal("error while finalize", err)
 	}
@@ -437,7 +438,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 	s.tds.SetBlockNr(context.Background(), 1)
 
-	err = s.state.Commit(context.Background(), s.tds.DbStateWriter())
+	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}
@@ -474,7 +475,7 @@ func TestCopyOfCopy(t *testing.T) {
 	}
 }
 
-func TestStateDBNewEmptyAccount(t *testing.T) {
+func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
@@ -486,7 +487,7 @@ func TestStateDBNewEmptyAccount(t *testing.T) {
 	}
 }
 
-func TestStateDBNewContractAccount(t *testing.T) {
+func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
 	state := New(tds)
@@ -538,7 +539,7 @@ func TestCopy(t *testing.T) {
 		}
 	}
 
-	err = orig.Finalise(context.Background(), origTds.TrieStateWriter())
+	err = orig.FinalizeTx(context.Background(), origTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
@@ -550,7 +551,7 @@ func TestCopy(t *testing.T) {
 
 	origTds.SetBlockNr(context.Background(), 1)
 
-	err = orig.Commit(context.Background(), origTds.DbStateWriter())
+	err = orig.CommitBlock(context.Background(), origTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}
@@ -581,7 +582,7 @@ func TestCopy(t *testing.T) {
 	done := make(chan struct{}, 1)
 	go func() {
 		ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
-		err = orig.Finalise(ctx, origTds.TrieStateWriter())
+		err = orig.FinalizeTx(ctx, origTds.TrieStateWriter())
 		if err != nil {
 			t.Log("error while finalize", err)
 		}
@@ -593,7 +594,7 @@ func TestCopy(t *testing.T) {
 
 		origTds.SetBlockNr(ctx, 2)
 
-		err = orig.Commit(ctx, origTds.DbStateWriter())
+		err = orig.CommitBlock(ctx, origTds.DbStateWriter())
 		if err != nil {
 			t.Log("error while commit", err)
 		}
@@ -603,7 +604,7 @@ func TestCopy(t *testing.T) {
 
 	ctx := context.WithValue(context.Background(), params.IsEIP158Enabled, true)
 
-	err = copy.Finalise(ctx, copyTds.TrieStateWriter())
+	err = copy.FinalizeTx(ctx, copyTds.TrieStateWriter())
 	if err != nil {
 		t.Log("error while finalize", err)
 	}
@@ -614,7 +615,7 @@ func TestCopy(t *testing.T) {
 	}
 
 	copyTds.SetBlockNr(ctx, 2)
-	err = copy.Commit(ctx, copyTds.DbStateWriter())
+	err = copy.CommitBlock(ctx, copyTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)
 	}

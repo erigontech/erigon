@@ -64,13 +64,13 @@ type stateObject struct {
 	address  common.Address
 	data     accounts.Account
 	original accounts.Account
-	db       *StateDB
+	db       *IntraBlockState
 
 	// DB error.
 	// State objects are used by the consensus core and VM which are
 	// unable to deal with database-level errors. Any error that occurs
 	// during a database read is memoized here and will eventually be returned
-	// by StateDB.Commit.
+	// by IntraBlockState.Commit.
 	dbErr error
 
 	// Write caches.
@@ -98,7 +98,7 @@ func (so *stateObject) empty() bool {
 const HugeNumber = uint64(1 << 63)
 
 // newObject creates a state object.
-func newObject(db *StateDB, address common.Address, data, original accounts.Account) *stateObject {
+func newObject(db *IntraBlockState, address common.Address, data, original accounts.Account) *stateObject {
 	if data.Balance == nil {
 		data.Balance = new(big.Int)
 	}
@@ -248,7 +248,7 @@ func (so *stateObject) setBalance(amount *big.Int) {
 // Return the gas back to the origin. Used by the Virtual machine or Closures
 func (so *stateObject) ReturnGas(gas *big.Int) {}
 
-func (so *stateObject) deepCopy(db *StateDB) *stateObject {
+func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
 	stateObject := newObject(db, so.address, so.data, so.original)
 	stateObject.code = so.code
 	stateObject.dirtyStorage = so.dirtyStorage.Copy()

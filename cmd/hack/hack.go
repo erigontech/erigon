@@ -11,11 +11,9 @@ import (
 	"log"
 	"math/big"
 	"os"
-	"os/signal"
 	"runtime/pprof"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
@@ -24,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -702,11 +699,11 @@ func testRewind(block, rewind int) {
 	err = tds.UnwindTo(ctx, baseBlockNr-rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
 	check(err)
-	rewoundBlock_1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
-	fmt.Printf("Rewound+1 block number: %d\n", rewoundBlock_1.NumberU64())
-	fmt.Printf("Rewound+1 block hash: %x\n", rewoundBlock_1.Hash())
-	fmt.Printf("Rewound+1 block root hash: %x\n", rewoundBlock_1.Root())
-	fmt.Printf("Rewound+1 block parent hash: %x\n", rewoundBlock_1.ParentHash())
+	rewoundBlock1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
+	fmt.Printf("Rewound+1 block number: %d\n", rewoundBlock1.NumberU64())
+	fmt.Printf("Rewound+1 block hash: %x\n", rewoundBlock1.Hash())
+	fmt.Printf("Rewound+1 block root hash: %x\n", rewoundBlock1.Root())
+	fmt.Printf("Rewound+1 block parent hash: %x\n", rewoundBlock1.ParentHash())
 
 	rewoundBlock := bc.GetBlockByNumber(baseBlockNr - rewindLen)
 	fmt.Printf("Rewound block number: %d\n", rewoundBlock.NumberU64())
@@ -1058,21 +1055,21 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr+1)
+		v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		v_orig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, []byte(k), blockNr)
+		vOrig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
 		key := ([]byte(k))[len(accountBytes):]
 		if len(v) > 0 {
-			fmt.Printf("Updated %x: %x from %x\n", key, v, v_orig)
+			fmt.Printf("Updated %x: %x from %x\n", key, v, vOrig)
 			t.Update(key, v, blockNr)
 			check(err)
 		} else {
-			fmt.Printf("Deleted %x from %x\n", key, v_orig)
+			fmt.Printf("Deleted %x from %x\n", key, vOrig)
 			t.Delete(key, blockNr)
 		}
 	}
@@ -1110,10 +1107,11 @@ var (
 	big32 = big.NewInt(32)
 )
 
+/*
 // accumulateRewards credits the coinbase of the given block with the mining
 // reward. The total reward consists of the static block reward and rewards for
 // included uncles. The coinbase of each uncle block is also rewarded.
-func accumulateRewards(config *params.ChainConfig, state *state.StateDB, header *types.Header, uncles []*types.Header) {
+func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
 	// select the correct block reward based on chain progression
 	blockReward := ethash.FrontierBlockReward
 	if config.IsByzantium(header.Number) {
@@ -1197,7 +1195,7 @@ func repair() {
 		accumulateRewards(chainConfig, statedb, header, block.Uncles())
 		dbstate.SetBlockNr(block.NumberU64())
 		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
-		if err = statedb.Commit(ctx, dbstate); err != nil {
+		if err = statedb.CommitBlock(ctx, dbstate); err != nil {
 			panic(err)
 		}
 		dbstate.CheckKeys()
@@ -1221,6 +1219,7 @@ func repair() {
 	check(err)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 }
+*/
 
 func readAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("statedb")

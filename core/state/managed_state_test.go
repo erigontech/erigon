@@ -31,8 +31,8 @@ func create() (*ManagedState, *account) {
 	tds, _ := NewTrieDbState(context.TODO(), common.Hash{}, db, 1)
 	statedb := New(tds)
 	ms := ManageState(statedb)
-	ms.StateDB.SetNonce(addr, 100)
-	ms.accounts[addr] = newAccount(ms.StateDB.getStateObject(addr))
+	ms.IntraBlockState.SetNonce(addr, 100)
+	ms.accounts[addr] = newAccount(ms.IntraBlockState.getStateObject(addr))
 	return ms, ms.accounts[addr]
 }
 
@@ -92,7 +92,7 @@ func TestRemoteNonceChange(t *testing.T) {
 	account.nonces = append(account.nonces, nn...)
 	ms.NewNonce(addr)
 
-	ms.StateDB.stateObjects[addr].data.Nonce = 200
+	ms.IntraBlockState.stateObjects[addr].data.Nonce = 200
 	nonce := ms.NewNonce(addr)
 	if nonce != 200 {
 		t.Error("expected nonce after remote update to be", 200, "got", nonce)
@@ -100,7 +100,7 @@ func TestRemoteNonceChange(t *testing.T) {
 	ms.NewNonce(addr)
 	ms.NewNonce(addr)
 	ms.NewNonce(addr)
-	ms.StateDB.stateObjects[addr].data.Nonce = 200
+	ms.IntraBlockState.stateObjects[addr].data.Nonce = 200
 	nonce = ms.NewNonce(addr)
 	if nonce != 204 {
 		t.Error("expected nonce after remote update to be", 204, "got", nonce)
@@ -118,7 +118,7 @@ func TestSetNonce(t *testing.T) {
 	}
 
 	addr[0] = 1
-	ms.StateDB.SetNonce(addr, 1)
+	ms.IntraBlockState.SetNonce(addr, 1)
 
 	if ms.GetNonce(addr) != 1 {
 		t.Error("Expected nonce of 1, got", ms.GetNonce(addr))

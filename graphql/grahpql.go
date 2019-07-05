@@ -50,8 +50,8 @@ type Account struct {
 	blockNumber rpc.BlockNumber
 }
 
-// getState fetches the StateDB object for an account.
-func (a *Account) getState(ctx context.Context) (*state.StateDB, error) {
+// getState fetches the IntraBlockState object for an account.
+func (a *Account) getState(ctx context.Context) (*state.IntraBlockState, error) {
 	state, _, err := a.backend.StateAndHeaderByNumber(ctx, a.blockNumber)
 	return state, err
 }

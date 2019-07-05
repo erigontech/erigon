@@ -45,7 +45,7 @@ func (account) SetCode(common.Hash, []byte)                         {}
 func (account) ForEachStorage(cb func(key, value common.Hash) bool) {}
 
 type dummyStatedb struct {
-	state.StateDB
+	state.IntraBlockState
 }
 
 func (*dummyStatedb) GetRefund() uint64 { return 1337 }

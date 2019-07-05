@@ -118,7 +118,7 @@ func gasReturnDataCopy(gt params.GasTable, evm *EVM, contract *Contract, stack *
 func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, mem *Memory, memorySize uint64) (uint64, error) {
 	var (
 		y, x    = stack.Back(1), stack.Back(0)
-		current = evm.StateDB.GetState(contract.Address(), common.BigToHash(x))
+		current = evm.IntraBlockState.GetState(contract.Address(), common.BigToHash(x))
 	)
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
@@ -133,7 +133,7 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 		case current == (common.Hash{}) && y.Sign() != 0: // 0 => non 0
 			return params.SstoreSetGas, nil
 		case current != (common.Hash{}) && y.Sign() == 0: // non 0 => 0
-			evm.StateDB.AddRefund(params.SstoreRefundGas)
+			evm.IntraBlockState.AddRefund(params.SstoreRefundGas)
 			return params.SstoreClearGas, nil
 		default: // non 0 => non 0 (or 0 => 0)
 			return params.SstoreResetGas, nil
@@ -157,28 +157,28 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 	if current == value { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
-	original := evm.StateDB.GetCommittedState(contract.Address(), common.BigToHash(x))
+	original := evm.IntraBlockState.GetCommittedState(contract.Address(), common.BigToHash(x))
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
 		}
 		if value == (common.Hash{}) { // delete slot (2.1.2b)
-			evm.StateDB.AddRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 		return params.NetSstoreCleanGas, nil // write existing slot (2.1.2)
 	}
 	if original != (common.Hash{}) {
 		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
-			evm.StateDB.SubRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
 		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
-			evm.StateDB.AddRefund(params.NetSstoreClearRefund)
+			evm.IntraBlockState.AddRefund(params.NetSstoreClearRefund)
 		}
 	}
 	if original == value {
 		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
-			evm.StateDB.AddRefund(params.NetSstoreResetClearRefund)
+			evm.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
-			evm.StateDB.AddRefund(params.NetSstoreResetRefund)
+			evm.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
 		}
 	}
 	return params.NetSstoreDirtyGas, nil
@@ -396,10 +396,10 @@ func gasCall(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, mem
 		eip158         = evm.ChainConfig().IsEIP158(evm.BlockNumber)
 	)
 	if eip158 {
-		if transfersValue && evm.StateDB.Empty(address) {
+		if transfersValue && evm.IntraBlockState.Empty(address) {
 			gas += params.CallNewAccountGas
 		}
-	} else if !evm.StateDB.Exist(address) {
+	} else if !evm.IntraBlockState.Exist(address) {
 		gas += params.CallNewAccountGas
 	}
 	if transfersValue {
@@ -468,16 +468,16 @@ func gasSuicide(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, 
 
 		if eip158 {
 			// if empty and transfers value
-			if evm.StateDB.Empty(address) && evm.StateDB.GetBalance(contract.Address()).Sign() != 0 {
+			if evm.IntraBlockState.Empty(address) && evm.IntraBlockState.GetBalance(contract.Address()).Sign() != 0 {
 				gas += gt.CreateBySuicide
 			}
-		} else if !evm.StateDB.Exist(address) {
+		} else if !evm.IntraBlockState.Exist(address) {
 			gas += gt.CreateBySuicide
 		}
 	}
 
-	if !evm.StateDB.HasSuicided(contract.Address()) {
-		evm.StateDB.AddRefund(params.SuicideRefundGas)
+	if !evm.IntraBlockState.HasSuicided(contract.Address()) {
+		evm.IntraBlockState.AddRefund(params.SuicideRefundGas)
 	}
 	return gas, nil
 }
