@@ -491,7 +491,7 @@ func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check b
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			data, err := account.Encode(ctx)
+			data, err := account.EncodeRLP(ctx)
 			if err != nil {
 				return err
 			}

@@ -126,7 +126,7 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata1")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
@@ -175,7 +175,7 @@ func stateless(genLag, consLag int) {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 8000000
+	var thresholdBlock uint64 = 5000000
 	//prev := make(map[uint64]*state.Stateless)
 	var proofGen *state.Stateless  // Generator of proofs
 	var proofCons *state.Stateless // Consumer of proofs

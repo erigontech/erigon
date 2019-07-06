@@ -15,7 +15,7 @@ import (
 	//"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	//"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -347,8 +347,8 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 				if enc, _ := b.Get(crypto.Keccak256(address[:])); enc == nil {
 					roots[address] = common.Hash{}
 				} else {
-					account, err := encodingToAccount(enc)
-					if err != nil {
+					var account accounts.Account
+					if err := account.Decode(enc); err != nil {
 						return err
 					}
 					roots[address] = account.Root
