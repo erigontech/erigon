@@ -38,7 +38,7 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 			if len(value) == 0 {
 				return true, nil
 			}
-			if err := bDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
+			if err = bDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
 				return false, err
 			}
 			count++
@@ -84,7 +84,7 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 				v, _ := b.Get(crypto.Keccak256(address[:]))
 				exist[address] = v != nil
 			}
-			if err := sbDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
+			if err = sbDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
 				return false, err
 			}
 			count++
