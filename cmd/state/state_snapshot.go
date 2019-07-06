@@ -348,7 +348,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 					roots[address] = common.Hash{}
 				} else {
 					var account accounts.Account
-					if err := account.Decode(enc); err != nil {
+					if err = account.Decode(enc); err != nil {
 						return err
 					}
 					roots[address] = account.Root
