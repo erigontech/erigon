@@ -23,7 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func construct_snapshot(ethDb ethdb.Database, blockNum uint64) {
+func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	diskDb, err := bolt.Open(fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum), 0600, &bolt.Options{})
 	check(err)
 	defer diskDb.Close()
@@ -390,7 +390,7 @@ func state_snapshot() {
 		load_snapshot(db, "statedb0")
 		load_codes(db, ethDb)
 	} else {
-		construct_snapshot(ethDb, blockNum)
+		constructSnapshot(ethDb, blockNum)
 	}
 	fmt.Printf("Snapshot took %v\n", time.Since(startTime))
 	startTime = time.Now()

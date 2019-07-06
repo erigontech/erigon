@@ -1745,7 +1745,7 @@ func main() {
 	//stateless_chart_key_values("stateless1.csv", []int{1, 2}, "c_mask_hash.png", 1, 4)
 	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
-	//state_snapshot()
+	//stateSnapshot()
 	//estimate()
 	//verify_snapshot()
 	//feemarket()
