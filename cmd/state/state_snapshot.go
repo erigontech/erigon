@@ -376,7 +376,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
-func state_snapshot() {
+func stateSnapshot() {
 	startTime := time.Now()
 	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")

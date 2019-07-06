@@ -40,6 +40,7 @@ import (
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
+var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
@@ -1728,8 +1729,9 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-
-	stateless(*genLag, *consLag)
+	if *action == "stateless" {
+		stateless(*genLag, *consLag)
+	}
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
@@ -1745,7 +1747,9 @@ func main() {
 	//stateless_chart_key_values("stateless1.csv", []int{1, 2}, "c_mask_hash.png", 1, 4)
 	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
-	//stateSnapshot()
+	if *action == "stateSnapshot" {
+		stateSnapshot()
+	}
 	//estimate()
 	//verify_snapshot()
 	//feemarket()
