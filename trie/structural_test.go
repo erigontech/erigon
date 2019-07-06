@@ -56,7 +56,6 @@ func (tb *TrieBuilder) hasher(digit int) {
 func (tb *TrieBuilder) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
 	s := &shortNode{Key: hexToCompact(tb.key[len(tb.key)-length:]), Val: valueNode(tb.value)}
-	s.flags.dirty = true
 	tb.stack = append(tb.stack, s)
 }
 
@@ -64,7 +63,6 @@ func (tb *TrieBuilder) extension(key []byte) {
 	//fmt.Printf("EXTENSION %x\n", key)
 	n := tb.stack[len(tb.stack)-1]
 	s := &shortNode{Key: hexToCompact(key), Val: n}
-	s.flags.dirty = true
 	tb.stack[len(tb.stack)-1] = s
 }
 
@@ -283,7 +281,6 @@ func (hb *HashBuilder) hasher(digit int) {
 func (hb *HashBuilder) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
 	s := &shortNode{Key: hexToCompact(hb.key[len(hb.key)-length:]), Val: valueNode(hb.value)}
-	s.flags.dirty = true
 	hb.top = s
 }
 
@@ -298,7 +295,6 @@ func (hb *HashBuilder) extension(key []byte) {
 		hn, _ := hb.finaliseHasher()
 		s.Val = hashNode(hn[:])
 	}
-	s.flags.dirty = true
 	hb.top = s
 }
 
