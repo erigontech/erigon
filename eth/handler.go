@@ -720,13 +720,17 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		response.ID = request.ID
 		response.Entries = make([]rangeEntry, n)
 
+		for i := 0; i < n; i++ {
+			response.Entries[i].Status = NoData
+		}
+
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
 			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
 			if err != nil {
 				return err
 			}
-			for i := 0; i < n; i++ {
+			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
 				var leaves []keyValue
 				err = tds.WalkRangeOfLeaves(request.Prefixes[i],
 					func(key common.Hash, value []byte) {
@@ -737,16 +741,17 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				if err != nil {
 					return err
 				}
-				response.Entries[i].Leaves = leaves
+				if len(leaves) > MaxLeavesPerPrefix {
+					response.Entries[i].Status = TooManyLeaves
+				} else {
+					response.Entries[i].Status = OK
+					response.Entries[i].Leaves = leaves
+					responseSize += len(leaves)
+				}
 			}
 		} else {
-			for i := 0; i < n; i++ {
-				response.Entries[i].Status = NoData
-			}
 			response.AvailableBlocks = pm.blockchain.CachedBlocks()
 		}
-
-		// TODO [yperbasis] softResponseLimit & TooManyLeaves
 
 		return p2p.Send(p.rw, StateRangesCode, response)
 

@@ -18,6 +18,9 @@ var FirehoseLengths = []uint64{12}
 // FirehoseMaxMsgSize is the maximum cap on the size of a message.
 const FirehoseMaxMsgSize = 10 * 1024 * 1024
 
+// MaxLeavesPerPrefix is the maximum number of leaves allowed per prefix.
+const MaxLeavesPerPrefix = 4096
+
 // Firehose protocol message codes
 const (
 	GetStateRangesCode   = 0x00
