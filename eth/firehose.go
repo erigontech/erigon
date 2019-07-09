@@ -68,7 +68,7 @@ type rangeEntry struct {
 
 type getStateRangesMsg struct {
 	ID       uint64
-	Block    common.Hash // TODO [yperbasis] change to Root Hash or change the doc
+	Block    common.Hash
 	Prefixes []trie.Keybytes
 }
 

@@ -15,7 +15,7 @@ Changes in this revision:
 - Dropped "fuzzy" flag
 - Renamed `GetStateData` -> `GetStateRanges`, `GetStateNodeData` -> `GetStateNodes`, `GetStorageData` -> `GetStorageRanges`, `GetStorageNodeData` -> `GetStorageNodes`
 - Prefix encoding changed to the Yellow Paper's
-- Single state root per request in `GetStateRanges`
+- Single block (hash) per request in `GetStateRanges` and `GetStateNodes` rather than multiple root hashes
 - Return available block hashes rather than state roots
 - `StateRanges` & `StorageRanges` may only have all subtrie leaves or nothing, not intermediate nodes
 - Prefixes are not omitted from returned leaf keys
@@ -75,7 +75,7 @@ All the new operatives/commands live under a new [RLPx](https://github.com/ether
 
 ### `GetStateRanges` Request (`0x00`)
 
-The requester asks for state data (i.e. accounts) defined by a given state root hash and key prefix.
+The requester asks for state data (i.e. accounts) as of a given block that match a given key prefix.
 This command exclusively deals with retrieving the account RLPs.
 
 The requests can be batched so that multiple prefixes may be requested.
@@ -85,8 +85,8 @@ The requests can be batched so that multiple prefixes may be requested.
     # A request id is supplied, to match against the response
     id, # int
     
-    # The root hash for which we request the data
-    root_hash, # 32 bytes
+    # The hash of the block as of which we request the data
+    block_hash, # 32 bytes
 
     # A list of prefixes being requested
     (
@@ -103,13 +103,13 @@ also known as the compact encoding.
 No additional flags are utilized (i.e. `t == 0` always).
 
 #### Example
-Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at state root `0xaaa…aaa`.
+Say you want the accounts that (after hashing) have the prefixes `0xbeef` and `0x0ddba11`, at block `0xaaa…aaa`.
 Your request would look like:
 ```
 (
     1, #id
 
-    0xaaa...aaa, # state root hash
+    0xaaa...aaa, # block hash
     
     # even-length 0xbeef and odd-length 0x0ddba11, encoded
     (
@@ -136,7 +136,7 @@ For each requested prefix the responder has the option of returning either:
         # There is one 2-tuple for every prefix requested
         (
             # 0 – success
-            # 1 – no data for the requested root, the final entry of the response should be non-empty
+            # 1 – no data as of the requested block, the final entry of the response should be non-empty
             # 2 – too many leaves matching the prefix
             status_code, # int
 
@@ -171,7 +171,7 @@ For each requested prefix the responder has the option of returning either:
 
 The response must reuse the same ordering of prefixes as used for the request.
 
-For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash at the requested state root.
+For prefixes with the success status the response **must** include all the keys and values in the prefix, such that rebuilding the sub-trie produces the hash matching that of the requested block.
 
 "Too many leaves" (`status_code = 2`) may only be returned is there are more than 4096 leaves matching the prefix.
 
@@ -211,12 +211,12 @@ A response to the example request above might look like:
         )
     ),
     
-    # this is empty, because the server had data for the requested root
+    # this is empty, because the server had data for the requested block
     () # available blocks
 )
 ```
 
-If the server does not have any data for the requested state root, then it will return status code 1 for every prefix requested, and a list of available block hashes, like:
+If the server does not have any data for the requested block, then it will return status code 1 for every prefix requested, and a list of available block hashes, like:
 
 ```
 (
@@ -226,7 +226,7 @@ If the server does not have any data for the requested state root, then it will 
     (
         # This 2-tuple is for the 0xbeef prefix
         (
-            # the state root is unavailable
+            # the data as of the requested block is unavailable
             1, # status code
 
             # empty since not success
@@ -235,7 +235,7 @@ If the server does not have any data for the requested state root, then it will 
 
         # This 2-tuple is for the 0x0ddba11 prefix
         (
-            # the state root is unavailable
+            # the data as of the requested block is unavailable
             1, # status code
 
             # empty since not success
@@ -243,7 +243,7 @@ If the server does not have any data for the requested state root, then it will 
         )
     ),
 
-    # this should be populated, because the server did not have data for the requested root
+    # this should be populated, because the server did not have data for the requested block
     (
         # one available block hash
         0x1a2b3c4d...,
@@ -447,7 +447,7 @@ A response to the example request above might look like:
 
 ### `GetStateNodes` Request (`0x04`)
 
-Request state trie nodes for a specific state root.
+Request state trie nodes as of a specific block.
 Note that this operative is similar to `GetNodeData` [eth/63], but uses prefixes rather than hashes as node keys.
 It will also only return nodes from the state trie, not arbitrary node data.
 
@@ -463,8 +463,8 @@ the server may return either the matching node or an empty string.
     # A request id is supplied, to match against the response
     id, # int
     
-    # The root hash for which we request the data
-    root_hash, # 32 bytes
+    # The hash of the block as of which we request the data
+    block_hash, # 32 bytes
 
     # A list of prefixes being requested
     (
@@ -490,7 +490,7 @@ the server may return either the matching node or an empty string.
         ...
     ),
 
-    # If an old state root was requested, return the available blocks.
+    # If an old or not yet received block was requested, return the available blocks.
     # Otherwise, return an empty list.
     (
         # include the hash of every block that the server has the data for
