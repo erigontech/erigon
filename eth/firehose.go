@@ -2,6 +2,7 @@ package eth
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -59,14 +60,14 @@ type accountAndHash struct {
 	Hash    common.Hash
 }
 
-type keyValue struct {
-	Key []byte
-	Val []byte
+type accountLeaf struct {
+	Key common.Hash
+	Val *accounts.Account
 }
 
-type rangeEntry struct {
+type accountRange struct {
 	Status Status
-	Leaves []keyValue
+	Leaves []accountLeaf
 }
 
 type getStateRangesMsg struct {
@@ -77,7 +78,7 @@ type getStateRangesMsg struct {
 
 type stateRangesMsg struct {
 	ID              uint64
-	Entries         []rangeEntry
+	Entries         []accountRange
 	AvailableBlocks []common.Hash
 }
 

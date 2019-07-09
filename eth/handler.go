@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -718,7 +719,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		var response stateRangesMsg
 		response.ID = request.ID
-		response.Entries = make([]rangeEntry, n)
+		response.Entries = make([]accountRange, n)
 
 		for i := 0; i < n; i++ {
 			response.Entries[i].Status = NoData
@@ -731,11 +732,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				return err
 			}
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
-				var leaves []keyValue
-				err = tds.WalkRangeOfLeaves(request.Prefixes[i],
-					func(key common.Hash, value []byte) {
-						leaf := keyValue{key.Bytes(), value}
-						leaves = append(leaves, leaf)
+				var leaves []accountLeaf
+				err = tds.WalkRangeOfAccounts(request.Prefixes[i],
+					func(key common.Hash, value *accounts.Account) {
+						leaves = append(leaves, accountLeaf{key, value})
 					},
 				)
 				if err != nil {

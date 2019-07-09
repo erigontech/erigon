@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -530,10 +529,15 @@ func TestFirehoseStateRanges(t *testing.T) {
 	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
 	addr4 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
 
-	assert.Equal(t, crypto.Keccak256(addr1.Bytes()), common.FromHex("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
-	assert.Equal(t, crypto.Keccak256(addr2.Bytes()), common.FromHex("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
-	assert.Equal(t, crypto.Keccak256(addr3.Bytes()), common.FromHex("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
-	assert.Equal(t, crypto.Keccak256(addr4.Bytes()), common.FromHex("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
+	addr1Hash := crypto.Keccak256Hash(addr1.Bytes())
+	addr2Hash := crypto.Keccak256Hash(addr2.Bytes())
+	addr3Hash := crypto.Keccak256Hash(addr3.Bytes())
+	addr4Hash := crypto.Keccak256Hash(addr4.Bytes())
+
+	assert.Equal(t, addr1Hash, common.HexToHash("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
+	assert.Equal(t, addr2Hash, common.HexToHash("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
+	assert.Equal(t, addr3Hash, common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
+	assert.Equal(t, addr4Hash, common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 4
@@ -581,17 +585,15 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	var account accounts.Account
 	account.Balance = amount
-	accountRLP, err := rlp.EncodeToBytes(account)
-	assert.NoError(t, err)
 
 	var reply stateRangesMsg
 	reply.ID = 1
-	reply.Entries = []rangeEntry{
-		{Status: OK, Leaves: []keyValue{{addr4.Bytes(), accountRLP}, {addr3.Bytes(), accountRLP}}},
-		{Status: OK, Leaves: []keyValue{}},
+	reply.Entries = []accountRange{
+		{Status: OK, Leaves: []accountLeaf{{addr4Hash, &account}, {addr3Hash, &account}}},
+		{Status: OK, Leaves: []accountLeaf{}},
 	}
 
-	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
 		t.Fatalf("unexpected StateRanges response: %v", err)
 	}
 
@@ -609,7 +611,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 	reply.Entries[1].Status = NoData
 	reply.AvailableBlocks = []common.Hash{block2.Hash(), block1.Hash(), block0.Hash(), block3.Hash(), block4.Hash()}
 
-	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
 

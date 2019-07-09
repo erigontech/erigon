@@ -309,8 +309,8 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 	storageTrie.Print(w)
 }
 
-// WalkRangeOfLeaves calls the walker for each leaf whose key start with a given prefix.
-func (tds *TrieDbState) WalkRangeOfLeaves(prefix trie.Keybytes, walker func(common.Hash, []byte)) error {
+// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix.
+func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(common.Hash, *accounts.Account)) error {
 	startkey := make([]byte, 32)
 	copy(startkey, prefix.Data)
 
@@ -319,9 +319,13 @@ func (tds *TrieDbState) WalkRangeOfLeaves(prefix trie.Keybytes, walker func(comm
 		fixedbits -= 4
 	}
 
-	return tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr,
+	return tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
-			walker(common.BytesToHash(key), value)
+			acc, err := accounts.Decode(value)
+			if err != nil {
+				return false, err
+			}
+			walker(common.BytesToHash(key), acc)
 			return true, nil
 		},
 	)
