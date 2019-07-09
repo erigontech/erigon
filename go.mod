@@ -7,6 +7,8 @@ require (
 	github.com/Azure/azure-pipeline-go v0.0.0-20180607212504-7571e8eb0876
 	github.com/Azure/azure-storage-blob-go v0.0.0-20180712005634-eaae161d9d5e
 	github.com/StackExchange/wmi v0.0.0-20180116203802-5d049714c4a6
+	github.com/alecthomas/template v0.0.0-20160405071501-a0175ee3bccc // indirect
+	github.com/alecthomas/units v0.0.0-20151022065526-2efee857e7cf // indirect
 	github.com/allegro/bigcache v0.0.0-20181022200625-bff00e20c68d
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
 	github.com/btcsuite/btcd v0.0.0-20171128150713-2e60448ffcc6
@@ -35,6 +37,7 @@ require (
 	github.com/julienschmidt/httprouter v0.0.0-20170430222011-975b5c4c7c21
 	github.com/jung-kurt/gofpdf v1.0.0
 	github.com/karalabe/hid v0.0.0-20181128192157-d815e0c1a2e2
+	github.com/kyoh86/scopelint v0.1.1 // indirect
 	github.com/ledgerwatch/bolt v1.4.1
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/llgcode/ps v0.0.0-20150911083025-f1443b32eedb
@@ -70,6 +73,7 @@ require (
 	golang.org/x/sys v0.0.0-20190422165155-953cdadca894
 	golang.org/x/text v0.3.0
 	golang.org/x/tools v0.0.0-20190422233926-fe54fb35175b
+	gopkg.in/alecthomas/kingpin.v2 v2.2.6 // indirect
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20180302121509-abf0ba0be5d5

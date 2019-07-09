@@ -727,15 +727,17 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				return err
 			}
 			for i := 0; i < n; i++ {
+				var leaves []keyValue
 				err = tds.WalkRangeOfLeaves(request.Prefixes[i],
 					func(key common.Hash, value []byte) {
 						leaf := keyValue{key.Bytes(), value}
-						response.Entries[i].Leaves = append(response.Entries[i].Leaves, leaf)
+						leaves = append(leaves, leaf)
 					},
 				)
 				if err != nil {
 					return err
 				}
+				response.Entries[i].Leaves = leaves
 			}
 		} else {
 			for i := 0; i < n; i++ {
