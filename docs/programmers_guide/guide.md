@@ -185,87 +185,6 @@ or feeds the hash of the popped node or its serialisation (if it is less than 32
 sponge. The operand of this opcode, digit, is used as the index of the added child node within the pending branch
 node, or is used to determine (using the counter of items) how many empty items to feed before the popped one.
 
-This is the structural information for the chunk containing leafs from `0` to `7` (inclusive), assuming that we
-would like to produce the root hash and not build the trie:
-```
-LEAF 5
-HASHER 1
-LEAF 5
-ADD 2
-HASHER 0
-LEAF 5
-HASHER 0
-LEAF 5
-ADD 2
-LEAF 5
-ADD 3
-ADD 1
-LEAF 6
-ADD 2
-LEAF 6
-ADD 3
-LEAF 5
-```
-After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
-node (or its hash) for the prefix group of leafs `0` to `6`, and the second representing one leaf node for the leaf
-`7`. It can be observed that if we did not see what the next key after the leaf `7` is, we would not know the operand
-for the last `LEAF` opcode. If the next key started with the prefix `101` instead of `103`, the last opcode could have
-been `LEAF 4` (because leafs `7` and `8` would have formed a prefix group).
-
-After hashing the first chunk, the tree would look as follows.
-![prefix_groups_5](prefix_groups_5.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
-
-If we apply the same produce to the next chunk of 8 leaves, we will get to the following picture.
-![prefix_groups_6](prefix_groups_6.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
-
-And, after hashing the two remaning chunks.
-![prefix_groups_7](prefix_groups_7.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
-
-Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
-This needs an introduction on an extra opcode, which takes a hash value from the sequence (now we can have
-two sequences, one with key-value pairs, and another - with hashes), and places it on the stack
-
-6. `HASH`
-
-```
-HASH
-HASHER 0
-HASH
-HASHER 1
-HASH
-ADD 3
-HASHER 0
-HASH
-ADD 1
-HASH
-ADD 2
-HASH
-HASHER 0
-HASH
-HASHER 1
-HASH
-ADD 2
-HASHER 0
-HASH
-ADD 1
-ADD 3
-ADD 3
-ADD 1
-HASH
-HASHER 0
-HASH
-ADD 1
-HASH
-ADD 2
-ADD 3
-ADD 2
-HASH
-ADD 3
-```
-
 ### Multiproofs
 
 Encoding structural information separately from the sequences of key-value pairs and hashes allows
@@ -401,3 +320,106 @@ key being `3`, and preceeding key empty.
 
 In the deeper recursive step, max common prefix is empty, therefore the entry in groups dictionary is updated to
 ` => {0, 1, 2, 3}`. Opcode `ADD 3` is emitted. Optional part of the step happens, but no recursive invocation follows.
+
+### Converting sequence of keys and value into a multiproof
+
+One of the biggest difference between Turbo-Geth and go-ethereum is in the way the Ethereum state is persisted in
+the database. In go-ethereum, the model for persistence is Patricia Merkle tree. In Turbo-Geth, the model for
+persistence is sequence of key-value pairs, where keys are either derived from account addresses, or from
+storage indices. In this model, computing Patricia Merkle tree from part of data is a very commonly used operation.
+This operation is called "Resolution", because it normally arises from a need to look up (resolve) some keys and corresponding
+values, and later update them, thus requiring recomputation of the Patricia Merkle tree root.
+
+We can use the concept of Multiproofs to define the resolution operation. If we have a set of key-value pairs, and we need
+to "resolve" them, we effectively need to produce a multiproof for the given set of key-value pairs.
+To produce such multiproof, we can use the algorithm for generating the strutural information from the sequence of keys.
+However, within the algorithm, choices need to be made between emitting `HASHER` and `BRANCH` opcodes. Such choices
+are conseptually simple to make - if max common prefix is also a prefix of any of the keys we are trying to resolve,
+`BRANCH` should be emitted, otherwise, `HASHER` should be emitted.
+
+### Separation of keys and the structure (variant 2)
+
+Opcodes shown above form the structural information were designed for minimisation of the stack space required to
+execute these opcodes. However, this design is not suitable for "chunking" the sequence of keys, and then
+constructing the root from from the sub-roots of the chunks. An alternative scheme is more appropriate for such
+use case.
+
+1. `LEAF length-of-key`
+2. `ENDBRANCH set-of-digits`
+3. `EXTENSION key`
+
+The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
+
+`LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
+`length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
+in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
+being zero, pushes the value onto the stack and discards the key.
+
+`ENDBRANCH` opcode has a set of digits as its operand. This set can be encoded as a bitset, for example. The action of
+this opcode is to pop the same
+number of items from the stack as the number of digits in the operand's set, create a branch node, and push it
+onto the stack. Sets of digits can be seen as the horizonal rectangles on the picture `prefix_groups_4`.
+The correspondence between digits in the operand's set and the items poped from the stack is as follows.
+If the special, 17th digit is not present in the set, then the top of the stack (item being popped off first)
+corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
+If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
+item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
+
+`EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
+of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
+an extension node with the key provided in the operand, and the value being the item popped from the stack, and
+push this extension node onto the stack.
+
+This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
+```
+LEAF 5
+LEAF 5
+ENDBRANCH 12
+LEAF 5
+LEAF 5
+LEAF 5
+BRANCH 023
+LEAF 6
+LEAF 6
+BRANCH 0123
+LEAF 5
+```
+After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
+node (or its hash) for the prefix group of leafs `0` to `6`, and the second representing one leaf node for the leaf
+`7`. It can be observed that if we did not see what the next key after the leaf `7` is, we would not know the operand
+for the last `LEAF` opcode. If the next key started with the prefix `101` instead of `103`, the last opcode could have
+been `LEAF 4` (because leafs `7` and `8` would have formed a prefix group).
+
+After hashing the first chunk, the tree would look as follows.
+![prefix_groups_5](prefix_groups_5.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
+
+If we apply the same produce to the next chunk of 8 leaves, we will get to the following picture.
+![prefix_groups_6](prefix_groups_6.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
+
+And, after hashing the two remaning chunks.
+![prefix_groups_7](prefix_groups_7.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
+
+Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
+This needs an introduction on an extra opcode, which takes specified number hash from the sequence (now we can have
+two sequences, one with key-value pairs, and another - with hashes), and places them on the stack
+
+4. `HASHES number_of_hashes`
+
+```
+HASH 3
+BRANCH 13
+HASH 5
+BRANCH 12
+HASH 1
+BRANCH 01
+BRANCH 03
+BRANCH 0123
+HASH 5
+BRANCH 012
+BRANCH 013
+HASH 1
+BRANCH 0123 
+```
