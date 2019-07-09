@@ -554,6 +554,8 @@ func TestFirehoseStateRanges(t *testing.T) {
 		}
 	}
 
+	// TODO [yperbasis] check that returned accounts are not contaminated by future changes
+
 	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
@@ -572,18 +574,18 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	var account accounts.Account
 	account.Balance = amount
-	/*accountRLP*/ _, err := rlp.EncodeToBytes(account)
+	accountRLP, err := rlp.EncodeToBytes(account)
 	assert.NoError(t, err)
 
 	var reply stateRangesMsg
 	reply.ID = 1
 	reply.Entries = []rangeEntry{
-		{Status: OK, Leaves: []keyValue{}}, // TODO [yperbasis] {{addr4.Bytes(), accountRLP}, {addr2.Bytes(), accountRLP}}}
+		{Status: OK, Leaves: []keyValue{{addr4.Bytes(), accountRLP}, {addr2.Bytes(), accountRLP}}},
 		{Status: OK, Leaves: []keyValue{}},
 	}
 
 	if err = p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
-		t.Errorf("unexpected StateRanges response: %v", err)
+		t.Fatalf("unexpected StateRanges response: %v", err)
 	}
 
 	nonexistentBlock := common.HexToHash("4444444444444444444444444444444444444444444444444444444444444444")

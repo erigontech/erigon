@@ -52,8 +52,8 @@ type firehosePeer struct {
 }
 
 type accountAndHash struct {
-	Account []byte      // account address or hash thereof
-	Hash    common.Hash // TODO [yperbasis] potentially allow nil Hash in getBytecodeMsg
+	Account []byte // account address or hash thereof
+	Hash    common.Hash
 }
 
 type keyValue struct {

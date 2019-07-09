@@ -722,10 +722,21 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			if _, _, err := pm.blockchain.StateAt(block.Root(), block.NumberU64()); err != nil {
+			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			if err != nil {
 				return err
 			}
-			// TODO [yperbasis] implement
+			for i := 0; i < n; i++ {
+				err = tds.WalkRangeOfLeaves(request.Prefixes[i],
+					func(key common.Hash, value []byte) {
+						leaf := keyValue{key.Bytes(), value}
+						response.Entries[i].Leaves = append(response.Entries[i].Leaves, leaf)
+					},
+				)
+				if err != nil {
+					return err
+				}
+			}
 		} else {
 			for i := 0; i < n; i++ {
 				response.Entries[i].Status = NoData
