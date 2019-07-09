@@ -586,18 +586,23 @@ func TestFirehoseStateRanges(t *testing.T) {
 	var account accounts.Account
 	account.Balance = amount
 
-	var reply stateRangesMsg
-	reply.ID = 1
-	reply.Entries = []accountRange{
+	// TODO [yperbasis] remove this RLP hack
+	account.CodeHash = crypto.Keccak256(nil)
+	account.Root = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+
+	var reply1 stateRangesMsg
+	reply1.ID = 1
+	reply1.Entries = []accountRange{
 		{Status: OK, Leaves: []accountLeaf{{addr4Hash, &account}, {addr3Hash, &account}}},
 		{Status: OK, Leaves: []accountLeaf{}},
 	}
 
-	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
-		t.Fatalf("unexpected StateRanges response: %v", err)
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply1); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
 	}
 
 	nonexistentBlock := common.HexToHash("4444444444444444444444444444444444444444444444444444444444444444")
+	request.ID = 2
 	request.Block = nonexistentBlock
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
@@ -607,11 +612,15 @@ func TestFirehoseStateRanges(t *testing.T) {
 	block2 := pm.blockchain.GetBlockByNumber(2)
 	block3 := pm.blockchain.GetBlockByNumber(3)
 
-	reply.Entries[0].Status = NoData
-	reply.Entries[1].Status = NoData
-	reply.AvailableBlocks = []common.Hash{block2.Hash(), block1.Hash(), block0.Hash(), block3.Hash(), block4.Hash()}
+	var reply2 stateRangesMsg
+	reply2.ID = 2
+	reply2.Entries = []accountRange{
+		{Status: NoData, Leaves: []accountLeaf{}},
+		{Status: NoData, Leaves: []accountLeaf{}},
+	}
+	reply2.AvailableBlocks = []common.Hash{block2.Hash(), block1.Hash(), block0.Hash(), block3.Hash(), block4.Hash()}
 
-	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply); err != nil {
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply2); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
 
