@@ -527,8 +527,13 @@ outer:
 func TestFirehoseStateRanges(t *testing.T) {
 	addr1 := common.HexToAddress("0x3b4fc1530da632624fa1e223a91d99dbb07c2d42")
 	addr2 := common.HexToAddress("0xb574d96f69c1324e3b49e63f4cc899736dd52789")
-	addr3 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
-	addr4 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af06")
+	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
+	addr4 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
+
+	assert.Equal(t, crypto.Keccak256(addr1.Bytes()), common.FromHex("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
+	assert.Equal(t, crypto.Keccak256(addr2.Bytes()), common.FromHex("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
+	assert.Equal(t, crypto.Keccak256(addr3.Bytes()), common.FromHex("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
+	assert.Equal(t, crypto.Keccak256(addr4.Bytes()), common.FromHex("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 4
@@ -565,8 +570,10 @@ func TestFirehoseStateRanges(t *testing.T) {
 	var request getStateRangesMsg
 	request.ID = 1
 	request.Block = block4.Hash()
+
+	// the address hashes start only with 1, 4, and a
 	request.Prefixes = []trie.Keybytes{
-		{Data: common.FromHex("b0"), Odd: true, Terminating: false},
+		{Data: common.FromHex("40"), Odd: true, Terminating: false},
 		{Data: common.FromHex("20"), Odd: true, Terminating: false},
 	}
 
@@ -580,7 +587,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 	var reply stateRangesMsg
 	reply.ID = 1
 	reply.Entries = []rangeEntry{
-		{Status: OK, Leaves: []keyValue{{addr4.Bytes(), accountRLP}, {addr2.Bytes(), accountRLP}}},
+		{Status: OK, Leaves: []keyValue{{addr4.Bytes(), accountRLP}, {addr3.Bytes(), accountRLP}}},
 		{Status: OK, Leaves: []keyValue{}},
 	}
 
