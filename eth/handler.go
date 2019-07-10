@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -127,7 +128,7 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 		manager.fastSync = uint32(1)
 	}
 	// Initiate a sub-protocol for every implemented version we can handle
-	manager.SubProtocols = make([]p2p.Protocol, 0, len(ProtocolVersions))
+	manager.SubProtocols = make([]p2p.Protocol, 0, len(ProtocolVersions)+1)
 	for i, version := range ProtocolVersions {
 		// Skip protocol version if incompatible with the mode of operation
 		if mode == downloader.FastSync && version < eth63 {
@@ -164,6 +165,35 @@ func NewProtocolManager(config *params.ChainConfig, mode downloader.SyncMode, ne
 	if len(manager.SubProtocols) == 0 {
 		return nil, errIncompatibleConfig
 	}
+
+	// Initiate Firehose
+	log.Info("Initialising Firehose protocol", "versions", FirehoseVersions)
+	manager.SubProtocols = append(manager.SubProtocols, p2p.Protocol{
+		Name:    FirehoseName,
+		Version: FirehoseVersions[0],
+		Length:  FirehoseLengths[0],
+		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			peer := &firehosePeer{Peer: p, rw: rw}
+			select {
+			case <-manager.quitSync:
+				return p2p.DiscQuitting
+			default:
+				manager.wg.Add(1)
+				defer manager.wg.Done()
+				return manager.handleFirehose(peer)
+			}
+		},
+		NodeInfo: func() interface{} {
+			return manager.NodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			if p := manager.peers.Peer(fmt.Sprintf("%x", id[:8])); p != nil {
+				return p.Info()
+			}
+			return nil
+		},
+	})
+
 	// Construct the different synchronisation mechanisms
 	manager.downloader = downloader.New(mode, chaindb, manager.eventMux, blockchain, nil, manager.removePeer)
 
@@ -323,6 +353,15 @@ func (pm *ProtocolManager) handle(p *peer) error {
 	for {
 		if err := pm.handleMsg(p); err != nil {
 			p.Log().Debug("Ethereum message handling failed", "err", err)
+			return err
+		}
+	}
+}
+
+func (pm *ProtocolManager) handleFirehose(p *firehosePeer) error {
+	for {
+		if err := pm.handleFirehoseMsg(p); err != nil {
+			p.Log().Debug("Firehose message handling failed", "err", err)
 			return err
 		}
 	}
@@ -656,6 +695,141 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
 	}
 	return nil
+}
+
+func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
+	msg, err := p.rw.ReadMsg()
+	if err != nil {
+		return err
+	}
+	if msg.Size > FirehoseMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, FirehoseMaxMsgSize)
+	}
+	defer msg.Discard()
+
+	switch {
+	case msg.Code == GetStateRangesCode:
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStateRangesMsg
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		n := len(request.Prefixes)
+
+		var response stateRangesMsg
+		response.ID = request.ID
+		response.Entries = make([]accountRange, n)
+
+		for i := 0; i < n; i++ {
+			response.Entries[i].Status = NoData
+		}
+
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			if err != nil {
+				return err
+			}
+			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
+				var leaves []accountLeaf
+				err = tds.WalkRangeOfAccounts(request.Prefixes[i],
+					func(key common.Hash, value *accounts.Account) {
+						leaves = append(leaves, accountLeaf{key, value})
+					},
+				)
+				if err != nil {
+					return err
+				}
+				if len(leaves) > MaxLeavesPerPrefix {
+					response.Entries[i].Status = TooManyLeaves
+				} else {
+					response.Entries[i].Status = OK
+					response.Entries[i].Leaves = leaves
+					responseSize += len(leaves)
+				}
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
+
+		return p2p.Send(p.rw, StateRangesCode, response)
+
+	case msg.Code == StateRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageRangesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStateNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StateNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageNodesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetBytecodeCode:
+		// Decode the retrieval message
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+		var reqID uint64
+		if err := msgStream.Decode(&reqID); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		// Gather bytecodes until the fetch or network limits is reached
+		var (
+			responseSize int
+			code         [][]byte
+		)
+		for responseSize < softResponseLimit && len(code) < downloader.MaxStateFetch {
+			var requested accountAndHash
+			if err := msgStream.Decode(&requested); err == rlp.EOL {
+				break
+			} else if err != nil {
+				return errResp(ErrDecode, "msg %v: %v", msg, err)
+			}
+
+			if len(requested.Account) == 32 {
+				return errResp(ErrNotImplemented, "address hash isn't supported yet")
+			} else if len(requested.Account) != 20 {
+				return errResp(ErrDecode, "not an account address or its hash")
+			}
+			address := common.BytesToAddress(requested.Account)
+
+			// Retrieve requested byte code, stopping if enough was found
+			if entry, err := pm.blockchain.ByteCode(address); err == nil {
+				code = append(code, entry)
+				responseSize += len(entry)
+			}
+		}
+		return p.SendByteCode(reqID, code)
+
+	case msg.Code == BytecodeCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == GetStorageSizesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	case msg.Code == StorageSizesCode:
+		return errResp(ErrNotImplemented, "Not implemented yet")
+
+	default:
+		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
+	}
 }
 
 // BroadcastBlock will either propagate a block to a subset of it's peers, or

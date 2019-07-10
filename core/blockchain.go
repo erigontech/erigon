@@ -595,6 +595,31 @@ func (bc *BlockChain) HasBlockAndState(hash common.Hash, number uint64) bool {
 	return true
 }
 
+// CachedBlocks returns the hashes of the cached blocks.
+func (bc *BlockChain) CachedBlocks() []common.Hash {
+	a := bc.blockCache.Keys()
+	b := make([]common.Hash, len(a))
+	for i := range a {
+		b[i] = a[i].(common.Hash)
+	}
+	return b
+}
+
+// AvailableBlocks returns the hashes of easily available blocks.
+func (bc *BlockChain) AvailableBlocks() []common.Hash {
+	var res []common.Hash
+	blockNbr := bc.CurrentBlock().NumberU64()
+	for i := 0; i < blockCacheLimit; i++ {
+		block := bc.GetBlockByNumber(blockNbr)
+		if block == nil {
+			break
+		}
+		res = append(res, block.Hash())
+		blockNbr--
+	}
+	return res
+}
+
 // GetBlock retrieves a block from the database by hash and number,
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
@@ -677,10 +702,13 @@ func (bc *BlockChain) GetUnclesInChain(block *types.Block, length int) []*types.
 	return uncles
 }
 
-// TrieNode retrieves a blob of data associated with a trie node (or code hash)
-// either from ephemeral in-memory cache, or from persistent storage.
-func (bc *BlockChain) TrieNode(hash common.Hash) ([]byte, error) {
-	return nil, nil
+// ByteCode retrieves the runtime byte code associated with an account.
+func (bc *BlockChain) ByteCode(addr common.Address) ([]byte, error) {
+	stateDB, _, err := bc.State()
+	if err != nil {
+		return nil, err
+	}
+	return stateDB.GetCode(addr), nil
 }
 
 // Stop stops the blockchain service. If any imports are currently in progress

@@ -99,7 +99,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
-			fmt.Printf("Failed to recevied state message from peer: %v\n", err)
+			fmt.Printf("Failed to receive state message from peer: %v\n", err)
 			return err
 		}
 		switch {
@@ -153,6 +153,12 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 			fmt.Printf("Next message: %v\n", msg)
 		}
 	}
+	return nil
+}
+
+func (tp *TesterProtocol) firehoseRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	fmt.Printf("Firehose peer connected: %s\n", peer.Name())
+	// TODO [yperbasis] implement
 	return nil
 }
 
