@@ -291,7 +291,8 @@ func (p *Peer) handle(msg Msg) error {
 		return reason[0]
 	case msg.Code < baseProtocolLength:
 		// ignore other base protocol messages
-		return msg.Discard()
+		msg.Discard()
+		return nil
 	default:
 		// it's a subprotocol message
 		proto, err := p.getProto(msg.Code)

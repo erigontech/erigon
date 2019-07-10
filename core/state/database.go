@@ -189,7 +189,7 @@ func (b *Buffer) merge(other *Buffer) {
 	}
 }
 
-// Implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
+// TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
 	t               *trie.Trie
 	db              ethdb.Database
@@ -309,6 +309,28 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 	storageTrie.Print(w)
 }
 
+// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix.
+func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(common.Hash, *accounts.Account)) error {
+	startkey := make([]byte, 32)
+	copy(startkey, prefix.Data)
+
+	fixedbits := uint(len(prefix.Data)) * 8
+	if prefix.Odd {
+		fixedbits -= 4
+	}
+
+	return tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+		func(key []byte, value []byte) (bool, error) {
+			acc, err := accounts.Decode(value)
+			if err != nil {
+				return false, err
+			}
+			walker(common.BytesToHash(key), acc)
+			return true, nil
+		},
+	)
+}
+
 type Hashes []common.Hash
 
 func (hashes Hashes) Len() int {
@@ -410,7 +432,7 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[common.Addr
 	return nil
 }
 
-// Builds a sorted list of all adsresss hashes that were touched within the
+// Builds a sorted list of all address hashes that were touched within the
 // period for which we are aggregating updates
 func (tds *TrieDbState) buildAccountTouches() Hashes {
 	accountTouches := make(Hashes, len(tds.aggregateBuffer.accountUpdates)+len(tds.aggregateBuffer.accountReads))

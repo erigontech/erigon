@@ -274,7 +274,7 @@ func (p *peer) SendBlockBodiesRLP(bodies []rlp.RawValue) error {
 	return p2p.Send(p.rw, BlockBodiesMsg, bodies)
 }
 
-// SendNodeDataRLP sends a batch of arbitrary internal data, corresponding to the
+// SendNodeData sends a batch of arbitrary internal data, corresponding to the
 // hashes requested.
 func (p *peer) SendNodeData(data [][]byte) error {
 	return p2p.Send(p.rw, NodeDataMsg, data)
@@ -335,13 +335,17 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 	var status statusData // safe to read after two values have been received from errc
 
 	go func() {
-		errc <- p2p.Send(p.rw, StatusMsg, &statusData{
+		err := p2p.Send(p.rw, StatusMsg, &statusData{
 			ProtocolVersion: uint32(p.version),
 			NetworkId:       network,
 			TD:              td,
 			CurrentBlock:    head,
 			GenesisBlock:    genesis,
 		})
+		if err != nil {
+			p.Log().Debug("Failed to send Status msg", "err", err)
+		}
+		errc <- err
 	}()
 	go func() {
 		errc <- p.readStatus(network, &status, genesis)
@@ -365,6 +369,7 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 func (p *peer) readStatus(network uint64, status *statusData, genesis common.Hash) (err error) {
 	msg, err := p.rw.ReadMsg()
 	if err != nil {
+		p.Log().Debug("Failed to read Status msg", "err", err)
 		return err
 	}
 	if msg.Code != StatusMsg {
