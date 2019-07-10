@@ -101,7 +101,7 @@ func tester(ctx *cli.Context) error {
 	p2pConfig.PrivateKey = serverKey
 	p2pConfig.Name = "geth tester"
 	p2pConfig.Logger = log.New()
-	p2pConfig.Protocols = []p2p.Protocol{p2p.Protocol{
+	p2pConfig.Protocols = []p2p.Protocol{{
 		Name:    eth.ProtocolName,
 		Version: eth.ProtocolVersions[0],
 		Length:  eth.ProtocolLengths[0],
