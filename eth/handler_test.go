@@ -540,7 +540,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 	assert.Equal(t, addr4Hash, common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
 
 	signer := types.HomesteadSigner{}
-	numBlocks := 4
+	numBlocks := 5
 	amount := big.NewInt(10000)
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
@@ -560,10 +560,13 @@ func TestFirehoseStateRanges(t *testing.T) {
 			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, amount, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
+		case 4:
+			// top up account #3
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
 		}
 	}
-
-	// TODO [yperbasis] check that returned accounts are not contaminated by future changes
 
 	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
@@ -611,6 +614,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 	block1 := pm.blockchain.GetBlockByNumber(1)
 	block2 := pm.blockchain.GetBlockByNumber(2)
 	block3 := pm.blockchain.GetBlockByNumber(3)
+	block5 := pm.blockchain.GetBlockByNumber(5)
 
 	var reply2 stateRangesMsg
 	reply2.ID = 2
@@ -618,13 +622,11 @@ func TestFirehoseStateRanges(t *testing.T) {
 		{Status: NoData, Leaves: []accountLeaf{}},
 		{Status: NoData, Leaves: []accountLeaf{}},
 	}
-	reply2.AvailableBlocks = []common.Hash{block2.Hash(), block1.Hash(), block0.Hash(), block3.Hash(), block4.Hash()}
+	reply2.AvailableBlocks = []common.Hash{block5.Hash(), block4.Hash(), block3.Hash(), block2.Hash(), block1.Hash(), block0.Hash()}
 
 	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply2); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
-
-	// TODO [yperbasis] check TooManyLeaves
 }
 
 func TestFirehoseBytecode(t *testing.T) {

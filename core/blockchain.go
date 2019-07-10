@@ -605,6 +605,18 @@ func (bc *BlockChain) CachedBlocks() []common.Hash {
 	return b
 }
 
+// AvailableBlocks returns the hashes of easily available blocks.
+func (bc *BlockChain) AvailableBlocks() []common.Hash {
+	blockNbr := bc.CurrentBlock().NumberU64()
+	for i := 0; i < blockCacheLimit; i++ {
+		if bc.GetBlockByNumber(blockNbr) == nil {
+			break
+		}
+		blockNbr--
+	}
+	return bc.CachedBlocks()
+}
+
 // GetBlock retrieves a block from the database by hash and number,
 // caching it if found.
 func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {

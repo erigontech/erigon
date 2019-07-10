@@ -750,7 +750,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				}
 			}
 		} else {
-			response.AvailableBlocks = pm.blockchain.CachedBlocks()
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
 		}
 
 		return p2p.Send(p.rw, StateRangesCode, response)
