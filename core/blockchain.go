@@ -607,14 +607,17 @@ func (bc *BlockChain) CachedBlocks() []common.Hash {
 
 // AvailableBlocks returns the hashes of easily available blocks.
 func (bc *BlockChain) AvailableBlocks() []common.Hash {
+	var res []common.Hash
 	blockNbr := bc.CurrentBlock().NumberU64()
 	for i := 0; i < blockCacheLimit; i++ {
-		if bc.GetBlockByNumber(blockNbr) == nil {
+		block := bc.GetBlockByNumber(blockNbr)
+		if block == nil {
 			break
 		}
+		res = append(res, block.Hash())
 		blockNbr--
 	}
-	return bc.CachedBlocks()
+	return res
 }
 
 // GetBlock retrieves a block from the database by hash and number,
