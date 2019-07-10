@@ -68,7 +68,8 @@ func (self *TrieDbState) RawDump() Dump {
 			StorageSize: acc.StorageSize,
 		}
 		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
-			account.Storage[common.BytesToHash(self.GetKey(ks)).String()] = common.Bytes2Hex(vs)
+			key := self.GetKey(ks[common.AddressLength:]) //remove account address from composite key
+			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})
 		if err != nil {
