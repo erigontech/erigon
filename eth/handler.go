@@ -707,8 +707,8 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	}
 	defer msg.Discard()
 
-	switch {
-	case msg.Code == GetStateRangesCode:
+	switch msg.Code {
+	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStateRangesMsg
 		if err := msgStream.Decode(&request); err != nil {
@@ -755,28 +755,28 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		return p2p.Send(p.rw, StateRangesCode, response)
 
-	case msg.Code == StateRangesCode:
+	case StateRangesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == GetStorageRangesCode:
+	case GetStorageRangesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == StorageRangesCode:
+	case StorageRangesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == GetStateNodesCode:
+	case GetStateNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == StateNodesCode:
+	case StateNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == GetStorageNodesCode:
+	case GetStorageNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == StorageNodesCode:
+	case StorageNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == GetBytecodeCode:
+	case GetBytecodeCode:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		if _, err := msgStream.List(); err != nil {
@@ -804,6 +804,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			}
 
 			if len(requested.Account) == 32 {
+				// TODO [yperbasis] implement
 				return errResp(ErrNotImplemented, "address hash isn't supported yet")
 			} else if len(requested.Account) != 20 {
 				return errResp(ErrDecode, "not an account address or its hash")
@@ -818,13 +819,13 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		}
 		return p.SendByteCode(reqID, code)
 
-	case msg.Code == BytecodeCode:
+	case BytecodeCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == GetStorageSizesCode:
+	case GetStorageSizesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
-	case msg.Code == StorageSizesCode:
+	case StorageSizesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	default:
