@@ -94,7 +94,10 @@ type HashBuilder struct {
 	bufferStack   []*bytes.Buffer
 	digitStack    []int
 	branchStack   []*fullNode
-	top           *shortNode
+	topKey        []byte
+	topValue      []byte
+	topHash       common.Hash
+	topBranch     *fullNode
 	sha           keccakState
 	encodeToBytes bool
 }
@@ -112,7 +115,7 @@ func (hb *HashBuilder) branch(digit int) {
 	//fmt.Printf("BRANCH %d\n", digit)
 	f := &fullNode{}
 	f.flags.dirty = true
-	if hb.top == nil {
+	if hb.topKey == nil {
 		if len(hb.bufferStack) == 0 {
 			n := hb.branchStack[len(hb.branchStack)-1]
 			f.Children[digit] = n
@@ -124,8 +127,10 @@ func (hb *HashBuilder) branch(digit int) {
 			hb.branchStack = append(hb.branchStack, f)
 		}
 	} else {
-		f.Children[digit] = hb.top
-		hb.top = nil
+		f.Children[digit] = hb.shortNode()
+		hb.topKey = nil
+		hb.topValue = nil
+		hb.topBranch = nil
 		hb.branchStack = append(hb.branchStack, f)
 	}
 }
@@ -154,47 +159,47 @@ func generateStructLen(buffer []byte, l int) int {
 	return 4
 }
 
-func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) error {
+func (hb *HashBuilder) addLeafToHasher(buffer *bytes.Buffer) error {
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
 	var valPrefix [4]byte
 	var kp, vp, kl, vl int
 	// Write key
-	if len(n.Key) > 1 || n.Key[0] >= 128 {
-		keyPrefix[0] = byte(128 + len(n.Key))
+	compactKey := hexToCompact(hb.topKey)
+	if len(compactKey) > 1 || compactKey[0] >= 128 {
+		keyPrefix[0] = byte(128 + len(compactKey))
 		kp = 1
-		kl = len(n.Key)
+		kl = len(compactKey)
 	} else {
 		kl = 1
 	}
 	var v []byte
-	switch vn := n.Val.(type) {
-	case valueNode:
-		if len(vn) > 1 || vn[0] >= 128 {
+	if hb.topValue != nil {
+		if len(hb.topValue) > 1 || hb.topValue[0] >= 128 {
 			if hb.encodeToBytes {
 				// Wrapping into another byte array
-				vp = generateByteArrayLenDouble(valPrefix[:], 0, len(vn))
+				vp = generateByteArrayLenDouble(valPrefix[:], 0, len(hb.topValue))
 			} else {
-				vp = generateByteArrayLen(valPrefix[:], 0, len(vn))
+				vp = generateByteArrayLen(valPrefix[:], 0, len(hb.topValue))
 			}
-			vl = len(vn)
+			vl = len(hb.topValue)
 		} else {
 			vl = 1
 		}
-		v = []byte(vn)
-	case hashNode:
+		v = hb.topValue
+	} else if hb.topBranch != nil {
+		panic("")
+	} else {
 		valPrefix[0] = 128 + 32
 		vp = 1
 		vl = 32
-		v = []byte(vn)
-	default:
-		panic("")
+		v = hb.topHash[:]
 	}
 	totalLen := kp + kl + vp + vl
 	if totalLen < 32 {
 		// Embedded node
 		buffer.Write(keyPrefix[:kp])
-		buffer.Write(n.Key)
+		buffer.Write(compactKey)
 		buffer.Write(valPrefix[:vp])
 		buffer.Write(v)
 	} else {
@@ -207,7 +212,7 @@ func (hb *HashBuilder) addLeafToHasher(n *shortNode, buffer *bytes.Buffer) error
 		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
 			return err
 		}
-		if _, err := hb.sha.Write(n.Key); err != nil {
+		if _, err := hb.sha.Write(compactKey); err != nil {
 			return err
 		}
 		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
@@ -260,7 +265,7 @@ func (hb *HashBuilder) hasher(digit int) {
 	for i := 0; i < digit; i++ {
 		buffer.WriteByte(128) // Empty array
 	}
-	if hb.top == nil {
+	if hb.topKey == nil {
 		if len(hb.bufferStack) == 0 {
 			panic("")
 		} else {
@@ -269,52 +274,67 @@ func (hb *HashBuilder) hasher(digit int) {
 			buffer.Write(hn[:])
 		}
 	} else {
-		if err := hb.addLeafToHasher(hb.top, &buffer); err != nil {
+		if err := hb.addLeafToHasher(&buffer); err != nil {
 			panic(err)
 		}
 	}
 	hb.bufferStack = append(hb.bufferStack, &buffer)
-	hb.top = nil
+	hb.topKey = nil
+	hb.topValue = nil
+	hb.topBranch = nil
 	hb.digitStack = append(hb.digitStack, digit)
 }
 
 func (hb *HashBuilder) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
-	s := &shortNode{Key: hexToCompact(hb.key[len(hb.key)-length:]), Val: valueNode(hb.value)}
-	hb.top = s
+	hb.topKey = hb.key[len(hb.key)-length:]
+	hb.topValue = hb.value
+	hb.topBranch = nil
 }
 
 func (hb *HashBuilder) extension(key []byte) {
 	//fmt.Printf("EXTENSION %x\n", key)
-	s := &shortNode{Key: hexToCompact(key)}
 	if len(hb.bufferStack) == 0 {
 		f := hb.branchStack[len(hb.branchStack)-1]
 		hb.branchStack = hb.branchStack[:len(hb.branchStack)-1]
-		s.Val = f
+		hb.topBranch = f
 	} else {
 		hn, _ := hb.finaliseHasher()
-		s.Val = hashNode(hn[:])
+		hb.topHash = hn
+		hb.topBranch = nil
 	}
-	hb.top = s
+	hb.topKey = key
+	hb.topValue = nil
+}
+
+func (hb *HashBuilder) shortNode() *shortNode {
+	if hb.topValue != nil {
+		return &shortNode{Key: hexToCompact(hb.topKey), Val: valueNode(hb.topValue)}
+	} else if hb.topBranch != nil {
+		return &shortNode{Key: hexToCompact(hb.topKey), Val: hb.topBranch}
+	}
+	return &shortNode{Key: hexToCompact(hb.topKey), Val: hashNode(common.CopyBytes(hb.topHash[:]))}
 }
 
 func (hb *HashBuilder) add(digit int) {
 	//fmt.Printf("ADD %d\n", digit)
 	if len(hb.bufferStack) == 0 {
 		f := hb.branchStack[len(hb.branchStack)-1]
-		if hb.top == nil {
+		if hb.topKey == nil {
 			n := f
 			hb.branchStack = hb.branchStack[:len(hb.branchStack)-1]
 			f = hb.branchStack[len(hb.branchStack)-1]
 			f.Children[digit] = n
 		} else {
-			f.Children[digit] = hb.top
-			hb.top = nil
+			f.Children[digit] = hb.shortNode()
+			hb.topKey = nil
+			hb.topValue = nil
+			hb.topBranch = nil
 		}
 	} else {
 		prevBuffer := hb.bufferStack[len(hb.bufferStack)-1]
 		prevDigit := hb.digitStack[len(hb.digitStack)-1]
-		if hb.top == nil {
+		if hb.topKey == nil {
 			hn, _ := hb.finaliseHasher()
 			if len(hb.bufferStack) > 0 {
 				prevBuffer = hb.bufferStack[len(hb.bufferStack)-1]
@@ -333,11 +353,13 @@ func (hb *HashBuilder) add(digit int) {
 			for i := prevDigit + 1; i < digit; i++ {
 				prevBuffer.WriteByte(128)
 			}
-			if err := hb.addLeafToHasher(hb.top, prevBuffer); err != nil {
+			if err := hb.addLeafToHasher(prevBuffer); err != nil {
 				panic(err)
 			}
 			hb.digitStack[len(hb.digitStack)-1] = digit
-			hb.top = nil
+			hb.topKey = nil
+			hb.topValue = nil
+			hb.topBranch = nil
 		}
 	}
 }
@@ -346,9 +368,23 @@ func (hb *HashBuilder) hash() {
 	//fmt.Printf("HASH\n")
 }
 
-func (hb *HashBuilder) root() common.Hash {
+func (hb *HashBuilder) root() node {
+	if hb.topKey == nil {
+		if len(hb.bufferStack) == 0 {
+			if len(hb.branchStack) == 0 {
+				return nil
+			}
+			return hb.branchStack[len(hb.branchStack)-1]
+		}
+		hn, _ := hb.finaliseHasher()
+		return hashNode(hn[:])
+	}
+	return hb.shortNode()
+}
+
+func (hb *HashBuilder) rootHash() common.Hash {
 	var hn common.Hash
-	if hb.top == nil {
+	if hb.topKey == nil {
 		if len(hb.bufferStack) == 0 {
 			if len(hb.branchStack) == 0 {
 				return emptyRoot
@@ -363,7 +399,7 @@ func (hb *HashBuilder) root() common.Hash {
 	} else {
 		h := newHasher(hb.encodeToBytes)
 		defer returnHasherToPool(h)
-		h.hash(hb.top, true, hn[:])
+		h.hash(hb.shortNode(), true, hn[:])
 	}
 	return hn
 }
@@ -392,14 +428,14 @@ func TestTrieBuilding(t *testing.T) {
 		curr = succ
 		succ = []byte(key)
 		if curr != nil {
-			step(false, false, prec, curr, succ, &tb, groups)
+			step(func(prefix []byte) bool { return false }, false, prec, curr, succ, &tb, groups)
 		}
 		tb.setKeyValue([]byte(key), value)
 	}
 	prec = curr
 	curr = succ
 	succ = nil
-	step(false, false, prec, curr, succ, &tb, groups)
+	step(func(prefix []byte) bool { return false }, false, prec, curr, succ, &tb, groups)
 	builtHash := tb.root()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -430,16 +466,76 @@ func TestHashBuilding(t *testing.T) {
 		curr = succ
 		succ = []byte(key)
 		if curr != nil {
-			step(true, false, prec, curr, succ, hb, groups)
+			step(func(prefix []byte) bool { return true }, false, prec, curr, succ, hb, groups)
 		}
 		hb.setKeyValue([]byte(key), value)
 	}
 	prec = curr
 	curr = succ
 	succ = nil
-	step(true, false, prec, curr, succ, hb, groups)
-	builtHash := hb.root()
+	step(func(prefix []byte) bool { return true }, false, prec, curr, succ, hb, groups)
+	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	}
+}
+
+func TestResolution(t *testing.T) {
+	var keys []string
+	for b := uint32(0); b < 10000; b++ {
+		var preimage [4]byte
+		binary.BigEndian.PutUint32(preimage[:], b)
+		key := keybytesToHex(crypto.Keccak256(preimage[:])[:4])
+		keys = append(keys, string(key))
+	}
+	sort.Strings(keys)
+	tr := New(common.Hash{}, false)
+	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
+	for _, key := range keys {
+		_, tr.root = tr.insert(tr.root, []byte(key), 0, valueNode(value), 0)
+	}
+	trieHash := tr.Hash()
+
+	// Choose some keys to be resolved
+	var rs ResolveSet
+	// First, existing keys
+	for i := 0; i < 1000; i += 200 {
+		rs.AddKey([]byte(keys[i]))
+	}
+	// Next, some non-exsiting keys
+	for i := 0; i < 100; i++ {
+		key := keybytesToHex(crypto.Keccak256([]byte(keys[i]))[:4])
+		rs.AddKey(key)
+	}
+
+	hb := NewHashBuilder(false)
+	var prec, curr, succ []byte
+	groups := make(map[string]uint32)
+	for _, key := range keys {
+		prec = curr
+		curr = succ
+		succ = []byte(key)
+		if curr != nil {
+			step(rs.HashOnly, false, prec, curr, succ, hb, groups)
+		}
+		hb.setKeyValue([]byte(key), value)
+	}
+	prec = curr
+	curr = succ
+	succ = nil
+	step(rs.HashOnly, false, prec, curr, succ, hb, groups)
+	tr1 := New(common.Hash{}, false)
+	tr1.root = hb.root()
+	builtHash := hb.rootHash()
+	if trieHash != builtHash {
+		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	}
+	// Check the availibility of the resolved keys
+	for _, hexS := range rs.keys {
+		key := hexToKeybytes([]byte(hexS))
+		_, found := tr1.Get(key, 0)
+		if !found {
+			t.Errorf("Key %x was not resolved", hexS)
+		}
 	}
 }

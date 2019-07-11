@@ -16,6 +16,11 @@
 
 package trie
 
+import (
+	"bytes"
+	"sort"
+)
+
 // Experimental code for separating data and structural information
 
 type emitter interface {
@@ -27,7 +32,7 @@ type emitter interface {
 	hash()
 }
 
-func step(hashOnly bool, recursive bool, prec, curr, succ []byte, e emitter, groups map[string]uint32) {
+func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups map[string]uint32) {
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
 	succLen := prefixLen(succ, curr)
@@ -66,7 +71,7 @@ func step(hashOnly bool, recursive bool, prec, curr, succ []byte, e emitter, gro
 	if existed {
 		e.add(int(extraDigit))
 	} else if recursive || len(succ) > 0 || len(prec) > 0 {
-		if hashOnly {
+		if hashOnly(maxCommonPrefix) {
 			e.hasher(int(extraDigit))
 		} else {
 			e.branch(int(extraDigit))
@@ -93,4 +98,65 @@ func step(hashOnly bool, recursive bool, prec, curr, succ []byte, e emitter, gro
 	}
 	// Recursion
 	step(hashOnly, true, curr[:p], closing, succ, e, groups)
+}
+
+type sortable [][]byte
+
+func (s sortable) Len() int {
+	return len(s)
+}
+func (s sortable) Less(i, j int) bool {
+	return bytes.Compare(s[i], s[j]) < 0
+}
+func (s sortable) Swap(i, j int) {
+	s[i], s[j] = s[j], s[i]
+}
+
+// ResolveSet encapsulates the set of keys that are required to be fully available, or resolved
+// (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
+// pairs
+type ResolveSet struct {
+	keys     sortable
+	inited   bool // Whether keys are sorted and "LTE" and "GT" indices set
+	lteIndex int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+}
+
+// AddKey adds a new key to the set
+func (rs *ResolveSet) AddKey(key []byte) {
+	rs.keys = append(rs.keys, key)
+}
+
+func (rs *ResolveSet) ensureInited() {
+	if rs.inited {
+		return
+	}
+	sort.Sort(rs.keys)
+	rs.lteIndex = 0
+	rs.inited = true
+}
+
+// HashOnly decides whether to emit `HASHER` or `BRANCH` for a given prefix, by
+// checking if this is prefix of any of the keys added to the set
+// Since keys in the set are sorted, and we expect that the prefixes will
+// come in monotonically ascending order, we optimise for this, though
+// the function would still work if the order is different
+func (rs *ResolveSet) HashOnly(prefix []byte) bool {
+	rs.ensureInited()
+	// Adjust "GT" if necessary
+	var gtAdjusted bool
+	for rs.lteIndex < len(rs.keys)-1 && bytes.Compare(rs.keys[rs.lteIndex+1], prefix) <= 0 {
+		rs.lteIndex++
+		gtAdjusted = true
+	}
+	// Adjust "LTE" if necessary (normally will not be necessary)
+	for !gtAdjusted && rs.lteIndex > 0 && bytes.Compare(rs.keys[rs.lteIndex], prefix) > 0 {
+		rs.lteIndex--
+	}
+	if rs.lteIndex < len(rs.keys) && bytes.HasPrefix(rs.keys[rs.lteIndex], prefix) {
+		return false
+	}
+	if rs.lteIndex < len(rs.keys)-1 && bytes.HasPrefix(rs.keys[rs.lteIndex+1], prefix) {
+		return false
+	}
+	return true
 }

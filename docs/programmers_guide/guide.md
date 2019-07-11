@@ -336,6 +336,11 @@ To produce such multiproof, we can use the algorithm for generating the strutura
 However, within the algorithm, choices need to be made between emitting `HASHER` and `BRANCH` opcodes. Such choices
 are conseptually simple to make - if max common prefix is also a prefix of any of the keys we are trying to resolve,
 `BRANCH` should be emitted, otherwise, `HASHER` should be emitted.
+However, in order to make these choices efficiently, the set of keys being resolved will be converted into a sorted
+list. Then, at each point when the algoritm processes a key, it maintains references to two consequitive keys from
+that sorted list - one "LTE" (Less Than or Equal to the currently processed key), and another "GT" (Greater Than the
+currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
+otherwise, `HASHER` opcode is emitted.
 
 ### Separation of keys and the structure (variant 2)
 

@@ -73,6 +73,7 @@ type TrieResolver struct {
 	historical bool
 	blockNr    uint64
 	ctx        context.Context
+	rs         *ResolveSet
 }
 
 func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
@@ -86,6 +87,7 @@ func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64
 		reqIndices:   []int{},
 		blockNr:      blockNr,
 		ctx:          ctx,
+		rs:           new(ResolveSet),
 	}
 	return &tr
 }
@@ -312,7 +314,7 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 			}
 		} else {
 			if req.resolveHash != nil {
-				return fmt.Errorf("Resolving wrong hash for key %x, pos %d\nexpected %s, got embedded node\n",
+				return fmt.Errorf("resolving wrong hash for key %x, pos %d, expected %s, got embedded node",
 					req.resolveHex,
 					req.resolvePos,
 					req.resolveHash)
@@ -333,7 +335,6 @@ func (tr *TrieResolver) finishPreviousKey(k []byte) error {
 }
 
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Println("trie/resolver.go:341")
 	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if tr.key_set {
