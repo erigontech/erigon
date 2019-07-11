@@ -309,10 +309,10 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 	storageTrie.Print(w)
 }
 
-// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix.
-func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(common.Hash, *accounts.Account)) error {
-	// TODO [yperbasis] limit
-
+// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
+// for no more than maxAccounts.
+// Returns whether all matching accounts were traversed.
+func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxAccounts int, walker func(common.Hash, *accounts.Account)) (bool, error) {
 	startkey := make([]byte, 32)
 	copy(startkey, prefix.Data)
 
@@ -321,18 +321,25 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(co
 		fixedbits -= 4
 	}
 
-	return tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	i := 0
+
+	err := tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			acc, err := accounts.Decode(value)
 			if err != nil {
 				return false, err
 			}
 			if acc != nil {
-				walker(common.BytesToHash(key), acc)
+				if i < maxAccounts {
+					walker(common.BytesToHash(key), acc)
+				}
+				i++
 			}
-			return true, nil
+			return i <= maxAccounts, nil
 		},
 	)
+
+	return i <= maxAccounts, err
 }
 
 type Hashes []common.Hash

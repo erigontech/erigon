@@ -733,7 +733,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			}
 			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
 				var leaves []accountLeaf
-				err = tds.WalkRangeOfAccounts(request.Prefixes[i],
+				allTraversed, err := tds.WalkRangeOfAccounts(request.Prefixes[i], MaxLeavesPerPrefix,
 					func(key common.Hash, value *accounts.Account) {
 						leaves = append(leaves, accountLeaf{key, value})
 					},
@@ -741,12 +741,12 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				if err != nil {
 					return err
 				}
-				if len(leaves) > MaxLeavesPerPrefix {
-					response.Entries[i].Status = TooManyLeaves
-				} else {
+				if allTraversed {
 					response.Entries[i].Status = OK
 					response.Entries[i].Leaves = leaves
 					responseSize += len(leaves)
+				} else {
+					response.Entries[i].Status = TooManyLeaves
 				}
 			}
 		} else {

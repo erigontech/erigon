@@ -716,6 +716,25 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	assert.Equal(t, OK, reply2.Entries[0].Status)
 	// mind the test bank and the miner accounts
 	assert.Equal(t, MaxLeavesPerPrefix, len(reply2.Entries[0].Leaves))
+
+	// ----------------------------------------------------
+	// BLOCK #(MaxLeavesPerPrefix-1)
+
+	request.ID = 3
+	request.Block = pm.blockchain.GetBlockByNumber(MaxLeavesPerPrefix - 1).Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	var reply3 stateRangesMsg
+	reply3.ID = 3
+	reply3.Entries = []accountRange{
+		{Status: TooManyLeaves, Leaves: []accountLeaf{}},
+	}
+
+	err = p2p.ExpectMsg(peer.app, StateRangesCode, reply3)
+	if err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
 }
 
 func TestFirehoseBytecode(t *testing.T) {
