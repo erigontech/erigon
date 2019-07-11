@@ -24,10 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
@@ -35,6 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // Tests that protocol versions and modes of operations are matched up properly.
@@ -301,7 +305,7 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 func TestGetReceipt63(t *testing.T) { testGetReceipt(t, 63) }
 
 func testGetReceipt(t *testing.T, protocol int) {
-	// Define three accounts to simulate transactions with
+	// Define two accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
@@ -509,12 +513,181 @@ outer:
 		}
 	}
 	for _, peer := range peers {
-		peer.app.Close()
+		peer.close()
 	}
 	if err != nil {
 		t.Errorf("error matching block by peer: %v", err)
 	}
 	if receivedCount != broadcastExpected {
 		t.Errorf("block broadcast to %d peers, expected %d", receivedCount, broadcastExpected)
+	}
+}
+
+func TestFirehoseStateRanges(t *testing.T) {
+	addr1 := common.HexToAddress("0x3b4fc1530da632624fa1e223a91d99dbb07c2d42")
+	addr2 := common.HexToAddress("0xb574d96f69c1324e3b49e63f4cc899736dd52789")
+	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
+	addr4 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
+
+	addr1Hash := crypto.Keccak256Hash(addr1.Bytes())
+	addr2Hash := crypto.Keccak256Hash(addr2.Bytes())
+	addr3Hash := crypto.Keccak256Hash(addr3.Bytes())
+	addr4Hash := crypto.Keccak256Hash(addr4.Bytes())
+
+	assert.Equal(t, addr1Hash, common.HexToHash("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
+	assert.Equal(t, addr2Hash, common.HexToHash("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
+	assert.Equal(t, addr3Hash, common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
+	assert.Equal(t, addr4Hash, common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
+
+	signer := types.HomesteadSigner{}
+	numBlocks := 5
+	amount := big.NewInt(10000)
+	generator := func(i int, block *core.BlockGen) {
+		switch i {
+		case 0:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 1:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 2:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 3:
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 4:
+			// top up account #3
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		}
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	block4 := pm.blockchain.GetBlockByNumber(4)
+
+	var request getStateRangesMsg
+	request.ID = 1
+	request.Block = block4.Hash()
+
+	// the address hashes start only with 1, 4, and a
+	request.Prefixes = []trie.Keybytes{
+		{Data: common.FromHex("40"), Odd: true, Terminating: false},
+		{Data: common.FromHex("20"), Odd: true, Terminating: false},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	var account accounts.Account
+	account.Balance = amount
+
+	// TODO [yperbasis] remove this RLP hack
+	account.CodeHash = crypto.Keccak256(nil)
+	account.Root = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+
+	var reply1 stateRangesMsg
+	reply1.ID = 1
+	reply1.Entries = []accountRange{
+		{Status: OK, Leaves: []accountLeaf{{addr4Hash, &account}, {addr3Hash, &account}}},
+		{Status: OK, Leaves: []accountLeaf{}},
+	}
+
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply1); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
+
+	nonexistentBlock := common.HexToHash("4444444444444444444444444444444444444444444444444444444444444444")
+	request.ID = 2
+	request.Block = nonexistentBlock
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	block0 := pm.blockchain.GetBlockByNumber(0)
+	block1 := pm.blockchain.GetBlockByNumber(1)
+	block2 := pm.blockchain.GetBlockByNumber(2)
+	block3 := pm.blockchain.GetBlockByNumber(3)
+	block5 := pm.blockchain.GetBlockByNumber(5)
+
+	var reply2 stateRangesMsg
+	reply2.ID = 2
+	reply2.Entries = []accountRange{
+		{Status: NoData, Leaves: []accountLeaf{}},
+		{Status: NoData, Leaves: []accountLeaf{}},
+	}
+	reply2.AvailableBlocks = []common.Hash{block5.Hash(), block4.Hash(), block3.Hash(), block2.Hash(), block1.Hash(), block0.Hash()}
+
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply2); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
+}
+
+func TestFirehoseBytecode(t *testing.T) {
+	// Define two accounts to simulate transactions with
+	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
+	acc2Addr := crypto.PubkeyToAddress(acc2Key.PublicKey)
+
+	// Two byte codes
+	runtimeCode1 := common.FromHex("60606040525b600080fd00a165627a7a7230582012c9bd00152fa1c480f6827f81515bb19c3e63bf7ed9ffbb5fda0265983ac7980029")
+	contractCode1 := append(common.FromHex("606060405260186000553415601357600080fd5b5b60368060216000396000f300"), runtimeCode1...)
+	runtimeCode2 := common.FromHex("60606040525bfe00a165627a7a72305820c442e8fb2f1f8c3e73151a596376ff0f8da7f4de18ed79a6471c1ec584a14b080029")
+	contractCode2 := append(common.FromHex("606060405260046000553415601057fe5b5b603380601e6000396000f300"), runtimeCode2...)
+
+	signer := types.HomesteadSigner{}
+	numBlocks := 2
+	// Chain generator with a couple of dummy contracts
+	generator := func(i int, block *core.BlockGen) {
+		switch i {
+		case 0:
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc1Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err1)
+			block.AddTx(tx1)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc1Addr), new(big.Int), 1e5, nil, contractCode1), signer, acc1Key)
+			assert.NoError(t, err2)
+			block.AddTx(tx2)
+		case 1:
+			tx1, err1 := types.SignTx(types.NewTransaction(block.TxNonce(testBank), acc2Addr, big.NewInt(2e5), params.TxGas, nil, nil), signer, testBankKey)
+			assert.NoError(t, err1)
+			block.AddTx(tx1)
+			tx2, err2 := types.SignTx(types.NewContractCreation(block.TxNonce(acc2Addr), new(big.Int), 1e5, nil, contractCode2), signer, acc2Key)
+			assert.NoError(t, err2)
+			block.AddTx(tx2)
+		}
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	block1 := pm.blockchain.GetBlockByNumber(1)
+	receipts1 := pm.blockchain.GetReceiptsByHash(block1.Hash())
+	contract1Addr := receipts1[1].ContractAddress
+
+	block2 := pm.blockchain.GetBlockByNumber(2)
+	receipts2 := pm.blockchain.GetReceiptsByHash(block2.Hash())
+	contract2Addr := receipts2[1].ContractAddress
+
+	var reqID uint64 = 3758329
+	var request getBytecodeMsg
+	request.ID = reqID
+	request.Ref = []accountAndHash{
+		{Account: contract1Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode1)},
+		{Account: contract2Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode2)},
+	}
+
+	codes := bytecodeMsg{ID: reqID, Code: [][]byte{runtimeCode1, runtimeCode2}}
+
+	assert.NoError(t, p2p.Send(peer.app, GetBytecodeCode, request))
+	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {
+		t.Errorf("unexpected Bytecode response: %v", err)
 	}
 }

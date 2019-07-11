@@ -749,7 +749,7 @@ func (t *Trie) Hash() common.Hash {
 }
 
 func (t *Trie) unload(hex []byte, h *hasher) {
-	var nd = t.root
+	nd := t.root
 	var parent node
 	pos := 0
 	for pos < len(hex) {

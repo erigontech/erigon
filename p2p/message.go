@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
+	"log"
 	"sync/atomic"
 	"time"
 
@@ -61,9 +62,11 @@ func (msg Msg) String() string {
 }
 
 // Discard reads any remaining payload data into a black hole.
-func (msg Msg) Discard() error {
+func (msg Msg) Discard() {
 	_, err := io.Copy(ioutil.Discard, msg.Payload)
-	return err
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 type MsgReader interface {
@@ -228,7 +231,8 @@ func ExpectMsg(r MsgReader, code uint64, content interface{}) error {
 		return fmt.Errorf("message code mismatch: got %d, expected %d", msg.Code, code)
 	}
 	if content == nil {
-		return msg.Discard()
+		msg.Discard()
+		return nil
 	}
 	contentEnc, err := rlp.EncodeToBytes(content)
 	if err != nil {
