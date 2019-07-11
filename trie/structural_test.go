@@ -531,11 +531,11 @@ func TestResolution(t *testing.T) {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
 	// Check the availibility of the resolved keys
-	for _, hexS := range rs.keys {
-		key := hexToKeybytes([]byte(hexS))
+	for _, hex := range rs.keys {
+		key := hexToKeybytes(hex)
 		_, found := tr1.Get(key, 0)
 		if !found {
-			t.Errorf("Key %x was not resolved", hexS)
+			t.Errorf("Key %x was not resolved", hex)
 		}
 	}
 }
