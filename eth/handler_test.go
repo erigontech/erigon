@@ -18,6 +18,7 @@ package eth
 
 import (
 	"fmt"
+	"io/ioutil"
 	"math"
 	"math/big"
 	"math/rand"
@@ -38,6 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -529,11 +531,13 @@ func TestFirehoseStateRanges(t *testing.T) {
 	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
 	addr4 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
 
+	addr0Hash := crypto.Keccak256Hash(testBank.Bytes())
 	addr1Hash := crypto.Keccak256Hash(addr1.Bytes())
 	addr2Hash := crypto.Keccak256Hash(addr2.Bytes())
 	addr3Hash := crypto.Keccak256Hash(addr3.Bytes())
 	addr4Hash := crypto.Keccak256Hash(addr4.Bytes())
 
+	assert.Equal(t, addr0Hash, common.HexToHash("0x00bf49f440a1cd0527e4d06e2765654c0f56452257516d793a9b8d604dcfdf2a"))
 	assert.Equal(t, addr1Hash, common.HexToHash("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
 	assert.Equal(t, addr2Hash, common.HexToHash("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
 	assert.Equal(t, addr3Hash, common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
@@ -578,7 +582,8 @@ func TestFirehoseStateRanges(t *testing.T) {
 	request.ID = 1
 	request.Block = block4.Hash()
 
-	// the address hashes start only with 1, 4, and a
+	// All known account keys start with either 0, 1, 4, or a.
+	// Warning: we assume that the key of miner's account doesn't start with 2 or 4.
 	request.Prefixes = []trie.Keybytes{
 		{Data: common.FromHex("40"), Odd: true, Terminating: false},
 		{Data: common.FromHex("20"), Odd: true, Terminating: false},
@@ -627,6 +632,88 @@ func TestFirehoseStateRanges(t *testing.T) {
 	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply2); err != nil {
 		t.Errorf("unexpected StateRanges response: %v", err)
 	}
+}
+
+func TestFirehoseTooManyLeaves(t *testing.T) {
+	signer := types.HomesteadSigner{}
+	amount := big.NewInt(10)
+	generator := func(i int, block *core.BlockGen) {
+		var rndAddr common.Address
+		rand.Read(rndAddr[:])
+
+		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), rndAddr, amount, params.TxGas, nil, nil), signer, testBankKey)
+		assert.NoError(t, err)
+		block.AddTx(tx)
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, MaxLeavesPerPrefix, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	// ----------------------------------------------------
+	// BLOCK #1
+
+	var request getStateRangesMsg
+	request.ID = 0
+	request.Block = pm.blockchain.GetBlockByNumber(1).Hash()
+
+	request.Prefixes = []trie.Keybytes{
+		{Data: []byte{}, Odd: false, Terminating: false}, // empty prefix
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	msg, err := peer.app.ReadMsg()
+	assert.NoError(t, err)
+	content, err := ioutil.ReadAll(msg.Payload)
+	assert.NoError(t, err)
+	var reply0 stateRangesMsg
+	assert.NoError(t, rlp.DecodeBytes(content, &reply0))
+
+	assert.Equal(t, uint64(0), reply0.ID)
+	assert.Equal(t, 1, len(reply0.Entries))
+	assert.Equal(t, OK, reply0.Entries[0].Status)
+	// test bank account + miner's account + the first random account
+	assert.Equal(t, 3, len(reply0.Entries[0].Leaves))
+
+	// ----------------------------------------------------
+	// BLOCK #MaxLeavesPerPrefix
+
+	request.ID = 1
+	request.Block = pm.blockchain.CurrentBlock().Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	var reply1 stateRangesMsg
+	reply1.ID = 1
+	reply1.Entries = []accountRange{
+		{Status: TooManyLeaves, Leaves: []accountLeaf{}},
+	}
+
+	if err := p2p.ExpectMsg(peer.app, StateRangesCode, reply1); err != nil {
+		t.Errorf("unexpected StateRanges response: %v", err)
+	}
+
+	// ----------------------------------------------------
+	// BLOCK #(MaxLeavesPerPrefix-2)
+
+	request.ID = 2
+	request.Block = pm.blockchain.GetBlockByNumber(MaxLeavesPerPrefix - 2).Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
+
+	msg, err = peer.app.ReadMsg()
+	assert.NoError(t, err)
+	content, err = ioutil.ReadAll(msg.Payload)
+	assert.NoError(t, err)
+	var reply2 stateRangesMsg
+	assert.NoError(t, rlp.DecodeBytes(content, &reply2))
+
+	assert.Equal(t, uint64(2), reply2.ID)
+	assert.Equal(t, 1, len(reply2.Entries))
+	assert.Equal(t, OK, reply2.Entries[0].Status)
+	// mind the test bank and the miner accounts
+	assert.Equal(t, MaxLeavesPerPrefix, len(reply2.Entries[0].Leaves))
 }
 
 func TestFirehoseBytecode(t *testing.T) {

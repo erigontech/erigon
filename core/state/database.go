@@ -311,6 +311,8 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix.
 func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(common.Hash, *accounts.Account)) error {
+	// TODO [yperbasis] limit
+
 	startkey := make([]byte, 32)
 	copy(startkey, prefix.Data)
 
@@ -325,7 +327,9 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(co
 			if err != nil {
 				return false, err
 			}
-			walker(common.BytesToHash(key), acc)
+			if acc != nil {
+				walker(common.BytesToHash(key), acc)
+			}
 			return true, nil
 		},
 	)
