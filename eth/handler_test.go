@@ -639,6 +639,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	amount := big.NewInt(10)
 	generator := func(i int, block *core.BlockGen) {
 		var rndAddr common.Address
+		// #nosec G404
 		rand.Read(rndAddr[:])
 
 		tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), rndAddr, amount, params.TxGas, nil, nil), signer, testBankKey)
