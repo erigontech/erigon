@@ -322,10 +322,10 @@ func accountSavings(db *bolt.DB) (int, int) {
 		b := tx.Bucket([]byte("AT"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if bytes.Index(v, trie.EmptyRoot.Bytes()) != -1 {
+			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
 				emptyRoots++
 			}
-			if bytes.Index(v, emptyCodeHash) != -1 {
+			if bytes.Contains(v, emptyCodeHash) {
 				emptyCodes++
 			}
 		}
