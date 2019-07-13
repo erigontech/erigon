@@ -82,7 +82,7 @@ func (tb *TrieBuilder) hash() {
 
 func (tb *TrieBuilder) root() common.Hash {
 	if len(tb.stack) == 0 {
-		return emptyRoot
+		return EmptyRoot
 	}
 	h := newHasher(false)
 	defer returnHasherToPool(h)
@@ -355,7 +355,7 @@ func (hb *HashBuilder) root() common.Hash {
 	if hb.top == nil {
 		if len(hb.bufferStack) == 0 {
 			if len(hb.branchStack) == 0 {
-				return emptyRoot
+				return EmptyRoot
 			}
 			h := newHasher(hb.encodeToBytes)
 			defer returnHasherToPool(h)

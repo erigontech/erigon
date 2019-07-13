@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -620,7 +621,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	var original accounts.Account
 	if previous == nil {
 		account = accounts.Account{}
-		account.Root.SetBytes(emptyRoot[:])
+		account.Root.SetBytes(trie.EmptyRoot[:])
 		original = accounts.Account{}
 	} else {
 		account = previous.data

@@ -49,7 +49,7 @@ func newEmpty() *Trie {
 func TestEmptyTrie(t *testing.T) {
 	var trie Trie
 	res := trie.Hash()
-	exp := emptyRoot
+	exp := EmptyRoot
 	if res != common.Hash(exp) {
 		t.Errorf("expected %x got %x", exp, res)
 	}
@@ -379,7 +379,7 @@ func BenchmarkHash(b *testing.B) {
 		var (
 			nonce   = uint64(random.Int63())
 			balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
-			root    = emptyRoot
+			root    = EmptyRoot
 			code    = crypto.Keccak256(nil)
 		)
 		accounts[i], _ = rlp.EncodeToBytes([]interface{}{nonce, balance, root, code})

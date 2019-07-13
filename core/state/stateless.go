@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"os"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -446,7 +446,7 @@ func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check b
 		h.sha.Read(addrHash[:])
 		if _, ok := s.deleted[addrHash]; ok {
 			if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
-				account.Root = emptyRoot
+				account.Root = trie.EmptyRoot
 			}
 			storageTrie, err := s.getStorageTrie(address, false)
 			if err != nil {
