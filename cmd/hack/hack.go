@@ -35,7 +35,6 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
-var emptyRoot = trie.EmptyRoot.Bytes()
 
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 var reset = flag.Int("reset", -1, "reset to given block number")
@@ -323,7 +322,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 		b := tx.Bucket([]byte("AT"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if bytes.Index(v, emptyRoot) != -1 {
+			if bytes.Index(v, trie.EmptyRoot.Bytes()) != -1 {
 				emptyRoots++
 			}
 			if bytes.Index(v, emptyCodeHash) != -1 {
