@@ -404,7 +404,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
 			}, 1000)
 			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
+				return checkeq("GetState("+key.Hex()+")", state.GetState(addr, key), value)
 			}, 1000)
 		}
 		if err != nil {
