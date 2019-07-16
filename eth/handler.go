@@ -759,7 +759,62 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStorageRangesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStorageRangesMsg
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		numReq := len(request.Requests)
+
+		var response storageRangesMsg
+		response.ID = request.ID
+		response.Entries = make([][]storageRange, numReq)
+
+		// TODO [yperbasis] find state by StorageRoot, otherwise populate AvailableBlocks
+		_, tds, err := pm.blockchain.State()
+		if err != nil {
+			return err
+		}
+
+		for j, responseSize := 0, 0; j < numReq; j++ {
+			req := request.Requests[j]
+
+			if len(req.Account) == 32 {
+				// TODO [yperbasis] implement
+				return errResp(ErrNotImplemented, "address hash isn't supported yet")
+			} else if len(req.Account) != 20 {
+				return errResp(ErrDecode, "not an account address or its hash")
+			}
+			address := common.BytesToAddress(req.Account)
+
+			n := len(req.Prefixes)
+			response.Entries[j] = make([]storageRange, n)
+			for i := 0; i < n; i++ {
+				response.Entries[j][i].Status = NoData
+			}
+
+			for i := 0; i < n && responseSize < softResponseLimit; i++ {
+				var leaves []storageLeaf
+				allTraversed, err := tds.WalkStorageRange(address, req.Prefixes[i], MaxLeavesPerPrefix,
+					func(key common.Hash, value big.Int) {
+						leaves = append(leaves, storageLeaf{key, value})
+					},
+				)
+				if err != nil {
+					return err
+				}
+				if allTraversed {
+					response.Entries[j][i].Status = OK
+					response.Entries[j][i].Leaves = leaves
+					responseSize += len(leaves)
+				} else {
+					response.Entries[j][i].Status = TooManyLeaves
+				}
+			}
+		}
+
+		return p2p.Send(p.rw, StorageRangesCode, response)
 
 	case StorageRangesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
@@ -796,7 +851,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			code         [][]byte
 		)
 		for responseSize < softResponseLimit && len(code) < downloader.MaxStateFetch {
-			var requested accountAndHash
+			var requested bytecodeRef
 			if err := msgStream.Decode(&requested); err == rlp.EOL {
 				break
 			} else if err != nil {

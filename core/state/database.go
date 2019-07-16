@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"golang.org/x/crypto/sha3"
 )
@@ -310,10 +311,10 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 }
 
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
-// for no more than maxAccounts.
-// Returns whether all matching accounts were traversed.
-func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxAccounts int, walker func(common.Hash, *accounts.Account)) (bool, error) {
-	startkey := make([]byte, 32)
+// for no more than maxItems.
+// Returns whether all matching accounts were traversed (provided there was no error).
+func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
+	startkey := make([]byte, common.HashLength)
 	copy(startkey, prefix.Data)
 
 	fixedbits := uint(len(prefix.Data)) * 8
@@ -330,18 +331,52 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxAccounts in
 				return false, err
 			}
 			if acc != nil {
-				if i < maxAccounts {
+				if i < maxItems {
 					walker(common.BytesToHash(key), acc)
 				}
 				i++
 			}
-			return i <= maxAccounts, nil
+			return i <= maxItems, nil
 		},
 	)
 
-	return i <= maxAccounts, err
+	return i <= maxItems, err
 }
 
+// WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
+// for no more than maxItems.
+// Returns whether all matching storage items were traversed (provided there was no error).
+func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
+	startkey := make([]byte, common.AddressLength+common.HashLength)
+	copy(startkey, address[:])
+	copy(startkey[common.AddressLength:], prefix.Data)
+
+	fixedbits := (common.AddressLength + uint(len(prefix.Data))) * 8
+	if prefix.Odd {
+		fixedbits -= 4
+	}
+
+	i := 0
+
+	err := tds.db.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+		func(key []byte, value []byte) (bool, error) {
+			var val big.Int
+			if err := rlp.DecodeBytes(value, &val); err != nil {
+				return false, err
+			}
+
+			if i < maxItems {
+				walker(common.BytesToHash(key), val)
+			}
+			i++
+			return i <= maxItems, nil
+		},
+	)
+
+	return i <= maxItems, err
+}
+
+// Hashes are a slice of hashes.
 type Hashes []common.Hash
 
 func (hashes Hashes) Len() int {

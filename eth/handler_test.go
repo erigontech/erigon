@@ -596,7 +596,7 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	// TODO [yperbasis] remove this RLP hack
 	account.CodeHash = crypto.Keccak256(nil)
-	account.Root = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	account.Root = trie.EmptyRoot
 
 	var reply1 stateRangesMsg
 	reply1.ID = 1
@@ -737,6 +737,76 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	}
 }
 
+func TestFirehoseStorageRanges(t *testing.T) {
+	// this smart contract sets its 0th storage to 42
+	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b50603e8060226000396000f3fe6080604052600080fdfea265627a7a72305820cf0662873a9a1b68655e3d550d1929a5c01604a46b7acfb5124a3143a12ec5e464736f6c634300050a0032")
+
+	signer := types.HomesteadSigner{}
+	var addr common.Address
+
+	generator := func(i int, block *core.BlockGen) {
+		nonce := block.TxNonce(testBank)
+		tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1e5, nil, code), signer, testBankKey)
+		assert.NoError(t, err)
+		block.AddTx(tx)
+		addr = crypto.CreateAddress(testBank, nonce)
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 1, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+	defer peer.close()
+
+	var accountReq getStateRangesMsg
+	accountReq.ID = 0
+	accountReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
+	accountKey := crypto.Keccak256(addr.Bytes())
+	accountReq.Prefixes = []trie.Keybytes{
+		{Data: accountKey, Odd: false, Terminating: false},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, accountReq))
+
+	msg, err := peer.app.ReadMsg()
+	assert.NoError(t, err)
+	content, err := ioutil.ReadAll(msg.Payload)
+	assert.NoError(t, err)
+	var accountReply stateRangesMsg
+	assert.NoError(t, rlp.DecodeBytes(content, &accountReply))
+
+	assert.Equal(t, uint64(0), accountReply.ID)
+	assert.Equal(t, 1, len(accountReply.Entries))
+	assert.Equal(t, OK, accountReply.Entries[0].Status)
+	assert.Equal(t, 1, len(accountReply.Entries[0].Leaves))
+	assert.Equal(t, common.BytesToHash(accountKey), accountReply.Entries[0].Leaves[0].Key)
+
+	storageRoot := accountReply.Entries[0].Leaves[0].Val.Root
+	assert.NotEqual(t, trie.EmptyRoot, storageRoot)
+
+	var storageReq getStorageRangesMsg
+	storageReq.ID = 1
+	emptyPrefix := trie.Keybytes{Data: []byte{}, Odd: false, Terminating: false}
+	storageReq.Requests = []storageRangeReq{
+		{Account: addr.Bytes(), StorageRoot: storageRoot, Prefixes: []trie.Keybytes{emptyPrefix}},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
+
+	var storageReply storageRangesMsg
+	storageReply.ID = 1
+	zerothHash := crypto.Keccak256Hash(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
+	storageReply.Entries = [][]storageRange{{
+		{Status: OK, Leaves: []storageLeaf{storageLeaf{Key: zerothHash, Val: *(big.NewInt(42))}}},
+	}}
+
+	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
+	if err != nil {
+		t.Errorf("unexpected StorageRanges response: %v", err)
+	}
+
+	// TODO [yperbasis] change the storage in another block and check
+	// Add sol code with changeState method?
+}
+
 func TestFirehoseBytecode(t *testing.T) {
 	// Define two accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -787,9 +857,9 @@ func TestFirehoseBytecode(t *testing.T) {
 	var reqID uint64 = 3758329
 	var request getBytecodeMsg
 	request.ID = reqID
-	request.Ref = []accountAndHash{
-		{Account: contract1Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode1)},
-		{Account: contract2Addr.Bytes(), Hash: crypto.Keccak256Hash(runtimeCode2)},
+	request.Ref = []bytecodeRef{
+		{Account: contract1Addr.Bytes(), CodeHash: crypto.Keccak256Hash(runtimeCode1)},
+		{Account: contract2Addr.Bytes(), CodeHash: crypto.Keccak256Hash(runtimeCode2)},
 	}
 
 	codes := bytecodeMsg{ID: reqID, Code: [][]byte{runtimeCode1, runtimeCode2}}
