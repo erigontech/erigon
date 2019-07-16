@@ -795,7 +795,7 @@ func TestFirehoseStorageRanges(t *testing.T) {
 	storageReply.ID = 1
 	zerothHash := crypto.Keccak256Hash(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
 	storageReply.Entries = [][]storageRange{{
-		{Status: OK, Leaves: []storageLeaf{storageLeaf{Key: zerothHash, Val: *(big.NewInt(42))}}},
+		{Status: OK, Leaves: []storageLeaf{{Key: zerothHash, Val: *(big.NewInt(42))}}},
 	}}
 
 	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
