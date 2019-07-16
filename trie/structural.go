@@ -116,21 +116,21 @@ func (s sortable) Swap(i, j int) {
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
 type ResolveSet struct {
-	keys     sortable
+	hexes    sortable
 	inited   bool // Whether keys are sorted and "LTE" and "GT" indices set
 	lteIndex int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 }
 
 // AddKey adds a new key to the set
 func (rs *ResolveSet) AddKey(key []byte) {
-	rs.keys = append(rs.keys, key)
+	rs.hexes = append(rs.hexes, keybytesToHex(key))
 }
 
 func (rs *ResolveSet) ensureInited() {
 	if rs.inited {
 		return
 	}
-	sort.Sort(rs.keys)
+	sort.Sort(rs.hexes)
 	rs.lteIndex = 0
 	rs.inited = true
 }
@@ -144,18 +144,18 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 	rs.ensureInited()
 	// Adjust "GT" if necessary
 	var gtAdjusted bool
-	for rs.lteIndex < len(rs.keys)-1 && bytes.Compare(rs.keys[rs.lteIndex+1], prefix) <= 0 {
+	for rs.lteIndex < len(rs.hexes)-1 && bytes.Compare(rs.hexes[rs.lteIndex+1], prefix) <= 0 {
 		rs.lteIndex++
 		gtAdjusted = true
 	}
 	// Adjust "LTE" if necessary (normally will not be necessary)
-	for !gtAdjusted && rs.lteIndex > 0 && bytes.Compare(rs.keys[rs.lteIndex], prefix) > 0 {
+	for !gtAdjusted && rs.lteIndex > 0 && bytes.Compare(rs.hexes[rs.lteIndex], prefix) > 0 {
 		rs.lteIndex--
 	}
-	if rs.lteIndex < len(rs.keys) && bytes.HasPrefix(rs.keys[rs.lteIndex], prefix) {
+	if rs.lteIndex < len(rs.hexes) && bytes.HasPrefix(rs.hexes[rs.lteIndex], prefix) {
 		return false
 	}
-	if rs.lteIndex < len(rs.keys)-1 && bytes.HasPrefix(rs.keys[rs.lteIndex+1], prefix) {
+	if rs.lteIndex < len(rs.hexes)-1 && bytes.HasPrefix(rs.hexes[rs.lteIndex+1], prefix) {
 		return false
 	}
 	return true
