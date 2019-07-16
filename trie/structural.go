@@ -32,7 +32,48 @@ type emitter interface {
 	hash()
 }
 
-func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups map[string]uint32) {
+// prefixGroups is an optimised (for allocations) storage for the mapping of prefix groups to digit sets
+type prefixGroups struct {
+	data    []byte   // Data making up all the prefix groups
+	offsets []int    // Offsets of each prefix group in the data
+	digits  []uint32 // Digit sets corresponding to the prefix group
+}
+
+// lastMatches return true if given prefix equals to the last prefix group stored
+func (pg *prefixGroups) lastMatches(prefix []byte) bool {
+	if len(pg.offsets) == 0 {
+		return false
+	}
+	return bytes.Equal(pg.data[pg.offsets[len(pg.offsets)-1]:], prefix)
+}
+
+// newGroup creates a new group and places it as the last
+func (pg *prefixGroups) newGroup(prefix []byte, digit byte) {
+	pg.offsets = append(pg.offsets, len(pg.data))
+	pg.data = append(pg.data, prefix...)
+	pg.digits = append(pg.digits, uint32(1)<<digit)
+}
+
+// addToLast adds a new digit to the last group
+func (pg *prefixGroups) addToLast(digit byte) {
+	pg.digits[len(pg.digits)-1] |= (uint32(1) << digit)
+}
+
+// deleteLast remove the last group
+func (pg *prefixGroups) deleteLast() {
+	pg.data = pg.data[:pg.offsets[len(pg.offsets)-1]]
+	pg.offsets = pg.offsets[:len(pg.offsets)-1]
+	pg.digits = pg.digits[:len(pg.digits)-1]
+}
+
+func (pg *prefixGroups) lastLen() int {
+	if len(pg.offsets) == 0 {
+		return 0
+	}
+	return len(pg.data) - pg.offsets[len(pg.offsets)-1]
+}
+
+func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups *prefixGroups) {
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
 	succLen := prefixLen(succ, curr)
@@ -46,14 +87,17 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	maxCommonPrefix := make([]byte, maxLen)
 	copy(maxCommonPrefix, curr)
 	// Look up the prefix groups's digit set
-	set, existed := groups[string(maxCommonPrefix)]
+	existed := groups.lastMatches(curr[:maxLen])
 	// Add the digit immediately following the max common prefix and compute length of remainder length
 	extraDigit := curr[maxLen]
 	var remainderLen int
 	if recursive || len(succ) > 0 || len(prec) > 0 {
-		set |= (uint32(1) << extraDigit)
+		if existed {
+			groups.addToLast(extraDigit)
+		} else {
+			groups.newGroup(curr[:maxLen], extraDigit)
+		}
 		remainderLen = len(curr) - maxLen - 1
-		groups[string(maxCommonPrefix)] = set
 	} else {
 		remainderLen = len(curr)
 	}
@@ -84,18 +128,14 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	// Close the immediately encompassing prefix group
 	closing := curr[:precLen]
 	if precLen > succLen {
-		delete(groups, string(closing))
+		groups.deleteLast()
 	}
 	// Check the end of recursion
 	if precLen == 0 {
 		return
 	}
 	// Identify preceeding key for the recursive invocation
-	p := precLen - 1
-	_, found := groups[string(curr[:p])]
-	for ; p > 0 && !found; _, found = groups[string(curr[:p])] {
-		p--
-	}
+	p := groups.lastLen()
 	// Recursion
 	step(hashOnly, true, curr[:p], closing, succ, e, groups)
 }

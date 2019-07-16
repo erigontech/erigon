@@ -408,7 +408,7 @@ func TestHashBuilding(t *testing.T) {
 
 	hb := NewHashBuilder(false)
 	var prec, curr, succ bytes.Buffer
-	groups := make(map[string]uint32)
+	var groups prefixGroups
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -422,7 +422,7 @@ func TestHashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
 		}
 		hb.setKeyValue([]byte(key), value)
 	}
@@ -431,7 +431,7 @@ func TestHashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -443,7 +443,7 @@ func TestResolution(t *testing.T) {
 	for b := uint32(0); b < 10000; b++ {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
-		key := crypto.Keccak256(preimage[:])[:4]
+		key := crypto.Keccak256(preimage[:])[:8]
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
@@ -462,12 +462,12 @@ func TestResolution(t *testing.T) {
 	}
 	// Next, some non-exsiting keys
 	for i := 0; i < 100; i++ {
-		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:4])
+		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
 	hb := NewHashBuilder(false)
 	var prec, curr, succ bytes.Buffer
-	groups := make(map[string]uint32)
+	var groups prefixGroups
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -481,7 +481,7 @@ func TestResolution(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
 		}
 		hb.setKeyValue([]byte(key), value)
 	}
@@ -490,7 +490,7 @@ func TestResolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
 	tr1 := New(common.Hash{}, false)
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
