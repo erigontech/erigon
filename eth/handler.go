@@ -771,11 +771,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		response.ID = request.ID
 		response.Entries = make([][]storageRange, numReq)
 
-		// TODO [yperbasis] find state by StorageRoot, otherwise populate AvailableBlocks
-		_, tds, err := pm.blockchain.State()
-		if err != nil {
-			return err
-		}
+		missingData := false
 
 		for j, responseSize := 0, 0; j < numReq; j++ {
 			req := request.Requests[j]
@@ -792,6 +788,16 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			response.Entries[j] = make([]storageRange, n)
 			for i := 0; i < n; i++ {
 				response.Entries[j][i].Status = NoData
+			}
+
+			tds, err := pm.blockchain.FindStateWithStorageRoot(address, req.StorageRoot)
+			if err != nil {
+				return err
+			}
+
+			if tds == nil {
+				missingData = true
+				break
 			}
 
 			for i := 0; i < n && responseSize < softResponseLimit; i++ {
@@ -812,6 +818,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					response.Entries[j][i].Status = TooManyLeaves
 				}
 			}
+		}
+
+		if missingData {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
 		}
 
 		return p2p.Send(p.rw, StorageRangesCode, response)

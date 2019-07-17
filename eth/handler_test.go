@@ -739,20 +739,33 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 
 func TestFirehoseStorageRanges(t *testing.T) {
 	// this smart contract sets its 0th storage to 42
-	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b50603e8060226000396000f3fe6080604052600080fdfea265627a7a72305820cf0662873a9a1b68655e3d550d1929a5c01604a46b7acfb5124a3143a12ec5e464736f6c634300050a0032")
+	// see tests/contracts/storage.sol
+	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b506083806100236000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c806360fe47b114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b60005556fea265627a7a72305820c6d2a85ef1ffd7a88a51c6087851886ab108ffe628b0b80e4d95d923559e8d9564736f6c634300050a0032")
+
+	// call set(21)
+	set21 := common.FromHex("0x60fe47b10000000000000000000000000000000000000000000000000000000000000015")
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
 
 	generator := func(i int, block *core.BlockGen) {
-		nonce := block.TxNonce(testBank)
-		tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1e5, nil, code), signer, testBankKey)
-		assert.NoError(t, err)
-		block.AddTx(tx)
-		addr = crypto.CreateAddress(testBank, nonce)
+		switch i {
+		case 0:
+			nonce := block.TxNonce(testBank)
+			// storage is initialized to 42
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+			addr = crypto.CreateAddress(testBank, nonce)
+		case 1:
+			// storage is set to 21
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, set21), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		}
 	}
 
-	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 1, generator, nil)
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
@@ -802,9 +815,6 @@ func TestFirehoseStorageRanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected StorageRanges response: %v", err)
 	}
-
-	// TODO [yperbasis] change the storage in another block and check
-	// Add sol code with changeState method?
 }
 
 func TestFirehoseBytecode(t *testing.T) {

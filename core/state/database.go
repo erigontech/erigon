@@ -758,7 +758,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		// Not present in the trie, try the database
 		var err error
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr)
+			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr+1)
 			if err != nil {
 				enc = nil
 			}
