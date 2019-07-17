@@ -108,12 +108,6 @@ func tester(ctx *cli.Context) error {
 			Length:  eth.ProtocolLengths[0],
 			Run:     tp.protocolRun,
 		},
-		{
-			Name:    eth.FirehoseName,
-			Version: eth.FirehoseVersions[0],
-			Length:  eth.FirehoseLengths[0],
-			Run:     tp.firehoseRun,
-		},
 	}
 	server := &p2p.Server{Config: p2pConfig}
 	// Add protocol

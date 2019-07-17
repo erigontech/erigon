@@ -396,7 +396,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 		panic(err)
 	}
 	for address, root := range roots {
-		if root != (common.Hash{}) && root != emptyRoot {
+		if root != (common.Hash{}) && root != trie.EmptyRoot {
 			st := trie.New(root, true)
 			sr := trie.NewResolver(context.TODO(), false, false, blockNum)
 			key := []byte{}

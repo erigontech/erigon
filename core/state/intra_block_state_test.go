@@ -382,6 +382,7 @@ func (test *snapshotTest) run() bool {
 // checkEqual checks that methods of state and checkstate return the same values.
 func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, checkds *DbState) error {
 	for _, addr := range test.addrs {
+		addr := addr // pin
 		var err error
 		checkeq := func(op string, a, b interface{}) bool {
 			if err == nil && !reflect.DeepEqual(a, b) {
@@ -404,7 +405,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
 			}, 1000)
 			checkds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
-				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
+				return checkeq("GetState("+key.Hex()+")", state.GetState(addr, key), value)
 			}, 1000)
 		}
 		if err != nil {

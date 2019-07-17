@@ -53,7 +53,10 @@ var (
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
-	ErrNoGenesis = errors.New("Genesis not found in chain")
+	ErrNoGenesis = errors.New("genesis not found in chain")
+
+	// ErrNotFound is returned when sought data isn't found.
+	ErrNotFound = errors.New("data not found")
 )
 
 const (
@@ -431,6 +434,55 @@ func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.IntraBlo
 	return state.New(tds), tds, nil
 }
 
+// FindStateWithStorageRoot attempts to find a recent state where a given account has a certain storage root.
+func (bc *BlockChain) FindStateWithStorageRoot(address common.Address, storageRoot common.Hash) (*state.TrieDbState, error) {
+	blockNbr := bc.CurrentBlock().NumberU64()
+	for i := 0; i < blockCacheLimit; i++ {
+		block := bc.GetBlockByNumber(blockNbr)
+		if block == nil {
+			return nil, ErrNotFound
+		}
+		_, tds, err := bc.StateAt(block.Root(), block.NumberU64())
+		if err != nil {
+			return nil, err
+		}
+
+		tds.SetHistorical(i > 0)
+		account, err := tds.ReadAccountData(address)
+		if err != nil {
+			return nil, err
+		}
+
+		if account.Root == storageRoot {
+			return tds, nil
+		}
+
+		if blockNbr == 0 {
+			break
+		}
+		blockNbr--
+	}
+	return nil, ErrNotFound
+}
+
+// GetAddressFromItsHash returns the preimage of a given address hash.
+func (bc *BlockChain) GetAddressFromItsHash(hash common.Hash) (common.Address, error) {
+	var addr common.Address
+
+	_, tds, err := bc.State()
+	if err != nil {
+		return addr, err
+	}
+
+	key := tds.GetKey(hash.Bytes())
+	if len(key) != common.AddressLength {
+		return addr, ErrNotFound
+	}
+
+	addr.SetBytes(key)
+	return addr, nil
+}
+
 // Reset purges the entire blockchain, restoring it to its genesis state.
 func (bc *BlockChain) Reset() error {
 	return bc.ResetWithGenesisBlock(bc.genesisBlock)
@@ -615,6 +667,10 @@ func (bc *BlockChain) AvailableBlocks() []common.Hash {
 			break
 		}
 		res = append(res, block.Hash())
+
+		if blockNbr == 0 {
+			break
+		}
 		blockNbr--
 	}
 	return res

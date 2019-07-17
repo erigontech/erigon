@@ -441,8 +441,8 @@ func testThrottling(t *testing.T, protocol int, mode SyncMode) {
 
 	// Create a long block chain to download and the tester
 	targetBlocks := testChainBase.len() - 1
-	testChain:=testChainBase.copy(testChainBase.len())
-	err:=tester.newPeer("peer", protocol, testChain)
+	testChain := testChainBase.copy(testChainBase.len())
+	err := tester.newPeer("peer", protocol, testChain)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1579,19 +1579,19 @@ func TestRemoteHeaderRequestSpan(t *testing.T) {
 }
 
 func TestDataRace(t *testing.T) {
-	wg:= &sync.WaitGroup{}
+	wg := &sync.WaitGroup{}
 
 	const N = 10
 	wg.Add(N)
-	ln:=testChainBase.len()
-	for i:=0; i<N; i++ {
-		go makeFork(wg,ln,i)
+	ln := testChainBase.len()
+	for i := 0; i < N; i++ {
+		go makeFork(wg, ln, i)
 	}
 	wg.Wait()
 }
 
 func makeFork(wg *sync.WaitGroup, ln, i int) {
-	testChainBase.makeFork(ln,false, uint8(i))
+	testChainBase.makeFork(ln, false, uint8(i))
 	wg.Done()
 	fmt.Println("done", i)
 }

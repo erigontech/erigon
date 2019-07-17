@@ -1,6 +1,8 @@
 package eth
 
 import (
+	"math/big"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -55,11 +57,6 @@ type firehosePeer struct {
 	rw p2p.MsgReadWriter
 }
 
-type accountAndHash struct {
-	Account []byte // account address or hash thereof
-	Hash    common.Hash
-}
-
 type accountLeaf struct {
 	Key common.Hash
 	Val *accounts.Account
@@ -82,9 +79,41 @@ type stateRangesMsg struct {
 	AvailableBlocks []common.Hash
 }
 
+type storageRangeReq struct {
+	Account     []byte // account address or hash thereof
+	StorageRoot common.Hash
+	Prefixes    []trie.Keybytes
+}
+
+type getStorageRangesMsg struct {
+	ID       uint64
+	Requests []storageRangeReq
+}
+
+type storageLeaf struct {
+	Key common.Hash
+	Val big.Int
+}
+
+type storageRange struct {
+	Status Status
+	Leaves []storageLeaf
+}
+
+type storageRangesMsg struct {
+	ID              uint64
+	Entries         [][]storageRange
+	AvailableBlocks []common.Hash
+}
+
+type bytecodeRef struct {
+	Account  []byte // account address or hash thereof
+	CodeHash common.Hash
+}
+
 type getBytecodeMsg struct {
 	ID  uint64
-	Ref []accountAndHash
+	Ref []bytecodeRef
 }
 
 type bytecodeMsg struct {
