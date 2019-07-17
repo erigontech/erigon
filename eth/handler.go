@@ -698,9 +698,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 }
 
 func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
-	msg, err := p.rw.ReadMsg()
-	if err != nil {
-		return err
+	msg, readErr := p.rw.ReadMsg()
+	if readErr != nil {
+		return readErr
 	}
 	if msg.Size > FirehoseMaxMsgSize {
 		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, FirehoseMaxMsgSize)
@@ -786,12 +786,13 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			if len(req.Account) == common.AddressLength {
 				addr.SetBytes(req.Account)
 			} else if len(req.Account) == common.HashLength {
-				addr, err = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-				if err == core.ErrNotFound {
+				var preimageErr error
+				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+				if preimageErr == core.ErrNotFound {
 					missingData = true
 					break
-				} else if err != nil {
-					return err
+				} else if preimageErr != nil {
+					return preimageErr
 				}
 			} else {
 				return errResp(ErrDecode, "not an account address or its hash")
@@ -877,12 +878,13 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			if len(req.Account) == common.AddressLength {
 				addr.SetBytes(req.Account)
 			} else if len(req.Account) == common.HashLength {
-				addr, err = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-				if err == core.ErrNotFound {
+				var preimageErr error
+				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+				if preimageErr == core.ErrNotFound {
 					code = append(code, []byte{})
 					break
-				} else if err != nil {
-					return err
+				} else if preimageErr != nil {
+					return preimageErr
 				}
 			} else {
 				return errResp(ErrDecode, "not an account address or its hash")
