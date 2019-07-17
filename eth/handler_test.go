@@ -869,7 +869,7 @@ func TestFirehoseBytecode(t *testing.T) {
 	request.ID = reqID
 	request.Ref = []bytecodeRef{
 		{Account: contract1Addr.Bytes(), CodeHash: crypto.Keccak256Hash(runtimeCode1)},
-		{Account: contract2Addr.Bytes(), CodeHash: crypto.Keccak256Hash(runtimeCode2)},
+		{Account: crypto.Keccak256(contract2Addr.Bytes()), CodeHash: crypto.Keccak256Hash(runtimeCode2)},
 	}
 
 	codes := bytecodeMsg{ID: reqID, Code: [][]byte{runtimeCode1, runtimeCode2}}

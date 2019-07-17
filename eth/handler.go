@@ -776,21 +776,28 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		for j, responseSize := 0, 0; j < numReq; j++ {
 			req := request.Requests[j]
 
-			if len(req.Account) == 32 {
-				// TODO [yperbasis] implement
-				return errResp(ErrNotImplemented, "address hash isn't supported yet")
-			} else if len(req.Account) != 20 {
-				return errResp(ErrDecode, "not an account address or its hash")
-			}
-			address := common.BytesToAddress(req.Account)
-
 			n := len(req.Prefixes)
 			response.Entries[j] = make([]storageRange, n)
 			for i := 0; i < n; i++ {
 				response.Entries[j][i].Status = NoData
 			}
 
-			tds, err := pm.blockchain.FindStateWithStorageRoot(address, req.StorageRoot)
+			var addr common.Address
+			if len(req.Account) == common.AddressLength {
+				addr.SetBytes(req.Account)
+			} else if len(req.Account) == common.HashLength {
+				addr, err = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+				if err == core.ErrNotFound {
+					missingData = true
+					break
+				} else if err != nil {
+					return err
+				}
+			} else {
+				return errResp(ErrDecode, "not an account address or its hash")
+			}
+
+			tds, err := pm.blockchain.FindStateWithStorageRoot(addr, req.StorageRoot)
 			if err == core.ErrNotFound {
 				missingData = true
 				break
@@ -800,7 +807,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 			for i := 0; i < n && responseSize < softResponseLimit; i++ {
 				var leaves []storageLeaf
-				allTraversed, err := tds.WalkStorageRange(address, req.Prefixes[i], MaxLeavesPerPrefix,
+				allTraversed, err := tds.WalkStorageRange(addr, req.Prefixes[i], MaxLeavesPerPrefix,
 					func(key common.Hash, value big.Int) {
 						leaves = append(leaves, storageLeaf{key, value})
 					},
@@ -859,23 +866,30 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			code         [][]byte
 		)
 		for responseSize < softResponseLimit && len(code) < downloader.MaxStateFetch {
-			var requested bytecodeRef
-			if err := msgStream.Decode(&requested); err == rlp.EOL {
+			var req bytecodeRef
+			if err := msgStream.Decode(&req); err == rlp.EOL {
 				break
 			} else if err != nil {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
 
-			if len(requested.Account) == 32 {
-				// TODO [yperbasis] implement
-				return errResp(ErrNotImplemented, "address hash isn't supported yet")
-			} else if len(requested.Account) != 20 {
+			var addr common.Address
+			if len(req.Account) == common.AddressLength {
+				addr.SetBytes(req.Account)
+			} else if len(req.Account) == common.HashLength {
+				addr, err = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+				if err == core.ErrNotFound {
+					code = append(code, []byte{})
+					break
+				} else if err != nil {
+					return err
+				}
+			} else {
 				return errResp(ErrDecode, "not an account address or its hash")
 			}
-			address := common.BytesToAddress(requested.Account)
 
 			// Retrieve requested byte code, stopping if enough was found
-			if entry, err := pm.blockchain.ByteCode(address); err == nil {
+			if entry, err := pm.blockchain.ByteCode(addr); err == nil {
 				code = append(code, entry)
 				responseSize += len(entry)
 			}
