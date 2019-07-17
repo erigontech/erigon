@@ -53,10 +53,10 @@ var (
 	blockExecutionTimer  = metrics.NewRegisteredTimer("chain/execution", nil)
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
-	ErrNoGenesis = errors.New("Genesis not found in chain")
+	ErrNoGenesis = errors.New("genesis not found in chain")
 
 	// ErrNotFound is returned when sought data isn't found.
-	ErrNotFound = errors.New("Data not found")
+	ErrNotFound = errors.New("data not found")
 )
 
 const (
