@@ -54,6 +54,9 @@ var (
 	blockWriteTimer      = metrics.NewRegisteredTimer("chain/write", nil)
 
 	ErrNoGenesis = errors.New("Genesis not found in chain")
+
+	// ErrNotFound is returned when sought data isn't found.
+	ErrNotFound = errors.New("Data not found")
 )
 
 const (
@@ -437,7 +440,7 @@ func (bc *BlockChain) FindStateWithStorageRoot(address common.Address, storageRo
 	for i := 0; i < blockCacheLimit; i++ {
 		block := bc.GetBlockByNumber(blockNbr)
 		if block == nil {
-			return nil, nil
+			return nil, ErrNotFound
 		}
 		_, tds, err := bc.StateAt(block.Root(), block.NumberU64())
 		if err != nil {
@@ -459,7 +462,7 @@ func (bc *BlockChain) FindStateWithStorageRoot(address common.Address, storageRo
 		}
 		blockNbr--
 	}
-	return nil, nil
+	return nil, ErrNotFound
 }
 
 // Reset purges the entire blockchain, restoring it to its genesis state.

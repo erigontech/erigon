@@ -791,13 +791,11 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			}
 
 			tds, err := pm.blockchain.FindStateWithStorageRoot(address, req.StorageRoot)
-			if err != nil {
-				return err
-			}
-
-			if tds == nil {
+			if err == core.ErrNotFound {
 				missingData = true
 				break
+			} else if err != nil {
+				return err
 			}
 
 			for i := 0; i < n && responseSize < softResponseLimit; i++ {
