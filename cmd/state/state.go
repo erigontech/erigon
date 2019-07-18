@@ -39,7 +39,6 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
-var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
@@ -1418,7 +1417,7 @@ func encodingToAccount(enc []byte) (*accounts.Account, error) {
 	if len(enc) == 1 {
 		data.Balance = new(big.Int)
 		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
+		data.Root = trie.EmptyRoot
 	} else if len(enc) < 60 {
 		var extData accounts.ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
@@ -1427,7 +1426,7 @@ func encodingToAccount(enc []byte) (*accounts.Account, error) {
 		data.Nonce = extData.Nonce
 		data.Balance = extData.Balance
 		data.CodeHash = emptyCodeHash
-		data.Root = emptyRoot
+		data.Root = trie.EmptyRoot
 	} else {
 		if err := rlp.DecodeBytes(enc, &data); err != nil {
 			return nil, err

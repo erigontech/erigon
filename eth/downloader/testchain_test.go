@@ -96,7 +96,7 @@ func (tc *testChain) shorten(length int) *testChain {
 
 func (tc *testChain) copy(newlen int) *testChain {
 	tc.cpyLock.Lock()
-	defer  tc.cpyLock.Unlock()
+	defer tc.cpyLock.Unlock()
 	cpy := &testChain{
 		genesis:  tc.genesis,
 		headerm:  make(map[common.Hash]*types.Header, newlen),
@@ -126,7 +126,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	// start := time.Now()
 	// defer func() { fmt.Printf("test chain generated in %v\n", time.Since(start)) }()
 	tc.cpyLock.Lock()
-	defer  tc.cpyLock.Unlock()
+	defer tc.cpyLock.Unlock()
 
 	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})

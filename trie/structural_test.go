@@ -375,7 +375,7 @@ func (hb *HashBuilder) rootHash() common.Hash {
 	if hb.topKey == nil {
 		if len(hb.bufferStack) == 0 {
 			if len(hb.branchStack) == 0 {
-				return emptyRoot
+				return EmptyRoot
 			}
 			h := newHasher(hb.encodeToBytes)
 			defer returnHasherToPool(h)

@@ -26,9 +26,9 @@ import (
 )
 
 var (
-	// emptyRoot is the known root hash of an empty trie.
+	// EmptyRoot is the known root hash of an empty trie.
 	// DESCRIBED: docs/programmers_guide/guide.md#root
-	emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+	EmptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 	// emptyState is the known hash of an empty state trie entry.
 	emptyState = crypto.Keccak256Hash(nil)
@@ -58,7 +58,7 @@ func New(root common.Hash, encodeToBytes bool) *Trie {
 		encodeToBytes: encodeToBytes,
 		touchFunc:     func([]byte, bool) {},
 	}
-	if (root != common.Hash{}) && root != emptyRoot {
+	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
 	}
 	return trie
@@ -870,7 +870,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 
 func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
-		return hashNode(emptyRoot.Bytes()), nil
+		return hashNode(EmptyRoot.Bytes()), nil
 	}
 	h := newHasher(t.encodeToBytes)
 	defer returnHasherToPool(h)

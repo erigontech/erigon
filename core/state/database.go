@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"golang.org/x/crypto/sha3"
 )
@@ -309,9 +310,11 @@ func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
 	storageTrie.Print(w)
 }
 
-// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix.
-func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(common.Hash, *accounts.Account)) error {
-	startkey := make([]byte, 32)
+// WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
+// for no more than maxItems.
+// Returns whether all matching accounts were traversed (provided there was no error).
+func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walker func(common.Hash, *accounts.Account)) (bool, error) {
+	startkey := make([]byte, common.HashLength)
 	copy(startkey, prefix.Data)
 
 	fixedbits := uint(len(prefix.Data)) * 8
@@ -319,18 +322,61 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, walker func(co
 		fixedbits -= 4
 	}
 
-	return tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	i := 0
+
+	err := tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			acc, err := accounts.Decode(value)
 			if err != nil {
 				return false, err
 			}
-			walker(common.BytesToHash(key), acc)
-			return true, nil
+			if acc != nil {
+				if i < maxItems {
+					walker(common.BytesToHash(key), acc)
+				}
+				i++
+			}
+			return i <= maxItems, nil
 		},
 	)
+
+	return i <= maxItems, err
 }
 
+// WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
+// for no more than maxItems.
+// Returns whether all matching storage items were traversed (provided there was no error).
+func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
+	startkey := make([]byte, common.AddressLength+common.HashLength)
+	copy(startkey, address[:])
+	copy(startkey[common.AddressLength:], prefix.Data)
+
+	fixedbits := (common.AddressLength + uint(len(prefix.Data))) * 8
+	if prefix.Odd {
+		fixedbits -= 4
+	}
+
+	i := 0
+
+	err := tds.db.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+		func(key []byte, value []byte) (bool, error) {
+			var val big.Int
+			if err := rlp.DecodeBytes(value, &val); err != nil {
+				return false, err
+			}
+
+			if i < maxItems {
+				walker(common.BytesToHash(key), val)
+			}
+			i++
+			return i <= maxItems, nil
+		},
+	)
+
+	return i <= maxItems, err
+}
+
+// Hashes are a slice of hashes.
 type Hashes []common.Hash
 
 func (hashes Hashes) Len() int {
@@ -556,10 +602,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				return nil, err
 			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				account.Root = emptyRoot
+				account.Root = trie.EmptyRoot
 			}
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				account.Root = emptyRoot
+				account.Root = trie.EmptyRoot
 			}
 			storageTrie, err := tds.getStorageTrie(address, false)
 			if err != nil {
@@ -712,7 +758,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		// Not present in the trie, try the database
 		var err error
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr)
+			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr+1)
 			if err != nil {
 				enc = nil
 			}
@@ -931,9 +977,6 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
 	return &DbStateWriter{tds: tds}
 }
-
-// DESCRIBED: docs/programmers_guide/guide.md#root
-var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
 	if a1.Nonce != a2.Nonce {
