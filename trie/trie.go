@@ -150,11 +150,11 @@ func (rr *ResolveRequest) String() string {
 	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
 }
 
-// Determines whether the trie needs to be extended (resolved) by fetching data
+// NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
-	var nd node = t.root
+	var nd = t.root
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
@@ -201,7 +201,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 }
 
 func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
-	var nd node = t.root
+	var nd = t.root
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
@@ -432,7 +432,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 }
 
 func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
-	var nd node = t.root
+	var nd = t.root
 	var parent node
 	pos := 0
 	for pos < len(hex) {

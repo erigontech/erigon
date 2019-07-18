@@ -21,6 +21,7 @@ package trie
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -392,13 +393,18 @@ func (hb *HashBuilder) rootHash() common.Hash {
 }
 func TestHashBuilding(t *testing.T) {
 	var keys []string
-	for b := uint32(0); b < 10000; b++ {
+	for b := uint32(0); b < 1000000; b++ {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
-		key := crypto.Keccak256(preimage[:])[:4]
+		key := crypto.Keccak256(preimage[:])[:8]
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
+	for i, key := range keys {
+		if i > 0 && keys[i-1] == key {
+			fmt.Printf("Duplicate!\n")
+		}
+	}
 	tr := New(common.Hash{}, false)
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
@@ -440,7 +446,7 @@ func TestHashBuilding(t *testing.T) {
 
 func TestResolution(t *testing.T) {
 	var keys []string
-	for b := uint32(0); b < 10000; b++ {
+	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
 		key := crypto.Keccak256(preimage[:])[:8]
@@ -461,7 +467,7 @@ func TestResolution(t *testing.T) {
 		rs.AddKey([]byte(keys[i]))
 	}
 	// Next, some non-exsiting keys
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
