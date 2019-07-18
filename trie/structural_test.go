@@ -428,7 +428,7 @@ func TestHashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
+			groups = step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 		hb.setKeyValue([]byte(key), value)
 	}
@@ -437,7 +437,7 @@ func TestHashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
+	groups = step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -487,7 +487,7 @@ func TestResolution(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
+			groups = step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 		hb.setKeyValue([]byte(key), value)
 	}
@@ -496,7 +496,7 @@ func TestResolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, &groups)
+	groups = step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	tr1 := New(common.Hash{}, false)
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()

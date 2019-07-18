@@ -33,7 +33,7 @@ type emitter interface {
 	hash()
 }
 
-func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups *uint64) {
+func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups uint64) uint64 {
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
 	succLen := prefixLen(succ, curr)
@@ -47,15 +47,13 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	var existed bool
 	if succLen == precLen {
 		// We don't know if this is the beginning of the new prefix group, or continuation of the existing one, so we check
-		existed = *groups&(uint64(1)<<uint(maxLen)) != 0
+		existed = groups&(uint64(1)<<uint(maxLen)) != 0
 	} else {
 		existed = precLen > succLen
 	}
 	if !existed {
-		*groups |= (uint64(1) << uint(maxLen))
+		groups |= (uint64(1) << uint(maxLen))
 	}
-	// Add the digit immediately following the max common prefix and compute length of remainder length
-	extraDigit := curr[maxLen]
 	var remainderLen int
 	if recursive || len(succ) > 0 || len(prec) > 0 {
 		remainderLen = len(curr) - maxLen - 1
@@ -71,6 +69,8 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 		e.leaf(remainderLen)
 	}
 	// Emit BRANCH or HASHER, or ADD
+	// Add the digit immediately following the max common prefix and compute length of remainder length
+	extraDigit := curr[maxLen]
 	if existed {
 		e.add(int(extraDigit))
 	} else if recursive || len(succ) > 0 || len(prec) > 0 {
@@ -82,23 +82,23 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	}
 	// Check for the optional part
 	if precLen <= succLen {
-		return
+		return groups
 	}
 	// Close the immediately encompassing prefix group, if needed
-	*groups &^= (uint64(1) << uint(63-bits.LeadingZeros64(*groups)))
+	groups &^= (uint64(1) << uint(63-bits.LeadingZeros64(groups)))
 	// Check the end of recursion
 	if precLen == 0 {
-		return
+		return groups
 	}
 	// Identify preceeding key for the recursive invocation
 	newCurr := curr[:precLen]
 	var prevLen int
-	if *groups != 0 {
-		prevLen = 63 - bits.LeadingZeros64(*groups)
+	if groups != 0 {
+		prevLen = 63 - bits.LeadingZeros64(groups)
 	}
 	newPrec := curr[:prevLen]
 	// Recursion
-	step(hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return step(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 type sortable [][]byte
