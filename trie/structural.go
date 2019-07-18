@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"math/bits"
 	"sort"
 )
 
@@ -32,38 +33,7 @@ type emitter interface {
 	hash()
 }
 
-// prefixGroups is an optimised (for allocations) storage for the mapping of prefix groups to digit sets
-type prefixGroups struct {
-	lengths []int // Lengths of the prefixes of the prefix groups
-}
-
-// lastMatches return true if given prefix equals to the last prefix group stored
-func (pg *prefixGroups) lastMatches(prefixLen int) bool {
-	if len(pg.lengths) == 0 {
-		return false
-	}
-	return prefixLen == pg.lengths[len(pg.lengths)-1]
-}
-
-// newGroup creates a new group and places it as the last
-func (pg *prefixGroups) newGroup(prefixLen int) {
-	pg.lengths = append(pg.lengths, prefixLen)
-}
-
-// deleteLast remove the last group
-func (pg *prefixGroups) deleteLast() {
-	pg.lengths = pg.lengths[:len(pg.lengths)-1]
-}
-
-// last return the last group
-func (pg *prefixGroups) lastLen() int {
-	if len(pg.lengths) == 0 {
-		return 0
-	}
-	return pg.lengths[len(pg.lengths)-1]
-}
-
-func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups *prefixGroups) {
+func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups *uint64) {
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
 	succLen := prefixLen(succ, curr)
@@ -74,16 +44,15 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 		maxLen = succLen
 	}
 	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d\n", prec, curr, succ, maxLen)
-	// Look up the prefix groups's digit set
 	var existed bool
 	if succLen == precLen {
 		// We don't know if this is the beginning of the new prefix group, or continuation of the existing one, so we check
-		existed = groups.lastMatches(maxLen)
+		existed = *groups&(uint64(1)<<uint(maxLen)) != 0
 	} else {
 		existed = precLen > succLen
 	}
 	if !existed {
-		groups.newGroup(maxLen)
+		*groups |= (uint64(1) << uint(maxLen))
 	}
 	// Add the digit immediately following the max common prefix and compute length of remainder length
 	extraDigit := curr[maxLen]
@@ -116,14 +85,18 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 		return
 	}
 	// Close the immediately encompassing prefix group, if needed
-	groups.deleteLast()
+	*groups &^= (uint64(1) << uint(63-bits.LeadingZeros64(*groups)))
 	// Check the end of recursion
 	if precLen == 0 {
 		return
 	}
 	// Identify preceeding key for the recursive invocation
 	newCurr := curr[:precLen]
-	newPrec := curr[:groups.lastLen()]
+	var prevLen int
+	if *groups != 0 {
+		prevLen = 63 - bits.LeadingZeros64(*groups)
+	}
+	newPrec := curr[:prevLen]
 	// Recursion
 	step(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }

@@ -393,7 +393,7 @@ func (hb *HashBuilder) rootHash() common.Hash {
 }
 func TestHashBuilding(t *testing.T) {
 	var keys []string
-	for b := uint32(0); b < 1000000; b++ {
+	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
 		key := crypto.Keccak256(preimage[:])[:8]
@@ -414,7 +414,7 @@ func TestHashBuilding(t *testing.T) {
 
 	hb := NewHashBuilder(false)
 	var prec, curr, succ bytes.Buffer
-	var groups prefixGroups
+	var groups uint64
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -473,7 +473,7 @@ func TestResolution(t *testing.T) {
 
 	hb := NewHashBuilder(false)
 	var prec, curr, succ bytes.Buffer
-	var groups prefixGroups
+	var groups uint64
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
