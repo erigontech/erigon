@@ -921,14 +921,16 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 var prevMemStats runtime.MemStats
 
 func (tds *TrieDbState) PruneTries(print bool) {
-	if print {
-		mainPrunable := tds.t.CountPrunableNodes()
-		prunableNodes := mainPrunable
-		for _, storageTrie := range tds.storageTries {
-			prunableNodes += storageTrie.CountPrunableNodes()
+	/*
+		if print {
+			mainPrunable := tds.t.CountPrunableNodes()
+			prunableNodes := mainPrunable
+			for _, storageTrie := range tds.storageTries {
+				prunableNodes += storageTrie.CountPrunableNodes()
+			}
+			fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
 		}
-		fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
-	}
+	*/
 	pruned, emptyAddresses, err := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen), func(contract common.Address) (*trie.Trie, error) {
 		return tds.getStorageTrie(contract, false)
 	})
@@ -938,14 +940,16 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	if !pruned {
 		//return
 	}
-	if print {
-		mainPrunable := tds.t.CountPrunableNodes()
-		prunableNodes := mainPrunable
-		for _, storageTrie := range tds.storageTries {
-			prunableNodes += storageTrie.CountPrunableNodes()
+	/*
+		if print {
+			mainPrunable := tds.t.CountPrunableNodes()
+			prunableNodes := mainPrunable
+			for _, storageTrie := range tds.storageTries {
+				prunableNodes += storageTrie.CountPrunableNodes()
+			}
+			fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
 		}
-		fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
-	}
+	*/
 	// Storage tries that were completely pruned
 	for _, address := range emptyAddresses {
 		delete(tds.storageTries, address)

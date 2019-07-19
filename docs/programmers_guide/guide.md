@@ -185,87 +185,6 @@ or feeds the hash of the popped node or its serialisation (if it is less than 32
 sponge. The operand of this opcode, digit, is used as the index of the added child node within the pending branch
 node, or is used to determine (using the counter of items) how many empty items to feed before the popped one.
 
-This is the structural information for the chunk containing leafs from `0` to `7` (inclusive), assuming that we
-would like to produce the root hash and not build the trie:
-```
-LEAF 5
-HASHER 1
-LEAF 5
-ADD 2
-HASHER 0
-LEAF 5
-HASHER 0
-LEAF 5
-ADD 2
-LEAF 5
-ADD 3
-ADD 1
-LEAF 6
-ADD 2
-LEAF 6
-ADD 3
-LEAF 5
-```
-After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
-node (or its hash) for the prefix group of leafs `0` to `6`, and the second representing one leaf node for the leaf
-`7`. It can be observed that if we did not see what the next key after the leaf `7` is, we would not know the operand
-for the last `LEAF` opcode. If the next key started with the prefix `101` instead of `103`, the last opcode could have
-been `LEAF 4` (because leafs `7` and `8` would have formed a prefix group).
-
-After hashing the first chunk, the tree would look as follows.
-![prefix_groups_5](prefix_groups_5.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
-
-If we apply the same produce to the next chunk of 8 leaves, we will get to the following picture.
-![prefix_groups_6](prefix_groups_6.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
-
-And, after hashing the two remaning chunks.
-![prefix_groups_7](prefix_groups_7.dot.gd.png)
-To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
-
-Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
-This needs an introduction on an extra opcode, which takes a hash value from the sequence (now we can have
-two sequences, one with key-value pairs, and another - with hashes), and places it on the stack
-
-6. `HASH`
-
-```
-HASH
-HASHER 0
-HASH
-HASHER 1
-HASH
-ADD 3
-HASHER 0
-HASH
-ADD 1
-HASH
-ADD 2
-HASH
-HASHER 0
-HASH
-HASHER 1
-HASH
-ADD 2
-HASHER 0
-HASH
-ADD 1
-ADD 3
-ADD 3
-ADD 1
-HASH
-HASHER 0
-HASH
-ADD 1
-HASH
-ADD 2
-ADD 3
-ADD 2
-HASH
-ADD 3
-```
-
 ### Multiproofs
 
 Encoding structural information separately from the sequences of key-value pairs and hashes allows
@@ -344,60 +263,176 @@ Analogously, the last item in any prefix group has the property that its common 
 immediately to the left is longer than its common prefix with the item immediately to the right.
 
 The algorithm proceeds in steps, one step for each key-value pair, in the lexicographic order of the keys. At each step,
-it observes three keys (sequences of digits) - current, preceeding, and suceeding. It also has access to the
-dictionary of prefix groups, which starts off empty, and gets populated with entries of the form:
-`prefix => {set of digits}`.
+it observes three keys (sequences of digits) - current, preceeding, and suceeding. It also has access to the mutable
+set of of prefix groups lengths (`lengths`), which starts off empty. This set is shared between steps.
 Algorithm's step can also be invoked recursively from another step, with current and preceeding keys specified by the
 caller.
 
 A step starts with computing the prefix of the smallest prefix group that the current key belongs to. It is either
 the common prefix of current key and the preceeding key or the common prefix of current key and the suceeding key,
 whichever is longer (if they are the same length, then they are also equal, so no ambiguity there).
-This max common prefix is looked up in the groups dictionary, to get the corresponding set of digits.
-If there no entries with such prefix, an entry with an empty set of digits is assumed.
-An extra digit will be added to the set of digits. It is the digit in the current key immediately following the max
-common prefix. The sequence of digits of the current key following that extra digit is the remainder (which could be empty).
+If the common prefix with the succeeding key is longer, then the new prefix group is being created. When the common
+prefixes with the preceeding key and the succeding key are equal, the `lengths` set is used to check whether a prefix
+group with such length has already been created. If not, it is beging created and the `lengths` set is updated to
+include the length of the prefix for this new group.
+
+The digit of the current key immediately following the max common prefix is called "extra digit".
+The sequence of digits of the current key following that extra digit is the remainder (which could be empty).
 If this step of the algorithm was invoked on a key-value pair (non-recursively), then a `LEAF`
 opcode is emitted, with the operand being the length of the remainder (zero if the remainder is empty).
 If the step of the algorithm was invoked recursively, and the remainder is not empty, an `EXTENSION` opcode
 is emitted instead, with the operand being the remainder.
 For example, for leaf `12`, the lengths of common prefix with neighbours are 1 and 3. Therefore, this key will emit the opcode
 `LEAF 4`, where 4 = 8 (original length) - 3 (max common prefix length) - 1 (one digit goes to the branch node for the prefix group).
-Following the emitting of the `LEAF`, or `EXTENSION`, or no opcode, another opcode is emitted, which corresponds to
-adding an extra digit to the digit set of the groups dictionary item. If this step has resulted in the creation of a new
-entry, then `BRANCH` or `HASHER` opcode is emitted, with the operand being the the extra digit. If this step just added
-a new digit to an existing entry, then `ADD` opcode is emitted, with the operand being the exta digit. The choice
-between emitting `BRANCH` and emitting `HASHER` depends on whether the structural information is used to produce the root hash
-or to build the trie.
+Following the emitting of the `LEAF`, or `EXTENSION`, or no opcode, another opcode is emitted. If a new prefix group is being
+created in this step, then `BRANCH` or `HASHER` opcode is emitted, with the operand being the the extra digit. Otherwise, `ADD`
+opcode is emitted, with the operand being the exta digit. The choice between emitting `BRANCH` and emitting `HASHER` depends
+on whether the structural information is used to produce the root hash or to build the trie.
 
 The following, optional, part of the step only happens if the common prefix of the current key and the preceeding key is longer or equal than
-the common prefix of the current key and the suceeding key, in other words, at least one prefix group needs to be "closed".
-Closing a prefix group means that the algorithm invokes its step recursively (unless the group that was closed was the one with the
-empty prefix, wich encompasses all the keys), using prefix of the closed group as the current key,
-and the succeeding key simply passed on. Preceeding key is found by searching (in the groups dictionary) for the smallest group
-that contains the one that was just closed. This means the longest sub-prefix of the prefix of the closed group. If no such entry
-exists int the group map, empty string is used as the preceeding key.
+the common prefix of the current key and the suceeding key, in other words, if at least one prefix group needs to be "closed".
+Closing a prefix group means removing its length from the `lengths` set, and invoking the step of the algorithm recursively
+(unless the group that was closed was the one with the empty prefix, wich encompasses all the keys). For that recursive invocation,
+the prefix of the closed group is used as the current key, and the succeeding key simply passed on. Preceeding key is found as the
+prefix of the current key of the length equal of the longest item in the `length` set (or zero, if the set is empty).
 
 We will walk through the steps of the algorithm for the leaf `30`, and then for the leaf `31`.
-For `30`, the key is `33113123`. Its max common prefix with neighbours is `3311`. The digit immediately
-following this prefix is `3`. Therefore, entry `3311 => {2}` is found in the group dictionary, and
-replaced with `3311 => {2, 3}`. Since this is a non-recursive invocation, and the remainder `123` is 3 digits long,
-opcode `LEAF 3` is emitted, followed by `ADD 3`. Optional part of the step happens, and the step gets
-invoked recursively with current key being `3311`, and preceeding key identified as `3`
-(there were no prefix group with prefix `33` or `331` yet).
+For `30`, the key is `33113123`. Its max common prefix with neighbours is `3311`. The common prefix with the preceeding key
+is longer than with the succeeding key, therefore the prefix group `3311` is being closed. The digit immediately
+following this prefix is `3`. Since this is a non-recursive invocation, and the remainder `123` is 3 digits long,
+opcode `LEAF 3` is emitted, followed by `ADD 3` (because no new prefix group is created).
+Optional part of the step happens, the length `4` is removed from the `lengths` set, and the step gets invoked recursively
+with current key being `3311`, and preceeding key identified as `3` (there were no prefix group with prefix `33` or `331` yet,
+this can be figured out by checking the `lengths` set, where the highest item is currently `1`).
 
-In the recursive step, max common prefix is `331`, therefore a new entry `331 => {1}` is created in the groups dictionary,
-resulting in emitting `HASHER 1` or `BRANCH 1`. No more recursion.
+In the recursive invocation of the step,
+max common prefix is `331`. The common prefix with the succeeding key is longer than with the
+preceeding key, therefore a new prefix group `331` is created, and the set `lengths` is modified to include length `3`.
+Emitting `HASHER 1` or `BRANCH 1`. No more recursion.
 
-For leaf `31` (key `33132002`), max common prefix is `331`, so the groups dictionary gets updated with the entry
-`331 => {1, 3}`. Opcode `LEAF 4` is emitted (4 is the length of the remainder `2002`), followed by `ADD 3`.
-Optional part of the step happens, and the step gets invoked recursively with current key being `331`, and
-preceeding key identified as `3` (there were no prefix group with prefix `33`).
+For leaf `31` (key `33132002`), max common prefix is `331`. The common prefix with the preceeding key is longer than
+with the succeeding key, therefore the prefix group `331` is being closed. The digit immediately following this
+prefix is `3`. Since this is a non-recursive invocation, opcode `LEAF 4` is emitted
+(4 is the length of the remainder `2002`), followed by `ADD 3`.
+Optional part of the step happens, item `3` is removed from the `lengths` set, and the step gets invoked recursively
+with current key being `331`, and preceeding key identified as `3` (there were no prefix group with prefix `33`).
 
-In the recursive step, max common prefix is `3`, therefore the entry in groups dictionary gets updated to
-`3 => {0, 2, 3}`. The remainder `1` is non-empty, and since this is a recursive invocation, opcode
-`EXTENSION 1` is emitted, followed by `ADD 3`. Next, the step gets invoked recursively with current
-key being `3`, and preceeding key empty.
+In the recursive step, max common prefix is `3`. The common prefix with the preceeding key is longer than with the
+succeeding key, therefore the prefix group `3` is being closed. The digit immediately following this prefix is `3`.
+The remainder `1` is non-empty, and since this is a recursive invocation, opcode
+`EXTENSION 1` is emitted, followed by `ADD 3`.
+Optional part of the step happens, item `1` is removed from the `lengths` set, and the step gets invoked recursively
+with current key being `3`, and preceeding key empty (because the only item remaining in the `lengths` set is `0`).
 
-In the deeper recursive step, max common prefix is empty, therefore the entry in groups dictionary is updated to
-` => {0, 1, 2, 3}`. Opcode `ADD 3` is emitted. Optional part of the step happens, but no recursive invocation follows.
+In the deeper recursive step, max common prefix is empty. Since the common prefix with the preceeding key equals to
+the common prefix with the succeeding key (they are both empty), the `lengths` set is checked for the item `0`.
+Opcode `ADD 3` is emitted. Optional part of the step happens, the item `0` is removed from the `lengths` set,
+but no recursive invocation follows.
+
+### Converting sequence of keys and value into a multiproof
+
+One of the biggest difference between Turbo-Geth and go-ethereum is in the way the Ethereum state is persisted in
+the database. In go-ethereum, the model for persistence is Patricia Merkle tree. In Turbo-Geth, the model for
+persistence is sequence of key-value pairs, where keys are either derived from account addresses, or from
+storage indices. In this model, computing Patricia Merkle tree from part of data is a very commonly used operation.
+This operation is called "Resolution", because it normally arises from a need to look up (resolve) some keys and corresponding
+values, and later update them, thus requiring recomputation of the Patricia Merkle tree root.
+
+We can use the concept of Multiproofs to define the resolution operation. If we have a set of key-value pairs, and we need
+to "resolve" them, we effectively need to produce a multiproof for the given set of key-value pairs.
+To produce such multiproof, we can use the algorithm for generating the strutural information from the sequence of keys.
+However, within the algorithm, choices need to be made between emitting `HASHER` and `BRANCH` opcodes. Such choices
+are conseptually simple to make - if max common prefix is also a prefix of any of the keys we are trying to resolve,
+`BRANCH` should be emitted, otherwise, `HASHER` should be emitted.
+However, in order to make these choices efficiently, the set of keys being resolved will be converted into a sorted
+list. Then, at each point when the algoritm processes a key, it maintains references to two consequitive keys from
+that sorted list - one "LTE" (Less Than or Equal to the currently processed key), and another "GT" (Greater Than the
+currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
+otherwise, `HASHER` opcode is emitted.
+
+### Separation of keys and the structure (variant 2)
+
+Opcodes shown above form the structural information were designed for minimisation of the stack space required to
+execute these opcodes. However, this design is not suitable for "chunking" the sequence of keys, and then
+constructing the root from from the sub-roots of the chunks. An alternative scheme is more appropriate for such
+use case.
+
+1. `LEAF length-of-key`
+2. `ENDBRANCH set-of-digits`
+3. `EXTENSION key`
+
+The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
+
+`LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
+`length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
+in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
+being zero, pushes the value onto the stack and discards the key.
+
+`ENDBRANCH` opcode has a set of digits as its operand. This set can be encoded as a bitset, for example. The action of
+this opcode is to pop the same
+number of items from the stack as the number of digits in the operand's set, create a branch node, and push it
+onto the stack. Sets of digits can be seen as the horizonal rectangles on the picture `prefix_groups_4`.
+The correspondence between digits in the operand's set and the items poped from the stack is as follows.
+If the special, 17th digit is not present in the set, then the top of the stack (item being popped off first)
+corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
+If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
+item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
+
+`EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
+of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
+an extension node with the key provided in the operand, and the value being the item popped from the stack, and
+push this extension node onto the stack.
+
+This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
+```
+LEAF 5
+LEAF 5
+ENDBRANCH 12
+LEAF 5
+LEAF 5
+LEAF 5
+BRANCH 023
+LEAF 6
+LEAF 6
+BRANCH 0123
+LEAF 5
+```
+After executing these opcodes against the chunk, we will have 2 items on the stack, first representing the branch
+node (or its hash) for the prefix group of leafs `0` to `6`, and the second representing one leaf node for the leaf
+`7`. It can be observed that if we did not see what the next key after the leaf `7` is, we would not know the operand
+for the last `LEAF` opcode. If the next key started with the prefix `101` instead of `103`, the last opcode could have
+been `LEAF 4` (because leafs `7` and `8` would have formed a prefix group).
+
+After hashing the first chunk, the tree would look as follows.
+![prefix_groups_5](prefix_groups_5.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_5`
+
+If we apply the same produce to the next chunk of 8 leaves, we will get to the following picture.
+![prefix_groups_6](prefix_groups_6.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
+
+And, after hashing the two remaning chunks.
+![prefix_groups_7](prefix_groups_7.dot.gd.png)
+To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
+
+Now, if we were given the sequence of these hashes, we need to combine them to produce the root hash.
+This needs an introduction on an extra opcode, which takes specified number hash from the sequence (now we can have
+two sequences, one with key-value pairs, and another - with hashes), and places them on the stack
+
+4. `HASHES number_of_hashes`
+
+```
+HASH 3
+BRANCH 13
+HASH 5
+BRANCH 12
+HASH 1
+BRANCH 01
+BRANCH 03
+BRANCH 0123
+HASH 5
+BRANCH 012
+BRANCH 013
+HASH 1
+BRANCH 0123 
+```

@@ -9,14 +9,13 @@ import (
 	"github.com/ledgerwatch/bolt"
 
 	"context"
-	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
-	"github.com/ledgerwatch/turbo-geth/consensus/misc"
+	//"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
-	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -24,16 +23,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.DB, blockNum uint64) {
-	diskDb, err := bolt.Open("statedb", 0600, &bolt.Options{})
+func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
+	diskDb, err := bolt.Open(fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum), 0600, &bolt.Options{})
 	check(err)
 	defer diskDb.Close()
 	var startKey [32]byte
-	tx, err := db.Begin(true)
-	check(err)
 	txDisk, err := diskDb.Begin(true)
-	check(err)
-	b, err := tx.CreateBucket(state.AccountsBucket, true)
 	check(err)
 	bDisk, err := txDisk.CreateBucket(state.AccountsBucket, true)
 	check(err)
@@ -43,48 +38,31 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 			if len(value) == 0 {
 				return true, nil
 			}
-			if err := b.Put(key, value); err != nil {
-				return false, err
-			}
-			if err := bDisk.Put(key, value); err != nil {
+			if err = bDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
 				return false, err
 			}
 			count++
 			if count%1000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return false, err
-				}
 				if err := txDisk.Commit(); err != nil {
 					return false, err
 				}
 				fmt.Printf("Committed %d records\n", count)
 				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return false, err
-				}
 				txDisk, err = diskDb.Begin(true)
 				if err != nil {
 					return false, err
 				}
-				b = tx.Bucket(state.AccountsBucket)
 				bDisk = txDisk.Bucket(state.AccountsBucket)
 			}
 			return true, nil
 		},
 	)
 	check(err)
-	err = tx.Commit()
-	check(err)
 	err = txDisk.Commit()
-	check(err)
-	tx, err = db.Begin(true)
 	check(err)
 	txDisk, err = diskDb.Begin(true)
 	check(err)
-	b = tx.Bucket(state.AccountsBucket)
-	sb, err := tx.CreateBucket(state.StorageBucket, true)
-	check(err)
+	b := txDisk.Bucket(state.AccountsBucket)
 	sbDisk, err := txDisk.CreateBucket(state.StorageBucket, true)
 	check(err)
 	count = 0
@@ -106,39 +84,26 @@ func construct_snapshot(ethDb ethdb.Database, stateDb ethdb.Database, db *bolt.D
 				v, _ := b.Get(crypto.Keccak256(address[:]))
 				exist[address] = v != nil
 			}
-			if err := sb.Put(key, value); err != nil {
-				return false, err
-			}
-			if err := sbDisk.Put(key, value); err != nil {
+			if err = sbDisk.Put(common.CopyBytes(key), common.CopyBytes(value)); err != nil {
 				return false, err
 			}
 			count++
 			if count%1000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return false, err
-				}
 				if err := txDisk.Commit(); err != nil {
 					return false, err
 				}
 				fmt.Printf("Committed %d records\n", count)
 				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return false, err
-				}
 				txDisk, err = diskDb.Begin(true)
 				if err != nil {
 					return false, err
 				}
-				b = tx.Bucket(state.AccountsBucket)
-				sb = tx.Bucket(state.StorageBucket)
+				b = txDisk.Bucket(state.AccountsBucket)
 				sbDisk = txDisk.Bucket(state.StorageBucket)
 			}
 			return true, nil
 		},
 	)
-	check(err)
-	err = tx.Commit()
 	check(err)
 	err = txDisk.Commit()
 	check(err)
@@ -202,7 +167,6 @@ func load_snapshot(db *bolt.DB, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
 	check(err)
-	defer diskDb.Close()
 	tx, err := db.Begin(true)
 	check(err)
 	b, err := tx.CreateBucket(state.AccountsBucket, true)
@@ -258,6 +222,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 	check(err)
 	err = tx.Commit()
 	check(err)
+	diskDb.Close()
 }
 
 func load_codes(db *bolt.DB, codeDb ethdb.Database) {
@@ -382,8 +347,8 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 				if enc, _ := b.Get(crypto.Keccak256(address[:])); enc == nil {
 					roots[address] = common.Hash{}
 				} else {
-					account, err := encodingToAccount(enc)
-					if err != nil {
+					var account accounts.Account
+					if err = account.Decode(enc); err != nil {
 						return err
 					}
 					roots[address] = account.Root
@@ -411,12 +376,12 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
-func state_snapshot() {
+func stateSnapshot() {
 	startTime := time.Now()
 	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
 	defer ethDb.Close()
 	stateDb, db := ethdb.NewMemDatabase2()
@@ -425,7 +390,7 @@ func state_snapshot() {
 		load_snapshot(db, "statedb0")
 		load_codes(db, ethDb)
 	} else {
-		construct_snapshot(ethDb, stateDb, db, blockNum)
+		constructSnapshot(ethDb, blockNum)
 	}
 	fmt.Printf("Snapshot took %v\n", time.Since(startTime))
 	startTime = time.Now()
@@ -434,78 +399,19 @@ func state_snapshot() {
 	block := bc.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
-	check_roots(stateDb, db, block.Root(), blockNum)
-	nextBlock := bc.GetBlockByNumber(blockNum + 1)
-	fmt.Printf("Next Block number: %d\n", blockNum+1)
-	fmt.Printf("Next Block root hash: %x\n", nextBlock.Root())
-
-	chainConfig := params.MainnetChainConfig
-	vmConfig := vm.Config{}
-	engine := ethash.NewFullFaker()
-	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum))), block.Root(), batch, blockNum)
-	check(err)
-	tds.SetNoHistory(true)
-	statedb := state.New(tds)
-	fmt.Printf("Gas limit: %d\n", nextBlock.GasLimit())
-	gp := new(core.GasPool).AddGas(nextBlock.GasLimit())
-	usedGas := new(uint64)
-	nextHeader := nextBlock.Header()
-	var receipts types.Receipts
-	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(nextBlock.Number()) == 0 {
-		misc.ApplyDAOHardFork(statedb)
-	}
-	tds.StartNewBuffer()
-	for i, tx := range nextBlock.Transactions() {
-		statedb.Prepare(tx.Hash(), nextBlock.Hash(), i)
-		receipt, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, tds.TrieStateWriter(), nextHeader, tx, usedGas, vmConfig)
-		if err != nil {
-			panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
-		}
-		if !chainConfig.IsByzantium(nextHeader.Number) {
-			tds.StartNewBuffer()
-		}
-		receipts = append(receipts, receipt)
-	}
-	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.Finalize(chainConfig, nextHeader, statedb, nextBlock.Transactions(), nextBlock.Uncles(), receipts); err != nil {
-		panic(fmt.Errorf("finalize of block %d failed: %v", blockNum+1, err))
-	}
-
-	ctx := chainConfig.WithEIPsFlags(context.Background(), nextHeader.Number)
-	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		panic(fmt.Errorf("finalizeTx of block %d failed: %v", blockNum+1, err))
-	}
-
-	roots, err := tds.ComputeTrieRoots(ctx)
-	if err != nil {
-		panic(err)
-	}
-	for i, receipt := range receipts {
-		receipt.PostState = roots[i].Bytes()
-	}
-	fmt.Printf("Next root %x\n", roots[len(roots)-1])
-
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		panic(fmt.Errorf("Commiting block %d failed: %v", blockNum+1, err))
-	}
-	if _, err := batch.Commit(); err != nil {
-		panic(err)
-	}
-	check_roots(stateDb, db, nextBlock.Root(), blockNum+1)
-	//compare_snapshot(stateDb, db, "statedb1")
+	check_roots(ethDb, ethDb.DB(), block.Root(), blockNum)
 }
 
 func verify_snapshot() {
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	blockNum := uint64(*block)
+	ethDb, err := ethdb.NewBoltDatabase(fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
+	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	engine := ethash.NewFullFaker()
 	chainConfig := params.MainnetChainConfig
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	blockNum := uint64(*block)
 	block := bcb.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
@@ -513,5 +419,5 @@ func verify_snapshot() {
 	stateDb, db := ethdb.NewMemDatabase2()
 	defer stateDb.Close()
 	load_snapshot(db, fmt.Sprintf("state_%d", blockNum))
-	check_roots(stateDb, db, preRoot, blockNum)
+	check_roots(ethDb, db, preRoot, blockNum)
 }

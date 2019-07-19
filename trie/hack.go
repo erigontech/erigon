@@ -78,13 +78,11 @@ func hashRoot(n node, title string) {
 	defer returnHasherToPool(h)
 	defer returnHasherToPool(h1)
 	var hash common.Hash
-	n.makedirty()
 	hLen := h.hash(n, true, hash[:])
 	if hLen < 32 {
 		panic("expected hashNode")
 	}
 	fmt.Printf("%s noencode: %x\n", title, hash[:])
-	n.makedirty()
 	hLen = h1.hash(n, true, hash[:])
 	if hLen < 32 {
 		panic("expected hashNode")

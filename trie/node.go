@@ -30,7 +30,6 @@ type node interface {
 	fstring(string) string
 	dirty() bool
 	hash() []byte
-	makedirty()
 }
 
 type (
@@ -50,7 +49,6 @@ type (
 	shortNode struct {
 		Key   []byte
 		Val   node
-		flags nodeFlag
 	}
 	hashNode  []byte
 	valueNode []byte
@@ -260,33 +258,13 @@ func (n hashNode) dirty() bool   { return false }
 func (n valueNode) dirty() bool  { return true }
 func (n *fullNode) dirty() bool  { return n.flags.dirty }
 func (n *duoNode) dirty() bool   { return n.flags.dirty }
-func (n *shortNode) dirty() bool { return n.flags.dirty }
-
-func (n hashNode) makedirty()  {}
-func (n valueNode) makedirty() {}
-func (n *fullNode) makedirty() {
-	n.flags.dirty = true
-	for _, child := range n.Children {
-		if child != nil {
-			child.makedirty()
-		}
-	}
-}
-func (n *duoNode) makedirty() {
-	n.flags.dirty = true
-	n.child1.makedirty()
-	n.child2.makedirty()
-}
-func (n *shortNode) makedirty() {
-	n.flags.dirty = true
-	n.Val.makedirty()
-}
+func (n *shortNode) dirty() bool { return true }
 
 func (n hashNode) hash() []byte   { return n }
 func (n valueNode) hash() []byte  { return nil }
 func (n *fullNode) hash() []byte  { return n.flags.hash[:] }
 func (n *duoNode) hash() []byte   { return n.flags.hash[:] }
-func (n *shortNode) hash() []byte { return n.flags.hash[:] }
+func (n *shortNode) hash() []byte { return nil }
 
 // Pretty printing.
 func (n fullNode) String() string  { return n.fstring("") }
