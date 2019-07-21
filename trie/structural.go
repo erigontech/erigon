@@ -177,15 +177,15 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
-	hexKey, value bytes.Buffer // Next key-value pair to consume
-	bufferStack   []*bytes.Buffer
-	digitStack    []int
-	branchStack   []*fullNode
-	topKey        []byte
-	topValue      []byte
-	topHash       common.Hash
-	topBranch     *fullNode
-	sha           keccakState
+	hexKey      bytes.Buffer // Next key-value pair to consume
+	bufferStack []*bytes.Buffer
+	digitStack  []int
+	branchStack []*fullNode
+	topKey      []byte
+	topValue    []byte
+	topHash     common.Hash
+	topBranch   *fullNode
+	sha         keccakState
 }
 
 // NewHashBuilder creates new HashBuilder
@@ -197,7 +197,6 @@ func NewHashBuilder() *HashBuilder {
 
 func (hb *HashBuilder) Reset() {
 	hb.hexKey.Reset()
-	hb.value.Reset()
 	hb.digitStack = hb.digitStack[:0]
 	hb.branchStack = hb.branchStack[:0]
 	hb.topKey = nil
@@ -221,8 +220,7 @@ func (hb *HashBuilder) setKeyValue(skip int, key, value []byte) {
 		i++
 	}
 	hb.hexKey.WriteByte(16)
-	hb.value.Reset()
-	hb.value.Write(value)
+	hb.topValue = value
 }
 
 func (hb *HashBuilder) branch(digit int) {
@@ -433,7 +431,6 @@ func (hb *HashBuilder) leaf(length int) {
 	hex := hb.hexKey.Bytes()
 	//fmt.Printf("LEAF %d, hex: %d\n", length, len(hex))
 	hb.topKey = hex[len(hex)-length:]
-	hb.topValue = hb.value.Bytes()
 	hb.topBranch = nil
 }
 

@@ -42,8 +42,6 @@ var (
 type Trie struct {
 	root node
 
-	encodeToBytes bool
-
 	touchFunc func(hex []byte, del bool)
 }
 
@@ -53,10 +51,9 @@ type Trie struct {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-func New(root common.Hash, encodeToBytes bool) *Trie {
+func New(root common.Hash) *Trie {
 	trie := &Trie{
-		encodeToBytes: encodeToBytes,
-		touchFunc:     func([]byte, bool) {},
+		touchFunc: func([]byte, bool) {},
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -872,7 +869,7 @@ func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])

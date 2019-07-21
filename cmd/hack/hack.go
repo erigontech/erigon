@@ -747,7 +747,7 @@ func testStartup() {
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	t := trie.New(common.Hash{}, false)
+	t := trie.New(common.Hash{})
 	r := trie.NewResolver(context.Background(), false, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
@@ -779,7 +779,7 @@ func testResolve() {
 	r := trie.NewResolver(context.Background(), false, true, 806548)
 	key := common.FromHex("0x050a08070e090006010a05090c02050d050e0b0a06010a00060d060b03020f0a0203040c00090d0f050d020b080f020307010803050a0e0b00010b0a090b030a10")
 	resolveHash := common.FromHex("0xda5f3503cf2b72df779991a3862551da2a5aac66b59cd463eb03da0a47864350")
-	t := trie.New(common.BytesToHash(resolveHash), false)
+	t := trie.New(common.BytesToHash(resolveHash))
 	req := t.NewResolveRequest(nil, key, 0, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, 806548)
@@ -953,21 +953,21 @@ func upgradeBlocks() {
 	check(ethDb.DeleteBucket([]byte("r")))
 }
 
-func readTrie(filename string, encodeToBytes bool) *trie.Trie {
+func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)
 	defer f.Close()
-	t, err := trie.Load(f, encodeToBytes)
+	t, err := trie.Load(f)
 	check(err)
 	return t
 }
 
-func invTree(wrong, right, diff string, name string, encodeToBytes bool) {
+func invTree(wrong, right, diff string, name string) {
 	fmt.Printf("Reading trie...\n")
-	t1 := readTrie(fmt.Sprintf("%s_%s.txt", wrong, name), encodeToBytes)
+	t1 := readTrie(fmt.Sprintf("%s_%s.txt", wrong, name))
 	fmt.Printf("Root hash: %x\n", t1.Hash())
 	fmt.Printf("Reading trie 2...\n")
-	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name), encodeToBytes)
+	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name))
 	fmt.Printf("Root hash: %x\n", t2.Hash())
 	c, err := os.Create(fmt.Sprintf("%s_%s.txt", diff, name))
 	check(err)
@@ -1030,7 +1030,7 @@ func loadAccount() {
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
-	t := trie.New(common.Hash{}, true)
+	t := trie.New(common.Hash{})
 	count := 0
 	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
@@ -1322,7 +1322,7 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	invTree("tries/root", "tries/right", "tries/diff", *name, false)
+	invTree("tries/root", "tries/right", "tries/diff", *name)
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	preimage()

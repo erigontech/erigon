@@ -43,7 +43,7 @@ func TestHashBuilding(t *testing.T) {
 			fmt.Printf("Duplicate!\n")
 		}
 	}
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	valueLong := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	valueShort := []byte("VAL")
 	for i, key := range keys {
@@ -100,7 +100,7 @@ func TestResolution(t *testing.T) {
 		keys = append(keys, string(key))
 	}
 	sort.Strings(keys)
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
 		tr.Update([]byte(key), valueNode(value), 0)
@@ -144,7 +144,7 @@ func TestResolution(t *testing.T) {
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
-	tr1 := New(common.Hash{}, false)
+	tr1 := New(common.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {

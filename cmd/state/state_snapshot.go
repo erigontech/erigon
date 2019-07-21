@@ -12,6 +12,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+
 	//"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -324,7 +325,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
-	t := trie.New(rootHash, false)
+	t := trie.New(rootHash)
 	r := trie.NewResolver(context.TODO(), false, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -362,7 +363,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	}
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != trie.EmptyRoot {
-			st := trie.New(root, true)
+			st := trie.New(root)
 			sr := trie.NewResolver(context.TODO(), false, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])

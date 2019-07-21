@@ -218,7 +218,7 @@ func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, bl
 	if err != nil {
 		return nil, err
 	}
-	t := trie.New(root, false)
+	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
 	tds := TrieDbState{
@@ -812,9 +812,9 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 			return nil, err
 		}
 		if account == nil {
-			t = trie.New(common.Hash{}, false)
+			t = trie.New(common.Hash{})
 		} else {
-			t = trie.New(account.Root, false)
+			t = trie.New(account.Root)
 		}
 		t.SetTouchFunc(func(hex []byte, del bool) {
 			tds.tp.TouchContract(address, hex, del)

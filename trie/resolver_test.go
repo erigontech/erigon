@@ -18,7 +18,7 @@ func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := []byte("AT")
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 
 	keys := []string{
 		"FIRSTFIRSTFIRSTFIRSTFIRSTFIRSTFI",
@@ -51,7 +51,7 @@ func testRebuild(t *testing.T) {
 			t.Errorf("Could not encode value: %v", err)
 		}
 		db.Put(bucket, key, v1)
-		t1 := New(common.BytesToHash(root1), false)
+		t1 := New(common.BytesToHash(root1))
 		_ = t1.Rebuild(context.Background(), db, 0)
 	}
 }
@@ -59,7 +59,7 @@ func testRebuild(t *testing.T) {
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
@@ -79,7 +79,7 @@ func TestResolve1(t *testing.T) {
 
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
@@ -102,7 +102,7 @@ func TestResolve2(t *testing.T) {
 
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
@@ -125,7 +125,7 @@ func TestResolve2Keep(t *testing.T) {
 
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
@@ -151,7 +151,7 @@ func TestResolve3Keep(t *testing.T) {
 
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
