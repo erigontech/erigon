@@ -390,13 +390,6 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		// Remember the current key and value
 		if tr.accounts {
-			copy(tr.key_array[:], k[:32])
-			tr.key = tr.key_array[:32]
-		} else {
-			copy(tr.key_array[:], k[:52])
-			tr.key = tr.key_array[:52]
-		}
-		if tr.accounts {
 			account, err := accounts.Decode(v)
 			if err != nil {
 				return false, err
