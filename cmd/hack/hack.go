@@ -41,6 +41,7 @@ var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
+var name = flag.String("name", "", "name to add to the file names")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -961,14 +962,14 @@ func readTrie(filename string, encodeToBytes bool) *trie.Trie {
 	return t
 }
 
-func invTree(wrong, right, diff string, block int, encodeToBytes bool) {
+func invTree(wrong, right, diff string, name string, encodeToBytes bool) {
 	fmt.Printf("Reading trie...\n")
-	t1 := readTrie(fmt.Sprintf("%s_%d.txt", wrong, block), encodeToBytes)
+	t1 := readTrie(fmt.Sprintf("%s_%s.txt", wrong, name), encodeToBytes)
 	fmt.Printf("Root hash: %x\n", t1.Hash())
 	fmt.Printf("Reading trie 2...\n")
-	t2 := readTrie(fmt.Sprintf("%s_%d.txt", right, block), encodeToBytes)
+	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name), encodeToBytes)
 	fmt.Printf("Root hash: %x\n", t2.Hash())
-	c, err := os.Create(fmt.Sprintf("%s_%d.txt", diff, block))
+	c, err := os.Create(fmt.Sprintf("%s_%s.txt", diff, name))
 	check(err)
 	defer c.Close()
 	t1.PrintDiff(t2, c)
@@ -1321,7 +1322,7 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	//invTree("root", "right", "diff", *block, false)
+	invTree("tries/root", "tries/right", "tries/diff", *name, false)
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	preimage()
