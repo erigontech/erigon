@@ -812,9 +812,9 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 			return nil, err
 		}
 		if account == nil {
-			t = trie.New(common.Hash{}, true)
+			t = trie.New(common.Hash{}, false)
 		} else {
-			t = trie.New(account.Root, true)
+			t = trie.New(account.Root, false)
 		}
 		t.SetTouchFunc(func(hex []byte, del bool) {
 			tds.tp.TouchContract(address, hex, del)
@@ -852,7 +852,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 		}
 	}
 	enc, ok := t.Get(seckey[:], tds.blockNr)
-	if !ok {
+	if ok {
+		// Unwrap one RLP level
+		if len(enc) > 1 {
+			enc = enc[1:]
+		}
+	} else {
 		// Not present in the trie, try database
 		cKey := make([]byte, len(address)+len(seckey))
 		copy(cKey, address[:])
@@ -1106,7 +1111,17 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 		return err
 	}
 	if len(v) > 0 {
-		m[seckey] = common.CopyBytes(v)
+		// Write into 1 extra RLP level
+		var vv []byte
+		if len(v) > 1 || v[0] >= 128 {
+			vv = make([]byte, len(v)+1)
+			vv[0] = byte(128 + len(v))
+			copy(vv[1:], v)
+		} else {
+			vv = make([]byte, 1)
+			vv[0] = v[0]
+		}
+		m[seckey] = vv
 	} else {
 		m[seckey] = nil
 	}

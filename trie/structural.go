@@ -27,6 +27,7 @@ import (
 
 // Experimental code for separating data and structural information
 
+// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type emitter interface {
 	branch(digit int)
 	hasher(digit int)
@@ -36,6 +37,8 @@ type emitter interface {
 	hash()
 }
 
+// step of the algoritm that converts sequence of keys into structural information
+// DESCRIBED: docs/programmers_guide/guide.md#generating-the-structural-information-from-the-sequence-of-keys
 func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups uint64) uint64 {
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
@@ -119,6 +122,7 @@ func (s sortable) Swap(i, j int) {
 // ResolveSet encapsulates the set of keys that are required to be fully available, or resolved
 // (by using `BRANCH` opcode instead of `HASHER`) after processing of the sequence of key-value
 // pairs
+// DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
 type ResolveSet struct {
 	hexes    sortable
 	inited   bool // Whether keys are sorted and "LTE" and "GT" indices set
@@ -169,6 +173,9 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 	return true
 }
 
+// HashBuilder impements the interface `emitter` and opcodes that the structural information of the trie
+// is comprised of
+// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
 	hexKey, value bytes.Buffer // Next key-value pair to consume
 	bufferStack   []*bytes.Buffer
@@ -179,13 +186,12 @@ type HashBuilder struct {
 	topHash       common.Hash
 	topBranch     *fullNode
 	sha           keccakState
-	encodeToBytes bool
 }
 
-func NewHashBuilder(encodeToBytes bool) *HashBuilder {
+// NewHashBuilder creates new HashBuilder
+func NewHashBuilder() *HashBuilder {
 	return &HashBuilder{
-		sha:           sha3.NewLegacyKeccak256().(keccakState),
-		encodeToBytes: encodeToBytes,
+		sha: sha3.NewLegacyKeccak256().(keccakState),
 	}
 }
 
@@ -301,12 +307,7 @@ func (hb *HashBuilder) addLeafToHasher(buffer *bytes.Buffer) error {
 	var v []byte
 	if hb.topValue != nil {
 		if len(hb.topValue) > 1 || hb.topValue[0] >= 128 {
-			if hb.encodeToBytes {
-				// Wrapping into another byte array
-				vp = generateByteArrayLenDouble(valPrefix[:], 0, len(hb.topValue))
-			} else {
-				vp = generateByteArrayLen(valPrefix[:], 0, len(hb.topValue))
-			}
+			vp = generateByteArrayLen(valPrefix[:], 0, len(hb.topValue))
 			vl = len(hb.topValue)
 		} else {
 			vl = 1
@@ -533,7 +534,7 @@ func (hb *HashBuilder) rootHash() common.Hash {
 			if len(hb.branchStack) == 0 {
 				return EmptyRoot
 			}
-			h := newHasher(hb.encodeToBytes)
+			h := newHasher(false)
 			defer returnHasherToPool(h)
 			h.hash(hb.branchStack[len(hb.branchStack)-1], true, hn[:])
 		} else {
@@ -541,7 +542,7 @@ func (hb *HashBuilder) rootHash() common.Hash {
 			return hn
 		}
 	} else {
-		h := newHasher(hb.encodeToBytes)
+		h := newHasher(false)
 		defer returnHasherToPool(h)
 		h.hash(hb.shortNode(), true, hn[:])
 	}

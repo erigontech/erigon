@@ -55,7 +55,7 @@ func TestHashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder(false)
+	hb := NewHashBuilder()
 	var prec, curr, succ bytes.Buffer
 	var groups uint64
 	for i, key := range keys {
@@ -118,7 +118,7 @@ func TestResolution(t *testing.T) {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
-	hb := NewHashBuilder(false)
+	hb := NewHashBuilder()
 	var prec, curr, succ bytes.Buffer
 	var groups uint64
 	for _, key := range keys {

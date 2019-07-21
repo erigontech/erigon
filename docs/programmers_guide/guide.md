@@ -185,6 +185,8 @@ or feeds the hash of the popped node or its serialisation (if it is less than 32
 sponge. The operand of this opcode, digit, is used as the index of the added child node within the pending branch
 node, or is used to determine (using the counter of items) how many empty items to feed before the popped one.
 
+These opcodes are implemented by the type `HashBuilder` (implements the interface `emitter`) in [trie/structural.go](../../trie/structural.go)
+
 ### Multiproofs
 
 Encoding structural information separately from the sequences of key-value pairs and hashes allows
@@ -329,6 +331,8 @@ the common prefix with the succeeding key (they are both empty), the `lengths` s
 Opcode `ADD 3` is emitted. Optional part of the step happens, the item `0` is removed from the `lengths` set,
 but no recursive invocation follows.
 
+The step of this algorithm is implemented by the function `step` in [trie/structural.go](../../trie/structural.go).
+
 ### Converting sequence of keys and value into a multiproof
 
 One of the biggest difference between Turbo-Geth and go-ethereum is in the way the Ethereum state is persisted in
@@ -348,7 +352,7 @@ However, in order to make these choices efficiently, the set of keys being resol
 list. Then, at each point when the algoritm processes a key, it maintains references to two consequitive keys from
 that sorted list - one "LTE" (Less Than or Equal to the currently processed key), and another "GT" (Greater Than the
 currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
-otherwise, `HASHER` opcode is emitted.
+otherwise, `HASHER` opcode is emitted. This is implemented by the type `ResolveSet` in [trie/structural.go](../../trie/structural.go)
 
 ### Separation of keys and the structure (variant 2)
 

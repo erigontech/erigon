@@ -67,7 +67,7 @@ func TestResolve1(t *testing.T) {
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
-		resolveHash: hashNode(common.HexToHash("bfb355c9a7c26a9c173a9c30e1fb2895fd9908726a8d3dd097203b207d852cf5").Bytes()),
+		resolveHash: hashNode(common.HexToHash("6556dfaac213851c044228962a8dc179125d81e496805ef0f4b891e9109135e2").Bytes()),
 	}
 	r := NewResolver(context.Background(), false, false, 0)
 	r.AddRequest(req)
@@ -90,7 +90,7 @@ func TestResolve2(t *testing.T) {
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
-		resolveHash: hashNode(common.HexToHash("84e743de8f2e0cae5bb148b1a90459cb6c8643bdfd154bbd6782746e4dda5657").Bytes()),
+		resolveHash: hashNode(common.HexToHash("002aa06ac2d513074996011586fe840be50432a8ea3f8b7938c20394ec9ee3cf").Bytes()),
 	}
 	r := NewResolver(context.Background(), false, false, 0)
 	r.AddRequest(req)
@@ -113,7 +113,7 @@ func TestResolve2Keep(t *testing.T) {
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
-		resolveHash: hashNode(common.HexToHash("84e743de8f2e0cae5bb148b1a90459cb6c8643bdfd154bbd6782746e4dda5657").Bytes()),
+		resolveHash: hashNode(common.HexToHash("002aa06ac2d513074996011586fe840be50432a8ea3f8b7938c20394ec9ee3cf").Bytes()),
 	}
 	r := NewResolver(context.Background(), false, false, 0)
 	r.AddRequest(req)
@@ -139,7 +139,7 @@ func TestResolve3Keep(t *testing.T) {
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
-		resolveHash: hashNode(common.HexToHash("a9ac90d195f552b28a38097388523c463c36537decdc2c10b3eb0984db30fd0b").Bytes()),
+		resolveHash: hashNode(common.HexToHash("99f344aa0aea9a539dfac2f6404fd4506e0b274eac7aee7b6ed61eba73f98282").Bytes()),
 	}
 	r := NewResolver(context.Background(), false, false, 0)
 	r.AddRequest(req)
@@ -178,19 +178,19 @@ func TestTrieResolver(t *testing.T) {
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
-		resolveHash: hashNode(common.HexToHash("84e743de8f2e0cae5bb148b1a90459cb6c8643bdfd154bbd6782746e4dda5657").Bytes()),
+		resolveHash: hashNode(common.HexToHash("002aa06ac2d513074996011586fe840be50432a8ea3f8b7938c20394ec9ee3cf").Bytes()),
 	}
 	req2 := &ResolveRequest{
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 2 bytes is 4 nibbles
-		resolveHash: hashNode(common.HexToHash("294cc6f7e68d82fbdfdabb59bca6e7970a84ad8cfd8e4a3182daedb0373b6004").Bytes()),
+		resolveHash: hashNode(common.HexToHash("dc2332366fcf65ad75d09901e199e3dd52a5389ad85ff1d853803c5f40cbde56").Bytes()),
 	}
 	req3 := &ResolveRequest{
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 3 bytes is 6 nibbles
-		resolveHash: hashNode(common.HexToHash("294cc6f7e68d82fbdfdabb59bca6e7970a84ad8cfd8e4a3182daedb0373b6004").Bytes()),
+		resolveHash: hashNode(common.HexToHash("dc2332366fcf65ad75d09901e199e3dd52a5389ad85ff1d853803c5f40cbde56").Bytes()),
 	}
 	resolver := NewResolver(context.Background(), false, false, 0)
 	resolver.AddRequest(req3)

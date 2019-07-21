@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -56,7 +55,6 @@ type TrieResolver struct {
 	reqIndices []int // Indices pointing back to request slice from slices retured by PrepareResolveParams
 	keyIdx     int
 	currentReq *ResolveRequest // Request currently being handled
-	h          *hasher
 	historical bool
 	blockNr    uint64
 	ctx        context.Context
@@ -76,7 +74,7 @@ func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64
 		reqIndices: []int{},
 		blockNr:    blockNr,
 		ctx:        ctx,
-		hb:         NewHashBuilder(!accounts),
+		hb:         NewHashBuilder(),
 	}
 	return &tr
 }
@@ -225,15 +223,22 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			}
 			tr.hb.setKeyValue(skip, k, value)
 		} else {
-			tr.hb.setKeyValue(skip, k, common.CopyBytes(v))
+			var vv []byte
+			if len(v) > 1 || v[0] >= 128 {
+				vv = make([]byte, len(v)+1)
+				vv[0] = byte(128 + len(v))
+				copy(vv[1:], v)
+			} else {
+				vv = make([]byte, 1)
+				vv[0] = v[0]
+			}
+			tr.hb.setKeyValue(skip, k, vv)
 		}
 	}
 	return true, nil
 }
 
 func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
-	tr.h = newHasher(!tr.accounts)
-	defer returnHasherToPool(tr.h)
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	var err error
 	if db == nil {
