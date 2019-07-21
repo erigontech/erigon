@@ -371,10 +371,9 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.curr.Reset()
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
-		keyBytes := []byte(k)
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 		i := 0
-		for _, b := range keyBytes {
+		for _, b := range k {
 			if i >= skip {
 				tr.succ.WriteByte(b / 16)
 			}
