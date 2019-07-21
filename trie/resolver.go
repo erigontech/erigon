@@ -183,7 +183,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			panic("")
 		}
 		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
-		tr.hb = NewHashBuilder(!tr.accounts)
+		tr.hb.Reset()
 		tr.groups = 0
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[tr.keyIdx]]

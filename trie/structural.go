@@ -189,6 +189,16 @@ func NewHashBuilder(encodeToBytes bool) *HashBuilder {
 	}
 }
 
+func (hb *HashBuilder) Reset() {
+	hb.hexKey.Reset()
+	hb.value.Reset()
+	hb.digitStack = hb.digitStack[:0]
+	hb.branchStack = hb.branchStack[:0]
+	hb.topKey = nil
+	hb.topValue = nil
+	hb.topBranch = nil
+}
+
 // key is original key (not transformed into hex or compacted)
 func (hb *HashBuilder) setKeyValue(skip int, key, value []byte) {
 	// Transform key into hex representation
