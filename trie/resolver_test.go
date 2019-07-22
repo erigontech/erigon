@@ -69,7 +69,7 @@ func TestResolve1(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("6556dfaac213851c044228962a8dc179125d81e496805ef0f4b891e9109135e2").Bytes()),
 	}
-	r := NewResolver(context.Background(), false, false, 0)
+	r := NewResolver(context.Background(), 0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -92,7 +92,7 @@ func TestResolve2(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("002aa06ac2d513074996011586fe840be50432a8ea3f8b7938c20394ec9ee3cf").Bytes()),
 	}
-	r := NewResolver(context.Background(), false, false, 0)
+	r := NewResolver(context.Background(), 0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -115,7 +115,7 @@ func TestResolve2Keep(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("002aa06ac2d513074996011586fe840be50432a8ea3f8b7938c20394ec9ee3cf").Bytes()),
 	}
-	r := NewResolver(context.Background(), false, false, 0)
+	r := NewResolver(context.Background(), 0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -141,7 +141,7 @@ func TestResolve3Keep(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("99f344aa0aea9a539dfac2f6404fd4506e0b274eac7aee7b6ed61eba73f98282").Bytes()),
 	}
-	r := NewResolver(context.Background(), false, false, 0)
+	r := NewResolver(context.Background(), 0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -192,7 +192,7 @@ func TestTrieResolver(t *testing.T) {
 		resolvePos:  2, // 3 bytes is 6 nibbles
 		resolveHash: hashNode(common.HexToHash("dc2332366fcf65ad75d09901e199e3dd52a5389ad85ff1d853803c5f40cbde56").Bytes()),
 	}
-	resolver := NewResolver(context.Background(), false, false, 0)
+	resolver := NewResolver(context.Background(), 0, false, 0)
 	resolver.AddRequest(req3)
 	resolver.AddRequest(req2)
 	resolver.AddRequest(req1)

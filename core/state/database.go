@@ -443,7 +443,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.ctx, false, false, tds.blockNr)
+					resolver = trie.NewResolver(tds.ctx, 0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -504,7 +504,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(tds.ctx, false, true, tds.blockNr)
+				resolver = trie.NewResolver(tds.ctx, 0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)

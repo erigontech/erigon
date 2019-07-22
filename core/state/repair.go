@@ -264,7 +264,7 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(ctx, false, false, rds.blockNr)
+					resolver = trie.NewResolver(ctx, 0, false, rds.blockNr)
 				}
 				resolver.AddRequest(req)
 			}

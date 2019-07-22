@@ -326,7 +326,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
-	r := trie.NewResolver(context.TODO(), false, true, blockNum)
+	r := trie.NewResolver(context.TODO(), 0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -364,17 +364,24 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != trie.EmptyRoot {
 			st := trie.New(root)
-			sr := trie.NewResolver(context.TODO(), false, false, blockNum)
+			sr := trie.NewResolver(context.TODO(), 32, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {
 				fmt.Printf("%x: %v\n", address, err)
+				filename := fmt.Sprintf("tries/root_%x.txt", address)
+				f, err := os.Create(filename)
+				if err == nil {
+					defer f.Close()
+					st.Print(f)
+				}
 			}
 		}
 	}
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
+	panic("")
 }
 
 func stateSnapshot() {

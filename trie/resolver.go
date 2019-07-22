@@ -50,7 +50,7 @@ func (rh ResolveHexes) Swap(i, j int) {
 /* One resolver per trie (prefix) */
 type TrieResolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
-	hashes     bool // Whether to keep first 5 levels of the trie regardless
+	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
 	requests   []*ResolveRequest
 	reqIndices []int // Indices pointing back to request slice from slices retured by PrepareResolveParams
 	keyIdx     int
@@ -67,10 +67,10 @@ type TrieResolver struct {
 	groups     uint64
 }
 
-func NewResolver(ctx context.Context, hashes bool, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(ctx context.Context, topLevels int, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:   accounts,
-		hashes:     hashes,
+		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
@@ -153,10 +153,10 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
 			prevReq = req
 			var minLength int
-			if !tr.accounts || !tr.hashes || req.resolvePos >= 5 {
+			if req.resolvePos >= tr.topLevels {
 				minLength = 0
 			} else {
-				minLength = 6 - req.resolvePos
+				minLength = tr.topLevels - req.resolvePos
 			}
 			rs := NewResolveSet(minLength)
 			tr.rss = append(tr.rss, rs)
@@ -185,8 +185,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
 		if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-			fmt.Printf("Mismatching hash: %s %x\n", tr.currentReq.resolveHash, hbHash)
-			panic("")
+			return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 		}
 		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
 		tr.hb.Reset()
@@ -282,8 +281,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
 	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-		fmt.Printf("Mismatching hash1: %s %x\n", tr.currentReq.resolveHash, hbHash)
-		panic("")
+		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 	}
 	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
 	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
@@ -292,7 +290,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 func (t *Trie) rebuildHashes(ctx context.Context, db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(ctx, true, accounts, blockNr)
+	r := NewResolver(ctx, 5, accounts, blockNr)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
 }
