@@ -280,11 +280,11 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
+	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
+	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
 	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 	}
-	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
 	return err
 }
 
