@@ -597,12 +597,12 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				// Simply comparing the correctness of the storageRoot computations
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					if account.Root != storageTrie.Hash() {
-						return nil, fmt.Errorf("Mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					if account.Root != storageTrie.Hash() {
-						return nil, fmt.Errorf("Mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
 					}
 				}
 			}
