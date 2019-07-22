@@ -669,15 +669,19 @@ func extractTrie(block int) {
 }
 
 func testRewind(block, rewind int) {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth//chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
+	if block == 1 {
+		block = int(currentBlockNr)
+	}
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	baseBlockNr := baseBlock.NumberU64()
 	fmt.Printf("Base block number: %d\n", baseBlockNr)
@@ -1303,7 +1307,7 @@ func main() {
 	//bucketStats(db)
 	//mychart()
 	//testRebuild()
-	//testRewind(*block, *rewind)
+	testRewind(*block, *rewind)
 	//hashFile()
 	//buildHashFromFile()
 	//testResolve()
@@ -1322,7 +1326,7 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	invTree("tries/root", "tries/right", "tries/diff", *name)
+	//invTree("tries/root", "tries/right", "tries/diff", *name)
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	preimage()

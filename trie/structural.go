@@ -124,9 +124,15 @@ func (s sortable) Swap(i, j int) {
 // pairs
 // DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
 type ResolveSet struct {
-	hexes    sortable
-	inited   bool // Whether keys are sorted and "LTE" and "GT" indices set
-	lteIndex int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+	minLength int // Mininum length of prefixes for which `HashOnly` function can return `true`
+	hexes     sortable
+	inited    bool // Whether keys are sorted and "LTE" and "GT" indices set
+	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+}
+
+// NewResolveSet creates new ResolveSet
+func NewResolveSet(minLength int) *ResolveSet {
+	return &ResolveSet{minLength: minLength}
 }
 
 // AddKey adds a new key to the set
@@ -154,6 +160,9 @@ func (rs *ResolveSet) ensureInited() {
 // the function would still work if the order is different
 func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 	rs.ensureInited()
+	if len(prefix) < rs.minLength {
+		return false
+	}
 	// Adjust "GT" if necessary
 	var gtAdjusted bool
 	for rs.lteIndex < len(rs.hexes)-1 && bytes.Compare(rs.hexes[rs.lteIndex+1], prefix) <= 0 {

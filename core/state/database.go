@@ -525,7 +525,8 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 	}
 }
 
-//todo what is forward?
+// forward is `true` if the function is used to progress the state forward (by adding blocks)
+// forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
@@ -592,6 +593,18 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
 				}
+			} else {
+				// Simply comparing the correctness of the storageRoot computations
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					if account.Root != storageTrie.Hash() {
+						return nil, fmt.Errorf("Mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					}
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					if account.Root != storageTrie.Hash() {
+						return nil, fmt.Errorf("Mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					}
+				}
 			}
 		}
 
@@ -641,7 +654,13 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	return tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr)
+	if err := tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr); err != nil {
+		return err
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+	return nil
 }
 
 func (tds *TrieDbState) SetBlockNr(ctx context.Context, blockNr uint64) {
@@ -686,13 +705,24 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 				m = make(map[common.Hash][]byte)
 				b.storageUpdates[address] = m
 			}
-			m[keyHash] = value
 			if len(value) > 0 {
+				// Write into 1 extra RLP level
+				var vv []byte
+				if len(value) > 1 || value[0] >= 128 {
+					vv = make([]byte, len(value)+1)
+					vv[0] = byte(128 + len(value))
+					copy(vv[1:], value)
+				} else {
+					vv = make([]byte, 1)
+					vv[0] = value[0]
+				}
+				m[keyHash] = vv
 				storagePutKeys = append(storagePutKeys, key)
-				storagePutVals = append(storagePutVals, value)
+				storagePutVals = append(storagePutVals, vv)
 			} else {
 				//fmt.Printf("Deleted storage item\n")
 				storageDelKeys = append(storageDelKeys, key)
+				m[keyHash] = nil
 			}
 		}
 		return nil

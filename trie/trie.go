@@ -501,6 +501,35 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 	}
 }
 
+func (t *Trie) touchAll(n node, hex []byte, del bool) {
+	switch n := n.(type) {
+	case *shortNode:
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			hexVal = concat(hex, compactToHex(n.Key)...)
+		}
+		t.touchAll(n.Val, hexVal, del)
+	case *duoNode:
+		t.touchFunc(hex, del)
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = byte(i1)
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = byte(i2)
+		t.touchAll(n.child1, hex1, del)
+		t.touchAll(n.child2, hex2, del)
+	case *fullNode:
+		t.touchFunc(hex, del)
+		for i, child := range n.Children {
+			if child != nil {
+				t.touchAll(child, concat(hex, byte(i)), del)
+			}
+		}
+	}
+}
+
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
@@ -694,36 +723,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 }
 
 func (t *Trie) PrepareToRemove() {
-	t.prepareToRemove(t.root, []byte{})
-}
-
-func (t *Trie) prepareToRemove(n node, hex []byte) {
-	switch n := n.(type) {
-	case *shortNode:
-		var hexVal []byte
-		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			hexVal = concat(hex, compactToHex(n.Key)...)
-		}
-		t.prepareToRemove(n.Val, hexVal)
-	case *duoNode:
-		t.touchFunc(hex, true)
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = byte(i1)
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = byte(i2)
-		t.prepareToRemove(n.child1, hex1)
-		t.prepareToRemove(n.child2, hex2)
-	case *fullNode:
-		t.touchFunc(hex, true)
-		for i, child := range n.Children {
-			if child != nil {
-				t.prepareToRemove(child, concat(hex, byte(i)))
-			}
-		}
-	}
+	t.touchAll(t.root, []byte{}, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
