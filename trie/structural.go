@@ -40,6 +40,9 @@ type emitter interface {
 // step of the algoritm that converts sequence of keys into structural information
 // DESCRIBED: docs/programmers_guide/guide.md#generating-the-structural-information-from-the-sequence-of-keys
 func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []byte, e emitter, groups uint64) uint64 {
+	if !recursive && len(prec) == 0 {
+		prec = nil
+	}
 	// Calculate the prefix of the smallest prefix group containing curr
 	precLen := prefixLen(prec, curr)
 	succLen := prefixLen(succ, curr)
@@ -60,16 +63,15 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	if !existed {
 		groups |= (uint64(1) << uint(maxLen))
 	}
-	var remainderLen int
-	if recursive || len(succ) > 0 || len(prec) > 0 {
-		remainderLen = len(curr) - maxLen - 1
-	} else {
-		remainderLen = len(curr)
+	remainderStart := maxLen
+	if len(succ) > 0 || prec != nil {
+		remainderStart++
 	}
+	remainderLen := len(curr) - remainderStart
 	// Emit LEAF or EXTENSION based on the remainder
 	if recursive {
 		if remainderLen > 0 {
-			e.extension(curr[maxLen+1 : maxLen+1+remainderLen])
+			e.extension(curr[remainderStart : remainderStart+remainderLen])
 		}
 	} else {
 		e.leaf(remainderLen)
@@ -79,7 +81,7 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	extraDigit := curr[maxLen]
 	if existed {
 		e.add(int(extraDigit))
-	} else if recursive || len(succ) > 0 || len(prec) > 0 {
+	} else if len(succ) > 0 || prec != nil {
 		if hashOnly(curr[:maxLen]) {
 			e.hasher(int(extraDigit))
 		} else {
@@ -98,11 +100,10 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	}
 	// Identify preceeding key for the recursive invocation
 	newCurr := curr[:precLen]
-	var prevLen int
+	var newPrec []byte
 	if groups != 0 {
-		prevLen = 63 - bits.LeadingZeros64(groups)
+		newPrec = curr[:63-bits.LeadingZeros64(groups)]
 	}
-	newPrec := curr[:prevLen]
 	// Recursion
 	return step(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
