@@ -36,6 +36,7 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
@@ -1307,7 +1308,9 @@ func main() {
 	//bucketStats(db)
 	//mychart()
 	//testRebuild()
-	testRewind(*block, *rewind)
+	if *action == "testRewind" {
+		testRewind(*block, *rewind)
+	}
 	//hashFile()
 	//buildHashFromFile()
 	//testResolve()
@@ -1326,10 +1329,14 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	//invTree("tries/root", "tries/right", "tries/diff", *name)
+	if *action == "invTree" {
+		invTree("tries/root", "tries/right", "tries/diff", *name)
+	}
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
-	preimage()
+	if *action == "preimage" {
+		preimage()
+	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)

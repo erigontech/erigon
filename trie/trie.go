@@ -514,10 +514,10 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 		i1, i2 := n.childrenIdx()
 		hex1 := make([]byte, len(hex)+1)
 		copy(hex1, hex)
-		hex1[len(hex)] = byte(i1)
+		hex1[len(hex)] = i1
 		hex2 := make([]byte, len(hex)+1)
 		copy(hex2, hex)
-		hex2[len(hex)] = byte(i2)
+		hex2[len(hex)] = i2
 		t.touchAll(n.child1, hex1, del)
 		t.touchAll(n.child2, hex2, del)
 	case *fullNode:
