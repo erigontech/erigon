@@ -572,7 +572,6 @@ func constructShortNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	nKey := shortKeys[*shortIdx]
 	(*shortIdx)++
 	s := &shortNode{Key: hexToCompact(nKey)}
-	s.flags.dirty = true
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -608,9 +607,7 @@ func NewFromProofs(touchFunc func(hex []byte, del bool), ctime uint64,
 	hashes []common.Hash,
 	trace bool,
 ) (t *Trie, mIdx, hIdx, sIdx, vIdx int) {
-	t = &Trie{
-		encodeToBytes: encodeToBytes,
-	}
+	t = new(Trie)
 	var maskIdx int
 	var hashIdx int  // index in the hashes
 	var shortIdx int // index in the shortKeys
@@ -950,7 +947,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	}
 	if !ok && ((downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6) {
 		s = &shortNode{Key: hexToCompact(nKey)}
-		s.flags.dirty = true
 	}
 	if trace {
 		fmt.Printf("%spos: %d, down: %16b, nKey: %x", strings.Repeat(" ", pos), pos, downmask, nKey)
@@ -1004,10 +1000,6 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, compactToHex(s.Key)...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
-	if s.flags.dirty {
-		var hn common.Hash
-		h.hash(s, pos == 0, hn[:])
-	}
 	return s
 }
 
@@ -1028,7 +1020,7 @@ func (t *Trie) ApplyProof(
 	if len(masks) == 1 {
 		return maskIdx, hashIdx, shortIdx, valueIdx
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	if firstMask == 0 {
 		t.root = applyFullNode(h, t.touchFunc, ctime, t.root, []byte{}, masks, shortKeys, values, hashes,

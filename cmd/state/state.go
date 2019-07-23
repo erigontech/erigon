@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/pprof"
 	"sort"
 	"strconv"
@@ -39,7 +40,9 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
+var memprofile = flag.String("memprofile", "", "write mem profile `file`")
 var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
@@ -1694,6 +1697,7 @@ func main() {
 		if err != nil {
 			log.Fatal("could not create CPU profile: ", err)
 		}
+		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
 			log.Fatal("could not start CPU profile: ", err)
 		}
@@ -1727,8 +1731,9 @@ func main() {
 	//nakedSloadChart()
 	//nakedAccountChart()
 	//specExecChart1()
-
-	//stateless(*genLag, *consLag)
+	if *action == "stateless" {
+		stateless(*genLag, *consLag)
+	}
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
@@ -1744,11 +1749,24 @@ func main() {
 	//stateless_chart_key_values("stateless1.csv", []int{1, 2}, "c_mask_hash.png", 1, 4)
 	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
-	//state_snapshot()
+	if *action == "stateSnapshot" {
+		stateSnapshot()
+	}
 	//estimate()
 	//verify_snapshot()
 	//feemarket()
 	//transaction_stats()
 	//naked_storage_vs_blockproof()
 	//visual()
+	if *memprofile != "" {
+		f, err := os.Create(*memprofile)
+		if err != nil {
+			log.Fatal("could not create mem profile: ", err)
+		}
+		defer f.Close()
+		runtime.GC() // get up-to-date statistics
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			log.Fatal("could not write memory profile: ", err)
+		}
+	}
 }

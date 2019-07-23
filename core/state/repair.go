@@ -20,11 +20,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"runtime"
 	"sort"
 
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -233,9 +235,9 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 			return nil, err
 		}
 		if account == nil {
-			t = trie.New(common.Hash{}, true)
+			t = trie.New(common.Hash{})
 		} else {
-			t = trie.New(account.Root, true)
+			t = trie.New(account.Root)
 		}
 		rds.storageTries[address] = t
 	}
@@ -262,7 +264,7 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(ctx, false, false, rds.blockNr)
+					resolver = trie.NewResolver(ctx, 0, false, rds.blockNr)
 				}
 				resolver.AddRequest(req)
 			}
@@ -392,25 +394,32 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 		return nil
 	}
 	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
 	m, ok := rds.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)
 		rds.storageUpdates[address] = m
 	}
 	if len(v) > 0 {
+		// Write into 1 extra RLP level
+		var vv []byte
+		if len(v) > 1 || v[0] >= 128 {
+			vv = make([]byte, len(v)+1)
+			vv[0] = byte(128 + len(v))
+			copy(vv[1:], v)
+		} else {
+			vv = make([]byte, 1)
+			vv[0] = v[0]
+		}
 		m[seckey] = vv
 	} else {
 		m[seckey] = nil
 	}
-
 	rds.storageKeys[string(compositeKey)] = struct{}{}
 	var err error
 	if len(v) == 0 {
 		err = rds.currentDb.Delete(StorageBucket, compositeKey)
 	} else {
-		err = rds.currentDb.Put(StorageBucket, compositeKey, vv)
+		err = rds.currentDb.Put(StorageBucket, compositeKey, common.CopyBytes(v))
 	}
 	if err != nil {
 		return err

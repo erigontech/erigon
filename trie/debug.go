@@ -131,7 +131,6 @@ func loadDuo(br *bufio.Reader) (*duoNode, error) {
 
 func loadShort(br *bufio.Reader) (*shortNode, error) {
 	n := shortNode{}
-	n.flags.dirty = true
 	keyHexHex, err := br.ReadBytes(':')
 	if err != nil {
 		return nil, err
@@ -178,10 +177,9 @@ func loadValue(br *bufio.Reader) (valueNode, error) {
 	return valueNode(val), nil
 }
 
-func Load(r io.Reader, encodeToBytes bool) (*Trie, error) {
+func Load(r io.Reader) (*Trie, error) {
 	br := bufio.NewReader(r)
 	t := new(Trie)
-	t.encodeToBytes = encodeToBytes
 	var err error
 	t.root, err = loadNode(br)
 	return t, err
@@ -393,5 +391,3 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, ")")
 	}
 }
-
-

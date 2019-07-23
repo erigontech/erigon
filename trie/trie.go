@@ -42,8 +42,6 @@ var (
 type Trie struct {
 	root node
 
-	encodeToBytes bool
-
 	touchFunc func(hex []byte, del bool)
 }
 
@@ -53,10 +51,9 @@ type Trie struct {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-func New(root common.Hash, encodeToBytes bool) *Trie {
+func New(root common.Hash) *Trie {
 	trie := &Trie{
-		encodeToBytes: encodeToBytes,
-		touchFunc:     func([]byte, bool) {},
+		touchFunc: func([]byte, bool) {},
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -127,7 +124,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
-		newnode.flags.dirty = true
 		t.root = newnode
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value), blockNr)
@@ -151,11 +147,11 @@ func (rr *ResolveRequest) String() string {
 	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
 }
 
-// Determines whether the trie needs to be extended (resolved) by fetching data
+// NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
-	var nd node = t.root
+	var nd = t.root
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
@@ -202,7 +198,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 }
 
 func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
-	var nd node = t.root
+	var nd = t.root
 	hex := keybytesToHex(key)
 	pos := 0
 	for {
@@ -312,7 +308,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
-		s.flags.dirty = true
 		newNode = s
 		updated = true
 		return
@@ -325,7 +320,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value, blockNr)
 			if updated {
 				n.Val = nn
-				n.flags.dirty = true
 			}
 			newNode = n
 		} else {
@@ -335,7 +329,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				c1 = n.Val
 			} else {
 				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
-				s1.flags.dirty = true
 				c1 = s1
 			}
 			var c2 node
@@ -343,7 +336,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				c2 = value
 			} else {
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
-				s2.flags.dirty = true
 				c2 = s2
 			}
 			branch := &duoNode{}
@@ -366,7 +358,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = hexToCompact(key[pos : pos+matchlen])
 				n.Val = branch
-				n.flags.dirty = true
 				newNode = n
 			}
 			updated = true
@@ -397,7 +388,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				child = value
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-				short.flags.dirty = true
 				child = short
 			}
 			newnode := &fullNode{}
@@ -419,7 +409,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				n.Children[key[pos]] = value
 			} else {
 				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
-				short.flags.dirty = true
 				n.Children[key[pos]] = short
 			}
 			updated = true
@@ -440,7 +429,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 }
 
 func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
-	var nd node = t.root
+	var nd = t.root
 	var parent node
 	pos := 0
 	for pos < len(hex) {
@@ -512,6 +501,35 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 	}
 }
 
+func (t *Trie) touchAll(n node, hex []byte, del bool) {
+	switch n := n.(type) {
+	case *shortNode:
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			hexVal = concat(hex, compactToHex(n.Key)...)
+		}
+		t.touchAll(n.Val, hexVal, del)
+	case *duoNode:
+		t.touchFunc(hex, del)
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		t.touchAll(n.child1, hex1, del)
+		t.touchAll(n.child2, hex2, del)
+	case *fullNode:
+		t.touchFunc(hex, del)
+		for i, child := range n.Children {
+			if child != nil {
+				t.touchAll(child, concat(hex, byte(i)), del)
+			}
+		}
+	}
+}
+
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
@@ -533,19 +551,12 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			k := make([]byte, len(cnodeKey)+1)
 			k[0] = byte(pos)
 			copy(k[1:], cnodeKey)
-			newshort := &shortNode{Key: hexToCompact(k)}
-			newshort.Val = short.Val
-			newshort.flags.dirty = true
-			// cnode gets removed, but newshort gets added
-			return newshort
+			return &shortNode{Key: hexToCompact(k), Val: short.Val}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
-	newshort := &shortNode{Key: hexToCompact([]byte{byte(pos)})}
-	newshort.Val = cnode
-	newshort.flags.dirty = true
-	return newshort
+	return &shortNode{Key: hexToCompact([]byte{byte(pos)}), Val: cnode}
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -583,13 +594,9 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 						// avoid modifying n.Key since it might be shared with
 						// other nodes.
 						childKey := compactToHex(shortChild.Key)
-						newnode := &shortNode{Key: hexToCompact(concat(nKey, childKey...))}
-						newnode.Val = shortChild.Val
-						newnode.flags.dirty = true
-						newNode = newnode
+						newNode = &shortNode{Key: hexToCompact(concat(nKey, childKey...)), Val: shortChild.Val}
 					} else {
 						n.Val = nn
-						n.flags.dirty = true
 						newNode = n
 					}
 				}
@@ -716,36 +723,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 }
 
 func (t *Trie) PrepareToRemove() {
-	t.prepareToRemove(t.root, []byte{})
-}
-
-func (t *Trie) prepareToRemove(n node, hex []byte) {
-	switch n := n.(type) {
-	case *shortNode:
-		var hexVal []byte
-		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			hexVal = concat(hex, compactToHex(n.Key)...)
-		}
-		t.prepareToRemove(n.Val, hexVal)
-	case *duoNode:
-		t.touchFunc(hex, true)
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = byte(i1)
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = byte(i2)
-		t.prepareToRemove(n.child1, hex1)
-		t.prepareToRemove(n.child2, hex2)
-	case *fullNode:
-		t.touchFunc(hex, true)
-		for i, child := range n.Children {
-			if child != nil {
-				t.prepareToRemove(child, concat(hex, byte(i)))
-			}
-		}
-	}
+	t.touchAll(t.root, []byte{}, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -891,7 +869,7 @@ func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])

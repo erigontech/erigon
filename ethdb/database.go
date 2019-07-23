@@ -320,18 +320,11 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 						}
 					} else if cmp > 0 {
 						keyIdx++
-						if _, err := walker(keyIdx, nil, nil); err != nil {
-							return err
-						}
 						if keyIdx == len(startkeys) {
 							return nil
 						}
 						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
 						startkey = startkeys[keyIdx]
-						//k, v = c.SeekTo(startkey)
-						//if k == nil {
-						//	return nil
-						//}
 					}
 				}
 			}
@@ -346,12 +339,6 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 		return nil
 	}); err != nil {
 		return err
-	}
-	for keyIdx < len(startkeys) {
-		keyIdx++
-		if _, err := walker(keyIdx, nil, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -687,6 +674,10 @@ func (db *BoltDatabase) Keys() [][]byte {
 		})
 	})
 	return keys
+}
+
+func (db *BoltDatabase) DB() *bolt.DB {
+	return db.db
 }
 
 type PutItem struct {
