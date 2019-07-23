@@ -18,12 +18,12 @@ of an account's content (not identifier):
 #### Nonce
 Number of the type `uint64`.
 
-For non-contract accounts, nonce is important in two contexts. Firsly, all transactions signed by an account, have to
+For non-contract accounts, nonce is important in two contexts. Firstly, all transactions signed by an account, have to
 appear in the ledger in the order of strictly increasing nonces (without gaps). This check is performed by member function `preCheck` of
 type `StateTransition` [core/state_transition.go](../../core/state_transition.go)
 Secondly, if a transaction signed by an account is sent to no
-particular address (with intention of creating a contract), and it ends up creating a new smart contract account, the adress of such newly
-created smart contract account is calcuted based on the current nonce of the "creator" account.
+particular address (with intention of creating a contract), and it ends up creating a new smart contract account, the address of such newly
+created smart contract account is calculated based on the current nonce of the "creator" account.
 For smart contract accounts, nonce is important when `CREATE` opcode is executed on behalf of such account. This computation is
 performed in the member function `Create` of the type `EVM` [core/vm/evm.go](../../core/vm/evm.go). Note the difference between the
 member function `Create2`, where the address of the newly created contract is independent of the nonce. For contract accounts,
@@ -39,7 +39,7 @@ Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts cannot have storage,
 therefore root makes sense only for smart contract accounts. For non-contract accounts, the root field is assumed to be equal to the
-Merkle root of empty tree, which is hard-coded in the varible `emptyRoot` in [core/state/database.go](../../core/state/database.go) and
+Merkle root of empty tree, which is hard-coded in the variable `EmptyRoot` in
 [trie/trie.go](../../trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
 type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
 `Update` and `Delete` on the same type.
@@ -68,7 +68,7 @@ deployed code of the new contract), as shown in the function `CreateAddress2` in
 
 In many places in the code, sets of accounts are represented by mappings from account addresses to the objects representing
 the accounts themselves, for example, field `stateObjects` in the type `IntraBlockState` [core/state/intra_block_state.go](../../core/state/intra_block_state.go).
-Member functions of the type `IntraBlockState` that are for querying and modifying one of the componets of an accounts, are all accepting
+Member functions of the type `IntraBlockState` that are for querying and modifying one of the components of an accounts, are all accepting
 address as their first argument, see functions `GetBalance`, `GetNonce`, `GetCode`, `GetCodeSize`, `GetCodeHash`, `GetState` (this
 one queries an item in the contract storage), `GetCommittedState`, `AddBalance`, `SubBalance`, `SetBalance`, `SetNonce`,
 `SetCode`, `SetState` (this one modifies an item in the contract storage) [core/state/intra_block_state.go](../../core/state/intra_block_state.go).
@@ -89,7 +89,7 @@ another one for the block header. For post-Byzantium blocks, it always returns a
 ### Hexary radix "Patricia" tree
 Ethereum uses hexary (radix == 16) radix tree to guide the algorithm of computing the state root. For the purposes of
 illustrations, we will use tres trees with radix 4 (because radix 16 requires many more items for "interesting" features
-to appear). We start from a set of randomly looking keys, 2 bytes (or 8 quarternary digits) each.
+to appear). We start from a set of randomly looking keys, 2 bytes (or 8 quaternary digits) each.
 
 ![prefix_groups_1](prefix_groups_1.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_1`
@@ -107,7 +107,7 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_3`
 
 The entire collection of keys form one implicit prefix group, with the empty prefix.
 
-Merke patricia tree hashing rules first remove redundant parts of the each key within groups, making key-value
+Merkle Patricia tree hashing rules first remove redundant parts of the each key within groups, making key-value
 pairs so-called "leaf nodes". They correspond to `shortNode` type in the file [trie/node.go](../../trie/node.go).
 To produce the hash of a leaf node, one applies the hash function to the two piece RLP (Recursive Length Prefix).
 First piece is the representation of the non-redundant part of the key. And the second piece is the
@@ -130,7 +130,7 @@ one applies the hash function to the two piece RLP. First piece is the represent
 The second part is the hash of the branch node representing the prefix group. This shown in the member function `hashChildren` of the
 type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` case.
 
-This is the illlustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
+This is the illustration of resulting leaf nodes, branch nodes, and extension nodes for our example:
 
 ![prefix_groups_4](prefix_groups_4.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
@@ -140,8 +140,8 @@ To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_4`
 Our goal here will be to construct an algorithm that can produce the hash of the Patricia Merkle Tree of a sorted
 sequence of key-value pair, in one simple pass (i.e. without look-aheads and buffering, but with a stack).
 Another goal (perhaps more important)
-is to be able to split the sequence of key-value pairs into arbitrary chunks of consequitive keys, and reconstruct the
-root hash from hashes of the invidual chunks (note that a chunk might need to have more than one hash).
+is to be able to split the sequence of key-value pairs into arbitrary chunks of consecutive keys, and reconstruct the
+root hash from hashes of the individual chunks (note that a chunk might need to have more than one hash).
 
 Let's say that we would like to split the ordered sequence of 32 key-value pairs into 4 chunks, 8 pairs in each. We would then
 like to compute the hashes (there might be more than one hash per chunk) of each chunk separately. After that, we would like
@@ -166,7 +166,7 @@ of the operand `digit`.
 
 `HASHER` opcode pops an item from the stack, then pushes a Keccak-256 state onto the stack
 (plus a counter of how many items have been fed to it). The item popped from the stack is getting hashed
-and the resuling hash is fed into the Keccak-256 state. The value of the operand specified how many
+and the resulting hash is fed into the Keccak-256 state. The value of the operand specified how many
 empty strings are fed to the Keccak-256 state prior to the popped item's hash.
 
 `LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the stack. The operand
@@ -220,7 +220,7 @@ If we apply the same produce to the next chunk of 8 leaves, we will get to the f
 ![prefix_groups_6](prefix_groups_6.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_6`
 
-And, after hashing the two remaning chunks.
+And, after hashing the two remaining chunks.
 ![prefix_groups_7](prefix_groups_7.dot.gd.png)
 To regenerate this picture, run `go run cmd/pics/pics.go -pic prefix_groups_7`
 
@@ -344,14 +344,14 @@ Analogously, the last item in any prefix group has the property that its common 
 immediately to the left is longer than its common prefix with the item immediately to the right.
 
 The algorithm proceeds in steps, one step for each key-value pair, in the lexicographic order of the keys. At each step,
-it observes three keys (sequences of digits) - current, preceeding, and suceeding. It also has access to the
+it observes three keys (sequences of digits) - current, preceding, and succeeding. It also has access to the
 dictionary of prefix groups, which starts off empty, and gets populated with entries of the form:
 `prefix => {set of digits}`.
-Algorithm's step can also be invoked recursively from another step, with current and preceeding keys specified by the
+Algorithm's step can also be invoked recursively from another step, with current and preceding keys specified by the
 caller.
 
 A step starts with computing the prefix of the smallest prefix group that the current key belongs to. It is either
-the common prefix of current key and the preceeding key or the common prefix of current key and the suceeding key,
+the common prefix of current key and the preceding key or the common prefix of current key and the succeeding key,
 whichever is longer (if they are the same length, then they are also equal, so no ambiguity there).
 This max common prefix is looked up in the groups dictionary, to get the corresponding set of digits.
 If there no entries with such prefix, an entry with an empty set of digits is assumed.
@@ -366,24 +366,24 @@ For example, for leaf `12`, the lengths of common prefix with neighbours are 1 a
 Following the emitting of the `LEAF`, or `EXTENSION`, or no opcode, another opcode is emitted, which corresponds to
 adding an extra digit to the digit set of the groups dictionary item. If this step has resulted in the creation of a new
 entry, then `BRANCH` or `HASHER` opcode is emitted, with the operand being the the extra digit. If this step just added
-a new digit to an existing entry, then `ADD` opcode is emitted, with the operand being the exta digit. The choice
+a new digit to an existing entry, then `ADD` opcode is emitted, with the operand being the extra digit. The choice
 between emitting `BRANCH` and emitting `HASHER` depends on whether the structural information is used to produce the root hash
 or to build the trie.
 
-The following, optional, part of the step only happens if the common prefix of the current key and the preceeding key is longer or equal than
-the common prefix of the current key and the suceeding key, in other words, at least one prefix group needs to be "closed".
+The following, optional, part of the step only happens if the common prefix of the current key and the preceding key is longer or equal than
+the common prefix of the current key and the succeeding key, in other words, at least one prefix group needs to be "closed".
 Closing a prefix group means that the algorithm invokes its step recursively (unless the group that was closed was the one with the
-empty prefix, wich encompasses all the keys), using prefix of the closed group as the current key,
-and the succeeding key simply passed on. Preceeding key is found by searching (in the groups dictionary) for the smallest group
+empty prefix, which encompasses all the keys), using prefix of the closed group as the current key,
+and the succeeding key simply passed on. Preceding key is found by searching (in the groups dictionary) for the smallest group
 that contains the one that was just closed. This means the longest sub-prefix of the prefix of the closed group. If no such entry
-exists int the group map, empty string is used as the preceeding key.
+exists int the group map, empty string is used as the preceding key.
 
 We will walk through the steps of the algorithm for the leaf `30`, and then for the leaf `31`.
 For `30`, the key is `33113123`. Its max common prefix with neighbours is `3311`. The digit immediately
 following this prefix is `3`. Therefore, entry `3311 => {2}` is found in the group dictionary, and
 replaced with `3311 => {2, 3}`. Since this is a non-recursive invocation, and the remainder `123` is 3 digits long,
 opcode `LEAF 3` is emitted, followed by `ADD 3`. Optional part of the step happens, and the step gets
-invoked recursively with current key being `3311`, and preceeding key identified as `3`
+invoked recursively with current key being `3311`, and preceding key identified as `3`
 (there were no prefix group with prefix `33` or `331` yet).
 
 In the recursive step, max common prefix is `331`, therefore a new entry `331 => {1}` is created in the groups dictionary,
@@ -392,12 +392,12 @@ resulting in emitting `HASHER 1` or `BRANCH 1`. No more recursion.
 For leaf `31` (key `33132002`), max common prefix is `331`, so the groups dictionary gets updated with the entry
 `331 => {1, 3}`. Opcode `LEAF 4` is emitted (4 is the length of the remainder `2002`), followed by `ADD 3`.
 Optional part of the step happens, and the step gets invoked recursively with current key being `331`, and
-preceeding key identified as `3` (there were no prefix group with prefix `33`).
+preceding key identified as `3` (there were no prefix group with prefix `33`).
 
 In the recursive step, max common prefix is `3`, therefore the entry in groups dictionary gets updated to
 `3 => {0, 2, 3}`. The remainder `1` is non-empty, and since this is a recursive invocation, opcode
 `EXTENSION 1` is emitted, followed by `ADD 3`. Next, the step gets invoked recursively with current
-key being `3`, and preceeding key empty.
+key being `3`, and preceding key empty.
 
 In the deeper recursive step, max common prefix is empty, therefore the entry in groups dictionary is updated to
 ` => {0, 1, 2, 3}`. Opcode `ADD 3` is emitted. Optional part of the step happens, but no recursive invocation follows.
