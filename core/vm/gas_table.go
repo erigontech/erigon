@@ -17,6 +17,7 @@
 package vm
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -120,10 +121,12 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 		y, x    = stack.Back(1), stack.Back(0)
 		current = evm.IntraBlockState.GetState(contract.Address(), common.BigToHash(x))
 	)
+	fmt.Println("core/vm/gas_table.go:124 gasSStore", "x=",x,"y=",y, "current=", current.String())
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
 	if evm.chainRules.IsPetersburg || !evm.chainRules.IsConstantinople {
+		fmt.Println("core/vm/gas_table.go:129 evm.chainRules.IsPetersburg || !evm.chainRules.IsConstantinople", evm.chainRules.IsPetersburg, !evm.chainRules.IsConstantinople)
 		// This checks for 3 scenario's and calculates gas accordingly:
 		//
 		// 1. From a zero-value address to a non-zero value         (NEW VALUE)
@@ -154,10 +157,12 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 	//       2.2.2.1. If original value is 0, add 19800 gas to refund counter.
 	// 	     2.2.2.2. Otherwise, add 4800 gas to refund counter.
 	value := common.BigToHash(y)
+	fmt.Println("core/vm/gas_table.go:160 current == value", value.String(), current.String(), value==current)
 	if current == value { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}
 	original := evm.IntraBlockState.GetCommittedState(contract.Address(), common.BigToHash(x))
+	fmt.Println("core/vm/gas_table.go:160 current == original", original.String(), current.String())
 	if original == current {
 		if original == (common.Hash{}) { // create slot (2.1.1)
 			return params.NetSstoreInitGas, nil
@@ -168,6 +173,7 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 		return params.NetSstoreCleanGas, nil // write existing slot (2.1.2)
 	}
 	if original != (common.Hash{}) {
+		fmt.Println("core/vm/gas_table.go:176 original != (common.Hash{})")
 		if current == (common.Hash{}) { // recreate slot (2.2.1.1)
 			evm.IntraBlockState.SubRefund(params.NetSstoreClearRefund)
 		} else if value == (common.Hash{}) { // delete slot (2.2.1.2)
@@ -175,12 +181,14 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 		}
 	}
 	if original == value {
+		fmt.Println("original == value", original)
 		if original == (common.Hash{}) { // reset to original inexistent slot (2.2.2.1)
 			evm.IntraBlockState.AddRefund(params.NetSstoreResetClearRefund)
 		} else { // reset to original existing slot (2.2.2.2)
 			evm.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
 		}
 	}
+	fmt.Println("core/vm/gas_table.go:191 NetSstoreDirtyGas",params.NetSstoreDirtyGas)
 	return params.NetSstoreDirtyGas, nil
 }
 

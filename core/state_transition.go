@@ -195,6 +195,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 
 	// Pay intrinsic gas
 	gas, err := IntrinsicGas(st.data, contractCreation, homestead)
+	fmt.Println("core/state_transition.go:198 IntrinsicGas", gas, err)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -210,11 +211,15 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 		vmerr error
 	)
 	if contractCreation {
+		fmt.Println("core/state_transition.go:213 +contractCreation", st.gas, sender.Address().String())
 		ret, _, st.gas, vmerr = evm.Create(sender, st.data, st.gas, st.value)
+		fmt.Println("core/state_transition.go:213 -contractCreation", st.gas, sender.Address().String())
 	} else {
 		// Increment the nonce for the next transaction
+		fmt.Println("core/state_transition.go:213 +evm.Call", st.gas, sender.Address().String())
 		st.state.SetNonce(msg.From(), st.state.GetNonce(sender.Address())+1)
 		ret, st.gas, vmerr = evm.Call(sender, st.to(), st.data, st.gas, st.value)
+		fmt.Println("core/state_transition.go:213 -evm.Call", st.gas, sender.Address().String())
 	}
 	if vmerr != nil {
 		log.Debug("VM returned with error", "err", vmerr)
@@ -225,6 +230,7 @@ func (st *StateTransition) TransitionDb() (ret []byte, usedGas uint64, failed bo
 			return nil, 0, false, vmerr
 		}
 	}
+	fmt.Println("core/state_transition.go:230 gasUsed", st.gasUsed())
 	st.refundGas()
 	st.state.AddBalance(st.evm.Coinbase, new(big.Int).Mul(new(big.Int).SetUint64(st.gasUsed()), st.gasPrice))
 

@@ -17,15 +17,16 @@
 package vm
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"golang.org/x/crypto/sha3"
+	"math/big"
+	"runtime"
 )
 
 var (
@@ -636,8 +637,10 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
-
+	fmt.Println("core/vm/instructions.go:640 opSstore")
+	fmt.Println(caller(7))
 	locFromState := interpreter.evm.IntraBlockState.GetState(contract.Address(), loc)
+	fmt.Println("core/vm/instructions.go:640 opSstore loc", loc,"val", val, "hashval", common.BigToHash(val))
 
 	interpreter.evm.IntraBlockState.SetState(contract.Address(), loc, common.BigToHash(val))
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {
@@ -958,4 +961,14 @@ func makeSwap(size int64) executionFunc {
 		stack.swap(int(size))
 		return nil, nil
 	}
+}
+
+
+func caller(n int) string {
+	buf:=new(bytes.Buffer)
+	for i:=1;i<=n;i++ {
+		_,f,l,_:=runtime.Caller(i)
+		fmt.Fprintln(buf, f,l)
+	}
+	return buf.String()
 }

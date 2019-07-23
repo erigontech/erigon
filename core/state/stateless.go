@@ -366,7 +366,7 @@ func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.T
 	return t, nil
 }
 
-func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
 	//fmt.Printf("ReadAccountStorage\n")
 	h := newHasher()
 	defer returnHasherToPool(h)

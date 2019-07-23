@@ -45,6 +45,8 @@ type Trie struct {
 	encodeToBytes bool
 
 	touchFunc func(hex []byte, del bool)
+
+	Version uint8
 }
 
 // New creates a trie with an existing root node from db.

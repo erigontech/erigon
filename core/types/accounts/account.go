@@ -3,6 +3,7 @@ package accounts
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -25,6 +26,7 @@ type Account struct {
 	Root        common.Hash // merkle root of the storage trie
 	CodeHash    []byte
 	StorageSize *uint64
+	Version		uint8
 }
 
 type accountWithoutStorage struct {
@@ -32,6 +34,7 @@ type accountWithoutStorage struct {
 	Balance  *big.Int
 	Root     common.Hash // merkle root of the storage trie
 	CodeHash []byte
+	Version		uint8
 }
 
 const (
@@ -45,6 +48,7 @@ var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cad
 func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 	var toEncode interface{}
 
+	fmt.Println("core/types/accounts/account.go:51 encode version", a.Version)
 	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
 			return []byte{byte(192)}, nil
@@ -67,6 +71,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 				Balance:  acc.Balance,
 				Root:     acc.Root,
 				CodeHash: acc.CodeHash,
+				Version:  acc.Version,
 			}
 		}
 	}
@@ -166,6 +171,7 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
+	a.Version = srcAccount.Version
 
 	if srcAccount.StorageSize != nil {
 		a.StorageSize = new(uint64)
@@ -189,6 +195,7 @@ func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
+	a.Version=srcAccount.Version
 
 	a.StorageSize = nil
 
@@ -232,6 +239,12 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
+func (a *Account)GetVersion() uint8  {
+	return a.Version
+}
+func (a *Account)SetVersion(v uint8)  {
+	a.Version = v
+}
 func (a *Account) IsEmptyCodeHash() bool {
 	return a.CodeHash == nil || bytes.Equal(a.CodeHash[:], emptyCodeHash)
 }

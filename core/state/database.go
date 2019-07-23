@@ -56,7 +56,7 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
-	ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error)
+	ReadAccountStorage(address common.Address, version uint8,  key *common.Hash) ([]byte, error)
 	ReadAccountCode(codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(codeHash common.Hash) (int, error)
 }
@@ -65,7 +65,7 @@ type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, key, original, value *common.Hash) error
+	WriteAccountStorage(address common.Address, version uint8,  key, original, value *common.Hash) error
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -574,7 +574,9 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 			if err != nil {
 				return nil, err
 			}
+			fmt.Println("core/state/database.go:577 compute storage trie", address.String())
 			storageTrie, err := tds.getStorageTrie(address, true)
+			fmt.Println("core/state/database.go:577 compute storage trie", storageTrie.Version)
 			if err != nil {
 				return nil, err
 			}
@@ -805,16 +807,39 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 }
 
 func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
+fmt.Println("core/state/database.go:808 getStorageTrie", address.String())
 	t, ok := tds.storageTries[address]
+
+	if ok {
+		fmt.Println("core/state/database.go:813 ok", t.Version)
+		account, err := tds.ReadAccountData(address)
+		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address)", err)
+		if err==nil && account!=nil {
+			fmt.Println("core/state/database.go:817 account found", account)
+			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
+			if t.Version!=account.GetVersion() {
+				t = trie.New(common.Hash{}, true)
+				t.Version=account.GetVersion()
+				tds.storageTries[address] = t
+				return t, nil
+			}
+		}
+		return t, nil
+	}
 	if !ok && create {
+		fmt.Println("core/state/database.go:827 Create trie")
 		account, err := tds.ReadAccountData(address)
 		if err != nil {
 			return nil, err
 		}
 		if account == nil {
+			fmt.Println("core/state/database.go:833 account==nil")
 			t = trie.New(common.Hash{}, true)
+			//t.Version=1
 		} else {
 			t = trie.New(account.Root, true)
+			fmt.Println("core/state/database.go:833 account!=nil", account.GetVersion())
+			//t.Version=account.GetVersion()
 		}
 		t.SetTouchFunc(func(hex []byte, del bool) {
 			tds.tp.TouchContract(address, hex, del)
@@ -824,16 +849,21 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 	return t, nil
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
+	fmt.Println("core/state/database.go:828 ReadAccountStorage addr=", address.String(), "version=", version, "k=", key.String())
+
 	t, err := tds.getStorageTrie(address, true)
+	fmt.Println("core/state/database.go:831 getStorageTrie", err)
 	if err != nil {
 		return nil, err
 	}
 	seckey, err := tds.HashKey(key, false /*save*/)
+	fmt.Println("core/state/database.go:836 seckey", seckey)
 	if err != nil {
 		return nil, err
 	}
 	if tds.resolveReads {
+		fmt.Println("core/state/database.go:841 tds.resolveReads")
 		var addReadRecord = false
 		if mWrite, ok := tds.currentBuffer.storageUpdates[address]; ok {
 			if _, ok1 := mWrite[seckey]; !ok1 {
@@ -854,9 +884,11 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 	enc, ok := t.Get(seckey[:], tds.blockNr)
 	if !ok {
 		// Not present in the trie, try database
-		cKey := make([]byte, len(address)+len(seckey))
-		copy(cKey, address[:])
-		copy(cKey[len(address):], seckey[:])
+		//cKey := make([]byte, len(address)+len(seckey)+1)
+		//copy(cKey, address[:])
+		//copy(cKey[len(address):], seckey[:])
+		cKey:=append(address[:], version)
+		cKey=append(cKey, seckey[:]...)
 		if tds.historical {
 			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
 			if err != nil {
@@ -1016,10 +1048,17 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	fmt.Println("core/state/database.go:1044 UpdateAccountData", address.String(), "orig.vers", original.GetVersion(), "acc.vers",account.GetVersion())
 	data, err := account.Encode(ctx)
+	fmt.Println("core/state/database.go:1046 encode", data)
 	if err != nil {
 		return err
 	}
+
+	acc,err:=accounts.Decode(data)
+	fmt.Println("core/state/database.go:1046 decoded version", acc.Version, err)
+
+
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
@@ -1094,7 +1133,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return dsw.tds.db.Put(CodeBucket, codeHash[:], code)
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, version uint8,  key, original, value *common.Hash) error {
 	v := bytes.TrimLeft(value[:], "\x00")
 	m, ok := tsw.tds.currentBuffer.storageUpdates[address]
 	if !ok {
@@ -1113,7 +1152,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
 	}
@@ -1124,7 +1163,14 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, origi
 	v := bytes.TrimLeft(value[:], "\x00")
 	vv := make([]byte, len(v))
 	copy(vv, v)
-	compositeKey := append(address[:], seckey[:]...)
+	/**
+
+	*/
+	compositeKey := append(address[:], uint8(version))
+	compositeKey = append(compositeKey, seckey[:]...)
+	fmt.Println("core/state/database.go:1129 WriteAccountStorage acc=", address.String(), version,key, compositeKey, value)
+
+	//compositeKey := append(address[:], seckey[:]...)
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(StorageBucket, compositeKey)
 	} else {
