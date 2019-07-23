@@ -39,7 +39,7 @@ Binary 32-byte (256-bit) string.
 
 By root here one means the Merkle root of the smart contract storage, organised into a tree. Non-contract accounts cannot have storage,
 therefore root makes sense only for smart contract accounts. For non-contract accounts, the root field is assumed to be equal to the
-Merkle root of empty tree, which is hard-coded in the varible `emptyRoot` in [core/state/database.go](../../core/state/database.go) and
+Merkle root of empty tree, which is hard-coded in the variable `EmptyRoot` in
 [trie/trie.go](../../trie/trie.go). For contract accounts, the root is computed using member function `Hash` of
 type `Trie` [trie/trie.go](../../trie/trie.go), once the storage of the contract has been organised into the tree by calling member functions
 `Update` and `Delete` on the same type.
