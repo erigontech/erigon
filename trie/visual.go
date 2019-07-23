@@ -206,7 +206,7 @@ func (t *Trie) Fold(keys [][]byte) {
 	for _, key := range keys {
 		hexes = append(hexes, keybytesToHex(key))
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	_, t.root = fold(t.root, hexes, h, true)
 }

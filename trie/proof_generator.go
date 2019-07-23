@@ -607,9 +607,7 @@ func NewFromProofs(touchFunc func(hex []byte, del bool), ctime uint64,
 	hashes []common.Hash,
 	trace bool,
 ) (t *Trie, mIdx, hIdx, sIdx, vIdx int) {
-	t = &Trie{
-		encodeToBytes: encodeToBytes,
-	}
+	t = new(Trie)
 	var maskIdx int
 	var hashIdx int  // index in the hashes
 	var shortIdx int // index in the shortKeys
@@ -1022,7 +1020,7 @@ func (t *Trie) ApplyProof(
 	if len(masks) == 1 {
 		return maskIdx, hashIdx, shortIdx, valueIdx
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	if firstMask == 0 {
 		t.root = applyFullNode(h, t.touchFunc, ctime, t.root, []byte{}, masks, shortKeys, values, hashes,

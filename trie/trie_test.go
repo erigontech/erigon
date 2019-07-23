@@ -42,7 +42,7 @@ func init() {
 
 // Used for testing
 func newEmpty() *Trie {
-	trie := New(common.Hash{}, false)
+	trie := New(common.Hash{})
 	return trie
 }
 
@@ -170,7 +170,7 @@ func testReplication(t *testing.T) {
 	exp := trie.Hash()
 
 	// create a new trie on top of the database and check that lookups work.
-	trie2 := New(exp, false)
+	trie2 := New(exp)
 	for _, kv := range vals {
 		if string(getString(trie2, kv.k)) != kv.v {
 			t.Errorf("trie2 doesn't have %q => %q", kv.k, kv.v)
@@ -272,7 +272,7 @@ func (randTest) Generate(r *rand.Rand, size int) reflect.Value {
 }
 
 func runRandTest(rt randTest) bool {
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
@@ -294,7 +294,7 @@ func runRandTest(rt randTest) bool {
 			tr.Hash()
 		case opReset:
 			hash := tr.Hash()
-			newtr := New(hash, false)
+			newtr := New(hash)
 			tr = newtr
 		case opCheckCacheInvariant:
 		}
@@ -327,7 +327,7 @@ func benchGet(b *testing.B, commit bool) {
 	var tmpdb ethdb.Database
 	if commit {
 		_, tmpdb = tempDB()
-		trie = New(common.Hash{}, false)
+		trie = New(common.Hash{})
 	}
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {

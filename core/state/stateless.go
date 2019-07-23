@@ -357,7 +357,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
 	t, ok := s.storageTries[address]
 	if !ok && create {
-		t = trie.New(common.Hash{}, true)
+		t = trie.New(common.Hash{})
 		t.SetTouchFunc(func(hex []byte, del bool) {
 			s.tp.TouchContract(address, hex, del)
 		})
@@ -382,11 +382,13 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 	var secKey common.Hash
 	h.sha.Read(secKey[:])
 	enc, ok := t.Get(secKey[:], s.blockNr)
-	if !ok {
+	if ok {
+		// Unwrap one RLP level
+		if len(enc) > 1 {
+			enc = enc[1:]
+		}
+	} else {
 		return nil, fmt.Errorf("Storage of %x (key %x, hash %x) is not present in the proof", address, (*key), secKey)
-	}
-	if err != nil {
-		return nil, err
 	}
 	return common.CopyBytes(enc), nil
 }
@@ -552,11 +554,23 @@ func (s *Stateless) WriteAccountStorage(address common.Address, key, original, v
 	var secKey common.Hash
 	h.sha.Read(secKey[:])
 	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
-	m[secKey] = vv
+	if len(v) > 0 {
+		// Write into 1 extra RLP level
+		var vv []byte
+		if len(v) > 1 || v[0] >= 128 {
+			vv = make([]byte, len(v)+1)
+			vv[0] = byte(128 + len(v))
+			copy(vv[1:], v)
+		} else {
+			vv = make([]byte, 1)
+			vv[0] = v[0]
+		}
+		m[secKey] = vv
+	} else {
+		m[secKey] = nil
+	}
 	if s.trace {
-		fmt.Printf("WriteAccountStorage addr %x, keyHash %x, value %x\n", address, secKey, vv)
+		fmt.Printf("WriteAccountStorage addr %x, keyHash %x, value %x\n", address, secKey, v)
 	}
 	return nil
 }
