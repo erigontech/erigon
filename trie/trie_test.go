@@ -418,3 +418,35 @@ func updateString(trie *Trie, k, v string) {
 func deleteString(trie *Trie, k string) {
 	trie.Delete([]byte(k), 0)
 }
+
+func TestDeepHash(t *testing.T) {
+	prefix := "prefix"
+	var testdata = [][]struct {
+		key   string
+		value string
+	}{
+		{{"key1", "value1"}},
+		{{"key1", "value1"}, {"key2", "value2"}},
+		{{"key1", "value1"}, {"key2", "value2"}, {"key3", "value3"}},
+		{{"key1", "value1"}, {"key2", "value2"}, {"\xffek3", "value3"}},
+	}
+	for i, keyVals := range testdata {
+		trie := New(common.Hash{})
+		for _, keyVal := range keyVals {
+			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)
+		}
+		hash1 := trie.Hash()
+		prefixTrie := New(common.Hash{})
+		for _, keyVal := range keyVals {
+			// Add a prefix to every key
+			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
+		}
+		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
+		if !got2 {
+			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)
+		}
+		if hash1 != hash2 {
+			t.Errorf("DeepHash mistmatch: %x, expected %x, testcase %d", hash2, hash1, i)
+		}
+	}
+}
