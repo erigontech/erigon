@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -846,7 +847,7 @@ func TestFirehoseStateNodes(t *testing.T) {
 
 	var account accounts.Account
 	account.Balance = frhsAmnt
-	accountRLP, err := account.EncodeRLP(nil)
+	accountRLP, err := account.EncodeRLP(context.TODO())
 	assert.NoError(t, err)
 
 	assert.Equal(t, addrHash[3], common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
