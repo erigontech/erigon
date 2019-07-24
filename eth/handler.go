@@ -710,7 +710,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	switch msg.Code {
 	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStateRangesMsg
+		var request getStateRangesOrNodes
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -836,7 +836,41 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStateNodesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStateRangesOrNodes
+		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages? The same for the other codes
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		var response stateNodesMsg
+		response.ID = request.ID
+
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			if err != nil {
+				return err
+			}
+			tr := tds.AccountTrie()
+
+			n := len(request.Prefixes)
+			response.Nodes = make([][]byte, n)
+
+			// TODO [yperbasis] softResponseLimit, MaxStateFetch
+			for i := 0; i < n; i++ {
+				// TODO [yperbasis] mind odd prefixes. MAKE THIS ACTUALLY WORK!!!
+				val, present := tr.Get(request.Prefixes[i].Data, block.NumberU64())
+				if present {
+					// TODO [yperbasis] different RLP serialization of accounts in the DB???
+					response.Nodes[i] = val
+				}
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
+
+		return p2p.Send(p.rw, StateNodesCode, response)
 
 	case StateNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
