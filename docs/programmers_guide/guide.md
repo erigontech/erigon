@@ -440,3 +440,7 @@ BRANCH 013
 HASH 1
 BRANCH 0123 
 ```
+
+Transaction processing
+----------------------
+![processing](processing.png)

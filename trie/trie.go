@@ -745,6 +745,68 @@ func (t *Trie) Hash() common.Hash {
 	return common.BytesToHash(hash.(hashNode))
 }
 
+// DeepHash returns internal hash of a node reachable by the specified key prefix
+// Note that if the prefix points into the middle of a key for a leaf node or of an extention
+// node, it will return the hash of a modified leaf node or extension node, where the
+// key prefix is removed from the key.
+// First returned value is `true` if the node with the specified prefix is found
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix = hexPrefix[:len(hexPrefix)-1] // Remove terminal byte
+	var nd = t.root
+	pos := 0
+	for pos < len(hexPrefix) {
+		switch n := nd.(type) {
+		case nil:
+			return false, common.Hash{}
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hexPrefix[pos:], nKey)
+			//fmt.Printf("nKey: %x, hexPrefix[pos:]: %x, matchlen: %d\n", nKey, hexPrefix[pos:], matchlen)
+			if matchlen == len(nKey) {
+				nd = n.Val
+				pos += matchlen
+			} else if matchlen == len(hexPrefix)-pos {
+				// middle of the key
+				nd = &shortNode{Key: hexToCompact(nKey[matchlen:]), Val: n.Val}
+				pos += matchlen
+			} else {
+				return false, common.Hash{}
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hexPrefix[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return false, common.Hash{}
+			}
+		case *fullNode:
+			child := n.Children[hexPrefix[pos]]
+			if child == nil {
+				return false, common.Hash{}
+			}
+			nd = child
+			pos++
+		case valueNode:
+			return false, common.Hash{}
+		case hashNode:
+			return false, common.Hash{}
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+	var hn common.Hash
+	h.hash(nd, true, hn[:])
+	return true, hn
+}
+
 func (t *Trie) unload(hex []byte, h *hasher) {
 	nd := t.root
 	var parent node
