@@ -755,7 +755,9 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			tds.currentBuffer.accountReads[buf] = struct{}{}
 		}
 	}
+
 	enc, ok := tds.t.Get(buf[:], tds.blockNr)
+	fmt.Println("core/state/database.go:759 tds.t.Get", ok)
 	if !ok {
 		// Not present in the trie, try the database
 		var err error
@@ -765,10 +767,17 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 				enc = nil
 			}
 		} else {
+			fmt.Println("core/state/database.go:768 ReadAccountData read from db", address.String())
 			enc, err = tds.db.Get(AccountsBucket, buf[:])
 			if err != nil {
 				enc = nil
 			}
+		}
+	}
+	if ok {
+		a, err := tds.db.Get(AccountsBucket, buf[:])
+		if err != nil {
+			enc = a
 		}
 	}
 	return accounts.Decode(enc)
@@ -807,13 +816,13 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 }
 
 func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
-fmt.Println("core/state/database.go:808 getStorageTrie", address.String())
+	fmt.Println("core/state/database.go:828 getStorageTrie", address.String())
+	fmt.Println(caller(7))
 	t, ok := tds.storageTries[address]
-
 	if ok {
-		fmt.Println("core/state/database.go:813 ok", t.Version)
+		fmt.Println("core/state/database.go:813 ok, t.version=", t.Version)
 		account, err := tds.ReadAccountData(address)
-		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address)", err)
+		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address) err=", err, address.String())
 		if err==nil && account!=nil {
 			fmt.Println("core/state/database.go:817 account found", account)
 			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
@@ -857,6 +866,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 	if err != nil {
 		return nil, err
 	}
+
 	seckey, err := tds.HashKey(key, false /*save*/)
 	fmt.Println("core/state/database.go:836 seckey", seckey)
 	if err != nil {
@@ -1168,7 +1178,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version ui
 	*/
 	compositeKey := append(address[:], uint8(version))
 	compositeKey = append(compositeKey, seckey[:]...)
-	fmt.Println("core/state/database.go:1129 WriteAccountStorage acc=", address.String(), version,key, compositeKey, value)
+	fmt.Println("core/state/database.go:1129 WriteAccountStorage acc=", address.String(),"version=", version, key, compositeKey, value)
 
 	//compositeKey := append(address[:], seckey[:]...)
 	if len(v) == 0 {
@@ -1190,4 +1200,14 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version ui
 
 func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
+}
+
+
+func caller(n int) string {
+	buf:=new(bytes.Buffer)
+	for i:=1;i<=n;i++ {
+		_,f,l,_:=runtime.Caller(i)
+		fmt.Fprintln(buf, f,l)
+	}
+	return buf.String()
 }

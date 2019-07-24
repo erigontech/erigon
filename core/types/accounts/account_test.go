@@ -196,6 +196,30 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 	isStorageSizeEqual(t, a, decodedAccount)
 }
 
+func TestAccountIncreaseVersion(t *testing.T) {
+	a := &Account{
+		Nonce:    2,
+		Balance:  new(big.Int).SetInt64(1000),
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
+		Version: 1,
+	}
+
+	encodedAccount, err := a.Encode(context.Background())
+	if err != nil {
+		t.Fatal("cant encode the account", err, a)
+	}
+
+	decodedAccount, err := Decode(encodedAccount)
+	if err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+	 t.Log(decodedAccount.Version)
+	t.Log(a)
+	t.Log(decodedAccount)
+	isAccountsEqual(t, a, decodedAccount)
+}
+
 func isAccountsEqual(t *testing.T, src, dst *Account) {
 	if !bytes.Equal(dst.CodeHash, src.CodeHash) {
 		t.Fatal("cant decode the account CodeHash", src.CodeHash, dst.CodeHash)
@@ -211,6 +235,9 @@ func isAccountsEqual(t *testing.T, src, dst *Account) {
 
 	if dst.Nonce != src.Nonce {
 		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
+	}
+	if dst.Version != src.Version {
+		t.Fatal("cant decode the account Version", src.Version, dst.Version)
 	}
 }
 

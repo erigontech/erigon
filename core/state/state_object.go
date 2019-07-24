@@ -208,6 +208,8 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
+		fmt.Println("core/state/state_object.go:211 updateTrie", so.address.String(), "version", so.data.GetVersion())
+		fmt.Println("core/state/state_object.go:211 k=", key.String(), "v=", value.String())
 		if err := stateWriter.WriteAccountStorage(so.address,so.data.GetVersion(), &key, &original, &value); err != nil {
 			return err
 		}

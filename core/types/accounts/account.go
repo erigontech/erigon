@@ -15,6 +15,7 @@ import (
 type ExtAccount struct {
 	Nonce   uint64
 	Balance *big.Int
+	Version uint8
 }
 
 // Account is the Ethereum consensus representation of accounts.
@@ -34,7 +35,7 @@ type accountWithoutStorage struct {
 	Balance  *big.Int
 	Root     common.Hash // merkle root of the storage trie
 	CodeHash []byte
-	Version		uint8
+	Version	 uint8
 }
 
 const (
@@ -57,6 +58,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		toEncode = new(ExtAccount).
 			fill(a).
 			setDefaultBalance()
+		fmt.Println("core/types/accounts/account.go:61", toEncode)
 	} else {
 		acc := newAccountCopy(a)
 		toEncode = acc
@@ -104,11 +106,14 @@ func (a *Account) Decode(enc []byte) error {
 	case encodedLength == 0:
 
 	case encodedLength == accountSizeWithoutData:
+		fmt.Println("encodedLength == accountSizeWithoutData")
 		a.Balance = new(big.Int)
 		a.setCodeHash(emptyCodeHash)
 		a.Root = emptyRoot
 
 	case encodedLength < minAccountSizeWithRootAndCodeHash:
+		fmt.Println("encodedLength < minAccountSizeWithRootAndCodeHash")
+
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {
 			return err
@@ -116,6 +121,7 @@ func (a *Account) Decode(enc []byte) error {
 
 		a.fillFromExtAccount(extData)
 	default:
+		fmt.Println("default")
 		dataWithoutStorage := &accountWithoutStorage{}
 		err := rlp.DecodeBytes(enc, dataWithoutStorage)
 		if err == nil {
@@ -211,6 +217,7 @@ func (a *Account) fillFromExtAccount(srcExtAccount ExtAccount) *Account {
 	a.CodeHash = emptyCodeHash
 
 	a.Root = emptyRoot
+	a.Version=srcExtAccount.Version
 
 	return a
 }
@@ -239,10 +246,10 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
-func (a *Account)GetVersion() uint8  {
+func (a *Account) GetVersion() uint8  {
 	return a.Version
 }
-func (a *Account)SetVersion(v uint8)  {
+func (a *Account) SetVersion(v uint8)  {
 	a.Version = v
 }
 func (a *Account) IsEmptyCodeHash() bool {
@@ -258,6 +265,7 @@ func (extAcc *ExtAccount) fill(srcAccount *Account) *ExtAccount {
 	extAcc.Balance.Set(srcAccount.Balance)
 
 	extAcc.Nonce = srcAccount.Nonce
+	extAcc.Version = srcAccount.Version
 
 	return extAcc
 }
