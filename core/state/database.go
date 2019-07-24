@@ -195,7 +195,10 @@ type TrieDbState struct {
 	t               *trie.Trie
 	db              ethdb.Database
 	blockNr         uint64
+	//remove it
 	storageTries    map[common.Address]*trie.Trie
+	//storageTries    map[common.Address]*trie.Trie
+	storageTrie    *trie.Trie
 	buffers         []*Buffer
 	aggregateBuffer *Buffer // Merge of all buffers
 	currentBuffer   *Buffer
@@ -590,6 +593,8 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
+					//account.Root = tds.storageTrie.DeepHash(address.Bytes()[:]+ account.Version)
+					//todo add function that calculate
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
@@ -818,6 +823,7 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
 	fmt.Println("core/state/database.go:828 getStorageTrie", address.String())
 	fmt.Println(caller(7))
+
 	t, ok := tds.storageTries[address]
 	if ok {
 		fmt.Println("core/state/database.go:813 ok, t.version=", t.Version)
@@ -892,13 +898,14 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 		}
 	}
 	enc, ok := t.Get(seckey[:], tds.blockNr)
+
+	cKey:=GenerateCompositeStorageKey(address, version, seckey)
+	//tds.storageTrie.Get(cKey, tds.blockNr)
 	if !ok {
 		// Not present in the trie, try database
 		//cKey := make([]byte, len(address)+len(seckey)+1)
 		//copy(cKey, address[:])
 		//copy(cKey[len(address):], seckey[:])
-		cKey:=append(address[:], version)
-		cKey=append(cKey, seckey[:]...)
 		if tds.historical {
 			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
 			if err != nil {
@@ -1176,8 +1183,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version ui
 	/**
 
 	*/
-	compositeKey := append(address[:], uint8(version))
-	compositeKey = append(compositeKey, seckey[:]...)
+	compositeKey := GenerateCompositeStorageKey(address, version, seckey)
 	fmt.Println("core/state/database.go:1129 WriteAccountStorage acc=", address.String(),"version=", version, key, compositeKey, value)
 
 	//compositeKey := append(address[:], seckey[:]...)
@@ -1210,4 +1216,12 @@ func caller(n int) string {
 		fmt.Fprintln(buf, f,l)
 	}
 	return buf.String()
+}
+
+func GenerateCompositeStorageKey(addr common.Address, version uint8, seckey common.Hash) []byte {
+	compositeKey:=make([]byte, 0, 20+1+32)
+	compositeKey = append(compositeKey, addr[:]...)
+	compositeKey = append(compositeKey, version)
+	compositeKey = append(compositeKey, seckey[:]...)
+	return compositeKey
 }

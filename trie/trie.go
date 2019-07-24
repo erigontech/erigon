@@ -76,6 +76,10 @@ func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
 	return t.get(t.root, hex, 0, blockNr)
 }
 
+func (t *Trie) deepHash(key []byte)  {
+
+}
+
 func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
