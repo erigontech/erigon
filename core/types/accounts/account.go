@@ -26,8 +26,8 @@ type Account struct {
 	Balance     *big.Int
 	Root        common.Hash // merkle root of the storage trie
 	CodeHash    []byte
-	StorageSize *uint64
 	Version		uint8
+	StorageSize *uint64
 }
 
 type accountWithoutStorage struct {
@@ -51,6 +51,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 
 	fmt.Println("core/types/accounts/account.go:51 encode version", a.Version)
 	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
+		fmt.Println("encode ExtAccount")
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
 			return []byte{byte(192)}, nil
 		}
@@ -64,10 +65,12 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		toEncode = acc
 
 		if acc.StorageSize != nil {
+			fmt.Println("Encode with storage size")
 			return rlp.EncodeToBytes(toEncode)
 		}
 
 		if !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
+			fmt.Println("encode accountWithoutStorage")
 			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -132,7 +135,7 @@ func (a *Account) Decode(enc []byte) error {
 		if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
 			return err
 		}
-
+		fmt.Println("default to Account")
 		dataWithStorage := &Account{}
 		if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
 			return err

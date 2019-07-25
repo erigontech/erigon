@@ -431,16 +431,20 @@ func TestDeepHash(t *testing.T) {
 		{{"key1", "value1"}, {"key2", "value2"}, {"\xffek3", "value3"}},
 	}
 	for i, keyVals := range testdata {
+		fmt.Println("Test",i)
 		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)
 		}
+		trie.PrintTrie()
 		hash1 := trie.Hash()
 		prefixTrie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
 			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
 		}
+		fmt.Println("prefix trie")
+		prefixTrie.PrintTrie()
 		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
 		if !got2 {
 			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)

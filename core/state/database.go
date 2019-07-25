@@ -195,9 +195,6 @@ type TrieDbState struct {
 	t               *trie.Trie
 	db              ethdb.Database
 	blockNr         uint64
-	//remove it
-	storageTries    map[common.Address]*trie.Trie
-	//storageTries    map[common.Address]*trie.Trie
 	storageTrie    *trie.Trie
 	buffers         []*Buffer
 	aggregateBuffer *Buffer // Merge of all buffers
@@ -228,7 +225,7 @@ func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, bl
 		t:             t,
 		db:            db,
 		blockNr:       blockNr,
-		storageTries:  make(map[common.Address]*trie.Trie),
+		storageTrie:   trie.New(common.Hash{}),
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
@@ -255,6 +252,7 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
+	tStorageCopy := *tds.storageTrie
 
 	tp := trie.NewTriePruning(tds.blockNr)
 
@@ -262,7 +260,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		t:            &tcopy,
 		db:           tds.db,
 		blockNr:      tds.blockNr,
-		storageTries: make(map[common.Address]*trie.Trie),
+		storageTrie:  &tStorageCopy,
 		tp:           tp,
 	}
 	return &cpy
@@ -303,14 +301,12 @@ func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, er
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.t.Print(w)
-	for _, storageTrie := range tds.storageTries {
-		storageTrie.Print(w)
-	}
+	fmt.Fprintln(w,"") //nolint
+	tds.storageTrie.Print(w)
 }
 
 func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
-	storageTrie := tds.storageTries[address]
-	storageTrie.Print(w)
+	tds.storageTrie.Print(w)
 }
 
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
@@ -438,13 +434,10 @@ func (tds *TrieDbState) buildStorageTouches() map[common.Address]Hashes {
 func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]Hashes) error {
 	var resolver *trie.TrieResolver
 	for address, hashes := range storageTouches {
-		storageTrie, err := tds.getStorageTrie(address, true)
-		if err != nil {
-			return err
-		}
 		var contract = address // To avoid the value being overwritten, though still shared between continuations
 		for _, keyHash := range hashes {
-			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
+			//todo @need resolution for prefix
+			if need, req := tds.storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(tds.ctx, 0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
@@ -469,14 +462,17 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[common.Addr
 			// there were no reads before writes and account got deleted
 			continue
 		}
-		storageTrie, err := tds.getStorageTrie(address, true)
-		if err != nil {
-			return err
-		}
-		var contract = address
-		for _, keyHash := range hashes {
-			storageTrie.PopulateBlockProofData(contract[:], keyHash[:], tds.pg)
-		}
+
+		_=hashes
+		//@todo(b00ris) PopulateBlockProofData for data with prefix
+		//storageTrie, err := tds.getStorageTrie(address, true)
+		//if err != nil {
+		//	return err
+		//}
+		//var contract = address
+		//for _, keyHash := range hashes {
+		//	storageTrie.PopulateBlockProofData(contract[:], keyHash[:], tds.pg)
+		//}
 	}
 	return nil
 }
@@ -574,42 +570,96 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				// Deleted contracts will be dealth with later, in the next loop
 				continue
 			}
+
 			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
 			}
-			fmt.Println("core/state/database.go:577 compute storage trie", address.String())
-			storageTrie, err := tds.getStorageTrie(address, true)
-			fmt.Println("core/state/database.go:577 compute storage trie", storageTrie.Version)
+
+			acc,err:=tds.ReadAccountData(address)
 			if err != nil {
 				return nil, err
 			}
+
 			for keyHash, v := range m {
+				version:=uint8(0)
+				if acc!=nil {
+					version=acc.GetVersion()
+				}
+				addrHash,err:=tds.HashAddress(address, false)
+				if err != nil {
+					return nil, err
+				}
+
+				cKey:=GenerateCompositeStorageKey(addrHash, version, keyHash)
 				if len(v) > 0 {
-					storageTrie.Update(keyHash[:], v, tds.blockNr)
+					tds.storageTrie.Update(cKey, v, tds.blockNr)
 				} else {
-					storageTrie.Delete(keyHash[:], tds.blockNr)
+					tds.storageTrie.Delete(cKey, tds.blockNr)
 				}
 			}
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					account.Root = storageTrie.Hash()
-					//account.Root = tds.storageTrie.DeepHash(address.Bytes()[:]+ account.Version)
-					//todo add function that calculate
+					addrHash,err:=tds.HashAddress(address, false)
+					if err != nil {
+						return nil, err
+					}
+
+					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					if ok==false {
+						fmt.Println("---------------------------------------")
+						fmt.Println("core/state/database.go:596 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("---------------------------------------")
+					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					account.Root = storageTrie.Hash()
+					addrHash,err:=tds.HashAddress(address, false)
+					if err != nil {
+						return nil, err
+					}
+
+					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					if ok==false {
+						fmt.Println("---------------------------------------")
+						fmt.Println("core/state/database.go:604 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("---------------------------------------")
+					}
+
 				}
 			} else {
 				// Simply comparing the correctness of the storageRoot computations
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					if account.Root != storageTrie.Hash() {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					addrHash,err:=tds.HashAddress(address, false)
+					if err != nil {
+						return nil, err
+					}
+
+					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					if ok==false {
+						fmt.Println("---------------------------------------")
+						fmt.Println("core/state/database.go:615 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("---------------------------------------")
+					}
+
+					if account.Root != hash {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, hash)
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					if account.Root != storageTrie.Hash() {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					addrHash,err:=tds.HashAddress(address, false)
+					if err != nil {
+						return nil, err
+					}
+
+					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					if ok==false {
+						fmt.Println("---------------------------------------")
+						fmt.Println("core/state/database.go:627 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("---------------------------------------")
+					}
+
+					if account.Root != hash {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, hash)
 					}
 				}
 			}
@@ -627,14 +677,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
 			}
-			storageTrie, err := tds.getStorageTrie(address, false)
-			if err != nil {
-				return nil, err
-			}
-			if storageTrie != nil {
-				delete(tds.storageTries, address)
-				storageTrie.PrepareToRemove()
-			}
+
+			//@todo(b00ris) remove from tds.storageTrie
+			//delete(tds.storageTries, address)
+			//storageTrie.PrepareToRemove()
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -850,60 +896,54 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	return key
 }
 
-func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
-	fmt.Println("core/state/database.go:828 getStorageTrie", address.String())
-	fmt.Println(caller(7))
-
-	t, ok := tds.storageTries[address]
-	if ok {
-		fmt.Println("core/state/database.go:813 ok, t.version=", t.Version)
-		account, err := tds.ReadAccountData(address)
-		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address) err=", err, address.String())
-		if err==nil && account!=nil {
-			fmt.Println("core/state/database.go:817 account found", account)
-			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
-			if t.Version!=account.GetVersion() {
-				t = trie.New(common.Hash{})
-				t.Version=account.GetVersion()
-				tds.storageTries[address] = t
-				return t, nil
-			}
-		}
-		return t, nil
-	}
-	if !ok && create {
-		fmt.Println("core/state/database.go:827 Create trie")
-		account, err := tds.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-		if account == nil {
-			fmt.Println("core/state/database.go:833 account==nil")
-			t = trie.New(common.Hash{})
-			//t.Version=1
-		} else {
-			fmt.Println("core/state/database.go:833 account!=nil", account.GetVersion())
-			//t.Version=account.GetVersion()
-
-
-			t = trie.New(account.Root)
-		}
-		t.SetTouchFunc(func(hex []byte, del bool) {
-			tds.tp.TouchContract(address, hex, del)
-		})
-		tds.storageTries[address] = t
-	}
-	return t, nil
-}
+//func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
+//	fmt.Println("core/state/database.go:828 getStorageTrie", address.String())
+//	fmt.Println(caller(7))
+//
+//	t, ok := tds.storageTries[address]
+//	if ok {
+//		fmt.Println("core/state/database.go:813 ok, t.version=", t.Version)
+//		account, err := tds.ReadAccountData(address)
+//		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address) err=", err, address.String())
+//		if err==nil && account!=nil {
+//			fmt.Println("core/state/database.go:817 account found", account)
+//			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
+//			if t.Version!=account.GetVersion() {
+//				t = trie.New(common.Hash{})
+//				t.Version=account.GetVersion()
+//				tds.storageTries[address] = t
+//				return t, nil
+//			}
+//		}
+//		return t, nil
+//	}
+//	if !ok && create {
+//		fmt.Println("core/state/database.go:827 Create trie")
+//		account, err := tds.ReadAccountData(address)
+//		if err != nil {
+//			return nil, err
+//		}
+//		if account == nil {
+//			fmt.Println("core/state/database.go:833 account==nil")
+//			t = trie.New(common.Hash{})
+//			//t.Version=1
+//		} else {
+//			fmt.Println("core/state/database.go:833 account!=nil", account.GetVersion())
+//			//t.Version=account.GetVersion()
+//
+//
+//			t = trie.New(account.Root)
+//		}
+//		t.SetTouchFunc(func(hex []byte, del bool) {
+//			tds.tp.TouchContract(address, hex, del)
+//		})
+//		tds.storageTries[address] = t
+//	}
+//	return t, nil
+//}
 
 func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
 	fmt.Println("core/state/database.go:828 ReadAccountStorage addr=", address.String(), "version=", version, "k=", key.String())
-
-	t, err := tds.getStorageTrie(address, true)
-	fmt.Println("core/state/database.go:831 getStorageTrie", err)
-	if err != nil {
-		return nil, err
-	}
 
 	seckey, err := tds.HashKey(key, false /*save*/)
 	fmt.Println("core/state/database.go:836 seckey", seckey)
@@ -930,10 +970,13 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 		}
 	}
 
-	cKey:=GenerateCompositeStorageKey(address, version, seckey)
-	//tds.storageTrie.Get(cKey, tds.blockNr)
+	addrHash,err:=tds.HashAddress(address, false)
+	if err != nil {
+		return nil, err
+	}
 
-	enc, ok := t.Get(seckey[:], tds.blockNr)
+	cKey:=GenerateCompositeStorageKey(addrHash, version, seckey)
+	enc, ok := tds.storageTrie.Get(cKey, tds.blockNr)
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -941,9 +984,6 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 		}
 	} else {
 		// Not present in the trie, try database
-		//cKey := make([]byte, len(address)+len(seckey)+1)
-		//copy(cKey, address[:])
-		//copy(cKey[len(address):], seckey[:])
 		if tds.historical {
 			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
 			if err != nil {
@@ -1019,7 +1059,9 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		}
 	*/
 	pruned, emptyAddresses, err := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen), func(contract common.Address) (*trie.Trie, error) {
-		return tds.getStorageTrie(contract, false)
+		//@todo(b00ris) impliment pruning for tds.storageTrie
+		//return tds.getStorageTrie(contract, false)
+		return nil, nil
 	})
 	if err != nil {
 		fmt.Printf("Error while pruning: %v\n", err)
@@ -1039,7 +1081,9 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	*/
 	// Storage tries that were completely pruned
 	for _, address := range emptyAddresses {
-		delete(tds.storageTries, address)
+		//@todo(b00ris) Remove it from tds.storageTrie
+		//delete(tds.storageTries, address)
+		_=address
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -1228,10 +1272,13 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version ui
 	v := bytes.TrimLeft(value[:], "\x00")
 	vv := make([]byte, len(v))
 	copy(vv, v)
-	/**
 
-	*/
-	compositeKey := GenerateCompositeStorageKey(address, version, seckey)
+	addrHash,err:=dsw.tds.HashAddress(address, false)
+	if err != nil {
+		return  err
+	}
+
+	compositeKey := GenerateCompositeStorageKey(addrHash, version, seckey)
 	fmt.Println("core/state/database.go:1129 WriteAccountStorage acc=", address.String(),"version=", version, key, compositeKey, value)
 
 	//compositeKey := append(address[:], seckey[:]...)
@@ -1266,10 +1313,15 @@ func caller(n int) string {
 	return buf.String()
 }
 
-func GenerateCompositeStorageKey(addr common.Address, version uint8, seckey common.Hash) []byte {
-	compositeKey:=make([]byte, 0, 20+1+32)
-	compositeKey = append(compositeKey, addr[:]...)
-	compositeKey = append(compositeKey, version)
+func GenerateCompositeStorageKey(addressHash common.Hash, version uint8, seckey common.Hash) []byte {
+	compositeKey:=make([]byte, 0, 32+1+32)
+	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash,version)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
+}
+func GenerateStoragePrefix(addressHash common.Hash, version uint8) []byte {
+	prefix :=make([]byte, 0, 32+1)
+	prefix = append(prefix, addressHash[:]...)
+	prefix = append(prefix, version)
+	return prefix
 }
