@@ -783,7 +783,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			tds.currentBuffer.accountReads[buf] = struct{}{}
 		}
 	}
-	enc, ok := tds.t.Get(buf[:], tds.blockNr)
+	enc, ok := tds.t.Get(buf[:])
 	if !ok {
 		// Not present in the trie, try the database
 		var err error
@@ -881,7 +881,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, key *common.H
 			m[seckey] = struct{}{}
 		}
 	}
-	enc, ok := t.Get(seckey[:], tds.blockNr)
+	enc, ok := t.Get(seckey[:])
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
