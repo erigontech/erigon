@@ -677,10 +677,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
 			}
-
-			//@todo(b00ris) remove from tds.storageTrie
-			//delete(tds.storageTries, address)
-			//storageTrie.PrepareToRemove()
+			tds.storageTrie.Delete(GenerateStoragePrefix(addrHash,0), tds.blockNr)
 		}
 
 		for addrHash, account := range b.accountUpdates {

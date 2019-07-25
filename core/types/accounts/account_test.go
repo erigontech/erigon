@@ -202,7 +202,7 @@ func TestAccountIncreaseVersion(t *testing.T) {
 		Balance:  new(big.Int).SetInt64(1000),
 		Root:     emptyRoot,     // extAccount doesn't have Root value
 		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
-		Version: 1,
+		Incarnation: 1,
 	}
 
 	encodedAccount, err := a.Encode(context.Background())
@@ -214,7 +214,7 @@ func TestAccountIncreaseVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
-	 t.Log(decodedAccount.Version)
+	 t.Log(decodedAccount.Incarnation)
 	t.Log(a)
 	t.Log(decodedAccount)
 	isAccountsEqual(t, a, decodedAccount)
@@ -236,8 +236,8 @@ func isAccountsEqual(t *testing.T, src, dst *Account) {
 	if dst.Nonce != src.Nonce {
 		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
 	}
-	if dst.Version != src.Version {
-		t.Fatal("cant decode the account Version", src.Version, dst.Version)
+	if dst.Incarnation != src.Incarnation {
+		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
 	}
 }
 

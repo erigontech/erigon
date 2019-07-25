@@ -37,6 +37,20 @@ type accountWithoutStorage struct {
 	CodeHash []byte
 	Incarnation	 uint8
 }
+type RLPAccount struct {
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+	StorageSize *uint64
+}
+type RLPAccountWithoutStorage struct {
+	Nonce       uint64
+	Balance     *big.Int
+	Root        common.Hash // merkle root of the storage trie
+	CodeHash    []byte
+}
+
 
 const (
 	accountSizeWithoutData            = 1
@@ -86,14 +100,19 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 
 func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 	acc := newAccountCopy(a)
-	toEncode := interface{}(acc)
+	toEncode := interface{}(RLPAccount{
+		Nonce:acc.Nonce,
+		Balance:acc.Balance,
+		Root:acc.Root,
+		CodeHash:acc.CodeHash,
+	})
 
 	if acc.StorageSize != nil {
 		return rlp.EncodeToBytes(toEncode)
 	}
 
 	if acc.StorageSize == nil || !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
-		toEncode = &accountWithoutStorage{
+		toEncode = &RLPAccountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,
 			Root:     acc.Root,
