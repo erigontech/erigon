@@ -584,7 +584,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 			for keyHash, v := range m {
 				version:=uint8(0)
 				if acc!=nil {
-					version=acc.GetVersion()
+					version=acc.GetIncarnation()
 				}
 				addrHash,err:=tds.HashAddress(address, false)
 				if err != nil {
@@ -605,10 +605,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 						return nil, err
 					}
 
-					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok==false {
 						fmt.Println("---------------------------------------")
-						fmt.Println("core/state/database.go:596 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("core/state/database.go:596 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
 						fmt.Println("---------------------------------------")
 					}
 				}
@@ -618,10 +618,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 						return nil, err
 					}
 
-					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok==false {
 						fmt.Println("---------------------------------------")
-						fmt.Println("core/state/database.go:604 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("core/state/database.go:604 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
 						fmt.Println("---------------------------------------")
 					}
 
@@ -634,10 +634,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 						return nil, err
 					}
 
-					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok==false {
 						fmt.Println("---------------------------------------")
-						fmt.Println("core/state/database.go:615 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("core/state/database.go:615 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
 						fmt.Println("---------------------------------------")
 					}
 
@@ -651,10 +651,10 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 						return nil, err
 					}
 
-					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetVersion()))
+					ok,hash := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok==false {
 						fmt.Println("---------------------------------------")
-						fmt.Println("core/state/database.go:627 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetVersion())) !=ok", ok,account.Root)
+						fmt.Println("core/state/database.go:627 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
 						fmt.Println("---------------------------------------")
 					}
 
@@ -907,10 +907,10 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 //		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address) err=", err, address.String())
 //		if err==nil && account!=nil {
 //			fmt.Println("core/state/database.go:817 account found", account)
-//			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
-//			if t.Version!=account.GetVersion() {
+//			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetIncarnation(), "trie version", t.Version)
+//			if t.Version!=account.GetIncarnation() {
 //				t = trie.New(common.Hash{})
-//				t.Version=account.GetVersion()
+//				t.Version=account.GetIncarnation()
 //				tds.storageTries[address] = t
 //				return t, nil
 //			}
@@ -928,8 +928,8 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 //			t = trie.New(common.Hash{})
 //			//t.Version=1
 //		} else {
-//			fmt.Println("core/state/database.go:833 account!=nil", account.GetVersion())
-//			//t.Version=account.GetVersion()
+//			fmt.Println("core/state/database.go:833 account!=nil", account.GetIncarnation())
+//			//t.Version=account.GetIncarnation()
 //
 //
 //			t = trie.New(account.Root)
@@ -1147,7 +1147,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	fmt.Println("core/state/database.go:1044 UpdateAccountData", address.String(), "orig.vers", original.GetVersion(), "acc.vers",account.GetVersion())
+	fmt.Println("core/state/database.go:1044 UpdateAccountData", address.String(), "orig.vers", original.GetIncarnation(), "acc.vers",account.GetIncarnation())
 	data, err := account.Encode(ctx)
 	fmt.Println("core/state/database.go:1046 encode", data)
 	if err != nil {
@@ -1155,7 +1155,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	}
 
 	acc,err:=accounts.Decode(data)
-	fmt.Println("core/state/database.go:1046 decoded version", acc.Version, err)
+	fmt.Println("core/state/database.go:1046 decoded version", acc.GetIncarnation(), err)
 
 
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)

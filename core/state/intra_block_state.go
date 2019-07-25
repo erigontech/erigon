@@ -671,9 +671,9 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	}
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
-		fmt.Println("core/state/intra_block_state.go:673 versSet", prev.data.GetVersion()+1)
+		fmt.Println("core/state/intra_block_state.go:673 versSet", prev.data.GetIncarnation()+1)
 		newObj.setBalance(prev.data.Balance)
-		newObj.data.SetVersion(prev.data.GetVersion()+1)
+		newObj.data.SetIncarnation(prev.data.GetIncarnation()+1)
 	}
 }
 

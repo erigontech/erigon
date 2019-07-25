@@ -15,7 +15,7 @@ import (
 type ExtAccount struct {
 	Nonce   uint64
 	Balance *big.Int
-	Version uint8
+	Incarnation uint8
 }
 
 // Account is the Ethereum consensus representation of accounts.
@@ -26,7 +26,7 @@ type Account struct {
 	Balance     *big.Int
 	Root        common.Hash // merkle root of the storage trie
 	CodeHash    []byte
-	Version		uint8
+	Incarnation		uint8
 	StorageSize *uint64
 }
 
@@ -35,7 +35,7 @@ type accountWithoutStorage struct {
 	Balance  *big.Int
 	Root     common.Hash // merkle root of the storage trie
 	CodeHash []byte
-	Version	 uint8
+	Incarnation	 uint8
 }
 
 const (
@@ -49,7 +49,7 @@ var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cad
 func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 	var toEncode interface{}
 
-	fmt.Println("core/types/accounts/account.go:51 encode version", a.Version)
+	fmt.Println("core/types/accounts/account.go:51 encode version", a.GetIncarnation())
 	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
 		fmt.Println("encode ExtAccount")
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
@@ -76,7 +76,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 				Balance:  acc.Balance,
 				Root:     acc.Root,
 				CodeHash: acc.CodeHash,
-				Version:  acc.Version,
+				Incarnation:  acc.Incarnation,
 			}
 		}
 	}
@@ -180,7 +180,7 @@ func (a *Account) fill(srcAccount *Account) *Account {
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
-	a.Version = srcAccount.Version
+	a.Incarnation = srcAccount.Incarnation
 
 	if srcAccount.StorageSize != nil {
 		a.StorageSize = new(uint64)
@@ -204,7 +204,7 @@ func (a *Account) fillAccountWithoutStorage(srcAccount *accountWithoutStorage) *
 	a.Balance.Set(srcAccount.Balance)
 
 	a.Nonce = srcAccount.Nonce
-	a.Version=srcAccount.Version
+	a.Incarnation=srcAccount.Incarnation
 
 	a.StorageSize = nil
 
@@ -220,7 +220,7 @@ func (a *Account) fillFromExtAccount(srcExtAccount ExtAccount) *Account {
 	a.CodeHash = emptyCodeHash
 
 	a.Root = emptyRoot
-	a.Version=srcExtAccount.Version
+	a.Incarnation=srcExtAccount.Incarnation
 
 	return a
 }
@@ -249,11 +249,11 @@ func (a *Account) setDefaultRoot() *Account {
 	return a
 }
 
-func (a *Account) GetVersion() uint8  {
-	return a.Version
+func (a *Account) GetIncarnation() uint8  {
+	return a.Incarnation
 }
-func (a *Account) SetVersion(v uint8)  {
-	a.Version = v
+func (a *Account) SetIncarnation(v uint8)  {
+	a.Incarnation = v
 }
 func (a *Account) IsEmptyCodeHash() bool {
 	return a.CodeHash == nil || bytes.Equal(a.CodeHash[:], emptyCodeHash)
@@ -268,7 +268,7 @@ func (extAcc *ExtAccount) fill(srcAccount *Account) *ExtAccount {
 	extAcc.Balance.Set(srcAccount.Balance)
 
 	extAcc.Nonce = srcAccount.Nonce
-	extAcc.Version = srcAccount.Version
+	extAcc.Incarnation = srcAccount.Incarnation
 
 	return extAcc
 }
