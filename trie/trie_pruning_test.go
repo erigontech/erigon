@@ -28,7 +28,7 @@ import (
 
 func TestOnePerTimestamp(t *testing.T) {
 	tp := NewTriePruning(0)
-	tr := New(common.Hash{}, false)
+	tr := New(common.Hash{})
 	tr.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})

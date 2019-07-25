@@ -42,8 +42,6 @@ var (
 type Trie struct {
 	root node
 
-	encodeToBytes bool
-
 	touchFunc func(hex []byte, del bool)
 
 	Version uint8
@@ -55,10 +53,9 @@ type Trie struct {
 // trie is initially empty and does not require a database. Otherwise,
 // New will panic if db is nil and returns a MissingNodeError if root does
 // not exist in the database. Accessing the trie loads nodes from db on demand.
-func New(root common.Hash, encodeToBytes bool) *Trie {
+func New(root common.Hash) *Trie {
 	trie := &Trie{
-		encodeToBytes: encodeToBytes,
-		touchFunc:     func([]byte, bool) {},
+		touchFunc: func([]byte, bool) {},
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -510,6 +507,35 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 	}
 }
 
+func (t *Trie) touchAll(n node, hex []byte, del bool) {
+	switch n := n.(type) {
+	case *shortNode:
+		var hexVal []byte
+		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+			hexVal = concat(hex, compactToHex(n.Key)...)
+		}
+		t.touchAll(n.Val, hexVal, del)
+	case *duoNode:
+		t.touchFunc(hex, del)
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		t.touchAll(n.child1, hex1, del)
+		t.touchAll(n.child2, hex2, del)
+	case *fullNode:
+		t.touchFunc(hex, del)
+		for i, child := range n.Children {
+			if child != nil {
+				t.touchAll(child, concat(hex, byte(i)), del)
+			}
+		}
+	}
+}
+
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
@@ -703,36 +729,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 }
 
 func (t *Trie) PrepareToRemove() {
-	t.prepareToRemove(t.root, []byte{})
-}
-
-func (t *Trie) prepareToRemove(n node, hex []byte) {
-	switch n := n.(type) {
-	case *shortNode:
-		var hexVal []byte
-		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			hexVal = concat(hex, compactToHex(n.Key)...)
-		}
-		t.prepareToRemove(n.Val, hexVal)
-	case *duoNode:
-		t.touchFunc(hex, true)
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = byte(i1)
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = byte(i2)
-		t.prepareToRemove(n.child1, hex1)
-		t.prepareToRemove(n.child2, hex2)
-	case *fullNode:
-		t.touchFunc(hex, true)
-		for i, child := range n.Children {
-			if child != nil {
-				t.prepareToRemove(child, concat(hex, byte(i)))
-			}
-		}
-	}
+	t.touchAll(t.root, []byte{}, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -752,6 +749,68 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 func (t *Trie) Hash() common.Hash {
 	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))
+}
+
+// DeepHash returns internal hash of a node reachable by the specified key prefix
+// Note that if the prefix points into the middle of a key for a leaf node or of an extention
+// node, it will return the hash of a modified leaf node or extension node, where the
+// key prefix is removed from the key.
+// First returned value is `true` if the node with the specified prefix is found
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix = hexPrefix[:len(hexPrefix)-1] // Remove terminal byte
+	var nd = t.root
+	pos := 0
+	for pos < len(hexPrefix) {
+		switch n := nd.(type) {
+		case nil:
+			return false, common.Hash{}
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hexPrefix[pos:], nKey)
+			//fmt.Printf("nKey: %x, hexPrefix[pos:]: %x, matchlen: %d\n", nKey, hexPrefix[pos:], matchlen)
+			if matchlen == len(nKey) {
+				nd = n.Val
+				pos += matchlen
+			} else if matchlen == len(hexPrefix)-pos {
+				// middle of the key
+				nd = &shortNode{Key: hexToCompact(nKey[matchlen:]), Val: n.Val}
+				pos += matchlen
+			} else {
+				return false, common.Hash{}
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hexPrefix[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return false, common.Hash{}
+			}
+		case *fullNode:
+			child := n.Children[hexPrefix[pos]]
+			if child == nil {
+				return false, common.Hash{}
+			}
+			nd = child
+			pos++
+		case valueNode:
+			return false, common.Hash{}
+		case hashNode:
+			return false, common.Hash{}
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+	var hn common.Hash
+	h.hash(nd, true, hn[:])
+	return true, hn
 }
 
 func (t *Trie) unload(hex []byte, h *hasher) {
@@ -878,7 +937,7 @@ func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
-	h := newHasher(t.encodeToBytes)
+	h := newHasher(false)
 	defer returnHasherToPool(h)
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])

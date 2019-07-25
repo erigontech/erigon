@@ -36,11 +36,13 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+var action = flag.String("action", "", "action to execute")
 var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
 var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
+var name = flag.String("name", "", "name to add to the file names")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -668,15 +670,19 @@ func extractTrie(block int) {
 }
 
 func testRewind(block, rewind int) {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth//chaindata")
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
+	if block == 1 {
+		block = int(currentBlockNr)
+	}
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	baseBlockNr := baseBlock.NumberU64()
 	fmt.Printf("Base block number: %d\n", baseBlockNr)
@@ -746,8 +752,8 @@ func testStartup() {
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	t := trie.New(common.Hash{}, false)
-	r := trie.NewResolver(context.Background(), false, true, currentBlockNr)
+	t := trie.New(common.Hash{})
+	r := trie.NewResolver(context.Background(), 0, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -775,10 +781,10 @@ func testResolve() {
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	//contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
-	r := trie.NewResolver(context.Background(), false, true, 806548)
+	r := trie.NewResolver(context.Background(), 0, true, 806548)
 	key := common.FromHex("0x050a08070e090006010a05090c02050d050e0b0a06010a00060d060b03020f0a0203040c00090d0f050d020b080f020307010803050a0e0b00010b0a090b030a10")
 	resolveHash := common.FromHex("0xda5f3503cf2b72df779991a3862551da2a5aac66b59cd463eb03da0a47864350")
-	t := trie.New(common.BytesToHash(resolveHash), false)
+	t := trie.New(common.BytesToHash(resolveHash))
 	req := t.NewResolveRequest(nil, key, 0, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, 806548)
@@ -952,23 +958,23 @@ func upgradeBlocks() {
 	check(ethDb.DeleteBucket([]byte("r")))
 }
 
-func readTrie(filename string, encodeToBytes bool) *trie.Trie {
+func readTrie(filename string) *trie.Trie {
 	f, err := os.Open(filename)
 	check(err)
 	defer f.Close()
-	t, err := trie.Load(f, encodeToBytes)
+	t, err := trie.Load(f)
 	check(err)
 	return t
 }
 
-func invTree(wrong, right, diff string, block int, encodeToBytes bool) {
+func invTree(wrong, right, diff string, name string) {
 	fmt.Printf("Reading trie...\n")
-	t1 := readTrie(fmt.Sprintf("%s_%d.txt", wrong, block), encodeToBytes)
+	t1 := readTrie(fmt.Sprintf("%s_%s.txt", wrong, name))
 	fmt.Printf("Root hash: %x\n", t1.Hash())
 	fmt.Printf("Reading trie 2...\n")
-	t2 := readTrie(fmt.Sprintf("%s_%d.txt", right, block), encodeToBytes)
+	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name))
 	fmt.Printf("Root hash: %x\n", t2.Hash())
-	c, err := os.Create(fmt.Sprintf("%s_%d.txt", diff, block))
+	c, err := os.Create(fmt.Sprintf("%s_%s.txt", diff, name))
 	check(err)
 	defer c.Close()
 	t1.PrintDiff(t2, c)
@@ -1029,7 +1035,7 @@ func loadAccount() {
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
-	t := trie.New(common.Hash{}, true)
+	t := trie.New(common.Hash{})
 	count := 0
 	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
@@ -1302,7 +1308,9 @@ func main() {
 	//bucketStats(db)
 	//mychart()
 	//testRebuild()
-	//testRewind(*block, *rewind)
+	if *action == "testRewind" {
+		testRewind(*block, *rewind)
+	}
 	//hashFile()
 	//buildHashFromFile()
 	//testResolve()
@@ -1321,10 +1329,14 @@ func main() {
 	//testRedis()
 	//upgradeBlocks()
 	//compareTries()
-	//invTree("root", "right", "diff", *block, false)
+	if *action == "invTree" {
+		invTree("tries/root", "tries/right", "tries/diff", *name)
+	}
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
-	preimage()
+	if *action == "preimage" {
+		preimage()
+	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)

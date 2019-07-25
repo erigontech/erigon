@@ -221,7 +221,7 @@ func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, bl
 	if err != nil {
 		return nil, err
 	}
-	t := trie.New(root, false)
+	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
 	tds := TrieDbState{
@@ -446,7 +446,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.ctx, false, false, tds.blockNr)
+					resolver = trie.NewResolver(tds.ctx, 0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -507,7 +507,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(tds.ctx, false, true, tds.blockNr)
+				resolver = trie.NewResolver(tds.ctx, 0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)
@@ -528,7 +528,8 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 	}
 }
 
-//todo what is forward?
+// forward is `true` if the function is used to progress the state forward (by adding blocks)
+// forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
@@ -599,6 +600,18 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					account.Root = storageTrie.Hash()
 				}
+			} else {
+				// Simply comparing the correctness of the storageRoot computations
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					if account.Root != storageTrie.Hash() {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					}
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					if account.Root != storageTrie.Hash() {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", address, account.Root, storageTrie.Hash())
+					}
+				}
 			}
 		}
 
@@ -648,7 +661,13 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	return tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr)
+	if err := tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr); err != nil {
+		return err
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+	return nil
 }
 
 func (tds *TrieDbState) SetBlockNr(ctx context.Context, blockNr uint64) {
@@ -693,13 +712,24 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 				m = make(map[common.Hash][]byte)
 				b.storageUpdates[address] = m
 			}
-			m[keyHash] = value
 			if len(value) > 0 {
+				// Write into 1 extra RLP level
+				var vv []byte
+				if len(value) > 1 || value[0] >= 128 {
+					vv = make([]byte, len(value)+1)
+					vv[0] = byte(128 + len(value))
+					copy(vv[1:], value)
+				} else {
+					vv = make([]byte, 1)
+					vv[0] = value[0]
+				}
+				m[keyHash] = vv
 				storagePutKeys = append(storagePutKeys, key)
-				storagePutVals = append(storagePutVals, value)
+				storagePutVals = append(storagePutVals, vv)
 			} else {
 				//fmt.Printf("Deleted storage item\n")
 				storageDelKeys = append(storageDelKeys, key)
+				m[keyHash] = nil
 			}
 		}
 		return nil
@@ -833,7 +863,7 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 			fmt.Println("core/state/database.go:817 account found", account)
 			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetVersion(), "trie version", t.Version)
 			if t.Version!=account.GetVersion() {
-				t = trie.New(common.Hash{}, true)
+				t = trie.New(common.Hash{})
 				t.Version=account.GetVersion()
 				tds.storageTries[address] = t
 				return t, nil
@@ -849,12 +879,14 @@ func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*tr
 		}
 		if account == nil {
 			fmt.Println("core/state/database.go:833 account==nil")
-			t = trie.New(common.Hash{}, true)
+			t = trie.New(common.Hash{})
 			//t.Version=1
 		} else {
-			t = trie.New(account.Root, true)
 			fmt.Println("core/state/database.go:833 account!=nil", account.GetVersion())
 			//t.Version=account.GetVersion()
+
+
+			t = trie.New(account.Root)
 		}
 		t.SetTouchFunc(func(hex []byte, del bool) {
 			tds.tp.TouchContract(address, hex, del)
@@ -897,11 +929,17 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 			m[seckey] = struct{}{}
 		}
 	}
-	enc, ok := t.Get(seckey[:], tds.blockNr)
 
 	cKey:=GenerateCompositeStorageKey(address, version, seckey)
 	//tds.storageTrie.Get(cKey, tds.blockNr)
-	if !ok {
+
+	enc, ok := t.Get(seckey[:], tds.blockNr)
+	if ok {
+		// Unwrap one RLP level
+		if len(enc) > 1 {
+			enc = enc[1:]
+		}
+	} else {
 		// Not present in the trie, try database
 		//cKey := make([]byte, len(address)+len(seckey)+1)
 		//copy(cKey, address[:])
@@ -1162,7 +1200,17 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, version 
 		return err
 	}
 	if len(v) > 0 {
-		m[seckey] = common.CopyBytes(v)
+		// Write into 1 extra RLP level
+		var vv []byte
+		if len(v) > 1 || v[0] >= 128 {
+			vv = make([]byte, len(v)+1)
+			vv[0] = byte(128 + len(v))
+			copy(vv[1:], v)
+		} else {
+			vv = make([]byte, 1)
+			vv[0] = v[0]
+		}
+		m[seckey] = vv
 	} else {
 		m[seckey] = nil
 	}
