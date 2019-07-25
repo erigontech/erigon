@@ -1273,17 +1273,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		readBlockNr := parentNumber
 		var root common.Hash
 		if bc.trieDbState == nil {
-			currentBlockNr := bc.CurrentBlock().NumberU64()
-			log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
-			bc.trieDbState, err = state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(currentBlockNr))), bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
-			if err != nil {
-				return k, events, coalescedLogs, err
-			}
-			bc.trieDbState.SetNoHistory(bc.noHistory)
-			bc.trieDbState.SetResolveReads(bc.resolveReads)
-			if err := bc.trieDbState.Rebuild(); err != nil {
-				return k, events, coalescedLogs, err
-			}
+			bc.GetTrieDbState()
 		}
 		root = bc.trieDbState.LastRoot()
 		var parentRoot common.Hash
