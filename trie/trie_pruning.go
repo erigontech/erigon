@@ -27,15 +27,15 @@ import (
 )
 
 type TriePruning struct {
-	storageTimestamps map[common.Address]map[string]uint64
-	accountTimestamps map[string]uint64
+	storageTimestamps      map[common.Address]map[string]uint64
+	accountTimestamps      map[string]uint64
 	accountTimestampsMutex sync.RWMutex
 
 	// Maps timestamp (uint64) to address of the contract to set of prefixes of nodes (string)
 	storage map[uint64]map[common.Address]map[string]struct{}
 
 	// Maps timestamp (uint64) to set of prefixes of nodees (string)
-	accounts map[uint64]map[string]struct{}
+	accounts      map[uint64]map[string]struct{}
 	accountsMutex sync.RWMutex
 
 	// For each timestamp, keeps number of branch nodes belonging to it
