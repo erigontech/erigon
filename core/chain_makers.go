@@ -18,6 +18,7 @@ package core
 
 import (
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math/big"
 
 	"context"
@@ -175,6 +176,92 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 // Blocks created by GenerateChain do not contain valid proof of work
 // values. Inserting them into BlockChain requires use of FakePow or
 // a similar non-validating proof of work implementation.
+func GenerateChainX(addr common.Address, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts) {
+	if config == nil {
+		config = params.TestChainConfig
+	}
+	blocks, receipts := make(types.Blocks, n), make([]types.Receipts, n)
+	chainreader := &fakeChainReader{config: config}
+	genblock := func(i int, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState) (*types.Block, types.Receipts) {
+		b := &BlockGen{i: i, chain: blocks, parent: parent, statedb: statedb, triedbstate: tds, config: config, engine: engine}
+		b.header = makeHeader(chainreader, parent, b.engine)
+		// Mutate the state and block according to any hard-fork specs
+		if daoBlock := config.DAOForkBlock; daoBlock != nil {
+			limit := new(big.Int).Add(daoBlock, params.DAOForkExtraRange)
+			if b.header.Number.Cmp(daoBlock) >= 0 && b.header.Number.Cmp(limit) < 0 {
+				if config.DAOForkSupport {
+					b.header.Extra = common.CopyBytes(params.DAOForkBlockExtra)
+				}
+			}
+		}
+		tds.StartNewBuffer()
+		if config.DAOForkSupport && config.DAOForkBlock != nil && config.DAOForkBlock.Cmp(b.header.Number) == 0 {
+			misc.ApplyDAOHardFork(statedb)
+		}
+		// Execute any user modifications to the block
+		if gen != nil {
+			gen(i, b)
+		}
+		if b.engine != nil {
+			// Finalize and seal the block
+			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
+				panic(fmt.Sprintf("could not finalize block: %v", err))
+			}
+			ctx := config.WithEIPsFlags(context.Background(), b.header.Number)
+			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+				panic(err)
+			}
+			roots, err := tds.ComputeTrieRoots(ctx)
+			if err != nil {
+				panic(err)
+			}
+			if !b.config.IsByzantium(b.header.Number) {
+				for i, receipt := range b.receipts {
+					receipt.PostState = roots[i].Bytes()
+				}
+			}
+			b.header.Root = roots[len(roots)-1]
+			// Recreating block to make sure Root makes it into the header
+			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
+			tds.SetBlockNr(ctx, block.NumberU64())
+			// Write state changes to db
+			if err := statedb.CommitBlock(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
+				panic(fmt.Sprintf("state write error: %v", err))
+			}
+			return block, b.receipts
+		}
+		return nil, nil
+	}
+	tds, err := state.NewTrieDbState(config.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
+	if err != nil {
+		panic(err)
+	}
+	if err := tds.Rebuild(); err != nil {
+		panic(err)
+	}
+
+	var states []uint64
+
+	for i := 0; i < n; i++ {
+		statedb := state.New(tds)
+
+		gotAcc, err := tds.ReadAccountData(addr)
+		if err != nil {
+			panic(err)
+		}
+		panic(gotAcc == nil)
+		panic(spew.Sdump(states))
+
+		states = append(states, statedb.GetBalance(addr).Uint64())
+
+		block, receipt := genblock(i, parent, statedb, tds)
+		blocks[i] = block
+		receipts[i] = receipt
+		parent = block
+	}
+	return blocks, receipts
+}
+
 func GenerateChain(config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *BlockGen)) ([]*types.Block, []types.Receipts) {
 	if config == nil {
 		config = params.TestChainConfig

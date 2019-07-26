@@ -53,8 +53,8 @@ type RLPAccountWithoutStorage struct {
 
 
 const (
-	accountSizeWithoutData            = 1
-	minAccountSizeWithRootAndCodeHash = 60
+	accountSizeWithoutData            = 1+7
+	minAccountSizeWithRootAndCodeHash = 60+7
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -134,7 +134,7 @@ func (a *Account) Decode(enc []byte) error {
 		a.Root = emptyRoot
 
 	case encodedLength < minAccountSizeWithRootAndCodeHash:
-		fmt.Println("encodedLength < minAccountSizeWithRootAndCodeHash")
+		fmt.Println("encodedLength < minAccountSizeWithRootAndCodeHash", len(enc))
 
 		var extData ExtAccount
 		if err := rlp.DecodeBytes(enc, &extData); err != nil {

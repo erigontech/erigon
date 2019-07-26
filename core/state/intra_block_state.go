@@ -208,7 +208,7 @@ func (sdb *IntraBlockState) Exist(addr common.Address) bool {
 		}
 	}
 	//fmt.Printf("Checking existence of %s\n", hex.EncodeToString(addr[:]))
-	return sdb.getStateObject(addr) != nil
+	return sdb.GetStateObject(addr) != nil
 }
 
 // Empty returns whether the state object is either non-existent
@@ -220,7 +220,7 @@ func (sdb *IntraBlockState) Empty(addr common.Address) bool {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	so := sdb.getStateObject(addr)
+	so := sdb.GetStateObject(addr)
 	return so == nil || so.empty()
 }
 
@@ -233,7 +233,7 @@ func (sdb *IntraBlockState) GetBalance(addr common.Address) *big.Int {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Balance()
 	}
@@ -248,7 +248,7 @@ func (sdb *IntraBlockState) GetNonce(addr common.Address) uint64 {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.Nonce()
 	}
@@ -264,7 +264,7 @@ func (sdb *IntraBlockState) GetCode(addr common.Address) []byte {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		if sdb.trace {
 			fmt.Printf("GetCode %x, returned %d\n", addr, len(stateObject.Code()))
@@ -285,7 +285,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject == nil {
 		return 0
 	}
@@ -307,7 +307,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 			fmt.Println("CaptureAccountRead err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject == nil {
 		return common.Hash{}
 	}
@@ -317,7 +317,7 @@ func (sdb *IntraBlockState) GetCodeHash(addr common.Address) common.Hash {
 // GetState retrieves a value from the given account's storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetState(hash)
 	}
@@ -347,7 +347,7 @@ func (sdb *IntraBlockState) GetStorageProof(a common.Address, key common.Hash) (
 // GetCommittedState retrieves a value from the given account's committed storage trie.
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr common.Address, hash common.Hash) common.Hash {
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.GetCommittedState(hash)
 	}
@@ -355,7 +355,7 @@ func (sdb *IntraBlockState) GetCommittedState(addr common.Address, hash common.H
 }
 
 func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.suicided
 	}
@@ -370,7 +370,7 @@ func (sdb *IntraBlockState) StorageSize(addr common.Address) *uint64 {
 		}
 
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject != nil {
 		return stateObject.StorageSize()
 	}
@@ -489,7 +489,7 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 			fmt.Println("CaptureAccountWrite err", err)
 		}
 	}
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject == nil {
 		return false
 	}
@@ -558,10 +558,11 @@ func (sdb *IntraBlockState) changeStorageSize(addr common.Address, sizeDiff int6
 }
 
 // Retrieve a state object given my the address. Returns nil if not found.
-func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *stateObject) {
+func (sdb *IntraBlockState) GetStateObject(addr common.Address) (stateObject *stateObject) {
 	// Prefer 'live' objects.
 	if obj := sdb.stateObjects[addr]; obj != nil {
 		if obj.deleted {
+			log.Error("Case 1")
 			return nil
 		}
 		return obj
@@ -569,14 +570,18 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 
 	// Load the object from the database.
 	if _, ok := sdb.nilAccounts[addr]; ok {
+		log.Error("Case 2")
 		return nil
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
+		panic("!!!!")
 		sdb.setError(err)
+		log.Error("Case 3")
 		return nil
 	}
 	if account == nil {
+		log.Error("Case 4")
 		sdb.nilAccounts[addr] = struct{}{}
 		return nil
 	}
@@ -608,7 +613,7 @@ func (sdb *IntraBlockState) setStateObject(object *stateObject) {
 
 // Retrieve a state object or create a new state object if nil.
 func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObject {
-	stateObject := sdb.getStateObject(addr)
+	stateObject := sdb.GetStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
 		stateObject, _ = sdb.createObject(addr, stateObject)
 	}
@@ -667,7 +672,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 
 	var previous *stateObject
 	if checkPrev {
-		previous = sdb.getStateObject(addr)
+		previous = sdb.GetStateObject(addr)
 	}
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {

@@ -155,7 +155,7 @@ func (ch resetObjectChange) dirtied() *common.Address {
 }
 
 func (ch suicideChange) revert(s *IntraBlockState) {
-	obj := s.getStateObject(*ch.account)
+	obj := s.GetStateObject(*ch.account)
 	if obj != nil {
 		obj.suicided = ch.prev
 		obj.setBalance(ch.prevbalance)
@@ -176,7 +176,7 @@ func (ch touchChange) dirtied() *common.Address {
 }
 
 func (ch balanceChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setBalance(ch.prev)
+	s.GetStateObject(*ch.account).setBalance(ch.prev)
 }
 
 func (ch balanceChange) dirtied() *common.Address {
@@ -184,7 +184,7 @@ func (ch balanceChange) dirtied() *common.Address {
 }
 
 func (ch nonceChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setNonce(ch.prev)
+	s.GetStateObject(*ch.account).setNonce(ch.prev)
 }
 
 func (ch nonceChange) dirtied() *common.Address {
@@ -192,7 +192,7 @@ func (ch nonceChange) dirtied() *common.Address {
 }
 
 func (ch storageSizeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setStorageSize(ch.prevsize)
+	s.GetStateObject(*ch.account).setStorageSize(ch.prevsize)
 }
 
 func (ch storageSizeChange) dirtied() *common.Address {
@@ -200,7 +200,7 @@ func (ch storageSizeChange) dirtied() *common.Address {
 }
 
 func (ch codeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
+	s.GetStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
 }
 
 func (ch codeChange) dirtied() *common.Address {
@@ -208,7 +208,7 @@ func (ch codeChange) dirtied() *common.Address {
 }
 
 func (ch storageChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setState(ch.key, ch.prevalue)
+	s.GetStateObject(*ch.account).setState(ch.key, ch.prevalue)
 }
 
 func (ch storageChange) dirtied() *common.Address {

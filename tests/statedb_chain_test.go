@@ -84,7 +84,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChainX(address, gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
