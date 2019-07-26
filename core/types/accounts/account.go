@@ -53,8 +53,8 @@ type RLPAccountWithoutStorage struct {
 
 
 const (
-	accountSizeWithoutData            = 1+7
-	minAccountSizeWithRootAndCodeHash = 60+7
+	accountSizeWithoutData            = 1
+	minAccountSizeWithRootAndCodeHash = 60
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -65,15 +65,15 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 
 	fmt.Println("core/types/accounts/account.go:51 encode version", a.GetIncarnation())
 	if a.IsEmptyCodeHash() && a.IsEmptyRoot() {
-		fmt.Println("encode ExtAccount")
 		if (a.Balance == nil || a.Balance.Sign() == 0) && a.Nonce == 0 {
+			fmt.Println("Encode OneByte")
 			return []byte{byte(192)}, nil
 		}
 
 		toEncode = new(ExtAccount).
 			fill(a).
 			setDefaultBalance()
-		fmt.Println("core/types/accounts/account.go:61", toEncode)
+		fmt.Println("Encode extAccount")
 	} else {
 		acc := newAccountCopy(a)
 		toEncode = acc
@@ -84,7 +84,7 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		}
 
 		if !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
-			fmt.Println("encode accountWithoutStorage")
+			fmt.Println("Encode accountWithoutStorage")
 			toEncode = &accountWithoutStorage{
 				Nonce:    acc.Nonce,
 				Balance:  acc.Balance,
@@ -95,7 +95,9 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 		}
 	}
 
-	return rlp.EncodeToBytes(toEncode)
+	enc,err:=rlp.EncodeToBytes(toEncode)
+	fmt.Println("core/types/accounts/account.go:99 Encode", enc)
+	return enc,err
 }
 
 func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
@@ -120,10 +122,14 @@ func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 		}
 	}
 
-	return rlp.EncodeToBytes(toEncode)
+	enc,err:=rlp.EncodeToBytes(toEncode)
+	fmt.Println("core/types/accounts/account.go:124 EncodeRLP", enc)
+	return enc, err
 }
 
 func (a *Account) Decode(enc []byte) error {
+	fmt.Println("core/types/accounts/account.go:127 Decode len", len(enc))
+	fmt.Println("enc - ", enc)
 	switch encodedLength := len(enc); {
 	case encodedLength == 0:
 
@@ -170,6 +176,45 @@ func (a *Account) Decode(enc []byte) error {
 
 	return nil
 }
+
+func (a *Account) DecodeRLP(enc []byte) error {
+	dataWithoutStorage := &RLPAccountWithoutStorage{}
+	err := rlp.DecodeBytes(enc, dataWithoutStorage)
+	if err == nil {
+		a.Root = dataWithoutStorage.Root
+		a.CodeHash = dataWithoutStorage.CodeHash
+		a.Balance = dataWithoutStorage.Balance
+		a.Nonce = dataWithoutStorage.Nonce
+
+		return nil
+	}
+
+	if err.Error() != "rlp: input list has too many elements for accounts.accountWithoutStorage" {
+		return err
+	}
+	fmt.Println("default to Account")
+	dataWithStorage := &RLPAccount{}
+	if err := rlp.DecodeBytes(enc, &dataWithStorage); err != nil {
+		return err
+	}
+	a.Root = dataWithStorage.Root
+	a.CodeHash = dataWithStorage.CodeHash
+	a.Balance = dataWithStorage.Balance
+	a.Nonce = dataWithStorage.Nonce
+	a.StorageSize=dataWithStorage.StorageSize
+	return nil
+}
+func DecodeRLP(enc []byte) (*Account, error) {
+	if len(enc) == 0 {
+		return nil, nil
+	}
+
+	acc := new(Account)
+	err := acc.DecodeRLP(enc)
+	return acc, err
+}
+
+
 
 func Decode(enc []byte) (*Account, error) {
 	if len(enc) == 0 {

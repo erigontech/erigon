@@ -836,6 +836,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 
 	enc, ok := tds.t.Get(buf[:], tds.blockNr)
 	fmt.Println("core/state/database.go:759 tds.t.Get", ok)
+
 	if !ok {
 		// Not present in the trie, try the database
 		var err error
@@ -852,13 +853,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			}
 		}
 	}
-	if ok {
-		a, err := tds.db.Get(AccountsBucket, buf[:])
-		if err != nil {
-			enc = a
-		}
-	}
-	return accounts.Decode(enc)
+	return accounts.DecodeRLP(enc)
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
