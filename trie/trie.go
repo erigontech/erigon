@@ -65,13 +65,13 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-// TryGet returns the value for key stored in the trie.
-func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
+// Get returns the value for key stored in the trie.
+func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 	hex := keybytesToHex(key)
-	return t.get(t.root, hex, 0, blockNr)
+	return t.get(t.root, hex, 0)
 }
 
-func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
+func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -85,7 +85,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
 			} else {
-				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.get(n.Val, key, pos+len(nKey))
 			}
 		}
 		return
@@ -94,9 +94,9 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.get(n.child1, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child1, key, pos+1)
 		case i2:
-			value, gotValue = t.get(n.child2, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child2, key, pos+1)
 		default:
 			value, gotValue = nil, true
 		}
@@ -104,7 +104,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.get(child, key, pos+1, blockNr)
+		value, gotValue = t.get(child, key, pos+1)
 		return
 	case hashNode:
 		return nil, false
