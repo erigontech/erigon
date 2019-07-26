@@ -235,7 +235,7 @@ func load_codes(db *bolt.DB, codeDb ethdb.Database) {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			account, err := encodingToAccount(v)
+			account, err := accounts.Decode(v)
 			if err != nil {
 				return err
 			}

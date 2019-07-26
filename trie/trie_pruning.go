@@ -348,7 +348,7 @@ func (tp *TriePruning) PruneTo(
 	excess := tp.nodeCount - targetNodeCount
 	prunable := 0
 	pruneGeneration := tp.oldestGeneration
-	for prunable < excess {
+	for prunable < excess && pruneGeneration < tp.blockNr {
 		prunable += tp.generationCounts[pruneGeneration]
 		pruneGeneration++
 	}

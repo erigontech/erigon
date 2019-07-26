@@ -65,13 +65,13 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-// TryGet returns the value for key stored in the trie.
-func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
+// Get returns the value for key stored in the trie.
+func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 	hex := keybytesToHex(key)
-	return t.get(t.root, hex, 0, blockNr)
+	return t.get(t.root, hex, 0)
 }
 
-func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
+func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -85,7 +85,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
 			} else {
-				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.get(n.Val, key, pos+len(nKey))
 			}
 		}
 		return
@@ -94,9 +94,9 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.get(n.child1, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child1, key, pos+1)
 		case i2:
-			value, gotValue = t.get(n.child2, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child2, key, pos+1)
 		default:
 			value, gotValue = nil, true
 		}
@@ -104,7 +104,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.get(child, key, pos+1, blockNr)
+		value, gotValue = t.get(child, key, pos+1)
 		return
 	case hashNode:
 		return nil, false
@@ -743,6 +743,68 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 func (t *Trie) Hash() common.Hash {
 	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))
+}
+
+// DeepHash returns internal hash of a node reachable by the specified key prefix
+// Note that if the prefix points into the middle of a key for a leaf node or of an extention
+// node, it will return the hash of a modified leaf node or extension node, where the
+// key prefix is removed from the key.
+// First returned value is `true` if the node with the specified prefix is found
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	hexPrefix = hexPrefix[:len(hexPrefix)-1] // Remove terminal byte
+	var nd = t.root
+	pos := 0
+	for pos < len(hexPrefix) {
+		switch n := nd.(type) {
+		case nil:
+			return false, common.Hash{}
+		case *shortNode:
+			nKey := compactToHex(n.Key)
+			matchlen := prefixLen(hexPrefix[pos:], nKey)
+			//fmt.Printf("nKey: %x, hexPrefix[pos:]: %x, matchlen: %d\n", nKey, hexPrefix[pos:], matchlen)
+			if matchlen == len(nKey) {
+				nd = n.Val
+				pos += matchlen
+			} else if matchlen == len(hexPrefix)-pos {
+				// middle of the key
+				nd = &shortNode{Key: hexToCompact(nKey[matchlen:]), Val: n.Val}
+				pos += matchlen
+			} else {
+				return false, common.Hash{}
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hexPrefix[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return false, common.Hash{}
+			}
+		case *fullNode:
+			child := n.Children[hexPrefix[pos]]
+			if child == nil {
+				return false, common.Hash{}
+			}
+			nd = child
+			pos++
+		case valueNode:
+			return false, common.Hash{}
+		case hashNode:
+			return false, common.Hash{}
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+	var hn common.Hash
+	h.hash(nd, true, hn[:])
+	return true, hn
 }
 
 func (t *Trie) unload(hex []byte, h *hasher) {
