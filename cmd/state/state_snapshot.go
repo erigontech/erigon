@@ -227,6 +227,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 }
 
 func load_codes(db *bolt.DB, codeDb ethdb.Database) {
+	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
 		cb, err := tx.CreateBucket(state.CodeBucket, true)
@@ -235,14 +236,13 @@ func load_codes(db *bolt.DB, codeDb ethdb.Database) {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			account, err := accounts.Decode(v)
-			if err != nil {
+			if err := account.Decode(v); err != nil {
 				return err
 			}
-			if !bytes.Equal(account.CodeHash, emptyCodeHash) {
-				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash)
+			if !account.IsEmptyCodeHash() {
+				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash[:])
 				if code != nil {
-					cb.Put(account.CodeHash, code)
+					cb.Put(account.CodeHash[:], code)
 				}
 			}
 		}

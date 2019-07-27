@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
@@ -91,31 +92,35 @@ type stateObject struct {
 
 // empty returns whether the account is considered empty.
 func (so *stateObject) empty() bool {
-	return so.data.Nonce == 0 && so.data.Balance.Sign() == 0 && bytes.Equal(so.data.CodeHash, emptyCodeHash)
+	return so.data.Nonce == 0 && so.data.Balance.Sign() == 0 && bytes.Equal(so.data.CodeHash[:], emptyCodeHash)
 }
 
 // huge number stub. see https://eips.ethereum.org/EIPS/eip-2027
 const HugeNumber = uint64(1 << 63)
 
 // newObject creates a state object.
-func newObject(db *IntraBlockState, address common.Address, data, original accounts.Account) *stateObject {
-	if data.Balance == nil {
-		data.Balance = new(big.Int)
-	}
-
-	if data.CodeHash == nil {
-		data.CodeHash = emptyCodeHash
-	}
-
-	return &stateObject{
+func newObject(db *IntraBlockState, address common.Address, data, original *accounts.Account) *stateObject {
+	var so = stateObject{
 		db:                 db,
 		address:            address,
-		data:               data,
-		original:           original,
 		originStorage:      make(Storage),
 		blockOriginStorage: make(Storage),
 		dirtyStorage:       make(Storage),
 	}
+	so.data.Copy(data)
+	if !so.data.Initialised {
+		so.data.Balance.SetUint64(0)
+		so.data.Initialised = true
+	}
+	if so.data.CodeHash == (common.Hash{}) {
+		so.data.CodeHash = emptyCodeHashH
+	}
+	if so.data.Root == (common.Hash{}) {
+		so.data.Root = trie.EmptyRoot
+	}
+	so.original.Copy(original)
+
+	return &so
 }
 
 // setError remembers the first non-nil error it is called with.
@@ -209,7 +214,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 	return nil
 }
 
-// AddBalance removes amount from c's balance.
+// AddBalance adds amount to so's balance.
 // It is used to add funds to the destination account of a transfer.
 func (so *stateObject) AddBalance(amount *big.Int) {
 	// EIP158: We must check emptiness for the objects such that the account
@@ -224,7 +229,7 @@ func (so *stateObject) AddBalance(amount *big.Int) {
 	so.SetBalance(new(big.Int).Add(so.Balance(), amount))
 }
 
-// SubBalance removes amount from c's balance.
+// SubBalance removes amount from so's balance.
 // It is used to remove funds from the origin account of a transfer.
 func (so *stateObject) SubBalance(amount *big.Int) {
 	if amount.Sign() == 0 {
@@ -236,20 +241,21 @@ func (so *stateObject) SubBalance(amount *big.Int) {
 func (so *stateObject) SetBalance(amount *big.Int) {
 	so.db.journal.append(balanceChange{
 		account: &so.address,
-		prev:    new(big.Int).Set(so.data.Balance),
+		prev:    new(big.Int).Set(&so.data.Balance),
 	})
 	so.setBalance(amount)
 }
 
 func (so *stateObject) setBalance(amount *big.Int) {
-	so.data.Balance = amount
+	so.data.Balance.Set(amount)
+	so.data.Initialised = true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures
 func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) deepCopy(db *IntraBlockState) *stateObject {
-	stateObject := newObject(db, so.address, so.data, so.original)
+	stateObject := newObject(db, so.address, &so.data, &so.original)
 	stateObject.code = so.code
 	stateObject.dirtyStorage = so.dirtyStorage.Copy()
 	stateObject.originStorage = so.originStorage.Copy()
@@ -289,7 +295,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
 	prevcode := so.Code()
 	so.db.journal.append(codeChange{
 		account:  &so.address,
-		prevhash: so.CodeHash(),
+		prevhash: so.data.CodeHash,
 		prevcode: prevcode,
 	})
 	so.setCode(codeHash, code)
@@ -297,7 +303,7 @@ func (so *stateObject) SetCode(codeHash common.Hash, code []byte) {
 
 func (so *stateObject) setCode(codeHash common.Hash, code []byte) {
 	so.code = code
-	so.data.CodeHash = codeHash[:]
+	so.data.CodeHash = codeHash
 	so.dirtyCode = true
 }
 
@@ -313,28 +319,29 @@ func (so *stateObject) setNonce(nonce uint64) {
 	so.data.Nonce = nonce
 }
 
-func (so *stateObject) StorageSize() *uint64 {
-	return so.data.StorageSize
+func (so *stateObject) StorageSize() (bool, uint64) {
+	return so.data.HasStorageSize, so.data.StorageSize
 }
 
-func (so *stateObject) SetStorageSize(size *uint64) {
+func (so *stateObject) SetStorageSize(size uint64) {
 	so.db.journal.append(storageSizeChange{
 		account:  &so.address,
 		prevsize: so.data.StorageSize,
 	})
-	so.setStorageSize(size)
+	so.setStorageSize(true, size)
 }
 
-func (so *stateObject) setStorageSize(size *uint64) {
+func (so *stateObject) setStorageSize(has bool, size uint64) {
+	so.data.HasStorageSize = has
 	so.data.StorageSize = size
 }
 
 func (so *stateObject) CodeHash() []byte {
-	return so.data.CodeHash
+	return so.data.CodeHash[:]
 }
 
 func (so *stateObject) Balance() *big.Int {
-	return so.data.Balance
+	return &so.data.Balance
 }
 
 func (so *stateObject) Nonce() uint64 {

@@ -18,9 +18,11 @@ package state
 
 import (
 	"bytes"
+
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -46,7 +48,11 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return accounts.Decode(enc)
+	var acc accounts.Account
+	if err := acc.Decode(enc); err != nil {
+		return nil, err
+	}
+	return &acc, nil
 }
 
 func (tds *TraceDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -89,10 +95,9 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	data, err := account.Encode(ctx)
-	if err != nil {
-		return err
-	}
+	dataLen := account.EncodingLengthForStorage(ctx)
+	data := make([]byte, dataLen)
+	account.EncodeForStorage(data, ctx)
 	return tds.currentDb.Put(AccountsBucket, addrHash[:], data)
 }
 

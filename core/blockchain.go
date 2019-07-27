@@ -1308,7 +1308,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, fmt.Errorf("Wrong root %x, expected %x", root, parentRoot)
+				return 0, events, coalescedLogs, fmt.Errorf("Incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err := bc.reorg(currentBlock, parent); err != nil {

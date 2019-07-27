@@ -95,18 +95,18 @@ func NewStateless(stateRoot common.Hash,
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := accounts.Decode(enc)
-		if err != nil {
+		var acc accounts.Account
+		if err := acc.Decode(enc); err != nil {
 			return nil, err
 		}
-		if account.Root != st.Hash() {
+		if acc.Root != st.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr-1)
 			f, err := os.Create(filename)
 			if err == nil {
 				defer f.Close()
 				st.Print(f)
 			}
-			return nil, fmt.Errorf("[THIN] Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
+			return nil, fmt.Errorf("[THIN] Expected storage root for %x: %x, constructed root: %x", contract, acc.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -307,18 +307,18 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		if !ok {
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
-		account, err := accounts.Decode(enc)
-		if err != nil {
+		var acc accounts.Account
+		if err := acc.Decode(enc); err != nil {
 			return err
 		}
-		if account.Root != st.Hash() {
+		if acc.Root != st.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr-1)
 			f, err := os.Create(filename)
 			if err == nil {
 				defer f.Close()
 				st.Print(f)
 			}
-			return fmt.Errorf("[APPLY] Expected storage root for %x: %x, constructed root: %x", contract, account.Root, st.Hash())
+			return fmt.Errorf("[APPLY] Expected storage root for %x: %x, constructed root: %x", contract, acc.Root, st.Hash())
 		}
 		maskIdx += mIdx
 		shortIdx += sIdx
@@ -351,7 +351,11 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
-	return accounts.Decode(enc)
+	var acc accounts.Account
+	if err := acc.Decode(enc); err != nil {
+		return nil, err
+	}
+	return &acc, nil
 }
 
 func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
@@ -493,10 +497,9 @@ func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check b
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			data, err := account.EncodeRLP(ctx)
-			if err != nil {
-				return err
-			}
+			dataLen := account.EncodingLengthForHashing(ctx)
+			data := make([]byte, dataLen)
+			account.EncodeForHashing(data, ctx)
 			s.t.Update(addrHash[:], data, s.blockNr-1)
 		} else {
 			s.t.Delete(addrHash[:], s.blockNr-1)

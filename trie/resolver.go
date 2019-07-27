@@ -65,6 +65,8 @@ type TrieResolver struct {
 	curr       bytes.Buffer
 	succ       bytes.Buffer
 	groups     uint64
+	a          accounts.Account
+	buf        []byte
 }
 
 func NewResolver(ctx context.Context, topLevels int, accounts bool, blockNr uint64) *TrieResolver {
@@ -220,16 +222,15 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		// Remember the current key and value
 		if tr.accounts {
-			account, err := accounts.Decode(v)
-			if err != nil {
+			if err := tr.a.Decode(v); err != nil {
 				return false, err
 			}
-
-			value, err := account.EncodeRLP(tr.ctx)
-			if err != nil {
-				return false, err
+			encodeLen := tr.a.EncodingLengthForHashing(tr.ctx)
+			if int(encodeLen) > len(tr.buf) {
+				tr.buf = make([]byte, encodeLen)
 			}
-			tr.hb.setKeyValue(skip, k, value)
+			tr.a.EncodeForHashing(tr.buf[:encodeLen], tr.ctx)
+			tr.hb.setKeyValue(skip, k, tr.buf[:encodeLen])
 		} else {
 			var vv []byte
 			if len(v) > 1 || v[0] >= 128 {

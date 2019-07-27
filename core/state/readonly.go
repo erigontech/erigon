@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -132,7 +133,11 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return accounts.Decode(enc)
+	var acc accounts.Account
+	if err := acc.Decode(enc); err != nil {
+		return nil, err
+	}
+	return &acc, nil
 }
 
 func (dbs *DbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {

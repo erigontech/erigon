@@ -195,7 +195,11 @@ func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Acc
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
-	return accounts.Decode(enc)
+	var acc accounts.Account
+	if err := acc.Decode(enc); err != nil {
+		return nil, err
+	}
+	return &acc, nil
 }
 
 func (rds *RepairDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
@@ -312,21 +316,19 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
-	data, err := account.Encode(ctx)
-	if err != nil {
-		return err
-	}
+	dataLen := account.EncodingLengthForStorage(ctx)
+	data := make([]byte, dataLen)
+	account.EncodeForStorage(data, ctx)
 	if err = rds.currentDb.Put(AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
 	var originalData []byte
-	if original.Balance == nil {
+	if !original.Initialised {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(ctx)
-		if err != nil {
-			return err
-		}
+		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalData = make([]byte, originalDataLen)
+		original.EncodeForStorage(originalData, ctx)
 	}
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
@@ -352,15 +354,13 @@ func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Addr
 		return err
 	}
 	var originalData []byte
-	var err error
-	if original.Balance == nil {
+	if !original.Initialised {
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(ctx)
-		if err != nil {
-			return err
-		}
+		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalData = make([]byte, originalDataLen)
+		original.EncodeForStorage(originalData, ctx)
 	}
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {

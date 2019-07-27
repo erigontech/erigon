@@ -391,10 +391,17 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 			}
 			return true
 		}
+		checkeqBigInt := func(op string, a, b *big.Int) bool {
+			if err == nil && a.Cmp(b) != 0 {
+				err = fmt.Errorf("got %s(%s) == %d, want %d", op, addr.Hex(), a, b)
+				return false
+			}
+			return true
+		}
 		// Check basic accessor methods.
 		checkeq("Exist", state.Exist(addr), checkstate.Exist(addr))
 		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
-		checkeq("GetBalance", state.GetBalance(addr), checkstate.GetBalance(addr))
+		checkeqBigInt("GetBalance", state.GetBalance(addr), checkstate.GetBalance(addr))
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
 		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))
 		checkeq("GetCodeHash", state.GetCodeHash(addr), checkstate.GetCodeHash(addr))
@@ -483,7 +490,7 @@ func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
 	obj := state.getStateObject(addr)
-	if obj.data.StorageSize != nil {
+	if obj.data.HasStorageSize {
 		t.Fatal("Storage size of empty account should be 0", obj.data.StorageSize)
 	}
 }
@@ -498,21 +505,21 @@ func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
 	obj := state.getStateObject(addr)
-	if obj.data.StorageSize != nil {
+	if obj.data.HasStorageSize {
 		t.Fatal("Storage size of empty account should be nil", obj.data.StorageSize)
 	}
 
 	state.IncreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if *obj.data.StorageSize != HugeNumber+1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", *obj.data.StorageSize, HugeNumber)
+	if obj.data.StorageSize != HugeNumber+1 {
+		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize, HugeNumber)
 	}
 
 	state.DecreaseStorageSize(addr)
 	state.DecreaseStorageSize(addr)
 	obj = state.getStateObject(addr)
-	if *obj.data.StorageSize != HugeNumber-1 {
-		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize-HugeNumber)
+	if obj.data.StorageSize != HugeNumber-1 {
+		t.Fatal("Storage size of empty account should be HugeNumber - 1", obj.data.StorageSize, HugeNumber, obj.data.StorageSize-HugeNumber)
 	}
 
 }

@@ -112,12 +112,14 @@ type (
 		key, prevalue common.Hash
 	}
 	codeChange struct {
-		account            *common.Address
-		prevcode, prevhash []byte
+		account  *common.Address
+		prevcode []byte
+		prevhash common.Hash
 	}
 	storageSizeChange struct {
-		account  *common.Address
-		prevsize *uint64
+		account     *common.Address
+		prevHasSize bool
+		prevsize    uint64
 	}
 
 	// Changes to other state values.
@@ -192,7 +194,7 @@ func (ch nonceChange) dirtied() *common.Address {
 }
 
 func (ch storageSizeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setStorageSize(ch.prevsize)
+	s.getStateObject(*ch.account).setStorageSize(ch.prevHasSize, ch.prevsize)
 }
 
 func (ch storageSizeChange) dirtied() *common.Address {
@@ -200,7 +202,7 @@ func (ch storageSizeChange) dirtied() *common.Address {
 }
 
 func (ch codeChange) revert(s *IntraBlockState) {
-	s.getStateObject(*ch.account).setCode(common.BytesToHash(ch.prevhash), ch.prevcode)
+	s.getStateObject(*ch.account).setCode(ch.prevhash, ch.prevcode)
 }
 
 func (ch codeChange) dirtied() *common.Address {
