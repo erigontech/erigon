@@ -224,7 +224,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 	diskDb.Close()
 }
 
-func load_codes(db *bolt.DB, codeDb ethdb.Database) error {
+func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
@@ -248,7 +248,7 @@ func load_codes(db *bolt.DB, codeDb ethdb.Database) error {
 		}
 		return nil
 	})
-	check(err)
+	return err
 }
 
 func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
@@ -383,7 +383,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
-func stateSnapshot() {
+func stateSnapshot() error {
 	startTime := time.Now()
 	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
@@ -395,7 +395,9 @@ func stateSnapshot() {
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
 		load_snapshot(db, "statedb0")
-		load_codes(db, ethDb)
+		if err := loadCodes(db, ethDb); err != nil {
+			return err
+		}
 	} else {
 		constructSnapshot(ethDb, blockNum)
 	}
@@ -407,6 +409,7 @@ func stateSnapshot() {
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
 	check_roots(ethDb, ethDb.DB(), block.Root(), blockNum)
+	return nil
 }
 
 func verify_snapshot() {

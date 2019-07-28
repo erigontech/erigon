@@ -157,7 +157,7 @@ func stateless(genLag, consLag int) {
 		preRoot = genesisBlock.Header().Root
 	} else {
 		//load_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum-1))
-		//load_codes(db, ethDb)
+		//loadCodes(db, ethDb)
 		block := bcb.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
