@@ -351,6 +351,9 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
+	if len(enc) == 0 {
+		return nil, nil
+	}
 	var acc accounts.Account
 	if err := acc.Decode(enc); err != nil {
 		return nil, err
