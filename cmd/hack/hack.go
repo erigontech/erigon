@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -653,7 +652,7 @@ func extractTrie(block int) {
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), stateDb, baseBlock.NumberU64())
+	tds, err := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	check(err)
 	startTime := time.Now()
 	tds.Rebuild()
@@ -689,7 +688,7 @@ func testRewind(block, rewind int) {
 	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
 	db := ethDb.NewBatch()
 	defer db.Rollback()
-	tds, err := state.NewTrieDbState(bc.Config().WithEIPsFlags(context.Background(), baseBlock.Number()), baseBlock.Root(), db, baseBlockNr)
+	tds, err := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
 	check(err)
 	startTime := time.Now()
@@ -700,8 +699,7 @@ func testRewind(block, rewind int) {
 	startTime = time.Now()
 	rewindLen := uint64(rewind)
 
-	ctx := bc.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(baseBlockNr-rewindLen)))
-	err = tds.UnwindTo(ctx, baseBlockNr-rewindLen)
+	err = tds.UnwindTo(baseBlockNr - rewindLen)
 	fmt.Printf("Unwind done in %v\n", time.Since(startTime))
 	check(err)
 	rewoundBlock1 := bc.GetBlockByNumber(baseBlockNr - rewindLen + 1)
@@ -753,7 +751,7 @@ func testStartup() {
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	t := trie.New(common.Hash{})
-	r := trie.NewResolver(context.Background(), 0, true, currentBlockNr)
+	r := trie.NewResolver(0, true, currentBlockNr)
 	key := []byte{}
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
@@ -781,7 +779,7 @@ func testResolve() {
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	//contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
-	r := trie.NewResolver(context.Background(), 0, true, 806548)
+	r := trie.NewResolver(0, true, 806548)
 	key := common.FromHex("0x050a08070e090006010a05090c02050d050e0b0a06010a00060d060b03020f0a0203040c00090d0f050d020b080f020307010803050a0e0b00010b0a090b030a10")
 	resolveHash := common.FromHex("0xda5f3503cf2b72df779991a3862551da2a5aac66b59cd463eb03da0a47864350")
 	t := trie.New(common.BytesToHash(resolveHash))

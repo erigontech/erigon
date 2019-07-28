@@ -5,8 +5,6 @@ import (
 	//"fmt"
 	"testing"
 
-	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -52,7 +50,7 @@ func testRebuild(t *testing.T) {
 		}
 		db.Put(bucket, key, v1)
 		t1 := New(common.BytesToHash(root1))
-		_ = t1.Rebuild(context.Background(), db, 0)
+		_ = t1.Rebuild(db, 0)
 	}
 }
 
@@ -69,7 +67,7 @@ func TestResolve1(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("6556dfaac213851c044228962a8dc179125d81e496805ef0f4b891e9109135e2").Bytes()),
 	}
-	r := NewResolver(context.Background(), 0, false, 0)
+	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -92,7 +90,7 @@ func TestResolve2(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("ca8155b4955b3723207ba30103f1759effbf87e5d8193fa215e5fe9818a00e2a").Bytes()),
 	}
-	r := NewResolver(context.Background(), 0, false, 0)
+	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -115,7 +113,7 @@ func TestResolve2Keep(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("ca8155b4955b3723207ba30103f1759effbf87e5d8193fa215e5fe9818a00e2a").Bytes()),
 	}
-	r := NewResolver(context.Background(), 0, false, 0)
+	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -141,7 +139,7 @@ func TestResolve3Keep(t *testing.T) {
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("037d4f8cdf09ad062c866adefc24115c9e84e07399bd6ea058ed386b76dafde2").Bytes()),
 	}
-	r := NewResolver(context.Background(), 0, false, 0)
+	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	if err := r.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Could not resolve: %v", err)
@@ -192,7 +190,7 @@ func TestTrieResolver(t *testing.T) {
 		resolvePos:  2, // 3 bytes is 6 nibbles
 		resolveHash: hashNode(common.HexToHash("79d4d20420e467bc56adad82c454d68bc72ffbe7a26ad33028002bcbd1d41a05").Bytes()),
 	}
-	resolver := NewResolver(context.Background(), 0, false, 0)
+	resolver := NewResolver(0, false, 0)
 	resolver.AddRequest(req3)
 	resolver.AddRequest(req2)
 	resolver.AddRequest(req1)
@@ -217,7 +215,7 @@ func TestTwoStorageItems(t *testing.T) {
 		resolvePos:  0,
 		resolveHash: hashNode(common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8").Bytes()),
 	}
-	resolver := NewResolver(context.Background(), 0, false, 0)
+	resolver := NewResolver(0, false, 0)
 	resolver.AddRequest(req)
 	if err := resolver.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Resolve error: %v", err)

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -149,7 +150,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 			return err
 		}
 		parent := blockchain.GetBlockByHash(block.ParentHash())
-		tds, err := state.NewTrieDbState(blockchain.chainConfig.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), blockchain.db, parent.NumberU64())
+		tds, err := state.NewTrieDbState(parent.Root(), blockchain.db, parent.NumberU64())
 		if err != nil {
 			return err
 		}
@@ -171,7 +172,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		blockchain.chainmu.Lock()
 		ctx := blockchain.chainConfig.WithEIPsFlags(context.Background(), block.Number())
-		tds.SetBlockNr(ctx, block.NumberU64())
+		tds.SetBlockNr(block.NumberU64())
 		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 			return err
 		}

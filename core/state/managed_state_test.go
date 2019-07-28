@@ -19,7 +19,6 @@ package state
 import (
 	"testing"
 
-	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
@@ -28,7 +27,7 @@ var addr = common.BytesToAddress([]byte("test"))
 
 func create() (*ManagedState, *account) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.TODO(), common.Hash{}, db, 1)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 1)
 	statedb := New(tds)
 	ms := ManageState(statedb)
 	ms.IntraBlockState.SetNonce(addr, 100)
