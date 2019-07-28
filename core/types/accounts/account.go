@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -392,6 +393,14 @@ func (a *Account) Decode(enc []byte) error {
 		a.HasStorageSize = true
 	}
 	return nil
+}
+
+func (a *Account) DecodeRLP(s *rlp.Stream) error {
+	raw, err := s.Raw()
+	if err != nil {
+		return err
+	}
+	return a.Decode(raw)
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
