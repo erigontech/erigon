@@ -357,6 +357,7 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
+	var storageSize uint64
 	hasStorageSize, storageSize = st.StorageSize(contractAddress)
 	if !hasStorageSize {
 		t.Fatal("storage size should be present", st.GetCodeHash(contractAddress).Hex())
@@ -658,7 +659,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 	}
 
-	hasStorageSize, storageSize := st.StorageSize(address)
+	hasStorageSize, _ := st.StorageSize(address)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent at the block 0")
 	}
@@ -677,7 +678,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
 	}
 
-	hasStorageSize, storageSize = st.StorageSize(address)
+	hasStorageSize, _ = st.StorageSize(address)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent at the block 1")
 	}
@@ -688,6 +689,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
+	var storageSize uint64
 	hasStorageSize, storageSize = st.StorageSize(contractAddress)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent", storageSize, st.GetCodeHash(contractAddress).Hex())
@@ -860,7 +862,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
 	}
 
-	hasStorageSize, storageSize := st.StorageSize(address)
+	hasStorageSize, _ := st.StorageSize(address)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent at the block 0")
 	}
@@ -879,7 +881,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 1", contractAddress.Hash().String())
 	}
 
-	hasStorageSize, storageSize = st.StorageSize(address)
+	hasStorageSize, _ = st.StorageSize(address)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent at the block 1")
 	}
@@ -890,7 +892,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	hasStorageSize, storageSize = st.StorageSize(contractAddress)
+	hasStorageSize, _ = st.StorageSize(contractAddress)
 	if hasStorageSize {
 		t.Fatal("storage size should be absent", st.GetCodeHash(contractAddress).Hex())
 	}
@@ -901,6 +903,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
+	var storageSize uint64
 	hasStorageSize, storageSize = st.StorageSize(contractAddress)
 	if !hasStorageSize {
 		t.Fatal("storage size should be present", st.GetCodeHash(contractAddress).Hex())
