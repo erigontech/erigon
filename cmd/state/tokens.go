@@ -222,9 +222,7 @@ func makeTokenBalances() {
 		if enc == nil {
 			continue
 		}
-		if err := a.Decode(enc); err != nil {
-			panic(err)
-		}
+		check(a.Decode(enc))
 		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue
@@ -445,9 +443,7 @@ func makeTokenAllowances() {
 		if enc == nil {
 			continue
 		}
-		if err := a.Decode(enc); err != nil {
-			panic(err)
-		}
+		check(a.Decode(enc))
 		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue

@@ -1427,8 +1427,8 @@ func dustEOA() {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := a.Decode(v); err != nil {
-				panic(err)
+			if err1 := a.Decode(v); err1 != nil {
+				return err1
 			}
 			count++
 			if !a.IsEmptyCodeHash() {
