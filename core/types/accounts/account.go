@@ -2,14 +2,13 @@ package accounts
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"io"
 	"math/big"
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -34,7 +33,7 @@ var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 var b128 = big.NewInt(128)
 
-func (a *Account) encodingLength(ctx context.Context, forStorage bool) uint {
+func (a *Account) encodingLength(forStorage bool) uint {
 	var structLength uint
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
 	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 {
@@ -55,7 +54,7 @@ func (a *Account) encodingLength(ctx context.Context, forStorage bool) uint {
 	if !forStorage || !nonContract {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
 	}
-	if params.GetForkFlag(ctx, params.IsEIP2027Enabled) && a.HasStorageSize {
+	if a.HasStorageSize {
 		var storageSizeBytes int
 		if a.StorageSize < 128 && a.StorageSize != 0 {
 			storageSizeBytes = 0
@@ -71,15 +70,15 @@ func (a *Account) encodingLength(ctx context.Context, forStorage bool) uint {
 	return uint(1+lengthBytes) + structLength
 }
 
-func (a *Account) EncodingLengthForStorage(ctx context.Context) uint {
-	return a.encodingLength(ctx, true)
+func (a *Account) EncodingLengthForStorage() uint {
+	return a.encodingLength(true)
 }
 
-func (a *Account) EncodingLengthForHashing(ctx context.Context) uint {
-	return a.encodingLength(ctx, false)
+func (a *Account) EncodingLengthForHashing() uint {
+	return a.encodingLength(false)
 }
 
-func (a *Account) encode(buffer []byte, ctx context.Context, forStorage bool) {
+func (a *Account) encode(buffer []byte, forStorage bool) {
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
 	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 {
 		buffer[0] = 192
@@ -102,7 +101,7 @@ func (a *Account) encode(buffer []byte, ctx context.Context, forStorage bool) {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
 	}
 	var storageSizeBytes int
-	if params.GetForkFlag(ctx, params.IsEIP2027Enabled) && a.HasStorageSize {
+	if a.HasStorageSize {
 		if a.StorageSize < 128 && a.StorageSize != 0 {
 			storageSizeBytes = 0
 		} else {
@@ -172,7 +171,7 @@ func (a *Account) encode(buffer []byte, ctx context.Context, forStorage bool) {
 	}
 
 	// Encoding StorageSize
-	if params.GetForkFlag(ctx, params.IsEIP2027Enabled) && a.HasStorageSize {
+	if a.HasStorageSize {
 		if a.StorageSize < 128 && a.StorageSize != 0 {
 			buffer[pos] = byte(a.StorageSize)
 		} else {
@@ -187,12 +186,20 @@ func (a *Account) encode(buffer []byte, ctx context.Context, forStorage bool) {
 	}
 }
 
-func (a *Account) EncodeForStorage(buffer []byte, ctx context.Context) {
-	a.encode(buffer, ctx, true)
+func (a *Account) EncodeRLP(w io.Writer) error {
+	len := a.encodingLength(false)
+	buffer := make([]byte, len)
+	a.encode(buffer, false)
+	_, err := w.Write(buffer)
+	return err
 }
 
-func (a *Account) EncodeForHashing(buffer []byte, ctx context.Context) {
-	a.encode(buffer, ctx, false)
+func (a *Account) EncodeForStorage(buffer []byte) {
+	a.encode(buffer, true)
+}
+
+func (a *Account) EncodeForHashing(buffer []byte) {
+	a.encode(buffer, false)
 }
 
 func (a *Account) Copy(image *Account) {

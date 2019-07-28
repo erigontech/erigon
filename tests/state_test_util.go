@@ -175,7 +175,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	}
 	//fmt.Printf("\n%s\n", tds.Dump())
 
-	roots, err := tds.ComputeTrieRoots(ctx)
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
@@ -196,7 +196,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(ctx, common.Hash{}, db, blockNr)
+	tds, err := state.NewTrieDbState(common.Hash{}, db, blockNr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -214,10 +214,10 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
-	if _, err := tds.ComputeTrieRoots(ctx); err != nil {
+	if _, err := tds.ComputeTrieRoots(); err != nil {
 		return nil, nil, err
 	}
-	tds.SetBlockNr(ctx, blockNr+1)
+	tds.SetBlockNr(blockNr + 1)
 	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err
 	}

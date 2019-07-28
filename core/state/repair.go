@@ -268,7 +268,7 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(ctx, 0, false, rds.blockNr)
+					resolver = trie.NewResolver(0, false, rds.blockNr)
 				}
 				resolver.AddRequest(req)
 			}
@@ -316,9 +316,9 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
-	dataLen := account.EncodingLengthForStorage(ctx)
+	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
-	account.EncodeForStorage(data, ctx)
+	account.EncodeForStorage(data)
 	if err = rds.currentDb.Put(AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
@@ -326,9 +326,9 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 	if !original.Initialised {
 		originalData = []byte{}
 	} else {
-		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData, ctx)
+		original.EncodeForStorage(originalData)
 	}
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
@@ -358,9 +358,9 @@ func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Addr
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData, ctx)
+		original.EncodeForStorage(originalData)
 	}
 	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {

@@ -441,7 +441,7 @@ func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address,
 	return nil
 }
 
-func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check bool) error {
+func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	// Process updates first, deletes next
@@ -497,9 +497,9 @@ func (s *Stateless) CheckRoot(ctx context.Context, expected common.Hash, check b
 	for _, addrHash := range addrs {
 		account := s.accountUpdates[addrHash]
 		if account != nil {
-			dataLen := account.EncodingLengthForHashing(ctx)
+			dataLen := account.EncodingLengthForHashing()
 			data := make([]byte, dataLen)
-			account.EncodeForHashing(data, ctx)
+			account.EncodeForHashing(data)
 			s.t.Update(addrHash[:], data, s.blockNr-1)
 		} else {
 			s.t.Delete(addrHash[:], s.blockNr-1)

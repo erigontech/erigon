@@ -59,10 +59,10 @@ func (s *StateSuite) TestDump(c *checker.C) {
 	err = s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	_, err = s.tds.ComputeTrieRoots(ctx)
+	_, err = s.tds.ComputeTrieRoots()
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(ctx, 1)
+	s.tds.SetBlockNr(1)
 
 	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
@@ -100,7 +100,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.tds, _ = NewTrieDbState(context.TODO(), common.Hash{}, s.db, 0)
+	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
 }
@@ -117,7 +117,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 	err := s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
 	c.Check(err, checker.IsNil)
 
-	s.tds.SetBlockNr(ctx, 1)
+	s.tds.SetBlockNr(1)
 
 	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
 	c.Check(err, checker.IsNil)
@@ -162,7 +162,7 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	ctx := context.TODO()
-	tds, _ := NewTrieDbState(ctx, common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 
@@ -190,12 +190,12 @@ func TestSnapshot2(t *testing.T) {
 		t.Fatal("error while finalizing transaction", err)
 	}
 
-	_, err = tds.ComputeTrieRoots(ctx)
+	_, err = tds.ComputeTrieRoots()
 	if err != nil {
 		t.Fatal("error while computing trie roots", err)
 	}
 
-	tds.SetBlockNr(ctx, 1)
+	tds.SetBlockNr(1)
 
 	err = state.CommitBlock(ctx, tds.DbStateWriter())
 	if err != nil {

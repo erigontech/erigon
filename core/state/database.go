@@ -202,10 +202,9 @@ type TrieDbState struct {
 	resolveReads    bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
-	ctx             context.Context
 }
 
-func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -226,7 +225,6 @@ func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, bl
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
 		tp:            tp,
-		ctx:           ctx,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -288,8 +286,8 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
-func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
-	roots, err := tds.computeTrieRoots(ctx, true)
+func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
+	roots, err := tds.computeTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -428,7 +426,7 @@ func (tds *TrieDbState) buildStorageTouches() map[common.Address]Hashes {
 
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
-func (tds *TrieDbState) resolveStorageTouches(ctx context.Context, storageTouches map[common.Address]Hashes) error {
+func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]Hashes) error {
 	var resolver *trie.TrieResolver
 	for address, hashes := range storageTouches {
 		storageTrie, err := tds.getStorageTrie(address, true)
@@ -439,7 +437,7 @@ func (tds *TrieDbState) resolveStorageTouches(ctx context.Context, storageTouche
 		for _, keyHash := range hashes {
 			if need, req := storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(ctx, 0, false, tds.blockNr)
+					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -495,12 +493,12 @@ func (tds *TrieDbState) buildAccountTouches() Hashes {
 
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(ctx context.Context, accountTouches Hashes) error {
+func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	var resolver *trie.TrieResolver
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(ctx, 0, true, tds.blockNr)
+				resolver = trie.NewResolver(0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)
@@ -523,7 +521,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
-func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]common.Hash, error) {
+func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -540,7 +538,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches := tds.buildStorageTouches()
 
-	if err := tds.resolveStorageTouches(ctx, storageTouches); err != nil {
+	if err := tds.resolveStorageTouches(storageTouches); err != nil {
 		return nil, err
 	}
 	if tds.resolveReads {
@@ -551,7 +549,7 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches := tds.buildAccountTouches()
-	if err := tds.resolveAccountTouches(ctx, accountTouches); err != nil {
+	if err := tds.resolveAccountTouches(accountTouches); err != nil {
 		return nil, err
 	}
 	if tds.resolveReads {
@@ -628,9 +626,9 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				dataLength := account.EncodingLengthForHashing(ctx)
+				dataLength := account.EncodingLengthForHashing()
 				data := make([]byte, dataLength)
-				account.EncodeForHashing(data, ctx)
+				account.EncodeForHashing(data)
 				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
@@ -648,7 +646,7 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	if err := tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr); err != nil {
+	if err := tds.AccountTrie().Rebuild(tds.db, tds.blockNr); err != nil {
 		return err
 	}
 	var m runtime.MemStats
@@ -657,13 +655,12 @@ func (tds *TrieDbState) Rebuild() error {
 	return nil
 }
 
-func (tds *TrieDbState) SetBlockNr(ctx context.Context, blockNr uint64) {
+func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.blockNr = blockNr
 	tds.tp.SetBlockNr(blockNr)
-	tds.ctx = ctx
 }
 
-func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
+func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	fmt.Printf("Rewinding from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
@@ -711,7 +708,7 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(ctx, false); err != nil {
+	if _, err := tds.computeTrieRoots(false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {
@@ -721,9 +718,9 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 			}
 		} else {
 			//todo is aggregateBuffer collect data from one block?
-			valueLen := account.EncodingLengthForStorage(ctx)
+			valueLen := account.EncodingLengthForStorage()
 			value := make([]byte, valueLen)
-			account.EncodeForStorage(value, ctx)
+			account.EncodeForStorage(value)
 			if err := tds.db.Put(AccountsBucket, addrHash[:], value); err != nil {
 				return err
 			}
@@ -1039,9 +1036,9 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	dataLen := account.EncodingLengthForStorage(ctx)
+	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
-	account.EncodeForStorage(data, ctx)
+	account.EncodeForStorage(data)
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
@@ -1060,9 +1057,9 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if !original.Initialised {
 		originalData = []byte{}
 	} else {
-		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData, ctx)
+		original.EncodeForStorage(originalData)
 	}
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
@@ -1093,9 +1090,9 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalDataLen := original.EncodingLengthForStorage(ctx)
+		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData, ctx)
+		original.EncodeForStorage(originalData)
 	}
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }

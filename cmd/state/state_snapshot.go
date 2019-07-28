@@ -8,8 +8,6 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 
-	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 
@@ -226,7 +224,7 @@ func load_snapshot(db *bolt.DB, filename string) {
 	diskDb.Close()
 }
 
-func load_codes(db *bolt.DB, codeDb ethdb.Database) {
+func load_codes(db *bolt.DB, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
@@ -242,7 +240,9 @@ func load_codes(db *bolt.DB, codeDb ethdb.Database) {
 			if !account.IsEmptyCodeHash() {
 				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash[:])
 				if code != nil {
-					cb.Put(account.CodeHash[:], code)
+					if err := cb.Put(account.CodeHash[:], code); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -326,7 +326,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
-	r := trie.NewResolver(context.TODO(), 0, true, blockNum)
+	r := trie.NewResolver(0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -364,7 +364,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != trie.EmptyRoot {
 			st := trie.New(root)
-			sr := trie.NewResolver(context.TODO(), 32, false, blockNum)
+			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)

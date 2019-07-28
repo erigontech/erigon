@@ -16,8 +16,6 @@ import (
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
-	"math/big"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -69,7 +67,7 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	if err := statedb.CommitBlock(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(ctx, header.Root, checkRoot); err != nil {
+	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		f, err1 := os.Create(filename)
 		if err1 == nil {
@@ -167,7 +165,7 @@ func stateless(genLag, consLag int) {
 		check_roots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	tds, err := state.NewTrieDbState(bcb.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(blockNum-1))), preRoot, batch, blockNum-1)
+	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
 		tds.Rebuild()
@@ -228,7 +226,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 
-		roots, err := tds.ComputeTrieRoots(ctx)
+		roots, err := tds.ComputeTrieRoots()
 		if err != nil {
 			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
 			return
@@ -243,7 +241,7 @@ func stateless(genLag, consLag int) {
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
-		tds.SetBlockNr(ctx, blockNum)
+		tds.SetBlockNr(blockNum)
 
 		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {

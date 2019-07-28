@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -145,7 +146,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return receipts, allLogs, *usedGas, err
 	}
-	roots, err := tds.ComputeTrieRoots(ctx)
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return receipts, allLogs, *usedGas, err
 	}

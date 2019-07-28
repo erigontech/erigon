@@ -113,7 +113,7 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 			}
 		}
 	}
-	roots, err := tds.ComputeTrieRoots(ctx)
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return fmt.Errorf("Error calculating state root: %v", err)
 	}

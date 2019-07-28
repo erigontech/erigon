@@ -210,7 +210,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
-			roots, err := tds.ComputeTrieRoots(ctx)
+			roots, err := tds.ComputeTrieRoots()
 			if err != nil {
 				panic(err)
 			}
@@ -222,7 +222,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 			b.header.Root = roots[len(roots)-1]
 			// Recreating block to make sure Root makes it into the header
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
-			tds.SetBlockNr(ctx, block.NumberU64())
+			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
 			if err := statedb.CommitBlock(config.WithEIPsFlags(context.Background(), b.header.Number), tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
@@ -231,7 +231,7 @@ func GenerateChain(config *params.ChainConfig, parent *types.Block, engine conse
 		}
 		return nil, nil
 	}
-	tds, err := state.NewTrieDbState(config.WithEIPsFlags(context.Background(), parent.Number()), parent.Root(), db, parent.Number().Uint64())
+	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
 	if err != nil {
 		panic(err)
 	}

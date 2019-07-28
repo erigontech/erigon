@@ -5,11 +5,8 @@ import (
 	"math/big"
 	"testing"
 
-	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 func TestEmptyAccount(t *testing.T) {
@@ -20,10 +17,9 @@ func TestEmptyAccount(t *testing.T) {
 		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
 	}
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, false)
-	encodedLen := a.EncodingLengthForStorage(ctx)
+	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount, ctx)
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -42,10 +38,9 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 	}
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, false)
-	encodedLen := a.EncodingLengthForStorage(ctx)
+	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount, ctx)
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -67,10 +62,9 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	}
 	a.StorageSize = 10
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, false)
-	encodedLen := a.EncodingLengthForStorage(ctx)
+	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount, ctx)
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -88,10 +82,9 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
 	}
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, false)
-	encodedLen := a.EncodingLengthForStorage(ctx)
+	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount, ctx)
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -112,10 +105,9 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 	account.HasStorageSize = true
 	account.StorageSize = 10
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, true)
-	encodedLen := account.EncodingLengthForStorage(ctx)
+	encodedLen := account.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	account.EncodeForStorage(encodedAccount, ctx)
+	account.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -143,10 +135,9 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 			StorageSize:    storageSize,
 		}
 
-		ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, true)
-		encodedLen := a.EncodingLengthForStorage(ctx)
+		encodedLen := a.EncodingLengthForStorage()
 		encodedAccount := make([]byte, encodedLen)
-		a.EncodeForStorage(encodedAccount, ctx)
+		a.EncodeForStorage(encodedAccount)
 
 		var decodedAccount Account
 		if err := decodedAccount.Decode(encodedAccount); err != nil {
@@ -169,10 +160,9 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
 	}
 
-	ctx := context.WithValue(context.Background(), params.IsEIP2027Enabled, true)
-	encodedLen := a.EncodingLengthForStorage(ctx)
+	encodedLen := a.EncodingLengthForStorage()
 	encodedAccount := make([]byte, encodedLen)
-	a.EncodeForStorage(encodedAccount, ctx)
+	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
 	if err := decodedAccount.Decode(encodedAccount); err != nil {

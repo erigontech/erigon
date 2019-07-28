@@ -95,9 +95,9 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	dataLen := account.EncodingLengthForStorage(ctx)
+	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
-	account.EncodeForStorage(data, ctx)
+	account.EncodeForStorage(data)
 	return tds.currentDb.Put(AccountsBucket, addrHash[:], data)
 }
 
