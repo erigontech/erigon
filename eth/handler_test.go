@@ -830,11 +830,10 @@ func TestFirehoseStateNodes(t *testing.T) {
 	pm, peer := setUpDummyAccountsForFirehose(t)
 	defer peer.close()
 
-	block4 := pm.blockchain.GetBlockByNumber(4)
-
 	var request getStateRangesOrNodes
 	request.ID = 0
-	request.Block = block4.Hash()
+	// TODO [yperbasis] make it work with non-latest blocks
+	request.Block = pm.blockchain.GetBlockByNumber(5).Hash()
 
 	// All known account keys start with either 0, 1, 4, or a.
 	// Warning: we assume that the key of miner's account doesn't start with 2 or 4.
@@ -845,9 +844,15 @@ func TestFirehoseStateNodes(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
 
-	var account accounts.Account
-	account.Balance = frhsAmnt
-	accountRLP, err := account.EncodeRLP(context.TODO())
+	var account3 accounts.Account
+	account3.Balance = big.NewInt(0)
+	account3.Balance.Add(frhsAmnt, frhsAmnt)
+	account3rlp, err := account3.EncodeRLP(context.TODO())
+	assert.NoError(t, err)
+
+	var account4 accounts.Account
+	account4.Balance = frhsAmnt
+	account4rlp, err := account4.EncodeRLP(context.TODO())
 	assert.NoError(t, err)
 
 	assert.Equal(t, addrHash[3], common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
@@ -860,7 +865,7 @@ func TestFirehoseStateNodes(t *testing.T) {
 	copy(prefix3rlp, addrHash[3].Bytes())
 	prefix3rlp[0] = 0x20
 	addr3Node[0] = prefix3rlp
-	addr3Node[1] = accountRLP
+	addr3Node[1] = account3rlp
 	node3rlp, err := rlp.EncodeToBytes(addr3Node)
 	assert.NoError(t, err)
 
@@ -869,7 +874,7 @@ func TestFirehoseStateNodes(t *testing.T) {
 	copy(prefix4rlp, addrHash[4].Bytes())
 	prefix4rlp[0] = 0x20
 	addr4Node[0] = prefix4rlp
-	addr4Node[1] = accountRLP
+	addr4Node[1] = account4rlp
 	node4rlp, err := rlp.EncodeToBytes(addr4Node)
 	assert.NoError(t, err)
 

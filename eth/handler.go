@@ -848,10 +848,8 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
-			if err != nil {
-				return err
-			}
+			// TODO [yperbasis] The concurrency, stupid!
+			tds := pm.blockchain.GetTrieDbState()
 			tr := tds.AccountTrie()
 
 			n := len(request.Prefixes)
@@ -859,12 +857,8 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 			// TODO [yperbasis] softResponseLimit, MaxStateFetch
 			for i := 0; i < n; i++ {
-				// TODO [yperbasis] mind odd prefixes. MAKE THIS ACTUALLY WORK!!!
-				val, present := tr.Get(request.Prefixes[i].Data, block.NumberU64())
-				if present {
-					// TODO [yperbasis] different RLP serialization of accounts in the DB???
-					response.Nodes[i] = val
-				}
+				// TODO [yperbasis] different RLP serialization of accounts in the DB???
+				response.Nodes[i] = tr.GetNode(request.Prefixes[i])
 			}
 		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()

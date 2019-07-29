@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -110,6 +111,62 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		return nil, false
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
+	}
+}
+
+// GetNode returns node's RLP by its key/prefix.
+func (t *Trie) GetNode(key Keybytes) []byte {
+	key.Terminating = true
+	hex := compactToHex(key.ToCompact())
+	return t.getNode(t.root, hex, 0)
+}
+
+func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
+	if origNode == nil {
+		return nil
+	}
+
+	if pos+1 >= len(key) { // mind the terminating byte
+		res, err := rlp.EncodeToBytes(origNode)
+		if err != nil {
+			panic(fmt.Sprintf("%T: couldn't serialize node: %v", origNode, origNode))
+		}
+		return res
+	}
+
+	switch n := (origNode).(type) {
+	case *shortNode:
+		nKey := compactToHex(n.Key)
+		if len(key) < pos+len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
+			return nil
+		}
+
+		if _, ok := n.Val.(valueNode); ok {
+			res, err := rlp.EncodeToBytes(origNode)
+			if err != nil {
+				panic(fmt.Sprintf("%T: couldn't serialize node: %v", origNode, origNode))
+			}
+			return res
+		}
+
+		return t.getNode(n.Val, key, pos+len(nKey))
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			return t.getNode(n.child1, key, pos+1)
+		case i2:
+			return t.getNode(n.child2, key, pos+1)
+		default:
+			return nil
+		}
+	case *fullNode:
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		return t.getNode(child, key, pos+1)
+	default:
+		return nil
 	}
 }
 
