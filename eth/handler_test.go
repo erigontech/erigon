@@ -17,7 +17,6 @@
 package eth
 
 import (
-	"context"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -845,14 +844,13 @@ func TestFirehoseStateNodes(t *testing.T) {
 	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
 
 	var account3 accounts.Account
-	account3.Balance = big.NewInt(0)
 	account3.Balance.Add(frhsAmnt, frhsAmnt)
-	account3rlp, err := account3.EncodeRLP(context.TODO())
+	account3rlp, err := rlp.EncodeToBytes(&account3)
 	assert.NoError(t, err)
 
 	var account4 accounts.Account
-	account4.Balance = frhsAmnt
-	account4rlp, err := account4.EncodeRLP(context.TODO())
+	account4.Balance.Set(frhsAmnt)
+	account4rlp, err := rlp.EncodeToBytes(&account4)
 	assert.NoError(t, err)
 
 	assert.Equal(t, addrHash[3], common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
