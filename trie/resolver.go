@@ -3,6 +3,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -224,7 +225,9 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			}
 			encodeLen := tr.a.EncodingLengthForHashing()
 			if int(encodeLen) > len(tr.buf) {
-				tr.buf = make([]byte, encodeLen)
+				pool.PutBuffer(pool.NewValue(tr.buf))
+				buf := pool.GetBuffer(encodeLen)
+				tr.buf = buf.B
 			}
 			tr.a.EncodeForHashing(tr.buf[:encodeLen])
 			tr.hb.setKeyValue(skip, k, tr.buf[:encodeLen])
