@@ -682,12 +682,8 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				data, err := account.EncodeRLP(ctx)
-				if err != nil {
-					return nil, err
-				}
-
-				tds.t.Update(addrHash[:], data, tds.blockNr)
+				acc:=*account
+				tds.t.UpdateAccount(addrHash[:], acc, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
@@ -834,26 +830,29 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		}
 	}
 
-	enc, ok := tds.t.Get(buf[:], tds.blockNr)
+	acc, ok := tds.t.GetAccount(buf[:], tds.blockNr)
+	if ok {
+		return &acc, nil
+	}
 	fmt.Println("core/state/database.go:759 tds.t.Get", ok)
 
-	if !ok {
 		// Not present in the trie, try the database
-		var err error
-		if tds.historical {
-			enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr+1)
-			if err != nil {
-				enc = nil
-			}
-		} else {
-			fmt.Println("core/state/database.go:768 ReadAccountData read from db", address.String())
-			enc, err = tds.db.Get(AccountsBucket, buf[:])
-			if err != nil {
-				enc = nil
-			}
+	var err error
+	var enc []byte
+	if tds.historical {
+		enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr+1)
+		if err != nil {
+			enc = nil
+		}
+	} else {
+		fmt.Println("core/state/database.go:768 ReadAccountData read from db", address.String())
+		enc, err = tds.db.Get(AccountsBucket, buf[:])
+		if err != nil {
+			enc = nil
 		}
 	}
-	return accounts.DecodeRLP(enc)
+
+	return accounts.Decode(enc)
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -887,52 +886,6 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	key, _ := tds.db.Get(trie.SecureKeyPrefix, shaKey)
 	return key
 }
-
-//func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
-//	fmt.Println("core/state/database.go:828 getStorageTrie", address.String())
-//	fmt.Println(caller(7))
-//
-//	t, ok := tds.storageTries[address]
-//	if ok {
-//		fmt.Println("core/state/database.go:813 ok, t.version=", t.Version)
-//		account, err := tds.ReadAccountData(address)
-//		fmt.Println("core/state/database.go:815 tds.ReadAccountData(address) err=", err, address.String())
-//		if err==nil && account!=nil {
-//			fmt.Println("core/state/database.go:817 account found", account)
-//			fmt.Println("core/state/database.go:817 versCheck", address.String(), "acc.version", account.GetIncarnation(), "trie version", t.Version)
-//			if t.Version!=account.GetIncarnation() {
-//				t = trie.New(common.Hash{})
-//				t.Version=account.GetIncarnation()
-//				tds.storageTries[address] = t
-//				return t, nil
-//			}
-//		}
-//		return t, nil
-//	}
-//	if !ok && create {
-//		fmt.Println("core/state/database.go:827 Create trie")
-//		account, err := tds.ReadAccountData(address)
-//		if err != nil {
-//			return nil, err
-//		}
-//		if account == nil {
-//			fmt.Println("core/state/database.go:833 account==nil")
-//			t = trie.New(common.Hash{})
-//			//t.Version=1
-//		} else {
-//			fmt.Println("core/state/database.go:833 account!=nil", account.GetIncarnation())
-//			//t.Version=account.GetIncarnation()
-//
-//
-//			t = trie.New(account.Root)
-//		}
-//		t.SetTouchFunc(func(hex []byte, del bool) {
-//			tds.tp.TouchContract(address, hex, del)
-//		})
-//		tds.storageTries[address] = t
-//	}
-//	return t, nil
-//}
 
 func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
 	fmt.Println("core/state/database.go:828 ReadAccountStorage addr=", address.String(), "version=", version, "k=", key.String())

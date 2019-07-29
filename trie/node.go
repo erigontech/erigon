@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -52,7 +53,23 @@ type (
 	}
 	hashNode  []byte
 	valueNode []byte
+
+	accountNode accounts.Account
 )
+
+func (an accountNode) dirty() bool {
+	return false
+}
+
+func (an accountNode) hash() []byte {
+	return []byte{}
+}
+func (an accountNode)  print(io.Writer) {
+}
+func (an accountNode)  fstring(string) string {
+	return "nil"
+}
+
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
 // unset children need to serialize correctly.

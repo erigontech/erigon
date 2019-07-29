@@ -32,7 +32,7 @@ func create() (*ManagedState, *account) {
 	statedb := New(tds)
 	ms := ManageState(statedb)
 	ms.IntraBlockState.SetNonce(addr, 100)
-	ms.accounts[addr] = newAccount(ms.IntraBlockState.getStateObject(addr))
+	ms.accounts[addr] = newAccount(ms.IntraBlockState.GetStateObject(addr))
 	return ms, ms.accounts[addr]
 }
 

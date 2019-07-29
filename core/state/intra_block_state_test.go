@@ -400,7 +400,7 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 		checkeq("GetCodeHash", state.GetCodeHash(addr), checkstate.GetCodeHash(addr))
 		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
 		// Check storage.
-		if obj := state.getStateObject(addr); obj != nil {
+		if obj := state.GetStateObject(addr); obj != nil {
 			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
 				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
 			}, 1000)
@@ -482,7 +482,7 @@ func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	state := New(tds)
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
-	obj := state.getStateObject(addr)
+	obj := state.GetStateObject(addr)
 	if obj.data.StorageSize != nil {
 		t.Fatal("Storage size of empty account should be 0", obj.data.StorageSize)
 	}
@@ -497,20 +497,20 @@ func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	newObj.code = []byte("some non empty byte code")
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
-	obj := state.getStateObject(addr)
+	obj := state.GetStateObject(addr)
 	if obj.data.StorageSize != nil {
 		t.Fatal("Storage size of empty account should be nil", obj.data.StorageSize)
 	}
 
 	state.IncreaseStorageSize(addr)
-	obj = state.getStateObject(addr)
+	obj = state.GetStateObject(addr)
 	if *obj.data.StorageSize != HugeNumber+1 {
 		t.Fatal("Storage size of empty account should be HugeNumber +1", *obj.data.StorageSize, HugeNumber)
 	}
 
 	state.DecreaseStorageSize(addr)
 	state.DecreaseStorageSize(addr)
-	obj = state.getStateObject(addr)
+	obj = state.GetStateObject(addr)
 	if *obj.data.StorageSize != HugeNumber-1 {
 		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize-HugeNumber)
 	}

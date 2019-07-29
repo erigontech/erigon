@@ -20,6 +20,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -73,8 +74,55 @@ func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
 	return t.get(t.root, hex, 0, blockNr)
 }
 
-func (t *Trie) deepHash(key []byte)  {
+func (t *Trie) GetAccount(key []byte, blockNr uint64) (value accounts.Account, gotValue bool) {
+	hex := keybytesToHex(key)
+	return t.getAcoount(t.root, hex, 0, blockNr)
+}
 
+func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (value accounts.Account, gotValue bool) {
+	switch n := (origNode).(type) {
+	case nil:
+		return accounts.Account{}, false
+	case valueNode:
+		return accounts.Account{}, false
+	case *shortNode:
+		nKey := compactToHex(n.Key)
+		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
+			fmt.Println("if")
+			value, gotValue = accounts.Account{}, false
+		} else {
+			if v, ok := n.Val.(accountNode); ok {
+				value, gotValue = accounts.Account(v), true
+			} else {
+				value, gotValue = t.getAcoount(n.Val, key, pos+len(nKey), blockNr)
+			}
+		}
+		return
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			value, gotValue = t.getAcoount(n.child1, key, pos+1, blockNr)
+		case i2:
+			value, gotValue = t.getAcoount(n.child2, key, pos+1, blockNr)
+		default:
+			value, gotValue = accounts.Account{}, false
+		}
+		return
+	case *fullNode:
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		value, gotValue = t.getAcoount(child, key, pos+1, blockNr)
+		return
+	case hashNode:
+		return accounts.Account{}, false
+
+	case *accountNode:
+		return accounts.Account(*n), true
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
+	}
 }
 
 func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
@@ -114,6 +162,9 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		return
 	case hashNode:
 		return nil, false
+
+	case *accountNode:
+		return nil, false
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -133,6 +184,17 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 		t.root = newnode
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value), blockNr)
+	}
+}
+
+func (t *Trie) UpdateAccount(key []byte, value accounts.Account, blockNr uint64) {
+	hex := keybytesToHex(key)
+	fmt.Println("insert", string(key), hex)
+	if t.root == nil {
+		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode(value)}
+		t.root = newnode
+	} else {
+		_, t.root = t.insert(t.root, hex, 0, accountNode(value), blockNr)
 	}
 }
 
@@ -194,6 +256,8 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 				pos++
 			}
 		case valueNode:
+			return false, nil
+		case accountNode:
 			return false, nil
 		case hashNode:
 			return true, t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
