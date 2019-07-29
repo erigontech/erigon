@@ -362,7 +362,7 @@ func (sdb *IntraBlockState) HasSuicided(addr common.Address) bool {
 	return false
 }
 
-func (sdb *IntraBlockState) StorageSize(addr common.Address) *uint64 {
+func (sdb *IntraBlockState) StorageSize(addr common.Address) (bool, uint64) {
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace {
@@ -375,7 +375,7 @@ func (sdb *IntraBlockState) StorageSize(addr common.Address) *uint64 {
 		return stateObject.StorageSize()
 	}
 
-	return nil
+	return false, 0
 }
 
 /*
@@ -496,7 +496,7 @@ func (sdb *IntraBlockState) Suicide(addr common.Address) bool {
 		prevbalance: new(big.Int).Set(stateObject.Balance()),
 	})
 	stateObject.markSuicided()
-	stateObject.data.Balance = new(big.Int)
+	stateObject.data.Balance.SetInt64(0)
 
 	return true
 }
@@ -536,19 +536,15 @@ func (sdb *IntraBlockState) changeStorageSize(addr common.Address, sizeDiff int6
 		return
 	}
 
-	size := sdb.StorageSize(addr)
-	if size == nil {
-		size = new(uint64)
-		*size = HugeNumber
-	}
-	if size != nil && *size == 0 {
-		*size = HugeNumber
+	hasSize, size := sdb.StorageSize(addr)
+	if !hasSize {
+		size = HugeNumber
 	}
 
 	if sizeDiff >= 0 {
-		*size = *size + uint64(sizeDiff)
+		size += uint64(sizeDiff)
 	} else {
-		*size = *size - uint64(-sizeDiff)
+		size -= uint64(-sizeDiff)
 	}
 
 	stateObject.SetStorageSize(size)
@@ -578,8 +574,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 		return nil
 	}
 	// Insert into the live set.
-	original := *account // Copy
-	obj := newObject(sdb, addr, *account, original)
+	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(obj)
 	return obj
 }
@@ -617,15 +612,15 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj, prev *stateObject) {
 	//fmt.Printf("CREATE %x\n", addr[:])
 	prev = previous
-	var account accounts.Account
-	var original accounts.Account
+	var account *accounts.Account
+	var original *accounts.Account
 	if previous == nil {
-		account = accounts.Account{}
+		account = &accounts.Account{}
 		account.Root.SetBytes(trie.EmptyRoot[:])
-		original = accounts.Account{}
+		original = &accounts.Account{}
 	} else {
-		account = previous.data
-		original = previous.original
+		account = &previous.data
+		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
@@ -667,7 +662,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	}
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
-		newObj.setBalance(prev.data.Balance)
+		newObj.setBalance(&prev.data.Balance)
 	}
 }
 

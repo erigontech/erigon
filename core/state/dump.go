@@ -44,11 +44,12 @@ func (self *TrieDbState) RawDump() Dump {
 		Root:     fmt.Sprintf("%x", self.t.Hash()),
 		Accounts: make(map[string]DumpAccount),
 	}
+	var acc accounts.Account
 	var prefix [32]byte
 	err := self.db.Walk(AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
-		acc, err := accounts.Decode(v)
-		if err != nil {
+		var err error
+		if err = acc.Decode(v); err != nil {
 			return false, err
 		}
 		var code []byte
@@ -59,13 +60,16 @@ func (self *TrieDbState) RawDump() Dump {
 			}
 		}
 		account := DumpAccount{
-			Balance:     acc.Balance.String(),
-			Nonce:       acc.Nonce,
-			Root:        common.Bytes2Hex(acc.Root[:]),
-			CodeHash:    common.Bytes2Hex(acc.CodeHash),
-			Code:        common.Bytes2Hex(code),
-			Storage:     make(map[string]string),
-			StorageSize: acc.StorageSize,
+			Balance:  acc.Balance.String(),
+			Nonce:    acc.Nonce,
+			Root:     common.Bytes2Hex(acc.Root[:]),
+			CodeHash: common.Bytes2Hex(acc.CodeHash[:]),
+			Code:     common.Bytes2Hex(code),
+			Storage:  make(map[string]string),
+		}
+		if acc.HasStorageSize {
+			var storageSize = acc.StorageSize
+			account.StorageSize = &storageSize
 		}
 		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
 			key := self.GetKey(ks[common.AddressLength:]) //remove account address from composite key

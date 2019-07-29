@@ -144,13 +144,13 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds, _ = state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
 func (b *SimulatedBackend) prependingState() (*state.IntraBlockState, error) {
-	tds, err := state.NewTrieDbState(b.blockchain.Config().WithEIPsFlags(context.Background(), b.prependBlock.Number()), b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	if err != nil {
 		return nil, err
 	}

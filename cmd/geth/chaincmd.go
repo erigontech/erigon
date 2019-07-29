@@ -17,7 +17,6 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -416,7 +415,7 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			tds, err := state.NewTrieDbState(chain.Config().WithEIPsFlags(context.Background(), block.Number()), block.Root(), chainDb, block.NumberU64())
+			tds, err := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64())
 			if err != nil {
 				utils.Fatalf("could not create new state: %v", err)
 			}

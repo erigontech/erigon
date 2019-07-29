@@ -601,10 +601,10 @@ func TestFirehoseStateRanges(t *testing.T) {
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
 
 	var account accounts.Account
-	account.Balance = frhsAmnt
+	account.Balance.Set(frhsAmnt)
 
 	// TODO [yperbasis] remove this RLP hack
-	account.CodeHash = crypto.Keccak256(nil)
+	copy(account.CodeHash[:], crypto.Keccak256(nil))
 	account.Root = trie.EmptyRoot
 
 	var reply1 stateRangesMsg
