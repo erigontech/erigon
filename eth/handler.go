@@ -857,7 +857,6 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 			// TODO [yperbasis] softResponseLimit, MaxStateFetch
 			for i := 0; i < n; i++ {
-				// TODO [yperbasis] different RLP serialization of accounts in the DB???
 				response.Nodes[i] = tr.GetNode(request.Prefixes[i])
 			}
 		} else {

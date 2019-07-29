@@ -13,8 +13,8 @@ func TestEmptyAccount(t *testing.T) {
 	a := &Account{
 		Nonce:    0,
 		Balance:  *new(big.Int),
-		Root:     emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -78,8 +78,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	a := &Account{
 		Nonce:    2,
 		Balance:  *new(big.Int).SetInt64(1000),
-		Root:     emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -156,8 +156,8 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 	a := &Account{
 		Nonce:    2,
 		Balance:  *new(big.Int).SetInt64(1000),
-		Root:     emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()

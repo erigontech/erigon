@@ -599,12 +599,8 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
 
-	var account accounts.Account
+	account := accounts.NewAccount()
 	account.Balance.Set(frhsAmnt)
-
-	// TODO [yperbasis] remove this RLP hack
-	copy(account.CodeHash[:], crypto.Keccak256(nil))
-	account.Root = trie.EmptyRoot
 
 	var reply1 stateRangesMsg
 	reply1.ID = 1
@@ -844,17 +840,13 @@ func TestFirehoseStateNodes(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
 
-	var account3 accounts.Account
+	account3 := accounts.NewAccount()
 	account3.Balance.Add(frhsAmnt, frhsAmnt)
-	copy(account3.CodeHash[:], crypto.Keccak256(nil))
-	account3.Root = trie.EmptyRoot
 	account3rlp, err := rlp.EncodeToBytes(&account3)
 	assert.NoError(t, err)
 
-	var account4 accounts.Account
+	account4 := accounts.NewAccount()
 	account4.Balance.Set(frhsAmnt)
-	copy(account4.CodeHash[:], crypto.Keccak256(nil))
-	account4.Root = trie.EmptyRoot
 	account4rlp, err := rlp.EncodeToBytes(&account4)
 	assert.NoError(t, err)
 
