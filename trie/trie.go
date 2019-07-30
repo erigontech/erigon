@@ -23,7 +23,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 var (
@@ -126,12 +125,11 @@ func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
 		return nil
 	}
 
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+
 	if pos+1 >= len(key) { // mind the terminating byte
-		res, err := rlp.EncodeToBytes(origNode)
-		if err != nil {
-			panic(fmt.Sprintf("%T: couldn't serialize node: %v", origNode, origNode))
-		}
-		return res
+		return h.hashChildren(origNode, 0)
 	}
 
 	switch n := (origNode).(type) {
@@ -142,11 +140,7 @@ func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
 		}
 
 		if _, ok := n.Val.(valueNode); ok {
-			res, err := rlp.EncodeToBytes(origNode)
-			if err != nil {
-				panic(fmt.Sprintf("%T: couldn't serialize node: %v", origNode, origNode))
-			}
-			return res
+			return h.hashChildren(origNode, 0)
 		}
 
 		return t.getNode(n.Val, key, pos+len(nKey))

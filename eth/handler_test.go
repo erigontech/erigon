@@ -832,11 +832,10 @@ func TestFirehoseStateNodes(t *testing.T) {
 
 	// All known account keys start with either 0, 1, 4, or a.
 	// Warning: we assume that the key of miner's account doesn't start with 2 or 4.
-	// prefixA := trie.Keybytes{Data: common.FromHex("40"), Odd: true}
+	prefixA := trie.Keybytes{Data: common.FromHex("40"), Odd: true}
 	prefixB := trie.Keybytes{Data: common.FromHex("20"), Odd: true}
 	addr3prefix := trie.Keybytes{Data: addrHash[3].Bytes(), Odd: false}
-	// TODO [yperbasis] restore prefixA
-	request.Prefixes = []trie.Keybytes{ /*prefixA,*/ prefixB, addr3prefix}
+	request.Prefixes = []trie.Keybytes{prefixA, prefixB, addr3prefix}
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
 
@@ -876,12 +875,12 @@ func TestFirehoseStateNodes(t *testing.T) {
 	branchNode := make([][]byte, 17)
 	branchNode[6] = crypto.Keccak256(node3rlp)
 	branchNode[4] = crypto.Keccak256(node4rlp)
-	_, err = rlp.EncodeToBytes(branchNode)
+	rlpA, err := rlp.EncodeToBytes(branchNode)
 	assert.NoError(t, err)
 
 	var reply stateNodesMsg
 	reply.ID = 0
-	reply.Nodes = [][]byte{ /*rlpA,*/ nil, node3rlp}
+	reply.Nodes = [][]byte{rlpA, nil, node3rlp}
 
 	err = p2p.ExpectMsg(peer.app, StateNodesCode, reply)
 	if err != nil {
