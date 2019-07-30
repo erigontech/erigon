@@ -68,6 +68,10 @@ func GetBuffer(size uint) *bytebufferpool.ByteBuffer {
 }
 
 func PutBuffer(p *bytebufferpool.ByteBuffer) {
+	if p == nil || cap(p.B) == 0 {
+		return
+	}
+
 	for i, n := range chunkSizeClasses {
 		if uint(cap(p.B)) <= n {
 			chunkPools[i].Put(p)

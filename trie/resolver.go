@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -65,7 +66,6 @@ type TrieResolver struct {
 	succ       bytes.Buffer
 	groups     uint64
 	a          accounts.Account
-	buf        []byte
 }
 
 func NewResolver(topLevels int, accounts bool, blockNr uint64) *TrieResolver {
@@ -171,6 +171,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
+// Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
@@ -223,23 +224,21 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			if err := tr.a.Decode(v); err != nil {
 				return false, err
 			}
+
 			encodeLen := tr.a.EncodingLengthForHashing()
-			if int(encodeLen) > len(tr.buf) {
-				pool.PutBuffer(pool.NewValue(tr.buf))
-				buf := pool.GetBuffer(encodeLen)
-				tr.buf = buf.B
-			}
-			tr.a.EncodeForHashing(tr.buf[:encodeLen])
-			tr.hb.setKeyValue(skip, k, tr.buf[:encodeLen])
+			buf := pool.GetBuffer(encodeLen)
+
+			tr.a.EncodeForHashing(buf.B)
+			tr.hb.setKeyValue(skip, k, buf)
 		} else {
-			var vv []byte
+			var vv *bytebufferpool.ByteBuffer
 			if len(v) > 1 || v[0] >= 128 {
-				vv = make([]byte, len(v)+1)
-				vv[0] = byte(128 + len(v))
-				copy(vv[1:], v)
+				vv = pool.GetBuffer(uint(len(v) + 1))
+				vv.B[0] = byte(128 + len(v))
+				copy(vv.B[1:], v)
 			} else {
-				vv = make([]byte, 1)
-				vv[0] = v[0]
+				vv = pool.GetBuffer(1)
+				vv.B[0] = v[0]
 			}
 			tr.hb.setKeyValue(skip, k, vv)
 		}

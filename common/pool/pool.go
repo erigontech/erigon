@@ -45,6 +45,10 @@ func (p *pool) Get() *bytebufferpool.ByteBuffer {
 //
 // The buffer mustn't be accessed after returning to the pool.
 func (p *pool) Put(b *bytebufferpool.ByteBuffer) {
+	if b == nil || cap(b.B) == 0 {
+		return
+	}
+
 	maxSize := int(atomic.LoadUint64(&p.maxSize))
 	if maxSize == 0 || cap(b.B) <= maxSize {
 		b.Reset()
