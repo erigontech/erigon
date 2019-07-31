@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -711,6 +712,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStateRangesOrNodes
+		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -761,6 +763,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	case GetStorageRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStorageRangesMsg
+		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -837,27 +840,44 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 	case GetStateNodesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStateRangesOrNodes
-		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages? The same for the other codes
-		if err := msgStream.Decode(&request); err != nil {
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+		var reqID uint64
+		if err := msgStream.Decode(&reqID); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
 
-		var response stateNodesMsg
-		response.ID = request.ID
+		var blockHash common.Hash
+		if err := msgStream.Decode(&blockHash); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
 
-		block := pm.blockchain.GetBlockByHash(request.Block)
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		var response stateNodesMsg
+		response.ID = reqID
+
+		block := pm.blockchain.GetBlockByHash(blockHash)
 		if block != nil {
 			// TODO [yperbasis] The concurrency, stupid!
 			tds := pm.blockchain.GetTrieDbState()
 			tr := tds.AccountTrie()
 
-			n := len(request.Prefixes)
-			response.Nodes = make([][]byte, n)
-
-			// TODO [yperbasis] softResponseLimit, MaxStateFetch
-			for i := 0; i < n; i++ {
-				response.Nodes[i] = tr.GetNode(request.Prefixes[i])
+			// Gather nodes until the fetch or network limit is reached
+			responseSize := 0
+			for responseSize < softResponseLimit && len(response.Nodes) < downloader.MaxStateFetch {
+				var prefix trie.Keybytes
+				if err := msgStream.Decode(&prefix); err == rlp.EOL {
+					break
+				} else if err != nil {
+					return errResp(ErrDecode, "msg %v: %v", msg, err)
+				}
+				node := tr.GetNode(prefix)
+				response.Nodes = append(response.Nodes, node)
+				responseSize += len(node)
 			}
 		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
@@ -888,7 +908,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			return err
 		}
 
-		// Gather bytecodes until the fetch or network limits is reached
+		// Gather bytecodes until the fetch or network limit is reached
 		var (
 			responseSize int
 			code         [][]byte
