@@ -159,3 +159,65 @@ func TestResolution(t *testing.T) {
 		}
 	}
 }
+
+func TestV2HashBuilding(t *testing.T) {
+	var keys []string
+	for b := uint32(0); b < 100000; b++ {
+		var preimage [4]byte
+		binary.BigEndian.PutUint32(preimage[:], b)
+		key := crypto.Keccak256(preimage[:])[:8]
+		keys = append(keys, string(key))
+	}
+	sort.Strings(keys)
+	for i, key := range keys {
+		if i > 0 && keys[i-1] == key {
+			fmt.Printf("Duplicate!\n")
+		}
+	}
+	tr := New(common.Hash{})
+	valueLong := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
+	valueShort := []byte("VAL")
+	for i, key := range keys {
+		if i%2 == 0 {
+			tr.Update([]byte(key), valueNode(valueLong), 0)
+		} else {
+			tr.Update([]byte(key), valueNode(valueShort), 0)
+		}
+	}
+	trieHash := tr.Hash()
+
+	hb := NewHashBuilder()
+	var prec, curr, succ bytes.Buffer
+	var groups uint64
+	for i, key := range keys {
+		prec.Reset()
+		prec.Write(curr.Bytes())
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := []byte(key)
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		succ.WriteByte(16)
+		if curr.Len() > 0 {
+			groups = step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+		}
+		if i%2 == 0 {
+			hb.setKeyValue(0, []byte(key), valueLong)
+		} else {
+			hb.setKeyValue(0, []byte(key), valueShort)
+		}
+	}
+	prec.Reset()
+	prec.Write(curr.Bytes())
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	builtHash := hb.rootHash()
+	if trieHash != builtHash {
+		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	}
+}

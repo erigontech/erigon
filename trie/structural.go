@@ -208,6 +208,7 @@ func NewHashBuilder() *HashBuilder {
 func (hb *HashBuilder) Reset() {
 	hb.hexKey.Reset()
 	hb.digitStack = hb.digitStack[:0]
+	hb.bufferStack = hb.bufferStack[:0]
 	hb.branchStack = hb.branchStack[:0]
 	hb.topKey = nil
 	hb.topValue = nil
