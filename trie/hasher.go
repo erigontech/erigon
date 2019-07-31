@@ -18,6 +18,7 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"hash"
 
@@ -267,6 +268,26 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				copy(buffer[pos:], vn)
 				pos += len(vn)
 			}
+		} else if ac, ok := n.Val.(accountNode); ok {
+			b, err := ac.EncodeRLP(context.Background())
+			if err != nil {
+				fmt.Println("------------trie/hasher.go:274", err)
+				//	todo add panic
+			}
+			if len(b) == 1 && b[0] < 128 {
+				buffer[pos] = b[0]
+				pos++
+			} else {
+				if h.encodeToBytes {
+					// Wrapping into another byte array
+					pos = generateByteArrayLenDouble(buffer, pos, len(b))
+				} else {
+					pos = generateByteArrayLen(buffer, pos, len(b))
+				}
+				copy(buffer[pos:], b)
+				pos += len(b)
+			}
+
 		} else {
 			if n.Val == nil {
 				// empty byte array
@@ -380,6 +401,8 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		}
 		return buffer[4:pos]
 
+	case accountNode:
+		panic("accountNode")
 	case hashNode:
 		panic("hashNode")
 	}

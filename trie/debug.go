@@ -21,6 +21,7 @@ package trie
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -288,6 +289,12 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "hash(%x)", []byte(n))
 	case valueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
+	case accountNode:
+		enc, err := n.Encode(context.TODO())
+		if err != nil {
+			fmt.Println("------------trie/debug.go:295 ------", err)
+		}
+		fmt.Fprintf(w, "account(%s %x)", key, enc)
 	}
 }
 

@@ -92,7 +92,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 			value, gotValue = accounts.Account{}, false
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
-				value, gotValue = accounts.Account(v), true
+				value, gotValue = accounts.Account(*v.Account), true
 			} else {
 				value, gotValue = t.getAcoount(n.Val, key, pos+len(nKey), blockNr)
 			}
@@ -119,7 +119,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 		return accounts.Account{}, false
 
 	case *accountNode:
-		return accounts.Account(*n), true
+		return accounts.Account(*n.Account), true
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -191,10 +191,10 @@ func (t *Trie) UpdateAccount(key []byte, value accounts.Account, blockNr uint64)
 	hex := keybytesToHex(key)
 	fmt.Println("insert", string(key), hex)
 	if t.root == nil {
-		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode(value)}
+		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{&value}}
 		t.root = newnode
 	} else {
-		_, t.root = t.insert(t.root, hex, 0, accountNode(value), blockNr)
+		_, t.root = t.insert(t.root, hex, 0, accountNode{&value}, blockNr)
 	}
 }
 

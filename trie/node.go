@@ -48,14 +48,16 @@ type (
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		Key   []byte
-		Val   node
+		Key []byte
+		Val node
 	}
 	hashNode  []byte
 	valueNode []byte
-
-	accountNode accounts.Account
 )
+
+type accountNode struct {
+	*accounts.Account
+}
 
 func (an accountNode) dirty() bool {
 	return false
@@ -64,12 +66,13 @@ func (an accountNode) dirty() bool {
 func (an accountNode) hash() []byte {
 	return []byte{}
 }
-func (an accountNode)  print(io.Writer) {
-}
-func (an accountNode)  fstring(string) string {
-	return "nil"
+
+func (an accountNode) print(io.Writer) {
 }
 
+func (an accountNode) fstring(string) string {
+	return "nil"
+}
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
 // unset children need to serialize correctly.
