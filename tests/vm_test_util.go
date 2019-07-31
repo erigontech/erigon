@@ -87,9 +87,6 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	}
 	tds.StartNewBuffer()
 	ret, gasRemaining, err := t.exec(state, vmconfig)
-	if err != nil {
-		return fmt.Errorf("execution error: %v", err)
-	}
 	if t.json.GasRemaining == nil {
 		if err == nil {
 			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")
