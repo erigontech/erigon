@@ -465,10 +465,7 @@ func (sdb *IntraBlockState) SetCode(addr common.Address, code []byte) {
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) SetState(addr common.Address, key, value common.Hash) {
 	stateObject := sdb.GetOrNewStateObject(addr)
-	fmt.Println("core/state/intra_block_state.go:468 origin state", stateObject.originStorage)
-	fmt.Println("core/state/intra_block_state.go:468 dirty state", stateObject.dirtyStorage)
 	if stateObject != nil {
-		fmt.Println("core/state/statedb.go:471 stateObject != nil")
 		stateObject.SetState(key, value)
 	}
 }
@@ -676,7 +673,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	}
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
-		fmt.Println("core/state/intra_block_state.go:673 versSet", prev.data.GetIncarnation()+1)
 		newObj.setBalance(prev.data.Balance)
 		newObj.data.SetIncarnation(prev.data.GetIncarnation()+1)
 	}

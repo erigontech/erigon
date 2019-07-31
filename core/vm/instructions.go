@@ -637,8 +637,6 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
-	fmt.Println("core/vm/instructions.go:640 opSstore")
-	fmt.Println(caller(7))
 	locFromState := interpreter.evm.IntraBlockState.GetState(contract.Address(), loc)
 	fmt.Println("core/vm/instructions.go:640 opSstore loc", loc,"val", val, "hashval", common.BigToHash(val))
 

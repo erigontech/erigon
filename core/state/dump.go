@@ -68,12 +68,10 @@ func (self *TrieDbState) RawDump() Dump {
 			StorageSize: acc.StorageSize,
 		}
 
-		fmt.Println("core/state/dump.go:71 Account", common.BytesToAddress(addr).String(), "version - ", acc.GetIncarnation())
+		//fmt.Println("core/state/dump.go:71 Account", common.BytesToAddress(addr).String(), "version - ", acc.GetIncarnation())
 		hashAddr,err:=self.HashAddress(common.BytesToAddress(addr),false)
 		err = self.db.Walk(StorageBucket, GenerateStoragePrefix(hashAddr, acc.GetIncarnation()), uint(len(hashAddr)*8+8), func(ks, vs []byte) (bool, error) {
-			fmt.Println("core/state/dump.go:73 ks", ks)
 			key := self.GetKey(ks[common.HashLength+1:]) //remove account address from composite key
-			fmt.Println("core/state/dump.go:73 key", key)
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})

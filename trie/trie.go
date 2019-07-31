@@ -199,7 +199,6 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 
 func (t *Trie) UpdateAccount(key []byte, value accounts.Account, blockNr uint64) {
 	hex := keybytesToHex(key)
-	fmt.Println("UpdateAccount insert", string(key), hex)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{&value}}
 		t.root = newnode

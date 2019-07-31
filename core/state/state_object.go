@@ -143,7 +143,6 @@ func (so *stateObject) touch() {
 // GetState returns a value from account storage.
 func (so *stateObject) GetState(key common.Hash) common.Hash {
 	value, dirty := so.dirtyStorage[key]
-	fmt.Println("core/state/state_object.go:146 GetState from dirtyStorage","key",key.String(), "value", value.String(), dirty)
 	if dirty {
 		return value
 	}
@@ -153,18 +152,15 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
-	fmt.Println("core/state/state_object.go:155 GetCommittedState key = ", key)
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
 		if cached {
-			fmt.Println("core/state/state_object.go:160 cached s.originStorage[key] v=",value, cached)
 			return value
 		}
 	}
 	// Load from DB in case it is missing.
 	enc, err := so.db.stateReader.ReadAccountStorage(so.address,so.data.GetIncarnation(), &key)
-	fmt.Println("core/state/state_object.go:166 s.ReadAccountStorage",  enc, err,)
 	if err != nil {
 		so.setError(err)
 		return common.Hash{}
@@ -173,7 +169,6 @@ func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if enc != nil {
 		value.SetBytes(enc)
 	}
-	fmt.Println("core/state/state_object.go:175 save to originStorage",so.address.String(),"k=",key.String(),"v=", value.String())
 	so.originStorage[key] = value
 	so.blockOriginStorage[key] = value
 	return value
@@ -183,7 +178,6 @@ func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 func (so *stateObject) SetState(key, value common.Hash) {
 	// If the new value is the same as old, don't set
 	prev := so.GetState(key)
-	fmt.Println("core/state/state_object.go:181 compare prev and new value", prev, value)
 	if prev == value {
 		return
 	}
@@ -208,8 +202,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		fmt.Println("core/state/state_object.go:211 updateTrie", so.address.String(), "version", so.data.GetIncarnation())
-		fmt.Println("core/state/state_object.go:211 k=", key.String(), "v=", value.String())
+
 		if err := stateWriter.WriteAccountStorage(so.address,so.data.GetIncarnation(), &key, &original, &value); err != nil {
 			return err
 		}

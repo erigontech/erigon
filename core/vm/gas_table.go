@@ -157,7 +157,6 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 	//       2.2.2.1. If original value is 0, add 19800 gas to refund counter.
 	// 	     2.2.2.2. Otherwise, add 4800 gas to refund counter.
 	value := common.BigToHash(y)
-	fmt.Println("core/vm/gas_table.go:160 current == value", value.String(), current.String(), value==current)
 	if current == value { // noop (1)
 		return params.NetSstoreNoopGas, nil
 	}

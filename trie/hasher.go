@@ -20,10 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"hash"
-
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
+	"hash"
+	"reflect"
 )
 
 type hasher struct {
@@ -66,7 +66,8 @@ func returnHasherToPool(h *hasher) {
 // original node initialized with the computed hash to replace the original one.
 func (h *hasher) hash(n node, force bool, storeTo []byte) int {
 	//n.makedirty()
-	return h.hashInternal(n, force, storeTo, 0)
+	hh:=h.hashInternal(n, force, storeTo, 0)
+	return hh
 }
 
 // hash collapses a node down into a hash node, also returning a copy of the
@@ -380,11 +381,13 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			enc,err=n.EncodeRLP(context.TODO())
 		case valueNode:
 			enc=n
+		case nil:
+		//		skip
 		default:
-			fmt.Println("!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:384")
+			fmt.Println("trie/hasher.go:385 !!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:384", reflect.TypeOf(n))
 		}
 		if err!=nil {
-			fmt.Println("!!!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:387")
+			fmt.Println("!!!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:387", err)
 		}
 		if enc == nil {
 			buffer[pos] = byte(128)
