@@ -19,6 +19,7 @@ package trie
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
@@ -131,6 +132,12 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		return nil, true
 	case valueNode:
 		return n, true
+	case accountNode:
+		enc,err:=n.EncodeRLP(context.Background())
+		if err!=nil {
+			fmt.Println("!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:138", err)
+		}
+		return enc, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
@@ -138,6 +145,9 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		} else {
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
+			} else if v, ok := n.Val.(accountNode); ok {
+				enc,_:=v.Encode(context.TODO())
+				return enc, true
 			} else {
 				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
 			}
@@ -189,7 +199,7 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 
 func (t *Trie) UpdateAccount(key []byte, value accounts.Account, blockNr uint64) {
 	hex := keybytesToHex(key)
-	fmt.Println("insert", string(key), hex)
+	fmt.Println("UpdateAccount insert", string(key), hex)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{&value}}
 		t.root = newnode
@@ -288,6 +298,12 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 				copy(proofHex[pos:], nKey)
 				if v, ok := n.Val.(valueNode); ok {
 					pg.addValue(contract, proofHex, pos+len(nKey), common.CopyBytes(v))
+				} else if v, ok := n.Val.(accountNode); ok {
+					enc,err:=v.EncodeRLP(context.TODO())
+					if err!=nil {
+						fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:301", err)
+					}
+					pg.addValue(contract, proofHex, pos+len(nKey), enc)
 				} else {
 					pg.addSoleHash(contract, proofHex, pos+len(nKey), common.BytesToHash(n.Val.hash()))
 				}
@@ -306,7 +322,13 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 					pg.addShort(contract, proofHex, pos+1, nKey)
 					if v, ok := s.Val.(valueNode); ok {
 						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
-					} else {
+					} else if v, ok := s.Val.(accountNode); ok {
+						enc,err:=v.EncodeRLP(context.TODO())
+						if err!=nil {
+							fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:325", err)
+						}
+						pg.addValue(contract, proofHex, pos+1+len(nKey), enc)
+					}else {
 						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
 					}
 				}
@@ -349,6 +371,13 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 			}
 		case valueNode:
 			pg.addValue(contract, hex, pos, common.CopyBytes(n))
+			return
+		case accountNode:
+			enc,err:=n.EncodeRLP(context.TODO())
+			if err!=nil {
+				fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:375", err)
+			}
+			pg.addValue(contract, hex, pos, enc)
 			return
 		case hashNode:
 			pg.addSoleHash(contract, hex, pos, common.BytesToHash(n))
@@ -575,8 +604,15 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	switch n := n.(type) {
 	case *shortNode:
 		var hexVal []byte
-		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
+		switch n.Val.(type) {
+		case valueNode:
+			break
+		case accountNode:
+			break
+		default:
+			// Don't need to compute prefix for a leaf
 			hexVal = concat(hex, compactToHex(n.Key)...)
+
 		}
 		t.touchAll(n.Val, hexVal, del)
 	case *duoNode:
@@ -782,6 +818,11 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 		newNode = nil
 		return
 
+	case accountNode:
+		updated = true
+		newNode = nil
+		return
+
 	case nil:
 		updated = false
 		newNode = nil
@@ -864,6 +905,8 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 			pos++
 		case valueNode:
 			return false, common.Hash{}
+		case accountNode:
+			return false, common.Hash{}
 		case hashNode:
 			return false, common.Hash{}
 		default:
@@ -920,6 +963,8 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 			}
 		case valueNode:
 			return
+		case accountNode:
+			return
 		case hashNode:
 			return
 		default:
@@ -961,6 +1006,8 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 		return 0
 	case valueNode:
 		return 0
+	case accountNode:
+		return 0
 	case hashNode:
 		return 0
 	case *shortNode:
@@ -968,6 +1015,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
 			hexVal = concat(hex, compactToHex(n.Key)...)
 		}
+		//@todo accountNode?
 		return t.countPrunableNodes(n.Val, hexVal, print)
 	case *duoNode:
 		i1, i2 := n.childrenIdx()

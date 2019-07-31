@@ -252,6 +252,17 @@ func (n valueNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", []byte(n))
 }
 
+func (an accountNode) fstring(string) string {
+	enc,_:=an.Encode(context.TODO())
+	return fmt.Sprintf("%x ", enc)
+}
+
+func (an accountNode) print(w io.Writer) {
+	enc,_:=an.Encode(context.TODO())
+	fmt.Fprintf(w, "v(%x)", enc)
+}
+
+
 func printDiffSide(n node, w io.Writer, ind string, key string) {
 	switch n := n.(type) {
 	case *fullNode:
@@ -292,7 +303,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 	case accountNode:
 		enc, err := n.Encode(context.TODO())
 		if err != nil {
-			fmt.Println("------------trie/debug.go:295 ------", err)
+			fmt.Println("------------ accountNodeErr trie/debug.go:295 ------", err)
 		}
 		fmt.Fprintf(w, "account(%s %x)", key, enc)
 	}

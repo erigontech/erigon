@@ -271,7 +271,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		} else if ac, ok := n.Val.(accountNode); ok {
 			b, err := ac.EncodeRLP(context.Background())
 			if err != nil {
-				fmt.Println("------------trie/hasher.go:274", err)
+				fmt.Println("------------accountNodeErr trie/hasher.go:274", err)
 				//	todo add panic
 			}
 			if len(b) == 1 && b[0] < 128 {
@@ -373,17 +373,29 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				}
 			}
 		}
-		vn, _ := n.Children[16].(valueNode)
-		if vn == nil {
+		var enc []byte
+		var err error
+		switch n:=n.Children[16].(type) {
+		case accountNode:
+			enc,err=n.EncodeRLP(context.TODO())
+		case valueNode:
+			enc=n
+		default:
+			fmt.Println("!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:384")
+		}
+		if err!=nil {
+			fmt.Println("!!!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:387")
+		}
+		if enc == nil {
 			buffer[pos] = byte(128)
 			pos++
-		} else if len(vn) == 1 && vn[0] < 128 {
-			buffer[pos] = vn[0]
+		} else if len(enc) == 1 && enc[0] < 128 {
+			buffer[pos] = enc[0]
 			pos++
 		} else {
-			pos = generateByteArrayLen(buffer, pos, len(vn))
-			copy(buffer[pos:], vn)
-			pos += len(vn)
+			pos = generateByteArrayLen(buffer, pos, len(enc))
+			copy(buffer[pos:], enc)
+			pos += len(enc)
 		}
 		return finishRLP(buffer, pos)
 
@@ -402,7 +414,23 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		return buffer[4:pos]
 
 	case accountNode:
-		panic("accountNode")
+		enc,err:=n.EncodeRLP(context.TODO())
+		if err!=nil {
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!trie/hasher.go:419", err)
+		}
+		if len(enc) == 1 && enc[0] < 128 {
+			buffer[pos] = enc[0]
+			pos++
+		} else {
+			if h.encodeToBytes {
+				// Wrapping into another byte array
+				pos = generateByteArrayLen(buffer, pos, len(enc))
+			}
+			copy(buffer[pos:], enc)
+			pos += len(enc)
+		}
+		return buffer[4:pos]
+
 	case hashNode:
 		panic("hashNode")
 	}

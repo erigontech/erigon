@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"hash"
 	"io"
 	"math/big"
@@ -294,7 +295,9 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
+	fmt.Println("+StartComputeTrieRoots")
 	roots, err := tds.computeTrieRoots(ctx, true)
+	fmt.Println("-StartComputeTrieRoots")
 	tds.clearUpdates()
 	return roots, err
 }
@@ -690,6 +693,9 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 		}
 		roots[i] = tds.t.Hash()
 	}
+	fmt.Println(" core/state/database.go:694 -------compute trie root")
+	spew.Dump(roots)
+	tds.t.PrintTrie()
 	return roots, nil
 }
 
@@ -1098,10 +1104,10 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-
-	acc,err:=accounts.Decode(data)
-	fmt.Println("core/state/database.go:1046 decoded version", acc.GetIncarnation(), err)
-
+	//
+	//acc,err:=accounts.Decode(data)
+	//fmt.Println("core/state/database.go:1046 decoded version", acc.GetIncarnation(), err)
+	//
 
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {

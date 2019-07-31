@@ -53,26 +53,11 @@ type (
 	}
 	hashNode  []byte
 	valueNode []byte
+
+	accountNode struct {
+		*accounts.Account
+	}
 )
-
-type accountNode struct {
-	*accounts.Account
-}
-
-func (an accountNode) dirty() bool {
-	return false
-}
-
-func (an accountNode) hash() []byte {
-	return []byte{}
-}
-
-func (an accountNode) print(io.Writer) {
-}
-
-func (an accountNode) fstring(string) string {
-	return "nil"
-}
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
 // unset children need to serialize correctly.
@@ -279,12 +264,14 @@ func (n valueNode) dirty() bool  { return true }
 func (n *fullNode) dirty() bool  { return n.flags.dirty }
 func (n *duoNode) dirty() bool   { return n.flags.dirty }
 func (n *shortNode) dirty() bool { return true }
+func (an accountNode) dirty() bool {return true}
 
 func (n hashNode) hash() []byte   { return n }
 func (n valueNode) hash() []byte  { return nil }
 func (n *fullNode) hash() []byte  { return n.flags.hash[:] }
 func (n *duoNode) hash() []byte   { return n.flags.hash[:] }
 func (n *shortNode) hash() []byte { return nil }
+func (an accountNode) hash() []byte {return nil}
 
 // Pretty printing.
 func (n fullNode) String() string  { return n.fstring("") }
@@ -292,3 +279,4 @@ func (n duoNode) String() string   { return n.fstring("") }
 func (n shortNode) String() string { return n.fstring("") }
 func (n hashNode) String() string  { return n.fstring("") }
 func (n valueNode) String() string { return n.fstring("") }
+func (n accountNode) String() string { return n.fstring("") }

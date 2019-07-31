@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -61,6 +62,9 @@ var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 
 func (a *Account) Encode(ctx context.Context) ([]byte, error) {
+	fmt.Println("core/types/accounts/account.go:65 Encode")
+	fmt.Println(caller(5))
+
 	var toEncode interface{}
 
 	fmt.Println("core/types/accounts/account.go:51 encode version", a.GetIncarnation())
@@ -101,6 +105,8 @@ func (a *Account) Encode(ctx context.Context) ([]byte, error) {
 }
 
 func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
+	fmt.Println("core/types/accounts/account.go:105 EncodeRLP")
+	fmt.Println(caller(5))
 	acc := newAccountCopy(a)
 	toEncode := interface{}(RLPAccount{
 		Nonce:acc.Nonce,
@@ -114,6 +120,7 @@ func (a *Account) EncodeRLP(ctx context.Context) ([]byte, error) {
 	}
 
 	if acc.StorageSize == nil || !params.GetForkFlag(ctx, params.IsEIP2027Enabled) {
+		fmt.Println("core/types/accounts/account.go:117 RLPAccountWithoutStorage ")
 		toEncode = &RLPAccountWithoutStorage{
 			Nonce:    acc.Nonce,
 			Balance:  acc.Balance,
@@ -343,4 +350,14 @@ func (extAcc *ExtAccount) setDefaultBalance() *ExtAccount {
 	}
 
 	return extAcc
+}
+
+
+func caller(n int) string {
+	buf:=new(bytes.Buffer)
+	for i:=1;i<=n;i++ {
+		_,f,l,_:=runtime.Caller(i)
+		fmt.Fprintln(buf, f,l)
+	}
+	return buf.String()
 }
