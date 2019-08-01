@@ -22,8 +22,8 @@ func BenchmarkEncodingLengthForStorage(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -89,8 +89,8 @@ func BenchmarkEncodingLengthForHashing(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -158,8 +158,8 @@ func BenchmarkEncodingAccountForStorage(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -232,8 +232,8 @@ func BenchmarkEncodingAccountForHashing(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -305,8 +305,8 @@ func BenchmarkDecodingAccount(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -390,8 +390,8 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -453,8 +453,8 @@ func BenchmarkRLPDecodingAccount(b *testing.B) {
 			acc: &Account{
 				Nonce:    0,
 				Balance:  *new(big.Int),
-				Root:     emptyRoot,                         // extAccount doesn't have Root value
-				CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+				Root:     emptyRoot,     // extAccount doesn't have Root value
+				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 			},
 		},
 
@@ -531,8 +531,8 @@ func BenchmarkIsEmptyCodeHash(b *testing.B) {
 	acc := &Account{
 		Nonce:    0,
 		Balance:  *new(big.Int),
-		Root:     emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool
@@ -549,8 +549,8 @@ func BenchmarkIsEmptyRoot(b *testing.B) {
 	acc := &Account{
 		Nonce:    0,
 		Balance:  *new(big.Int),
-		Root:     emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash: common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:     emptyRoot,     // extAccount doesn't have Root value
+		CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	var isEmpty bool
