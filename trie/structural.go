@@ -18,6 +18,8 @@ package trie
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 	"math/bits"
 	"sort"
 
@@ -192,7 +194,7 @@ type HashBuilder struct {
 	digitStack  []int
 	branchStack []*fullNode
 	topKey      []byte
-	topValue    []byte
+	topValue    *bytebufferpool.ByteBuffer
 	topHash     common.Hash
 	topBranch   *fullNode
 	sha         keccakState
@@ -210,12 +212,15 @@ func (hb *HashBuilder) Reset() {
 	hb.digitStack = hb.digitStack[:0]
 	hb.branchStack = hb.branchStack[:0]
 	hb.topKey = nil
+
+	pool.PutBuffer(hb.topValue)
 	hb.topValue = nil
+
 	hb.topBranch = nil
 }
 
 // key is original key (not transformed into hex or compacted)
-func (hb *HashBuilder) setKeyValue(skip int, key, value []byte) {
+func (hb *HashBuilder) setKeyValue(skip int, key []byte, value *bytebufferpool.ByteBuffer) {
 	// Transform key into hex representation
 	hb.hexKey.Reset()
 	i := 0
@@ -230,6 +235,8 @@ func (hb *HashBuilder) setKeyValue(skip int, key, value []byte) {
 		i++
 	}
 	hb.hexKey.WriteByte(16)
+
+	pool.PutBuffer(hb.topValue)
 	hb.topValue = value
 }
 
@@ -251,7 +258,10 @@ func (hb *HashBuilder) branch(digit int) {
 	} else {
 		f.Children[digit] = hb.shortNode()
 		hb.topKey = nil
+
+		pool.PutBuffer(hb.topValue)
 		hb.topValue = nil
+
 		hb.topBranch = nil
 		hb.branchStack = append(hb.branchStack, f)
 	}
@@ -314,13 +324,13 @@ func (hb *HashBuilder) addLeafToHasher(buffer *bytes.Buffer) error {
 	}
 	var v []byte
 	if hb.topValue != nil {
-		if len(hb.topValue) > 1 || hb.topValue[0] >= 128 {
-			vp = generateByteArrayLen(valPrefix[:], 0, len(hb.topValue))
-			vl = len(hb.topValue)
+		if hb.topValue.Len() > 1 || hb.topValue.B[0] >= 128 {
+			vp = generateByteArrayLen(valPrefix[:], 0, hb.topValue.Len())
+			vl = hb.topValue.Len()
 		} else {
 			vl = 1
 		}
-		v = hb.topValue
+		v = hb.topValue.B
 	} else if hb.topBranch != nil {
 		panic("")
 	} else {
@@ -432,7 +442,10 @@ func (hb *HashBuilder) hasher(digit int) {
 	}
 	hb.bufferStack = append(hb.bufferStack, &buffer)
 	hb.topKey = nil
+
+	pool.PutBuffer(hb.topValue)
 	hb.topValue = nil
+
 	hb.topBranch = nil
 	hb.digitStack = append(hb.digitStack, digit)
 }
@@ -456,12 +469,14 @@ func (hb *HashBuilder) extension(key []byte) {
 		hb.topBranch = nil
 	}
 	hb.topKey = key
+
+	pool.PutBuffer(hb.topValue)
 	hb.topValue = nil
 }
 
 func (hb *HashBuilder) shortNode() *shortNode {
 	if hb.topValue != nil {
-		return &shortNode{Key: hexToCompact(hb.topKey), Val: valueNode(common.CopyBytes(hb.topValue))}
+		return &shortNode{Key: hexToCompact(hb.topKey), Val: valueNode(common.CopyBytes(hb.topValue.B))}
 	} else if hb.topBranch != nil {
 		return &shortNode{Key: hexToCompact(hb.topKey), Val: hb.topBranch}
 	}
@@ -480,7 +495,10 @@ func (hb *HashBuilder) add(digit int) {
 		} else {
 			f.Children[digit] = hb.shortNode()
 			hb.topKey = nil
+
+			pool.PutBuffer(hb.topValue)
 			hb.topValue = nil
+
 			hb.topBranch = nil
 		}
 	} else {
@@ -510,7 +528,10 @@ func (hb *HashBuilder) add(digit int) {
 			}
 			hb.digitStack[len(hb.digitStack)-1] = digit
 			hb.topKey = nil
+
+			pool.PutBuffer(hb.topValue)
 			hb.topValue = nil
+
 			hb.topBranch = nil
 		}
 	}

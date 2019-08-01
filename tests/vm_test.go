@@ -30,7 +30,7 @@ func TestVM(t *testing.T) {
 
 	vmt.walk(t, vmTestDir, func(t *testing.T, name string, test *VMTest) {
 		withTrace(t, test.json.Exec.GasLimit, func(vmconfig vm.Config) error {
-			return vmt.checkFailure(t, name, test.Run(vmconfig, 0))
+			return vmt.checkFailure(t, test.Run(vmconfig, 0))
 		})
 	})
 }
