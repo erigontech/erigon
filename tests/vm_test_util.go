@@ -87,9 +87,9 @@ func (t *VMTest) Run(vmconfig vm.Config, blockNr uint64) error {
 	}
 	tds.StartNewBuffer()
 	ret, gasRemaining, err := t.exec(state, vmconfig)
-	if err != nil {
-		return fmt.Errorf("execution error: %v", err)
-	}
+	// err is not supposed to be checked here, because in VM tests, the failure
+	// is indicated by the absence of the post-condition section.
+	// In other words, when such section is not present, we expect an error
 	if t.json.GasRemaining == nil {
 		if err == nil {
 			return fmt.Errorf("gas unspecified (indicating an error), but VM returned no error")

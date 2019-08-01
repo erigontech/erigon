@@ -600,6 +600,12 @@
 			"revisionTime": "2018-06-15T20:27:29Z"
 		},
 		{
+			"checksumSHA1": "ua2PK6PDbNCyzxOmakS3BJoF8Co=",
+			"path": "github.com/valyala/bytebufferpool",
+			"revision": "cdfbe9377474227bb42120c1e22fd4433e7f69bf",
+			"revisionTime": "2018-09-05T18:22:47Z"
+		},
+		{
 			"checksumSHA1": "TT1rac6kpQp2vz24m5yDGUNQ/QQ=",
 			"path": "golang.org/x/crypto/cast5",
 			"revision": "ff983b9c42bc9fbf91556e191cc8efb585c16908",

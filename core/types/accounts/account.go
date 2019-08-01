@@ -8,8 +8,10 @@ import (
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/valyala/bytebufferpool"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -25,11 +27,6 @@ type Account struct {
 	StorageSize    uint64
 }
 
-const (
-	accountSizeWithoutData            = 1
-	minAccountSizeWithRootAndCodeHash = 60
-)
-
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 var b128 = big.NewInt(128)
@@ -37,6 +34,7 @@ var b128 = big.NewInt(128)
 func (a *Account) encodingLength(forStorage bool) uint {
 	var structLength uint
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
+
 	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 {
 		var balanceBytes int
 		if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
@@ -44,17 +42,21 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		} else {
 			balanceBytes = (a.Balance.BitLen() + 7) / 8
 		}
+
 		var nonceBytes int
 		if a.Nonce < 128 && a.Nonce != 0 {
 			nonceBytes = 0
 		} else {
 			nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
 		}
+
 		structLength += uint(balanceBytes + nonceBytes + 2)
 	}
+
 	if !forStorage || !nonContract {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
 	}
+
 	if a.HasStorageSize {
 		var storageSizeBytes int
 		if a.StorageSize < 128 && a.StorageSize != 0 {
@@ -64,10 +66,13 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		}
 		structLength += uint(storageSizeBytes + 1)
 	}
+
 	if structLength < 56 {
 		return 1 + structLength
 	}
+
 	lengthBytes := (bits.Len(structLength) + 7) / 8
+
 	return uint(1+lengthBytes) + structLength
 }
 
@@ -85,22 +90,26 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		buffer[0] = 192
 		return
 	}
+
 	var balanceBytes int
 	if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
 		balanceBytes = 0
 	} else {
 		balanceBytes = (a.Balance.BitLen() + 7) / 8
 	}
+
 	var nonceBytes int
 	if a.Nonce < 128 && a.Nonce != 0 {
 		nonceBytes = 0
 	} else {
 		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
 	}
+
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	if !forStorage || !nonContract {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
 	}
+
 	var storageSizeBytes int
 	if a.HasStorageSize {
 		if a.StorageSize < 128 && a.StorageSize != 0 {
@@ -108,8 +117,10 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		} else {
 			storageSizeBytes = (bits.Len64(a.StorageSize) + 7) / 8
 		}
+
 		structLength += uint(storageSizeBytes + 1)
 	}
+
 	var pos int
 	if structLength < 56 {
 		buffer[0] = byte(192 + structLength)
@@ -117,10 +128,12 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	} else {
 		lengthBytes := (bits.Len(structLength) + 7) / 8
 		buffer[0] = byte(247 + lengthBytes)
+
 		for i := lengthBytes; i > 0; i-- {
 			buffer[i] = byte(structLength)
 			structLength >>= 8
 		}
+
 		pos = lengthBytes + 1
 	}
 
@@ -190,9 +203,10 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 
 func (a *Account) EncodeRLP(w io.Writer) error {
 	len := a.encodingLength(false)
-	buffer := make([]byte, len)
-	a.encode(buffer, false)
-	_, err := w.Write(buffer)
+	buffer := pool.GetBuffer(len)
+	a.encode(buffer.Bytes(), false)
+	_, err := w.Write(buffer.Bytes())
+	pool.PutBuffer(buffer)
 	return err
 }
 
@@ -255,6 +269,7 @@ func (a *Account) Decode(enc []byte) error {
 			enc,
 		)
 	}
+
 	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.SetInt64(0)
@@ -262,6 +277,7 @@ func (a *Account) Decode(enc []byte) error {
 	copy(a.CodeHash[:], emptyCodeHash)
 	a.StorageSize = 0
 	a.HasStorageSize = false
+
 	if pos < len(enc) {
 		nonceBytes, s, newPos := decodeLength(enc, pos)
 		if s {
@@ -270,6 +286,7 @@ func (a *Account) Decode(enc []byte) error {
 				enc[pos:newPos+nonceBytes],
 			)
 		}
+
 		if newPos+nonceBytes > len(enc) {
 			return fmt.Errorf(
 				"malformed RLP for Account.Nonce(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
@@ -277,6 +294,7 @@ func (a *Account) Decode(enc []byte) error {
 				newPos-pos, nonceBytes, len(enc)-pos,
 			)
 		}
+
 		var nonce uint64
 		if nonceBytes == 0 && newPos == pos {
 			nonce = uint64(enc[newPos])
@@ -287,6 +305,7 @@ func (a *Account) Decode(enc []byte) error {
 			}
 			pos = newPos + nonceBytes
 		}
+
 		a.Nonce = nonce
 	}
 	if pos < len(enc) {
@@ -297,12 +316,14 @@ func (a *Account) Decode(enc []byte) error {
 				enc[pos:newPos+balanceBytes],
 			)
 		}
+
 		if newPos+balanceBytes > len(enc) {
 			return fmt.Errorf("malformed RLP for Account.Balance(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos],
 				newPos-pos, balanceBytes, len(enc)-pos,
 			)
 		}
+
 		var bigB big.Int
 		if balanceBytes == 0 && newPos == pos {
 			a.Balance.SetInt64(int64(enc[newPos]))
@@ -316,6 +337,7 @@ func (a *Account) Decode(enc []byte) error {
 			pos = newPos + balanceBytes
 		}
 	}
+
 	if pos < len(enc) {
 		rootBytes, s, newPos := decodeLength(enc, pos)
 		if s {
@@ -324,21 +346,25 @@ func (a *Account) Decode(enc []byte) error {
 				enc[pos:newPos+rootBytes],
 			)
 		}
+
 		if rootBytes != 32 {
 			return fmt.Errorf(
 				"encoding of Account.Root should have size 32, got %d",
 				rootBytes,
 			)
 		}
+
 		if newPos+rootBytes > len(enc) {
 			return fmt.Errorf("malformed RLP for Account.Root(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos],
 				newPos-pos, rootBytes, len(enc)-pos,
 			)
 		}
+
 		copy(a.Root[:], enc[newPos:newPos+rootBytes])
 		pos = newPos + rootBytes
 	}
+
 	if pos < len(enc) {
 		codeHashBytes, s, newPos := decodeLength(enc, pos)
 		if s {
@@ -347,21 +373,25 @@ func (a *Account) Decode(enc []byte) error {
 				enc[pos:newPos+codeHashBytes],
 			)
 		}
+
 		if codeHashBytes != 32 {
 			return fmt.Errorf(
 				"encoding of Account.CodeHash should have size 32, got %d",
 				codeHashBytes,
 			)
 		}
+
 		if newPos+codeHashBytes > len(enc) {
 			return fmt.Errorf("malformed RLP for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos:newPos+codeHashBytes],
 				newPos-pos, codeHashBytes, len(enc)-pos,
 			)
 		}
+
 		copy(a.CodeHash[:], enc[newPos:newPos+codeHashBytes])
 		pos = newPos + codeHashBytes
 	}
+
 	if pos < len(enc) {
 		storageSizeBytes, s, newPos := decodeLength(enc, pos)
 		if s {
@@ -370,6 +400,7 @@ func (a *Account) Decode(enc []byte) error {
 				enc[pos:newPos+storageSizeBytes],
 			)
 		}
+
 		if newPos+storageSizeBytes > len(enc) {
 			return fmt.Errorf(
 				"malformed RLP for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
@@ -377,6 +408,7 @@ func (a *Account) Decode(enc []byte) error {
 				newPos-pos, storageSizeBytes, len(enc)-pos,
 			)
 		}
+
 		var storageSize uint64
 		if storageSizeBytes == 0 && newPos == pos {
 			storageSize = uint64(enc[newPos])
@@ -389,6 +421,7 @@ func (a *Account) Decode(enc []byte) error {
 			// Commented out because of the ineffectual assignment - uncomment if adding more fields
 			//pos = newPos + storageSizeBytes
 		}
+
 		a.StorageSize = storageSize
 		a.HasStorageSize = true
 	}
@@ -400,7 +433,16 @@ func (a *Account) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	return a.Decode(raw)
+
+	err = a.Decode(raw)
+	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: raw})
+	return err
+}
+
+func (a *Account) decodeRLPFromBytes(b []byte) error {
+	err := a.Decode(b)
+	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: b})
+	return err
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
