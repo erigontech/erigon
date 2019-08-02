@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -393,17 +394,32 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr uint64) (updated bool, newNode node) {
+	//fmt.Println(caller(7))
 	var nn node
 	if len(key) == pos {
-		if v, ok := origNode.(valueNode); ok {
-			updated = !bytes.Equal(v, value.(valueNode))
+		origN, origNok := origNode.(valueNode)
+		vn,vnok := value.(valueNode)
+		if  origNok && vnok{
+			updated = !bytes.Equal(origN, vn)
 			if updated {
 				newNode = value
 			} else {
-				newNode = v
+				newNode = vn
 			}
 			return
 		}
+		origAccN, origNok := origNode.(accountNode)
+		vAccN, vnok := value.(accountNode)
+		if  origNok && vnok{
+			updated = !origAccN.Equals(vAccN.Account)
+			if updated {
+				newNode=value
+			} else {
+				newNode=vAccN
+			}
+			return
+		}
+
 		updated = true
 		newNode = value
 		return
@@ -1058,4 +1074,14 @@ func (t *Trie) hashRoot() (node, error) {
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])
 	return hashNode(hn[:]), nil
+}
+
+
+func caller(n int) string {
+	buf:=new(bytes.Buffer)
+	for i:=1;i<=n;i++ {
+		_,f,l,_:=runtime.Caller(i)
+		fmt.Fprintln(buf, f,l)
+	}
+	return buf.String()
 }

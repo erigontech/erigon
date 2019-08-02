@@ -6,7 +6,6 @@ import (
 	"io"
 	"math/big"
 	"math/bits"
-	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -464,11 +463,14 @@ func (a *Account) GetIncarnation() uint8  {
 func (a *Account) SetIncarnation(v uint8)  {
 	a.Incarnation = v
 }
-func caller(n int) string {
-	buf:=new(bytes.Buffer)
-	for i:=1;i<=n;i++ {
-		_,f,l,_:=runtime.Caller(i)
-		fmt.Fprintln(buf, f,l)
-	}
-	return buf.String()
+
+func (a *Account) Equals(acc *Account) bool {
+	return a.Nonce==acc.Nonce &&
+			a.CodeHash == acc.CodeHash &&
+			a.Root == acc.Root &&
+			a.Balance.Cmp(&acc.Balance) == 0 &&
+			a.Incarnation == acc.Incarnation &&
+			a.StorageSize == acc.StorageSize
+
+
 }

@@ -1,7 +1,6 @@
 package vm
 
 import (
-	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -12,7 +11,7 @@ import (
 
 func _TestVersionAdd(t *testing.T)  {
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	tds, _ := state.NewTrieDbState( common.Hash{}, db, 0)
 	stateDb:=state.New(tds)
 	t.Log("0"+string(tds.Dump()))
 

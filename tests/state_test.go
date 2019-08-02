@@ -33,8 +33,7 @@ import (
 
 func TestStateDebug(t *testing.T)  {
 	st := new(testMatcher)
-	st.whitelist(`^stSStoreTest/InitCollision.json`)
-	//st.fails(`^stSStoreTest/InitCollision.json/Constantinople/0`, "work in progress")
+	st.whitelist(`^TestStateDebug/stSStoreTest/InitCollision.json`)
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
@@ -52,7 +51,7 @@ func TestStateDebug(t *testing.T)  {
 					fmt.Println("--------------- i", i, key)
 					_, _, _, err := test.Run(ctx, subtest, vmconfig)
 					i++
-					return st.checkFailure(t, name, err)
+					return st.checkFailure(t,  err)
 				})
 			})
 		}

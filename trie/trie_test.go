@@ -107,14 +107,14 @@ func TestGetAccount(t *testing.T) {
 	acc1:=accounts.Account{
 		Nonce:1,
 		Incarnation:1,
-		Balance:big.NewInt(100),
+		Balance:*big.NewInt(100),
 	}
 	acc2:=accounts.Account{
 		Nonce:2,
 		Incarnation:2,
-		Balance:big.NewInt(200),
+		Balance:*big.NewInt(200),
 		Root:common.BytesToHash([]byte("0x1")),
-		CodeHash:[]byte("codehash"),
+		CodeHash:common.BytesToHash([]byte("0x01")),
 	}
 	trie := newEmpty()
 	key1:=[]byte("acc1")

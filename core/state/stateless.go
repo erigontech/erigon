@@ -547,7 +547,7 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, version uint8,  key, original, value *common.Hash) error {
 	m, ok := s.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)

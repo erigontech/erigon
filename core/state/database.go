@@ -119,7 +119,7 @@ func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
 	return nil
 }
 
@@ -683,7 +683,6 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 				acc:=*account
 				tds.t.UpdateAccount(addrHash[:], acc, tds.blockNr)
-				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
@@ -788,6 +787,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					return err
 				}
 			} else {
+				//cKey:=GenerateCompositeStorageKey(address, keyHash)
 				if err := tds.db.Put(StorageBucket, append(address[:], keyHash[:]...), value); err != nil {
 					return err
 				}
