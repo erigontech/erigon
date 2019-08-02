@@ -55,16 +55,16 @@ func TestState(t *testing.T) {
 	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/0`, "bug in test")
 	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/3`, "bug in test")
 
-	//st.whitelist(`^stSStoreTest/InitCollision.json`)
+	//st.whitelist(`(?m)^TestState/stSStoreTest/InitCollision\.json`)
 
 	// Work in progress
 	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/0`, "work in progress")
 	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/1`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json\/Constantinople/2`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json\/Constantinople/3`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json\/ConstantinopleFix/0`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json\/ConstantinopleFix/1`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json\/ConstantinopleFix/3`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/2`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/3`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/1`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/3`, "work in progress")
 	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Byzantium/0`, "work in progress")
 	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Constantinople/0`, "work in progress")
 	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/ConstantinopleFix/0`, "work in progress")
