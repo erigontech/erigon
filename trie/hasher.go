@@ -18,8 +18,8 @@ package trie
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 	"hash"
@@ -270,11 +270,11 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				pos += len(vn)
 			}
 		} else if ac, ok := n.Val.(accountNode); ok {
-			b, err := ac.EncodeRLP(context.Background())
-			if err != nil {
-				fmt.Println("------------accountNodeErr trie/hasher.go:274", err)
-				//	todo add panic
-			}
+			encodedAccount := pool.GetBuffer(ac.EncodingLengthForHashing())
+			ac.EncodeForHashing(encodedAccount.B)
+			b:=encodedAccount.Bytes()
+			pool.PutBuffer(encodedAccount)
+
 			if len(b) == 1 && b[0] < 128 {
 				buffer[pos] = b[0]
 				pos++
@@ -378,7 +378,10 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		var err error
 		switch n:=n.Children[16].(type) {
 		case accountNode:
-			enc,err=n.EncodeRLP(context.TODO())
+			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+			n.EncodeForHashing(encodedAccount.B)
+			enc=encodedAccount.Bytes()
+			pool.PutBuffer(encodedAccount)
 		case valueNode:
 			enc=n
 		case nil:
@@ -417,10 +420,10 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		return buffer[4:pos]
 
 	case accountNode:
-		enc,err:=n.EncodeRLP(context.TODO())
-		if err!=nil {
-			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!trie/hasher.go:419", err)
-		}
+		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+		n.EncodeForHashing(encodedAccount.B)
+		enc:=encodedAccount.Bytes()
+		pool.PutBuffer(encodedAccount)
 		if len(enc) == 1 && enc[0] < 128 {
 			buffer[pos] = enc[0]
 			pos++

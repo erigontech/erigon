@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -214,17 +215,15 @@ func makeTokenBalances() {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
+	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
 		enc, err := ethDb.Get(state.AccountsBucket, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
-		a, err := encodingToAccount(enc)
-		if err != nil {
-			panic(err)
-		}
-		if bytes.Equal(a.CodeHash, emptyCodeHash) {
+		check(a.Decode(enc))
+		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue
 		}
@@ -437,17 +436,15 @@ func makeTokenAllowances() {
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
+	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
 		enc, err := ethDb.Get(state.AccountsBucket, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
-		a, err := encodingToAccount(enc)
-		if err != nil {
-			panic(err)
-		}
-		if bytes.Equal(a.CodeHash, emptyCodeHash) {
+		check(a.Decode(enc))
+		if a.IsEmptyCodeHash() {
 			// Only processing contracts
 			continue
 		}

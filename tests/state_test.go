@@ -78,43 +78,42 @@ func TestState(t *testing.T) {
 	st.skipLoad(`^stTransactionTest/OverflowGasRequire\.json`) // gasLimit > 256 bits
 	st.skipLoad(`^stTransactionTest/zeroSigTransa[^/]*\.json`) // EIP-86 is not supported yet
 	// Expected failures:
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/0`, "bug in test")
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium/3`, "bug in test")
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople/0`, "bug in test")
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople/3`, "bug in test")
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/0`, "bug in test")
-	st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/3`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium\/0`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Byzantium\/3`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople\/0`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople\/3`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/0`, "bug in test")
+	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/3`, "bug in test")
 
-	//st.whitelist(`^stSStoreTest/InitCollision.json`)
+	//st.whitelist(`(?m)^TestState/stSStoreTest/InitCollision\.json`)
 
 	// Work in progress
-	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/0`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/1`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/2`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/Constantinople/3`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/ConstantinopleFix/1`, "work in progress")
-	st.fails(`^stSStoreTest/InitCollision.json/ConstantinopleFix/3`, "work in progress")
-	st.fails(`^stRevertTest/RevertInCreateInInit.json/Byzantium/0`, "work in progress")
-	st.fails(`^stRevertTest/RevertInCreateInInit.json/Constantinople/0`, "work in progress")
-	st.fails(`^stRevertTest/RevertInCreateInInit.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/Constantinople/0`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/Constantinople/1`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/Constantinople/1`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/Constantinople/2`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/ConstantinopleFix/1`, "work in progress")
-	st.fails(`^stCreate2/create2collisionStorage.json/ConstantinopleFix/2`, "work in progress")
-	st.fails(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json/Constantinople/0`, "work in progress")
-	st.fails(`^stExtCodeHash/dynamicAccountOverwriteEmpty.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`^stCreate2/RevertInCreateInInitCreate2.json/Constantinople/0`, "work in progress")
-	st.fails(`^stCreate2/RevertInCreateInInitCreate2.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/0`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/1`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/2`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/3`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/1`, "work in progress")
+	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/3`, "work in progress")
+	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Byzantium/0`, "work in progress")
+	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Constantinople/0`, "work in progress")
+	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/0`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/1`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/1`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/2`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/1`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/2`, "work in progress")
+	st.fails(`(?m)^TestState/stExtCodeHash/dynamicAccountOverwriteEmpty\.json/Constantinople/0`, "work in progress")
+	st.fails(`(?m)^TestState/stExtCodeHash/dynamicAccountOverwriteEmpty\.json/ConstantinopleFix/0`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/RevertInCreateInInitCreate2\.json/Constantinople/0`, "work in progress")
+	st.fails(`(?m)^TestState/stCreate2/RevertInCreateInInitCreate2\.json/ConstantinopleFix/0`, "work in progress")
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {
 			subtest := subtest
 			key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-			name = name + "/" + key
 			t.Run(key, func(t *testing.T) {
 				withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
 					config, ok := Forks[subtest.Fork]
@@ -123,7 +122,7 @@ func TestState(t *testing.T) {
 					}
 					ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
 					_, _, _, err := test.Run(ctx, subtest, vmconfig)
-					return st.checkFailure(t, name, err)
+					return st.checkFailure(t, err)
 				})
 			})
 		}

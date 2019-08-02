@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
@@ -1408,33 +1407,6 @@ func oldStorage() {
 	}
 }
 
-func encodingToAccount(enc []byte) (*accounts.Account, error) {
-	if enc == nil || len(enc) == 0 {
-		return nil, nil
-	}
-	var data accounts.Account
-	// Kind of hacky
-	if len(enc) == 1 {
-		data.Balance = new(big.Int)
-		data.CodeHash = emptyCodeHash
-		data.Root = trie.EmptyRoot
-	} else if len(enc) < 60 {
-		var extData accounts.ExtAccount
-		if err := rlp.DecodeBytes(enc, &extData); err != nil {
-			return nil, err
-		}
-		data.Nonce = extData.Nonce
-		data.Balance = extData.Balance
-		data.CodeHash = emptyCodeHash
-		data.Root = trie.EmptyRoot
-	} else {
-		if err := rlp.DecodeBytes(enc, &data); err != nil {
-			return nil, err
-		}
-	}
-	return &data, nil
-}
-
 func dustEOA() {
 	startTime := time.Now()
 	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
@@ -1447,6 +1419,7 @@ func dustEOA() {
 	maxBalance := big.NewInt(1000000000000000000)
 	// Go through the current state
 	thresholdMap := make(map[uint64]int)
+	var a accounts.Account
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
 		if b == nil {
@@ -1454,12 +1427,11 @@ func dustEOA() {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			a, err := encodingToAccount(v)
-			if err != nil {
-				panic(err)
+			if err1 := a.Decode(v); err1 != nil {
+				return err1
 			}
 			count++
-			if !bytes.Equal(a.CodeHash, emptyCodeHash) {
+			if !a.IsEmptyCodeHash() {
 				// Only processing EOA
 				continue
 			}
@@ -1750,7 +1722,9 @@ func main() {
 	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
 	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
 	if *action == "stateSnapshot" {
-		stateSnapshot()
+		if err := stateSnapshot(); err != nil {
+			fmt.Printf("Error: %v\n", err)
+		}
 	}
 	//estimate()
 	//verify_snapshot()

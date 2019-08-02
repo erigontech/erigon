@@ -165,11 +165,10 @@ func (tm *testMatcher) findConfig(name string) *params.ChainConfig {
 }
 
 // checkFailure checks whether a failure is expected.
-func (tm *testMatcher) checkFailure(t *testing.T, name string, err error) error {
-	// TODO(fjl): name can be derived from t when min Go version is 1.8
+func (tm *testMatcher) checkFailure(t *testing.T, err error) error {
 	failReason := ""
 	for _, m := range tm.failpat {
-		if m.p.MatchString(name) {
+		if m.p.MatchString(t.Name()) {
 			failReason = m.reason
 			break
 		}
@@ -219,7 +218,7 @@ func (tm *testMatcher) runTestFile(t *testing.T, path, name string, runTest inte
 		t.Skip(r)
 	}
 	if tm.whitelistpat != nil {
-		if !tm.whitelistpat.MatchString(name) {
+		if !tm.whitelistpat.MatchString(t.Name()) {
 			t.Skip("Skipped by whitelist")
 		}
 	}

@@ -11,13 +11,15 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+
+	"image"
+	"image/color"
 
 	"github.com/llgcode/draw2d"
 	"github.com/llgcode/draw2d/draw2dimg"
 	"github.com/petar/GoLLRB/llrb"
-	"image"
-	"image/color"
 	//"sort"
 )
 
@@ -41,8 +43,8 @@ func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 		if enc == nil {
 			return fmt.Errorf("Could find account %x\n", contract)
 		}
-		account, err := encodingToAccount(enc)
-		if err != nil {
+		var account accounts.Account
+		if err := account.Decode(enc); err != nil {
 			return err
 		}
 		storageRoot = account.Root

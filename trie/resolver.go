@@ -2,8 +2,9 @@ package trie
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -15,7 +16,7 @@ import (
 
 var emptyHash [32]byte
 
-func (t *Trie) Rebuild(ctx context.Context, db ethdb.Database, blockNr uint64) error {
+func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	if t.root == nil {
 		return nil
 	}
@@ -23,7 +24,7 @@ func (t *Trie) Rebuild(ctx context.Context, db ethdb.Database, blockNr uint64) e
 	if !ok {
 		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
-	if err := t.rebuildHashes(ctx, db, nil, 0, blockNr, true, n); err != nil {
+	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
 		return err
 	}
 	log.Info("Rebuilt top of account trie and verified", "root hash", n)
@@ -58,23 +59,22 @@ type TrieResolver struct {
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	historical bool
 	blockNr    uint64
-	ctx        context.Context
 	hb         *HashBuilder
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       bytes.Buffer
 	succ       bytes.Buffer
 	groups     uint64
+	a          accounts.Account
 }
 
-func NewResolver(ctx context.Context, topLevels int, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(topLevels int, accounts bool, blockNr uint64) *TrieResolver {
 	tr := TrieResolver{
 		accounts:   accounts,
 		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		ctx:        ctx,
 		hb:         NewHashBuilder(),
 	}
 	return &tr
@@ -171,6 +171,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
+// Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
@@ -220,25 +221,24 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		// Remember the current key and value
 		if tr.accounts {
-			account, err := accounts.Decode(v)
-			if err != nil {
+			if err := tr.a.Decode(v); err != nil {
 				return false, err
 			}
 
-			value, err := account.EncodeRLP(tr.ctx)
-			if err != nil {
-				return false, err
-			}
-			tr.hb.setKeyValue(skip, k, value)
+			encodeLen := tr.a.EncodingLengthForHashing()
+			buf := pool.GetBuffer(encodeLen)
+
+			tr.a.EncodeForHashing(buf.B)
+			tr.hb.setKeyValue(skip, k, buf)
 		} else {
-			var vv []byte
+			var vv *bytebufferpool.ByteBuffer
 			if len(v) > 1 || v[0] >= 128 {
-				vv = make([]byte, len(v)+1)
-				vv[0] = byte(128 + len(v))
-				copy(vv[1:], v)
+				vv = pool.GetBuffer(uint(len(v) + 1))
+				vv.B[0] = byte(128 + len(v))
+				copy(vv.B[1:], v)
 			} else {
-				vv = make([]byte, 1)
-				vv[0] = v[0]
+				vv = pool.GetBuffer(1)
+				vv.B[0] = v[0]
 			}
 			tr.hb.setKeyValue(skip, k, vv)
 		}
@@ -288,9 +288,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	return err
 }
 
-func (t *Trie) rebuildHashes(ctx context.Context, db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
+func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
 	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(ctx, 5, accounts, blockNr)
+	r := NewResolver(5, accounts, blockNr)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
 }

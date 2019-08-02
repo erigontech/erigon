@@ -45,7 +45,7 @@ import (
 func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 
 	// Update it with some accounts
@@ -63,7 +63,7 @@ func TestUpdateLeaks(t *testing.T) {
 		_ = state.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	}
 
-	_, err := tds.ComputeTrieRoots(context.Background())
+	_, err := tds.ComputeTrieRoots()
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
@@ -84,10 +84,10 @@ func TestIntermediateLeaks(t *testing.T) {
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
 	finalDb := ethdb.NewMemDatabase()
-	transTds, _ := NewTrieDbState(context.Background(), common.Hash{}, transDb, 0)
+	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0)
 	transState := New(transTds)
 	transTds.StartNewBuffer()
-	finalTds, _ := NewTrieDbState(context.Background(), common.Hash{}, finalDb, 0)
+	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0)
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
@@ -128,12 +128,12 @@ func TestIntermediateLeaks(t *testing.T) {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = transTds.ComputeTrieRoots(context.Background())
+	_, err = transTds.ComputeTrieRoots()
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	transTds.SetBlockNr(context.Background(), 1)
+	transTds.SetBlockNr(1)
 
 	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter())
 	if err != nil {
@@ -145,12 +145,12 @@ func TestIntermediateLeaks(t *testing.T) {
 		t.Fatal("error while finalizing state", err)
 	}
 
-	_, err = finalTds.ComputeTrieRoots(context.Background())
+	_, err = finalTds.ComputeTrieRoots()
 	if err != nil {
 		t.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	finalTds.SetBlockNr(context.Background(), 1)
+	finalTds.SetBlockNr(1)
 	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
@@ -391,16 +391,23 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState, ds, che
 			}
 			return true
 		}
+		checkeqBigInt := func(op string, a, b *big.Int) bool {
+			if err == nil && a.Cmp(b) != 0 {
+				err = fmt.Errorf("got %s(%s) == %d, want %d", op, addr.Hex(), a, b)
+				return false
+			}
+			return true
+		}
 		// Check basic accessor methods.
 		checkeq("Exist", state.Exist(addr), checkstate.Exist(addr))
 		checkeq("HasSuicided", state.HasSuicided(addr), checkstate.HasSuicided(addr))
-		checkeq("GetBalance", state.GetBalance(addr), checkstate.GetBalance(addr))
+		checkeqBigInt("GetBalance", state.GetBalance(addr), checkstate.GetBalance(addr))
 		checkeq("GetNonce", state.GetNonce(addr), checkstate.GetNonce(addr))
 		checkeq("GetCode", state.GetCode(addr), checkstate.GetCode(addr))
 		checkeq("GetCodeHash", state.GetCodeHash(addr), checkstate.GetCodeHash(addr))
 		checkeq("GetCodeSize", state.GetCodeSize(addr), checkstate.GetCodeSize(addr))
 		// Check storage.
-		if obj := state.GetStateObject(addr); obj != nil {
+		if obj := state.getStateObject(addr); obj != nil {
 			ds.ForEachStorage(addr, []byte{} /*startKey*/, func(key, seckey, value common.Hash) bool {
 				return checkeq("GetState("+key.Hex()+")", checkstate.GetState(addr, key), value)
 			}, 1000)
@@ -432,12 +439,12 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 		c.Fatal("error while finalize", err)
 	}
 
-	_, err = s.tds.ComputeTrieRoots(context.Background())
+	_, err = s.tds.ComputeTrieRoots()
 	if err != nil {
 		c.Fatal("error while ComputeTrieRoots", err)
 	}
 
-	s.tds.SetBlockNr(context.Background(), 1)
+	s.tds.SetBlockNr(1)
 
 	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
 	if err != nil {
@@ -462,7 +469,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 // See https://github.com/ledgerwatch/turbo-geth/pull/15225#issuecomment-380191512
 func TestCopyOfCopy(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	sdbTds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	sdbTds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	sdb := New(sdbTds)
 	sdbTds.StartNewBuffer()
 	addr := common.HexToAddress("aaaa")
@@ -478,41 +485,41 @@ func TestCopyOfCopy(t *testing.T) {
 
 func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
-	obj := state.GetStateObject(addr)
-	if obj.data.StorageSize != nil {
+	obj := state.getStateObject(addr)
+	if obj.data.HasStorageSize {
 		t.Fatal("Storage size of empty account should be 0", obj.data.StorageSize)
 	}
 }
 
 func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{2}
 	newObj, _ := state.createObject(addr, nil)
 	newObj.code = []byte("some non empty byte code")
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)
-	obj := state.GetStateObject(addr)
-	if obj.data.StorageSize != nil {
+	obj := state.getStateObject(addr)
+	if obj.data.HasStorageSize {
 		t.Fatal("Storage size of empty account should be nil", obj.data.StorageSize)
 	}
 
 	state.IncreaseStorageSize(addr)
-	obj = state.GetStateObject(addr)
-	if *obj.data.StorageSize != HugeNumber+1 {
-		t.Fatal("Storage size of empty account should be HugeNumber +1", *obj.data.StorageSize, HugeNumber)
+	obj = state.getStateObject(addr)
+	if obj.data.StorageSize != HugeNumber+1 {
+		t.Fatal("Storage size of empty account should be HugeNumber +1", obj.data.StorageSize, HugeNumber)
 	}
 
 	state.DecreaseStorageSize(addr)
 	state.DecreaseStorageSize(addr)
-	obj = state.GetStateObject(addr)
-	if *obj.data.StorageSize != HugeNumber-1 {
-		t.Fatal("Storage size of empty account should be HugeNumber - 1", *obj.data.StorageSize, HugeNumber, *obj.data.StorageSize-HugeNumber)
+	obj = state.getStateObject(addr)
+	if obj.data.StorageSize != HugeNumber-1 {
+		t.Fatal("Storage size of empty account should be HugeNumber - 1", obj.data.StorageSize, HugeNumber, obj.data.StorageSize-HugeNumber)
 	}
 
 }
@@ -523,7 +530,7 @@ func TestIntraBlockStateNewContractAccount(t *testing.T) {
 func TestCopy(t *testing.T) {
 	// Create a random state test to copy and modify "independently"
 	db := ethdb.NewMemDatabase()
-	origTds, err := NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	origTds, err := NewTrieDbState(common.Hash{}, db, 0)
 	if err != nil {
 		t.Log(err)
 	}
@@ -545,12 +552,12 @@ func TestCopy(t *testing.T) {
 		t.Log("error while finalize", err)
 	}
 
-	_, err = origTds.ComputeTrieRoots(context.Background())
+	_, err = origTds.ComputeTrieRoots()
 	if err != nil {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
-	origTds.SetBlockNr(context.Background(), 1)
+	origTds.SetBlockNr(1)
 
 	err = orig.CommitBlock(context.Background(), origTds.DbStateWriter())
 	if err != nil {
@@ -588,12 +595,12 @@ func TestCopy(t *testing.T) {
 			t.Log("error while finalize", err)
 		}
 
-		_, err = origTds.ComputeTrieRoots(ctx)
+		_, err = origTds.ComputeTrieRoots()
 		if err != nil {
 			t.Log("error while ComputeTrieRoots", err)
 		}
 
-		origTds.SetBlockNr(ctx, 2)
+		origTds.SetBlockNr(2)
 
 		err = orig.CommitBlock(ctx, origTds.DbStateWriter())
 		if err != nil {
@@ -610,12 +617,12 @@ func TestCopy(t *testing.T) {
 		t.Log("error while finalize", err)
 	}
 
-	_, err = copyTds.ComputeTrieRoots(ctx)
+	_, err = copyTds.ComputeTrieRoots()
 	if err != nil {
 		t.Log("error while ComputeTrieRoots", err)
 	}
 
-	copyTds.SetBlockNr(ctx, 2)
+	copyTds.SetBlockNr(2)
 	err = copy.CommitBlock(ctx, copyTds.DbStateWriter())
 	if err != nil {
 		t.Log("error while commit", err)

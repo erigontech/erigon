@@ -971,7 +971,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	if err = s.FinalizeTx(ctx, w.current.tds.TrieStateWriter()); err != nil {
 		return err
 	}
-	roots, err := w.current.tds.ComputeTrieRoots(ctx)
+	roots, err := w.current.tds.ComputeTrieRoots()
 	if err != nil {
 		return err
 	}

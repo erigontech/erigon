@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/valyala/bytebufferpool"
 	"sort"
 	"testing"
 
@@ -74,9 +75,9 @@ func TestHashBuilding(t *testing.T) {
 			groups = step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 		if i%2 == 0 {
-			hb.setKeyValue(0, []byte(key), valueLong)
+			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueLong})
 		} else {
-			hb.setKeyValue(0, []byte(key), valueShort)
+			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueShort})
 		}
 	}
 	prec.Reset()
@@ -136,7 +137,7 @@ func TestResolution(t *testing.T) {
 		if curr.Len() > 0 {
 			groups = step(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
-		hb.setKeyValue(0, []byte(key), value)
+		hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: value})
 	}
 	prec.Reset()
 	prec.Write(curr.Bytes())
@@ -153,7 +154,7 @@ func TestResolution(t *testing.T) {
 	// Check the availibility of the resolved keys
 	for _, hex := range rs.hexes {
 		key := hexToKeybytes(hex)
-		_, found := tr1.Get(key, 0)
+		_, found := tr1.Get(key)
 		if !found {
 			t.Errorf("Key %x was not resolved", hex)
 		}

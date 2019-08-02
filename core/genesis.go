@@ -241,7 +241,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
-	tds, err := state.NewTrieDbState(context.Background(), common.Hash{}, db, 0)
+	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -255,12 +255,11 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 			statedb.SetState(addr, key, value)
 		}
 	}
-	ctx := context.Background()
 	err = statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	roots, err := tds.ComputeTrieRoots(ctx)
+	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -300,7 +299,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
 	ctx := g.Config.WithEIPsFlags(context.Background(), block.Number())
-	tds.SetBlockNr(ctx, 0)
+	tds.SetBlockNr(0)
 	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
 	}

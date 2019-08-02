@@ -229,7 +229,7 @@ func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
-		bc.trieDbState, err = state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), bc.CurrentBlock().Number()), bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		if err != nil {
 			panic(err)
 		}
@@ -427,7 +427,7 @@ func (bc *BlockChain) State() (*state.IntraBlockState, *state.TrieDbState, error
 
 // StateAt returns a new mutable state based on a particular point in time.
 func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(blockNr))), root, bc.db, blockNr)
+	tds, err := state.NewTrieDbState(root, bc.db, blockNr)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1000,7 +1000,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		rawdb.WriteHeader(bc.db, block.Header())
 	}
 
-	tds.SetBlockNr(bc.chainConfig.WithEIPsFlags(context.Background(), block.Number()), block.NumberU64())
+	tds.SetBlockNr(block.NumberU64())
 	ctx := bc.chainConfig.WithEIPsFlags(context.Background(), block.Number())
 	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return NonStatTy, err
@@ -1171,7 +1171,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 	var offset int
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
-	parentBlockCtx := bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(parentNumber)))
 	// Find correct insertion point for this chain
 	if !bc.noHistory {
 		preBlocks := []*types.Block{}
@@ -1275,7 +1274,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		if bc.trieDbState == nil {
 			currentBlockNr := bc.CurrentBlock().NumberU64()
 			log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
-			bc.trieDbState, err = state.NewTrieDbState(bc.chainConfig.WithEIPsFlags(context.Background(), big.NewInt(int64(currentBlockNr))), bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+			bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 			if err != nil {
 				return k, events, coalescedLogs, err
 			}
@@ -1298,7 +1297,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			if err = bc.trieDbState.UnwindTo(parentBlockCtx, readBlockNr); err != nil {
+			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
@@ -1308,7 +1307,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, fmt.Errorf("Wrong root %x, expected %x", root, parentRoot)
+				return 0, events, coalescedLogs, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err := bc.reorg(currentBlock, parent); err != nil {

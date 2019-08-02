@@ -21,9 +21,9 @@ package trie
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/hex"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"io"
 	"strconv"
 )
@@ -253,13 +253,19 @@ func (n valueNode) print(w io.Writer) {
 }
 
 func (an accountNode) fstring(string) string {
-	enc,_:=an.Encode(context.TODO())
-	return fmt.Sprintf("%x ", enc)
+	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount.B)
+	defer pool.PutBuffer(encodedAccount)
+
+	return fmt.Sprintf("%x ", encodedAccount.String())
 }
 
 func (an accountNode) print(w io.Writer) {
-	enc,_:=an.Encode(context.TODO())
-	fmt.Fprintf(w, "v(%x)", enc)
+	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount.B)
+	defer pool.PutBuffer(encodedAccount)
+
+	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
 }
 
 
@@ -301,11 +307,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 	case valueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
 	case accountNode:
-		enc, err := n.Encode(context.TODO())
-		if err != nil {
-			fmt.Println("------------ accountNodeErr trie/debug.go:295 ------", err)
-		}
-		fmt.Fprintf(w, "account(%s %x)", key, enc)
+		fmt.Fprintf(w, "account(%s %x)", key, n)
 	}
 }
 

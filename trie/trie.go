@@ -19,8 +19,8 @@ package trie
 
 import (
 	"bytes"
-	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -69,10 +69,10 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-// TryGet returns the value for key stored in the trie.
-func (t *Trie) Get(key []byte, blockNr uint64) (value []byte, gotValue bool) {
+// Get returns the value for key stored in the trie.
+func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 	hex := keybytesToHex(key)
-	return t.get(t.root, hex, 0, blockNr)
+	return t.get(t.root, hex, 0)
 }
 
 func (t *Trie) GetAccount(key []byte, blockNr uint64) (value accounts.Account, gotValue bool) {
@@ -126,17 +126,17 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 	}
 }
 
-func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []byte, gotValue bool) {
+func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
 	case valueNode:
 		return n, true
 	case accountNode:
-		enc,err:=n.EncodeRLP(context.Background())
-		if err!=nil {
-			fmt.Println("!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:138", err)
-		}
+		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+		n.EncodeForHashing(encodedAccount.B)
+		enc:=encodedAccount.Bytes()
+		pool.PutBuffer(encodedAccount)
 		return enc, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
@@ -146,10 +146,14 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
 			} else if v, ok := n.Val.(accountNode); ok {
-				enc,_:=v.Encode(context.TODO())
+				encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
+				v.EncodeForHashing(encodedAccount.B)
+				enc:=encodedAccount.Bytes()
+				pool.PutBuffer(encodedAccount)
+
 				return enc, true
 			} else {
-				value, gotValue = t.get(n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.get(n.Val, key, pos+len(nKey))
 			}
 		}
 		return
@@ -158,9 +162,9 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.get(n.child1, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child1, key, pos+1)
 		case i2:
-			value, gotValue = t.get(n.child2, key, pos+1, blockNr)
+			value, gotValue = t.get(n.child2, key, pos+1)
 		default:
 			value, gotValue = nil, true
 		}
@@ -168,7 +172,7 @@ func (t *Trie) get(origNode node, key []byte, pos int, blockNr uint64) (value []
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.get(child, key, pos+1, blockNr)
+		value, gotValue = t.get(child, key, pos+1)
 		return
 	case hashNode:
 		return nil, false
@@ -298,10 +302,11 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 				if v, ok := n.Val.(valueNode); ok {
 					pg.addValue(contract, proofHex, pos+len(nKey), common.CopyBytes(v))
 				} else if v, ok := n.Val.(accountNode); ok {
-					enc,err:=v.EncodeRLP(context.TODO())
-					if err!=nil {
-						fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:301", err)
-					}
+					encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
+					v.EncodeForHashing(encodedAccount.B)
+					enc:=encodedAccount.Bytes()
+					pool.PutBuffer(encodedAccount)
+
 					pg.addValue(contract, proofHex, pos+len(nKey), enc)
 				} else {
 					pg.addSoleHash(contract, proofHex, pos+len(nKey), common.BytesToHash(n.Val.hash()))
@@ -322,10 +327,10 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 					if v, ok := s.Val.(valueNode); ok {
 						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
 					} else if v, ok := s.Val.(accountNode); ok {
-						enc,err:=v.EncodeRLP(context.TODO())
-						if err!=nil {
-							fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:325", err)
-						}
+						encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
+						v.EncodeForHashing(encodedAccount.B)
+						enc:=encodedAccount.Bytes()
+						pool.PutBuffer(encodedAccount)
 						pg.addValue(contract, proofHex, pos+1+len(nKey), enc)
 					}else {
 						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
@@ -372,10 +377,10 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 			pg.addValue(contract, hex, pos, common.CopyBytes(n))
 			return
 		case accountNode:
-			enc,err:=n.EncodeRLP(context.TODO())
-			if err!=nil {
-				fmt.Println("!!!!!!!!!!!!!!!!!!!!!! accountNodeErr trie/trie.go:375", err)
-			}
+			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+			n.EncodeForHashing(encodedAccount.B)
+			enc:=encodedAccount.Bytes()
+			pool.PutBuffer(encodedAccount)
 			pg.addValue(contract, hex, pos, enc)
 			return
 		case hashNode:

@@ -146,13 +146,9 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
-			b.accountUpdates[addrHash] = &accounts.Account{
-				Nonce:       account.Nonce,
-				Balance:     new(big.Int).Set(account.Balance),
-				Root:        account.Root,
-				CodeHash:    account.CodeHash,
-				StorageSize: account.StorageSize,
-			}
+			var c accounts.Account
+			c.Copy(account)
+			b.accountUpdates[addrHash] = &c
 		}
 	}
 }
@@ -206,10 +202,9 @@ type TrieDbState struct {
 	resolveReads    bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
-	ctx             context.Context
 }
 
-func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -230,7 +225,6 @@ func NewTrieDbState(ctx context.Context, root common.Hash, db ethdb.Database, bl
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
 		tp:            tp,
-		ctx:           ctx,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -293,9 +287,9 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 }
 
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
-func (tds *TrieDbState) ComputeTrieRoots(ctx context.Context) ([]common.Hash, error) {
+func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 	fmt.Println("+StartComputeTrieRoots")
-	roots, err := tds.computeTrieRoots(ctx, true)
+	roots, err := tds.computeTrieRoots(true)
 	fmt.Println("-StartComputeTrieRoots")
 	tds.clearUpdates()
 	return roots, err
@@ -325,15 +319,15 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 
 	i := 0
 
+	var acc accounts.Account
 	err := tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
-			acc, err := accounts.Decode(value)
-			if err != nil {
-				return false, err
-			}
-			if acc != nil {
+			if len(value) > 0 {
+				if err := acc.Decode(value); err != nil {
+					return false, err
+				}
 				if i < maxItems {
-					walker(common.BytesToHash(key), acc)
+					walker(common.BytesToHash(key), &acc)
 				}
 				i++
 			}
@@ -441,7 +435,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[common.Address]
 			//todo @need resolution for prefix
 			if need, req := tds.storageTrie.NeedResolution(contract[:], keyHash[:]); need {
 				if resolver == nil {
-					resolver = trie.NewResolver(tds.ctx, 0, false, tds.blockNr)
+					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				resolver.AddRequest(req)
@@ -505,7 +499,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
-				resolver = trie.NewResolver(tds.ctx, 0, true, tds.blockNr)
+				resolver = trie.NewResolver(0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
 			}
 			resolver.AddRequest(req)
@@ -528,7 +522,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
-func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]common.Hash, error) {
+func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -683,8 +677,13 @@ func (tds *TrieDbState) computeTrieRoots(ctx context.Context, forward bool) ([]c
 		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
+				dataLength := account.EncodingLengthForHashing()
+				data := make([]byte, dataLength)
+				account.EncodeForHashing(data)
+
 				acc:=*account
 				tds.t.UpdateAccount(addrHash[:], acc, tds.blockNr)
+				tds.t.Update(addrHash[:], data, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
@@ -702,7 +701,7 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	if err := tds.AccountTrie().Rebuild(tds.ctx, tds.db, tds.blockNr); err != nil {
+	if err := tds.AccountTrie().Rebuild(tds.db, tds.blockNr); err != nil {
 		return err
 	}
 	var m runtime.MemStats
@@ -711,37 +710,28 @@ func (tds *TrieDbState) Rebuild() error {
 	return nil
 }
 
-func (tds *TrieDbState) SetBlockNr(ctx context.Context, blockNr uint64) {
+func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.blockNr = blockNr
 	tds.tp.SetBlockNr(blockNr)
-	tds.ctx = ctx
 }
 
-func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
+func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	fmt.Printf("Rewinding from block %d to block %d\n", tds.blockNr, blockNr)
-	var accountPutKeys [][]byte
-	var accountPutVals [][]byte
-	var accountDelKeys [][]byte
-	var storagePutKeys [][]byte
-	var storagePutVals [][]byte
-	var storageDelKeys [][]byte
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
+		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
-				acc, err := accounts.Decode(value)
-				if err != nil {
+				var acc accounts.Account
+				if err := acc.Decode(value); err != nil {
 					return err
 				}
-				b.accountUpdates[addrHash] = acc
-				accountPutKeys = append(accountPutKeys, key)
-				accountPutVals = append(accountPutVals, value)
+				b.accountUpdates[addrHash] = &acc
 			} else {
 				b.accountUpdates[addrHash] = nil
-				accountDelKeys = append(accountDelKeys, key)
 			}
 		} else if bytes.Equal(bucket, StorageHistoryBucket) {
 			var address common.Address
@@ -765,11 +755,7 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 					vv[0] = value[0]
 				}
 				m[keyHash] = vv
-				storagePutKeys = append(storagePutKeys, key)
-				storagePutVals = append(storagePutVals, vv)
 			} else {
-				//fmt.Printf("Deleted storage item\n")
-				storageDelKeys = append(storageDelKeys, key)
 				m[keyHash] = nil
 			}
 		}
@@ -777,7 +763,7 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(ctx, false); err != nil {
+	if _, err := tds.computeTrieRoots(false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {
@@ -787,10 +773,9 @@ func (tds *TrieDbState) UnwindTo(ctx context.Context, blockNr uint64) error {
 			}
 		} else {
 			//todo is aggregateBuffer collect data from one block?
-			value, err := account.Encode(ctx)
-			if err != nil {
-				return err
-			}
+			valueLen := account.EncodingLengthForStorage()
+			value := make([]byte, valueLen)
+			account.EncodeForStorage(value)
 			if err := tds.db.Put(AccountsBucket, addrHash[:], value); err != nil {
 				return err
 			}
@@ -851,8 +836,14 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			enc = nil
 		}
 	}
-
-	return accounts.Decode(enc)
+	if len(enc) == 0 {
+		return nil, nil
+	}
+	var a accounts.Account
+	if err := a.Decode(enc); err != nil {
+		return nil, err
+	}
+	return &a, nil
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -917,7 +908,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 	}
 
 	cKey:=GenerateCompositeStorageKey(addrHash, version, seckey)
-	enc, ok := tds.storageTrie.Get(cKey, tds.blockNr)
+	enc, ok := tds.storageTrie.Get(cKey)
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -1054,25 +1045,25 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	if a1.Nonce != a2.Nonce {
 		return false
 	}
-	if a1.Balance == nil {
-		if a2.Balance != nil {
+	if !a1.Initialised {
+		if a2.Initialised {
 			return false
 		}
-	} else if a2.Balance == nil {
+	} else if !a2.Initialised {
 		return false
-	} else if a1.Balance.Cmp(a2.Balance) != 0 {
+	} else if a1.Balance.Cmp(&a2.Balance) != 0 {
 		return false
 	}
 	if a1.Root != a2.Root {
 		return false
 	}
-	if a1.CodeHash == nil {
-		if a2.CodeHash != nil {
+	if a1.CodeHash == (common.Hash{}) {
+		if a2.CodeHash != (common.Hash{}) {
 			return false
 		}
-	} else if a2.CodeHash == nil {
+	} else if a2.CodeHash == (common.Hash{}) {
 		return false
-	} else if !bytes.Equal(a1.CodeHash, a2.CodeHash) {
+	} else if a1.CodeHash != a2.CodeHash {
 		return false
 	}
 	return true
@@ -1088,11 +1079,9 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	data, err := account.Encode(ctx)
-	if err != nil {
-		return err
-	}
-
+	dataLen := account.EncodingLengthForStorage()
+	data := make([]byte, dataLen)
+	account.EncodeForStorage(data)
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
@@ -1108,13 +1097,12 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		return nil
 	}
 	var originalData []byte
-	if original.Balance == nil {
+	if !original.Initialised {
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(ctx)
-		if err != nil {
-			return err
-		}
+		originalDataLen := original.EncodingLengthForStorage()
+		originalData = make([]byte, originalDataLen)
+		original.EncodeForStorage(originalData)
 	}
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
@@ -1141,14 +1129,13 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		return nil
 	}
 	var originalData []byte
-	if original.Balance == nil {
+	if !original.Initialised {
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		originalData, err = original.Encode(ctx)
-		if err != nil {
-			return err
-		}
+		originalDataLen := original.EncodingLengthForStorage()
+		originalData = make([]byte, originalDataLen)
+		original.EncodeForStorage(originalData)
 	}
 	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }

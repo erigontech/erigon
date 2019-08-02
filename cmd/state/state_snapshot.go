@@ -8,8 +8,6 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 
-	"context"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 
@@ -226,7 +224,8 @@ func load_snapshot(db *bolt.DB, filename string) {
 	diskDb.Close()
 }
 
-func load_codes(db *bolt.DB, codeDb ethdb.Database) {
+func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
+	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket(state.AccountsBucket)
 		cb, err := tx.CreateBucket(state.CodeBucket, true)
@@ -235,20 +234,21 @@ func load_codes(db *bolt.DB, codeDb ethdb.Database) {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			account, err := accounts.Decode(v)
-			if err != nil {
+			if err := account.Decode(v); err != nil {
 				return err
 			}
-			if !bytes.Equal(account.CodeHash, emptyCodeHash) {
-				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash)
+			if !account.IsEmptyCodeHash() {
+				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash[:])
 				if code != nil {
-					cb.Put(account.CodeHash, code)
+					if err := cb.Put(account.CodeHash[:], code); err != nil {
+						return err
+					}
 				}
 			}
 		}
 		return nil
 	})
-	check(err)
+	return err
 }
 
 func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
@@ -326,7 +326,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
-	r := trie.NewResolver(context.TODO(), 0, true, blockNum)
+	r := trie.NewResolver(0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
@@ -364,7 +364,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	for address, root := range roots {
 		if root != (common.Hash{}) && root != trie.EmptyRoot {
 			st := trie.New(root)
-			sr := trie.NewResolver(context.TODO(), 32, false, blockNum)
+			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
 			streq := st.NewResolveRequest(address[:], key, 0, root[:])
 			sr.AddRequest(streq)
@@ -383,7 +383,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
-func stateSnapshot() {
+func stateSnapshot() error {
 	startTime := time.Now()
 	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
@@ -395,7 +395,9 @@ func stateSnapshot() {
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
 		load_snapshot(db, "statedb0")
-		load_codes(db, ethDb)
+		if err := loadCodes(db, ethDb); err != nil {
+			return err
+		}
 	} else {
 		constructSnapshot(ethDb, blockNum)
 	}
@@ -407,6 +409,7 @@ func stateSnapshot() {
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
 	check_roots(ethDb, ethDb.DB(), block.Root(), blockNum)
+	return nil
 }
 
 func verify_snapshot() {
