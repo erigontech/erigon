@@ -412,13 +412,9 @@ func (hb *HashBuilder) finaliseHasher() (common.Hash, error) {
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
 		return common.Hash{}, err
-	} else {
-		//fmt.Printf("%x", lenPrefix[:pt])
 	}
 	if _, err := hb.sha.Write(prevBuffer.Bytes()); err != nil {
 		return common.Hash{}, err
-	} else {
-		//fmt.Printf("%x", prevBuffer.Bytes())
 	}
 	//fmt.Printf("\n")
 	var hn common.Hash

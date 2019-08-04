@@ -403,8 +403,6 @@ func (hb *HashBuilder2) branchHash(set uint32) {
 	pt := generateStructLen(lenPrefix[:], totalSize)
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
 		panic(err)
-	} else {
-		//fmt.Printf("%x", lenPrefix[:pt])
 	}
 	// Output children hashes or embedded RLPs
 	i = 0
@@ -415,28 +413,21 @@ func (hb *HashBuilder2) branchHash(set uint32) {
 			if hashes[33*i] == byte(128+32) {
 				if _, err := hb.sha.Write(hashes[33*i : 33*i+33]); err != nil {
 					panic(err)
-				} else {
-					//fmt.Printf("%x", hashes[33*i:33*i+33])
 				}
 			} else {
 				// Embedded node
 				size := int(hashes[33*i]) - 192
 				if _, err := hb.sha.Write(hashes[33*i : 33*i+size+1]); err != nil {
 					panic(err)
-				} else {
-					//fmt.Printf("%x", hashes[33*i:33*i+size+1])
 				}
 			}
 			i++
 		} else {
 			if _, err := hb.sha.Write(b[:]); err != nil {
 				panic(err)
-			} else {
-				//fmt.Printf("%x", b)
 			}
 		}
 	}
-	//fmt.Printf("\n")
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-33*digits+33]
 	hb.hashStack[len(hb.hashStack)-33] = 128 + 32
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-32:]); err != nil {
