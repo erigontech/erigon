@@ -363,7 +363,7 @@ func (hb *HashBuilder2) branch(set uint32) {
 	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
 	var i int
-	for digit := uint(0); digit < 16; i++ {
+	for digit := uint(0); digit < 16; digit++ {
 		if ((uint32(1) << digit) & set) != 0 {
 			if nodes[i] == nil {
 				f.Children[digit] = hashNode(common.CopyBytes(hashes[33*i+1 : 33*i+33]))
