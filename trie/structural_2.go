@@ -357,7 +357,7 @@ func (hb *HashBuilder2) extensionHash(key []byte) {
 }
 
 func (hb *HashBuilder2) branch(set uint32) {
-	fmt.Printf("BRANCH %b\n", set)
+	//fmt.Printf("BRANCH %b\n", set)
 	f := &fullNode{}
 	digits := bits.OnesCount32(set)
 	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
@@ -447,4 +447,8 @@ func (hb *HashBuilder2) rootHash() common.Hash {
 	var hash common.Hash
 	copy(hash[:], hb.hashStack[1:33])
 	return hash
+}
+
+func (hb *HashBuilder2) root() node {
+	return hb.nodeStack[0]
 }

@@ -224,3 +224,73 @@ func TestV2HashBuilding(t *testing.T) {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
 }
+
+func TestV2Resolution(t *testing.T) {
+	var keys []string
+	for b := uint32(0); b < 100000; b++ {
+		var preimage [4]byte
+		binary.BigEndian.PutUint32(preimage[:], b)
+		key := crypto.Keccak256(preimage[:])[:8]
+		keys = append(keys, string(key))
+	}
+	sort.Strings(keys)
+	tr := New(common.Hash{})
+	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
+	for _, key := range keys {
+		tr.Update([]byte(key), valueNode(value), 0)
+	}
+	trieHash := tr.Hash()
+
+	// Choose some keys to be resolved
+	var rs ResolveSet
+	// First, existing keys
+	for i := 0; i < 1000; i += 200 {
+		rs.AddKey([]byte(keys[i]))
+	}
+	// Next, some non-exsiting keys
+	for i := 0; i < 1000; i++ {
+		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
+	}
+
+	hb := NewHashBuilder2()
+	var prec, curr, succ bytes.Buffer
+	var groups []uint32
+	var prefix []byte
+	for _, key := range keys {
+		prec.Reset()
+		prec.Write(curr.Bytes())
+		curr.Reset()
+		curr.Write(succ.Bytes())
+		succ.Reset()
+		keyBytes := []byte(key)
+		for _, b := range keyBytes {
+			succ.WriteByte(b / 16)
+			succ.WriteByte(b % 16)
+		}
+		succ.WriteByte(16)
+		if curr.Len() > 0 {
+			prefix, groups = step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
+		}
+		hb.setKeyValue(0, []byte(key), value)
+	}
+	prec.Reset()
+	prec.Write(curr.Bytes())
+	curr.Reset()
+	curr.Write(succ.Bytes())
+	succ.Reset()
+	step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
+	tr1 := New(common.Hash{})
+	tr1.root = hb.root()
+	builtHash := hb.rootHash()
+	if trieHash != builtHash {
+		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
+	}
+	// Check the availibility of the resolved keys
+	for _, hex := range rs.hexes {
+		key := hexToKeybytes(hex)
+		_, found := tr1.Get(key)
+		if !found {
+			t.Errorf("Key %x was not resolved", hex)
+		}
+	}
+}
