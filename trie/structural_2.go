@@ -16,14 +16,23 @@
 
 package trie
 
-import "bytes"
+import (
+	"bytes"
+	"fmt"
+	"math/bits"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"golang.org/x/crypto/sha3"
+)
 
 // Experimental code for separating data and structural information (variant 2)
 type emitter2 interface {
 	leaf(length int)
+	leafHash(length int)
 	extension(key []byte)
-	endbranch(set uint32)
-	endhasher(set uint32)
+	extensionHash(key []byte)
+	branch(set uint32)
+	branchHash(set uint32)
 	hash()
 }
 
@@ -46,14 +55,17 @@ func step2(
 	} else {
 		maxLen = succLen
 	}
-	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d\n", prec, curr, succ, maxLen)
+	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d, prefix: %x\n", prec, curr, succ, maxLen, prefix)
 	// Add the digit immediately following the max common prefix and compute length of remainder length
 	extraDigit := curr[maxLen]
 	for maxLen >= len(groups) {
 		groups = append(groups, 0)
-		prefix = append(prefix, curr[len(prefix)])
 	}
 	groups[maxLen] |= (uint32(1) << extraDigit)
+	for maxLen > len(prefix) {
+		prefix = append(prefix, curr[len(prefix)])
+	}
+	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
 	remainderStart := maxLen
 	if len(succ) > 0 || prec != nil {
 		remainderStart++
@@ -62,21 +74,29 @@ func step2(
 	// Emit LEAF or EXTENSION based on the remainder
 	if recursive {
 		if remainderLen > 0 {
-			e.extension(curr[remainderStart : remainderStart+remainderLen])
+			if hashOnly(curr[:maxLen]) {
+				e.extensionHash(curr[remainderStart : remainderStart+remainderLen])
+			} else {
+				e.extension(curr[remainderStart : remainderStart+remainderLen])
+			}
 		}
 	} else {
-		e.leaf(remainderLen)
+		if hashOnly(curr[:maxLen]) {
+			e.leafHash(remainderLen)
+		} else {
+			e.leaf(remainderLen)
+		}
 	}
 	// Check for the optional part
-	if precLen <= succLen {
-		return nil, groups
+	if precLen <= succLen && len(succ) > 0 {
+		return prefix, groups
 	}
 	// Close the immediately encompassing prefix group, if needed
 	if len(succ) > 0 || prec != nil {
 		if hashOnly(curr[:maxLen]) {
-			e.endhasher(groups[maxLen])
+			e.branchHash(groups[maxLen])
 		} else {
-			e.endbranch(groups[maxLen])
+			e.branch(groups[maxLen])
 		}
 	}
 	groups = groups[:maxLen]
@@ -89,32 +109,42 @@ func step2(
 	var newPrec []byte
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
 		groups = groups[:len(groups)-1]
-		prefix = prefix[:len(prefix)-1]
-		newPrec = prefix
 	}
+	if len(groups) <= 1 {
+		prefix = prefix[:0]
+	} else {
+		prefix = prefix[:len(groups)-1]
+	}
+	newPrec = prefix
+
 	// Recursion
 	newPrefix, newGroups = step2(hashOnly, true, newPrec, newCurr, succ, e, prefix, groups)
-	return
+	return newPrefix, newGroups
 }
 
-// HashBuilder impements the interface `emitter` and opcodes that the structural information of the trie
+// HashBuilder2 impements the interface `emitter` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder2 struct {
-	hexKey      bytes.Buffer // Next key-value pair to consume
-	bufferStack []*bytes.Buffer
-	branchStack []*fullNode
-	topValue    []byte
+	hexKey    bytes.Buffer // Next key-value pair to consume
+	hashStack []byte       // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
+	nodeStack []node       // Stack of nodes
+	topValue  []byte
+	sha       keccakState
 }
 
+// NewHashBuilder2 creates a new HashBuilder2
 func NewHashBuilder2() *HashBuilder2 {
-	return &HashBuilder2{}
+	return &HashBuilder2{
+		sha: sha3.NewLegacyKeccak256().(keccakState),
+	}
 }
 
+// Reset makes the HashBuilder2 suitable for reuse
 func (hb *HashBuilder2) Reset() {
 	hb.hexKey.Reset()
-	hb.bufferStack = hb.bufferStack[:0]
-	hb.branchStack = hb.branchStack[:0]
+	hb.hashStack = hb.hashStack[:0]
+	hb.nodeStack = hb.nodeStack[:0]
 	hb.topValue = nil
 }
 
@@ -135,4 +165,295 @@ func (hb *HashBuilder2) setKeyValue(skip int, key, value []byte) {
 	}
 	hb.hexKey.WriteByte(16)
 	hb.topValue = value
+}
+
+func (hb *HashBuilder2) leaf(length int) {
+	//fmt.Printf("LEAF %d\n", length)
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	s := &shortNode{Key: hexToCompact(key), Val: valueNode(common.CopyBytes(hb.topValue))}
+	hb.nodeStack = append(hb.nodeStack, s)
+	hb.leafHash(length)
+}
+
+func (hb *HashBuilder2) leafHash(length int) {
+	//fmt.Printf("LEAFHASH %d\n", length)
+	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	// Compute the total length of binary representation
+	var keyPrefix [1]byte
+	var valPrefix [4]byte
+	var lenPrefix [4]byte
+	var kp, vp, kl, vl int
+	// Write key
+	var compactLen int
+	var ni int
+	var compact0 byte
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	if hasTerm(key) {
+		compactLen = (len(key)-1)/2 + 1
+		if len(key)&1 == 0 {
+			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		} else {
+			compact0 = 32
+		}
+	} else {
+		compactLen = len(key)/2 + 1
+		if len(key)&1 == 1 {
+			compact0 = 16 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		}
+	}
+	if compactLen > 1 {
+		keyPrefix[0] = byte(128 + compactLen)
+		kp = 1
+		kl = compactLen
+	} else {
+		kl = 1
+	}
+	val := hb.topValue
+	if len(val) > 1 || val[0] >= 128 {
+		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
+		vl = len(val)
+	} else {
+		vl = 1
+	}
+	totalLen := kp + kl + vp + vl
+	pt := generateStructLen(lenPrefix[:], totalLen)
+	if pt+totalLen < 32 {
+		// Embedded node
+		pos := 0
+		copy(hash[pos:], lenPrefix[:pt])
+		pos += pt
+		copy(hash[pos:], keyPrefix[:kp])
+		pos += kp
+		hash[pos] = compact0
+		pos++
+		for i := 1; i < compactLen; i++ {
+			hash[pos] = key[ni]*16 + key[ni+1]
+			pos++
+			ni += 2
+		}
+		copy(hash[pos:], valPrefix[:vp])
+		pos += vp
+		copy(hash[pos:], val)
+	} else {
+		hb.sha.Reset()
+		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+			panic(err)
+		}
+		var b [1]byte
+		b[0] = compact0
+		if _, err := hb.sha.Write(b[:]); err != nil {
+			panic(err)
+		}
+		for i := 1; i < compactLen; i++ {
+			b[0] = key[ni]*16 + key[ni+1]
+			if _, err := hb.sha.Write(b[:]); err != nil {
+				panic(err)
+			}
+			ni += 2
+		}
+		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(val); err != nil {
+			panic(err)
+		}
+		hash[0] = byte(128 + 32)
+		if _, err := hb.sha.Read(hash[1:]); err != nil {
+			panic(err)
+		}
+	}
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	if len(hb.hashStack) > 33*len(hb.nodeStack) {
+		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+}
+
+func (hb *HashBuilder2) extension(key []byte) {
+	//fmt.Printf("EXTENSION %x\n", key)
+	nd := hb.nodeStack[len(hb.nodeStack)-1]
+	switch n := nd.(type) {
+	case nil:
+		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-32:])
+		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: hexToCompact(key), Val: hashNode(branchHash)}
+	case *fullNode:
+		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: hexToCompact(key), Val: n}
+	default:
+		panic(fmt.Errorf("wrong Val type for an extension: %T", nd))
+	}
+	hb.extensionHash(key)
+}
+
+func (hb *HashBuilder2) extensionHash(key []byte) {
+	//fmt.Printf("EXTENSIONHASH %x\n", key)
+	branchHash := hb.hashStack[len(hb.hashStack)-33:]
+	// Compute the total length of binary representation
+	var keyPrefix [1]byte
+	var lenPrefix [4]byte
+	var kp, kl int
+	// Write key
+	var compactLen int
+	var ni int
+	var compact0 byte
+	if hasTerm(key) {
+		compactLen = (len(key)-1)/2 + 1
+		if len(key)&1 == 0 {
+			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		} else {
+			compact0 = 32
+		}
+	} else {
+		compactLen = len(key)/2 + 1
+		if len(key)&1 == 1 {
+			compact0 = 16 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		}
+	}
+	if compactLen > 1 {
+		keyPrefix[0] = byte(128 + compactLen)
+		kp = 1
+		kl = compactLen
+	} else {
+		kl = 1
+	}
+	totalLen := kp + kl + 33
+	pt := generateStructLen(lenPrefix[:], totalLen)
+	hb.sha.Reset()
+	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+		panic(err)
+	}
+	if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+		panic(err)
+	}
+	var b [1]byte
+	b[0] = compact0
+	if _, err := hb.sha.Write(b[:]); err != nil {
+		panic(err)
+	}
+	for i := 1; i < compactLen; i++ {
+		b[0] = key[ni]*16 + key[ni+1]
+		if _, err := hb.sha.Write(b[:]); err != nil {
+			panic(err)
+		}
+		ni += 2
+	}
+	if _, err := hb.sha.Write(branchHash); err != nil {
+		panic(err)
+	}
+	// Replace previous hash with the new one
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-32:]); err != nil {
+		panic(err)
+	}
+	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
+		panic("extensionHash cannot be emitted when a node is on top of the stack")
+	}
+}
+
+func (hb *HashBuilder2) branch(set uint32) {
+	fmt.Printf("BRANCH %b\n", set)
+	f := &fullNode{}
+	digits := bits.OnesCount32(set)
+	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
+	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
+	var i int
+	for digit := uint(0); digit < 16; i++ {
+		if ((uint32(1) << digit) & set) != 0 {
+			if nodes[i] == nil {
+				f.Children[digit] = hashNode(common.CopyBytes(hashes[33*i+1 : 33*i+33]))
+			} else {
+				f.Children[digit] = nodes[i]
+			}
+			i++
+		}
+	}
+	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
+	hb.nodeStack[len(hb.nodeStack)-1] = f
+	hb.branchHash(set)
+	copy(f.flags.hash[:], hb.hashStack[len(hb.hashStack)-32:])
+
+}
+
+func (hb *HashBuilder2) branchHash(set uint32) {
+	//fmt.Printf("BRANCHHASH %b\n", set)
+	digits := bits.OnesCount32(set)
+	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
+	// Calculate the size of the resulting RLP
+	totalSize := 17 // These are 17 length prefixes
+	var i int
+	for digit := uint(0); digit < 16; digit++ {
+		if ((uint32(1) << digit) & set) != 0 {
+			if hashes[33*i] == byte(128+32) {
+				totalSize += 32
+			} else {
+				// Embedded node
+				totalSize += int(hashes[33*i]) - 192
+			}
+			i++
+		}
+	}
+	hb.sha.Reset()
+	var lenPrefix [4]byte
+	pt := generateStructLen(lenPrefix[:], totalSize)
+	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+		panic(err)
+	} else {
+		//fmt.Printf("%x", lenPrefix[:pt])
+	}
+	// Output children hashes or embedded RLPs
+	i = 0
+	var b [1]byte
+	b[0] = 128
+	for digit := uint(0); digit < 17; digit++ {
+		if ((uint32(1) << digit) & set) != 0 {
+			if hashes[33*i] == byte(128+32) {
+				if _, err := hb.sha.Write(hashes[33*i : 33*i+33]); err != nil {
+					panic(err)
+				} else {
+					//fmt.Printf("%x", hashes[33*i:33*i+33])
+				}
+			} else {
+				// Embedded node
+				size := int(hashes[33*i]) - 192
+				if _, err := hb.sha.Write(hashes[33*i : 33*i+size+1]); err != nil {
+					panic(err)
+				} else {
+					//fmt.Printf("%x", hashes[33*i:33*i+size+1])
+				}
+			}
+			i++
+		} else {
+			if _, err := hb.sha.Write(b[:]); err != nil {
+				panic(err)
+			} else {
+				//fmt.Printf("%x", b)
+			}
+		}
+	}
+	//fmt.Printf("\n")
+	hb.hashStack = hb.hashStack[:len(hb.hashStack)-33*digits+33]
+	hb.hashStack[len(hb.hashStack)-33] = 128 + 32
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-32:]); err != nil {
+		panic(err)
+	}
+	if 33*len(hb.nodeStack) > len(hb.hashStack) {
+		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
+		hb.nodeStack[len(hb.nodeStack)-1] = nil
+	}
+}
+
+func (hb *HashBuilder2) hash() {
+	panic("not implemented")
+}
+
+func (hb *HashBuilder2) rootHash() common.Hash {
+	var hash common.Hash
+	copy(hash[:], hb.hashStack[1:33])
+	return hash
 }

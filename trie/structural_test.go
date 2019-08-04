@@ -22,9 +22,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/valyala/bytebufferpool"
 	"sort"
 	"testing"
+
+	"github.com/valyala/bytebufferpool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -187,9 +188,10 @@ func TestV2HashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder()
+	hb := NewHashBuilder2()
 	var prec, curr, succ bytes.Buffer
-	var groups uint64
+	var groups []uint32
+	var prefix []byte
 	for i, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -203,7 +205,7 @@ func TestV2HashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			prefix, groups = step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
 		}
 		if i%2 == 0 {
 			hb.setKeyValue(0, []byte(key), valueLong)
@@ -216,7 +218,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step(func(prefix []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)

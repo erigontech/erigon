@@ -365,8 +365,8 @@ use case.
 2. `LEAFHASH length-of-key`
 3. `EXTENSION key`
 4. `EXTENSIONHASH key`
-5. `ENDBRANCH set-of-digits`
-6. `ENDHASHER set-of-digits`
+5. `BRANCH set-of-digits`
+6. `BRANCHHASH set-of-digits`
 7. `HASH number-of-hashes`
 
 The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
