@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"hash"
 	"io"
 	"math/big"
@@ -601,7 +602,10 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 						return nil, err
 					}
 
-					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					if ok {
+						account.Root = root
+					}
 					//if ok==false {
 					//	fmt.Println("---------------------------------------")
 					//	fmt.Println("core/state/database.go:596 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
@@ -614,7 +618,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 						return nil, err
 					}
 
-					ok,account.Root = tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					if ok {
+						account.Root = root
+					}
+
 					//if ok==false {
 					//	fmt.Println("---------------------------------------")
 					//	fmt.Println("core/state/database.go:604 tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation())) !=ok", ok,account.Root)
@@ -682,12 +690,21 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				account.EncodeForHashing(data)
 
 				acc:=*account
+				fmt.Println("core/state/database.go:685 tds.t.UpdateAccount", addrHash.String(), "block", tds.blockNr)
+				spew.Dump(acc)
 				tds.t.UpdateAccount(addrHash[:], acc, tds.blockNr)
 			} else {
+				fmt.Println("core/state/database.go:685 tds.t.delete", addrHash.String(), "block", tds.blockNr)
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
 		}
+
 		roots[i] = tds.t.Hash()
+		fmt.Println("core/state/database.go:694 computed root", roots[i].String())
+	}
+	fmt.Println("core/state/database.go:696 roots:")
+	for i:=range roots {
+		fmt.Println("root ", i, " - ", roots[i].String())
 	}
 
 	return roots, nil
