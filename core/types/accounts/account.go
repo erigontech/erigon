@@ -132,6 +132,9 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	if !forStorage || !nonContract {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
 	}
+	if forStorage {
+		structLength +=uint(incarnationBytes + 1)
+	}
 
 	var storageSizeBytes int
 	if a.HasStorageSize {
