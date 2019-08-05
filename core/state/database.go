@@ -1096,9 +1096,13 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 }
 
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+	fmt.Println("core/state/database.go:1099 UpdateAccountData", address.String(), account.GetIncarnation(), original.GetIncarnation())
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
+	a:=accounts.Account{}
+	a.Decode(data)
+	fmt.Println("core/state/database.go:1105", a.GetIncarnation())
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err

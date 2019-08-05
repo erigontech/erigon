@@ -665,6 +665,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
 		newObj.data.SetIncarnation(prev.data.GetIncarnation()+1)
+		fmt.Println("core/state/intra_block_state.go:668 Set incarnation",addr.String(), "incarnation - ", newObj.data.GetIncarnation())
 	}
 }
 
