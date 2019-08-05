@@ -23,12 +23,10 @@ type Account struct {
 	Balance        big.Int
 	Root           common.Hash // merkle root of the storage trie
 	CodeHash       common.Hash // hash of the bytecode
-	Incarnation		uint64
+	Incarnation    uint64
 	HasStorageSize bool
 	StorageSize    uint64
 }
-
-
 
 var emptyCodeHash = crypto.Keccak256(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
@@ -118,6 +116,11 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		nonceBytes = (bits.Len64(a.Nonce) + 7) / 8
 	}
 
+	var structLength = uint(balanceBytes + nonceBytes + 2)
+	if !forStorage || !nonContract {
+		structLength += 66 // Two 32-byte arrays + 2 prefixes
+	}
+
 	var incarnationBytes int
 	if forStorage {
 		fmt.Println("encode incarnation")
@@ -126,14 +129,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		} else {
 			incarnationBytes = (bits.Len64(a.Incarnation) + 7) / 8
 		}
-	}
-
-	var structLength = uint(balanceBytes + nonceBytes + 2)
-	if !forStorage || !nonContract {
-		structLength += 66 // Two 32-byte arrays + 2 prefixes
-	}
-	if forStorage {
-		structLength +=uint(incarnationBytes + 1)
+		structLength += uint(incarnationBytes + 1)
 	}
 
 	var storageSizeBytes int
@@ -198,18 +194,6 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += balanceBytes
 	}
 
-	// Encoding Root and CodeHash
-	if !forStorage || !nonContract {
-		buffer[pos] = 128 + 32
-		pos++
-		copy(buffer[pos:], a.Root[:])
-		pos += 32
-		buffer[pos] = 128 + 32
-		pos++
-		copy(buffer[pos:], a.CodeHash[:])
-		pos += 32
-	}
-
 	if forStorage {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			buffer[pos] = byte(a.Incarnation)
@@ -224,6 +208,17 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += 1 + incarnationBytes
 	}
 
+	// Encoding Root and CodeHash
+	if !forStorage || !nonContract {
+		buffer[pos] = 128 + 32
+		pos++
+		copy(buffer[pos:], a.Root[:])
+		pos += 32
+		buffer[pos] = 128 + 32
+		pos++
+		copy(buffer[pos:], a.CodeHash[:])
+		pos += 32
+	}
 
 	// Encoding StorageSize
 	if a.HasStorageSize {
@@ -380,9 +375,45 @@ func (a *Account) Decode(enc []byte) error {
 			pos = newPos + balanceBytes
 		}
 	}
+	fmt.Println(a.Balance.String())
+	fmt.Println(a.Nonce)
+
+	if pos < len(enc) {
+		incarnationBytes, s, newPos := decodeLength(enc, pos)
+		if s {
+			return fmt.Errorf(
+				"encoding of Account.StorageSize should be byte array, got RLP struct: %x",
+				enc[pos:newPos+incarnationBytes],
+			)
+		}
+
+		if newPos+incarnationBytes > len(enc) {
+			return fmt.Errorf(
+				"malformed RLP for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+				enc[pos:newPos+incarnationBytes],
+				newPos-pos, incarnationBytes, len(enc)-pos,
+			)
+		}
+
+		var incarnation uint64
+		if incarnationBytes == 0 && newPos == pos {
+			incarnation = uint64(enc[newPos])
+			// Commented out because of the ineffectual assignment - uncomment if adding more fields
+			pos = newPos + 1
+		} else {
+			for _, b := range enc[newPos : newPos+incarnationBytes] {
+				incarnation = (incarnation << 8) + uint64(b)
+			}
+			// Commented out because of the ineffectual assignment - uncomment if adding more fields
+			pos = newPos + incarnationBytes
+		}
+
+		a.Incarnation = incarnation
+	}
 
 	if pos < len(enc) {
 		rootBytes, s, newPos := decodeLength(enc, pos)
+		fmt.Println("rootBytes", rootBytes, s, newPos)
 		if s {
 			return fmt.Errorf(
 				"encoding of Account.Root should be byte array, got RLP struct: %x",
@@ -434,40 +465,6 @@ func (a *Account) Decode(enc []byte) error {
 		copy(a.CodeHash[:], enc[newPos:newPos+codeHashBytes])
 		pos = newPos + codeHashBytes
 	}
-
-	if pos < len(enc) {
-		incarnationBytes, s, newPos := decodeLength(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.StorageSize should be byte array, got RLP struct: %x",
-				enc[pos:newPos+incarnationBytes],
-			)
-		}
-
-		if newPos+incarnationBytes > len(enc) {
-			return fmt.Errorf(
-				"malformed RLP for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:newPos+incarnationBytes],
-				newPos-pos, incarnationBytes, len(enc)-pos,
-			)
-		}
-
-		var incarnation uint64
-		if incarnationBytes == 0 && newPos == pos {
-			incarnation = uint64(enc[newPos])
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			pos = newPos + 1
-		} else {
-			for _, b := range enc[newPos : newPos+incarnationBytes] {
-				incarnation = (incarnation << 8) + uint64(b)
-			}
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			pos = newPos + incarnationBytes
-		}
-
-		a.Incarnation=incarnation
-	}
-
 
 	if pos < len(enc) {
 		storageSizeBytes, s, newPos := decodeLength(enc, pos)
@@ -530,21 +527,20 @@ func (a *Account) IsEmptyRoot() bool {
 	return a.Root == emptyRoot || a.Root == common.Hash{}
 }
 
-func (a *Account) GetIncarnation() uint8  {
+func (a *Account) GetIncarnation() uint8 {
 	return uint8(a.Incarnation)
 }
 
-func (a *Account) SetIncarnation(v uint8)  {
+func (a *Account) SetIncarnation(v uint8) {
 	a.Incarnation = uint64(v)
 }
 
 func (a *Account) Equals(acc *Account) bool {
-	return a.Nonce==acc.Nonce &&
-			a.CodeHash == acc.CodeHash &&
-			a.Root == acc.Root &&
-			a.Balance.Cmp(&acc.Balance) == 0 &&
-			a.Incarnation == acc.Incarnation &&
-			a.StorageSize == acc.StorageSize
-
+	return a.Nonce == acc.Nonce &&
+		a.CodeHash == acc.CodeHash &&
+		a.Root == acc.Root &&
+		a.Balance.Cmp(&acc.Balance) == 0 &&
+		a.Incarnation == acc.Incarnation &&
+		a.StorageSize == acc.StorageSize
 
 }
