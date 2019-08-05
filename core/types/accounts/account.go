@@ -27,9 +27,17 @@ type Account struct {
 	StorageSize    uint64
 }
 
-var emptyCodeHash = crypto.Keccak256(nil)
+var emptyCodeHash = crypto.Keccak256Hash(nil)
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 var b128 = big.NewInt(128)
+
+// NewAccount creates a new account w/o code nor storage.
+func NewAccount() Account {
+	a := Account{}
+	a.Root = emptyRoot
+	a.CodeHash = emptyCodeHash
+	return a
+}
 
 func (a *Account) encodingLength(forStorage bool) uint {
 	var structLength uint
@@ -274,7 +282,7 @@ func (a *Account) Decode(enc []byte) error {
 	a.Nonce = 0
 	a.Balance.SetInt64(0)
 	a.Root = emptyRoot
-	copy(a.CodeHash[:], emptyCodeHash)
+	copy(a.CodeHash[:], emptyCodeHash.Bytes())
 	a.StorageSize = 0
 	a.HasStorageSize = false
 
@@ -446,7 +454,7 @@ func (a *Account) decodeRLPFromBytes(b []byte) error {
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
+	return bytes.Equal(a.CodeHash[:], emptyCodeHash.Bytes())
 }
 
 func (a *Account) IsEmptyRoot() bool {

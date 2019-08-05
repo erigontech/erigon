@@ -67,7 +67,7 @@ type accountRange struct {
 	Leaves []accountLeaf
 }
 
-type getStateRangesMsg struct {
+type getStateRangesOrNodes struct {
 	ID       uint64
 	Block    common.Hash
 	Prefixes []trie.Keybytes
@@ -103,6 +103,12 @@ type storageRange struct {
 type storageRangesMsg struct {
 	ID              uint64
 	Entries         [][]storageRange
+	AvailableBlocks []common.Hash
+}
+
+type stateNodesMsg struct {
+	ID              uint64
+	Nodes           [][]byte
 	AvailableBlocks []common.Hash
 }
 

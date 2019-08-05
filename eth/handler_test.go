@@ -525,48 +525,50 @@ outer:
 	}
 }
 
-func TestFirehoseStateRanges(t *testing.T) {
+var frhsAmnt = big.NewInt(10000)
+var addrHash = make([]common.Hash, 5)
+
+func setUpDummyAccountsForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer) {
 	addr1 := common.HexToAddress("0x3b4fc1530da632624fa1e223a91d99dbb07c2d42")
 	addr2 := common.HexToAddress("0xb574d96f69c1324e3b49e63f4cc899736dd52789")
 	addr3 := common.HexToAddress("0xb11e2c7c5b96dbf120ec8af539d028311366af00")
 	addr4 := common.HexToAddress("0x7d9eb619ce1033cc710d9f9806a2330f85875f22")
 
-	addr0Hash := crypto.Keccak256Hash(testBank.Bytes())
-	addr1Hash := crypto.Keccak256Hash(addr1.Bytes())
-	addr2Hash := crypto.Keccak256Hash(addr2.Bytes())
-	addr3Hash := crypto.Keccak256Hash(addr3.Bytes())
-	addr4Hash := crypto.Keccak256Hash(addr4.Bytes())
+	addrHash[0] = crypto.Keccak256Hash(testBank.Bytes())
+	addrHash[1] = crypto.Keccak256Hash(addr1.Bytes())
+	addrHash[2] = crypto.Keccak256Hash(addr2.Bytes())
+	addrHash[3] = crypto.Keccak256Hash(addr3.Bytes())
+	addrHash[4] = crypto.Keccak256Hash(addr4.Bytes())
 
-	assert.Equal(t, addr0Hash, common.HexToHash("0x00bf49f440a1cd0527e4d06e2765654c0f56452257516d793a9b8d604dcfdf2a"))
-	assert.Equal(t, addr1Hash, common.HexToHash("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
-	assert.Equal(t, addr2Hash, common.HexToHash("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
-	assert.Equal(t, addr3Hash, common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
-	assert.Equal(t, addr4Hash, common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
+	assert.Equal(t, addrHash[0], common.HexToHash("0x00bf49f440a1cd0527e4d06e2765654c0f56452257516d793a9b8d604dcfdf2a"))
+	assert.Equal(t, addrHash[1], common.HexToHash("0x1155f85cf8c36b3bf84a89b2d453da3cc5c647ff815a8a809216c47f5ab507a9"))
+	assert.Equal(t, addrHash[2], common.HexToHash("0xac8e03d3673a43257a69fcd3ff99a7a17b7d0e0a900c337d55dbd36567938776"))
+	assert.Equal(t, addrHash[3], common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
+	assert.Equal(t, addrHash[4], common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
 
 	signer := types.HomesteadSigner{}
 	numBlocks := 5
-	amount := big.NewInt(10000)
 	generator := func(i int, block *core.BlockGen) {
 		switch i {
 		case 0:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, amount, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr1, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 1:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, amount, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr2, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 2:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 3:
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, amount, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr4, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		case 4:
 			// top up account #3
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, amount, params.TxGas, nil, nil), signer, testBankKey)
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr3, frhsAmnt, params.TxGas, nil, nil), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -574,11 +576,17 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, numBlocks, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
+
+	return pm, peer
+}
+
+func TestFirehoseStateRanges(t *testing.T) {
+	pm, peer := setUpDummyAccountsForFirehose(t)
 	defer peer.close()
 
 	block4 := pm.blockchain.GetBlockByNumber(4)
 
-	var request getStateRangesMsg
+	var request getStateRangesOrNodes
 	request.ID = 1
 	request.Block = block4.Hash()
 
@@ -591,17 +599,13 @@ func TestFirehoseStateRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, request))
 
-	var account accounts.Account
-	account.Balance.Set(amount)
-
-	// TODO [yperbasis] remove this RLP hack
-	copy(account.CodeHash[:], crypto.Keccak256(nil))
-	account.Root = trie.EmptyRoot
+	account := accounts.NewAccount()
+	account.Balance.Set(frhsAmnt)
 
 	var reply1 stateRangesMsg
 	reply1.ID = 1
 	reply1.Entries = []accountRange{
-		{Status: OK, Leaves: []accountLeaf{{addr4Hash, &account}, {addr3Hash, &account}}},
+		{Status: OK, Leaves: []accountLeaf{{addrHash[4], &account}, {addrHash[3], &account}}},
 		{Status: OK, Leaves: []accountLeaf{}},
 	}
 
@@ -654,7 +658,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	// ----------------------------------------------------
 	// BLOCK #1
 
-	var request getStateRangesMsg
+	var request getStateRangesOrNodes
 	request.ID = 0
 	request.Block = pm.blockchain.GetBlockByNumber(1).Hash()
 
@@ -769,7 +773,7 @@ func TestFirehoseStorageRanges(t *testing.T) {
 	peer, _ := newFirehoseTestPeer("peer", pm)
 	defer peer.close()
 
-	var accountReq getStateRangesMsg
+	var accountReq getStateRangesOrNodes
 	accountReq.ID = 0
 	accountReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
 	accountKey := crypto.Keccak256(addr.Bytes())
@@ -814,6 +818,73 @@ func TestFirehoseStorageRanges(t *testing.T) {
 	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
 	if err != nil {
 		t.Errorf("unexpected StorageRanges response: %v", err)
+	}
+}
+
+func TestFirehoseStateNodes(t *testing.T) {
+	pm, peer := setUpDummyAccountsForFirehose(t)
+	defer peer.close()
+
+	var request getStateRangesOrNodes
+	request.ID = 0
+	// TODO [yperbasis] make it work with non-latest blocks
+	request.Block = pm.blockchain.GetBlockByNumber(5).Hash()
+
+	// All known account keys start with either 0, 1, 4, or a.
+	// Warning: we assume that the key of miner's account doesn't start with 2 or 4.
+	prefixA := trie.Keybytes{Data: common.FromHex("40"), Odd: true}
+	prefixB := trie.Keybytes{Data: common.FromHex("20"), Odd: true}
+	addr3prefix := trie.Keybytes{Data: addrHash[3].Bytes(), Odd: false}
+	request.Prefixes = []trie.Keybytes{prefixA, prefixB, addr3prefix}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
+
+	account3 := accounts.NewAccount()
+	account3.Balance.Add(frhsAmnt, frhsAmnt)
+	account3rlp, err := rlp.EncodeToBytes(&account3)
+	assert.NoError(t, err)
+
+	account4 := accounts.NewAccount()
+	account4.Balance.Set(frhsAmnt)
+	account4rlp, err := rlp.EncodeToBytes(&account4)
+	assert.NoError(t, err)
+
+	assert.Equal(t, addrHash[3], common.HexToHash("0x464b54760c96939ce60fb73b20987db21fce5a624d190f4e769c54a2ba8be49e"))
+	assert.Equal(t, addrHash[4], common.HexToHash("0x44091c88eed629ecac3ad260ab22318b52148b7a4cc2ac7d8bdf746877b54c15"))
+
+	// https://github.com/ethereum/wiki/wiki/Patricia-Tree
+
+	addr3Node := make([][]byte, 2)
+	prefix3rlp := make([]byte, common.HashLength)
+	copy(prefix3rlp, addrHash[3].Bytes())
+	prefix3rlp[0] = 0x20
+	addr3Node[0] = prefix3rlp
+	addr3Node[1] = account3rlp
+	node3rlp, err := rlp.EncodeToBytes(addr3Node)
+	assert.NoError(t, err)
+
+	addr4Node := make([][]byte, 2)
+	prefix4rlp := make([]byte, common.HashLength)
+	copy(prefix4rlp, addrHash[4].Bytes())
+	prefix4rlp[0] = 0x20
+	addr4Node[0] = prefix4rlp
+	addr4Node[1] = account4rlp
+	node4rlp, err := rlp.EncodeToBytes(addr4Node)
+	assert.NoError(t, err)
+
+	branchNode := make([][]byte, 17)
+	branchNode[6] = crypto.Keccak256(node3rlp)
+	branchNode[4] = crypto.Keccak256(node4rlp)
+	rlpA, err := rlp.EncodeToBytes(branchNode)
+	assert.NoError(t, err)
+
+	var reply stateNodesMsg
+	reply.ID = 0
+	reply.Nodes = [][]byte{rlpA, nil, node3rlp}
+
+	err = p2p.ExpectMsg(peer.app, StateNodesCode, reply)
+	if err != nil {
+		t.Errorf("unexpected StateNodes response: %v", err)
 	}
 }
 

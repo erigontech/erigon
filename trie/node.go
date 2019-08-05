@@ -47,8 +47,8 @@ type (
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		Key   []byte
-		Val   node
+		Key []byte
+		Val node
 	}
 	hashNode  []byte
 	valueNode []byte
