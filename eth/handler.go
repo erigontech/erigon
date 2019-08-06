@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -710,7 +711,8 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	switch msg.Code {
 	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStateRangesMsg
+		var request getStateRangesOrNodes
+		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -761,6 +763,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	case GetStorageRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStorageRangesMsg
+		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -836,7 +839,51 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStateNodesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+		var reqID uint64
+		if err := msgStream.Decode(&reqID); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		var blockHash common.Hash
+		if err := msgStream.Decode(&blockHash); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		var response stateNodesMsg
+		response.ID = reqID
+
+		block := pm.blockchain.GetBlockByHash(blockHash)
+		if block != nil {
+			// TODO [yperbasis] The concurrency, stupid!
+			tds := pm.blockchain.GetTrieDbState()
+			tr := tds.AccountTrie()
+
+			// Gather nodes until the fetch or network limit is reached
+			responseSize := 0
+			for responseSize < softResponseLimit && len(response.Nodes) < downloader.MaxStateFetch {
+				var prefix trie.Keybytes
+				if err := msgStream.Decode(&prefix); err == rlp.EOL {
+					break
+				} else if err != nil {
+					return errResp(ErrDecode, "msg %v: %v", msg, err)
+				}
+				node := tr.GetNode(prefix)
+				response.Nodes = append(response.Nodes, node)
+				responseSize += len(node)
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
+
+		return p2p.Send(p.rw, StateNodesCode, response)
 
 	case StateNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
@@ -861,7 +908,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			return err
 		}
 
-		// Gather bytecodes until the fetch or network limits is reached
+		// Gather bytecodes until the fetch or network limit is reached
 		var (
 			responseSize int
 			code         [][]byte

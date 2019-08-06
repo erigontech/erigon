@@ -116,7 +116,7 @@ type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*shortNode` cas
 
 Hashes of the elements within a prefix group are combined into so-called "branch nodes". They correspond to the
 types `duoNode` (for prefix groups with exactly two elements) and `fullNode` in the file [trie/node.go](../../trie/node.go).
-To produce the hash of the a branch node, one represents it as an array of 17 elements (17-th element is for the attached leaf,
+To produce the hash of a branch node, one represents it as an array of 17 elements (17-th element is for the attached leaf,
 if exists).
 The position in the array that do not have corresponding elements in the prefix group, are filled with empty strings. This is
 shown in the member function `hashChildren` of the type `hasher` [trie/hasher.go](../../trie/hasher.go), under the `*duoNode` and
