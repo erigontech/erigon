@@ -123,7 +123,6 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 
 	var incarnationBytes int
 	if forStorage {
-		fmt.Println("encode incarnation")
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationBytes = 0
 		} else {
@@ -266,7 +265,6 @@ func (a *Account) Copy(image *Account) {
 
 // Decodes length and determines whether it corresponds to a structure of a byte array
 func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos int) {
-	fmt.Println("first byte", int(buffer[pos]))
 	switch firstByte := int(buffer[pos]); {
 	case firstByte < 128:
 		return 0, false, pos
@@ -295,7 +293,6 @@ func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos in
 
 func (a *Account) Decode(enc []byte) error {
 	length, structure, pos := decodeLength(enc, 0)
-	fmt.Println("length", length, "structure", structure, "pos", pos, len(enc))
 	if pos+length != len(enc) {
 		return fmt.Errorf(
 			"malformed RLP for Account(%x): prefixLength(%d) + dataLength(%d) != sliceLength(%d)",
@@ -375,21 +372,19 @@ func (a *Account) Decode(enc []byte) error {
 			pos = newPos + balanceBytes
 		}
 	}
-	fmt.Println(a.Balance.String())
-	fmt.Println(a.Nonce)
 
 	if pos < len(enc) {
 		incarnationBytes, s, newPos := decodeLength(enc, pos)
 		if s {
 			return fmt.Errorf(
-				"encoding of Account.StorageSize should be byte array, got RLP struct: %x",
+				"encoding of Account.Incarnation should be byte array, got RLP struct: %x",
 				enc[pos:newPos+incarnationBytes],
 			)
 		}
 
 		if newPos+incarnationBytes > len(enc) {
 			return fmt.Errorf(
-				"malformed RLP for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+				"malformed RLP for Account.Incarnation(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos:newPos+incarnationBytes],
 				newPos-pos, incarnationBytes, len(enc)-pos,
 			)
@@ -413,7 +408,6 @@ func (a *Account) Decode(enc []byte) error {
 
 	if pos < len(enc) {
 		rootBytes, s, newPos := decodeLength(enc, pos)
-		fmt.Println("rootBytes", rootBytes, s, newPos)
 		if s {
 			return fmt.Errorf(
 				"encoding of Account.Root should be byte array, got RLP struct: %x",

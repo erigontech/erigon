@@ -603,6 +603,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 
 					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					fmt.Println("tds.storageTrie.DeepHash1", address.String(), addrHash.String())
+					fmt.Println("tds.storageTrie.DeepHash1", ok, root.String())
 					if ok {
 						account.Root = root
 					}
@@ -619,6 +621,9 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 
 					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					fmt.Println("tds.storageTrie.DeepHash", address.String(), addrHash.String())
+					fmt.Println("tds.storageTrie.DeepHash", ok, root.String())
+
 					if ok {
 						account.Root = root
 					}
