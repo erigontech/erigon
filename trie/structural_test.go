@@ -208,9 +208,9 @@ func TestV2HashBuilding(t *testing.T) {
 			prefix, groups = step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
 		}
 		if i%2 == 0 {
-			hb.setKeyValue(0, []byte(key), valueLong)
+			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueLong})
 		} else {
-			hb.setKeyValue(0, []byte(key), valueShort)
+			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueShort})
 		}
 	}
 	prec.Reset()
@@ -271,7 +271,7 @@ func TestV2Resolution(t *testing.T) {
 		if curr.Len() > 0 {
 			prefix, groups = step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, prefix, groups)
 		}
-		hb.setKeyValue(0, []byte(key), value)
+		hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: value})
 	}
 	prec.Reset()
 	prec.Write(curr.Bytes())

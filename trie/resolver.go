@@ -215,7 +215,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			buf := pool.GetBuffer(encodeLen)
 
 			tr.a.EncodeForHashing(buf.B)
-			tr.hb.setKeyValue(skip, k, buf.B)
+			tr.hb.setKeyValue(skip, k, buf)
 		} else {
 			var vv *bytebufferpool.ByteBuffer
 			if len(v) > 1 || v[0] >= 128 {
@@ -226,7 +226,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				vv = pool.GetBuffer(1)
 				vv.B[0] = v[0]
 			}
-			tr.hb.setKeyValue(skip, k, vv.B)
+			tr.hb.setKeyValue(skip, k, vv)
 		}
 	}
 	return true, nil

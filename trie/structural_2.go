@@ -22,6 +22,8 @@ import (
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -129,7 +131,7 @@ type HashBuilder2 struct {
 	hexKey    bytes.Buffer // Next key-value pair to consume
 	hashStack []byte       // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
 	nodeStack []node       // Stack of nodes
-	topValue  []byte
+	value     *bytebufferpool.ByteBuffer
 	sha       keccakState
 }
 
@@ -145,11 +147,12 @@ func (hb *HashBuilder2) Reset() {
 	hb.hexKey.Reset()
 	hb.hashStack = hb.hashStack[:0]
 	hb.nodeStack = hb.nodeStack[:0]
-	hb.topValue = nil
+	pool.PutBuffer(hb.value)
+	hb.value = nil
 }
 
 // key is original key (not transformed into hex or compacted)
-func (hb *HashBuilder2) setKeyValue(skip int, key, value []byte) {
+func (hb *HashBuilder2) setKeyValue(skip int, key []byte, value *bytebufferpool.ByteBuffer) {
 	// Transform key into hex representation
 	hb.hexKey.Reset()
 	i := 0
@@ -164,14 +167,15 @@ func (hb *HashBuilder2) setKeyValue(skip int, key, value []byte) {
 		i++
 	}
 	hb.hexKey.WriteByte(16)
-	hb.topValue = value
+	pool.PutBuffer(hb.value)
+	hb.value = value
 }
 
 func (hb *HashBuilder2) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
 	hex := hb.hexKey.Bytes()
 	key := hex[len(hex)-length:]
-	s := &shortNode{Key: hexToCompact(key), Val: valueNode(common.CopyBytes(hb.topValue))}
+	s := &shortNode{Key: hexToCompact(key), Val: valueNode(common.CopyBytes(hb.value.B))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	hb.leafHash(length)
 }
@@ -212,7 +216,7 @@ func (hb *HashBuilder2) leafHash(length int) {
 	} else {
 		kl = 1
 	}
-	val := hb.topValue
+	val := hb.value.B
 	if len(val) > 1 || val[0] >= 128 {
 		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
 		vl = len(val)
