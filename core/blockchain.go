@@ -224,22 +224,22 @@ func (bc *BlockChain) EnableReceipts(er bool) {
 	bc.enableReceipts = er
 }
 
-func (bc *BlockChain) GetTrieDbState() *state.TrieDbState {
+func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		bc.trieDbState.SetNoHistory(bc.noHistory)
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return bc.trieDbState
+	return bc.trieDbState, nil
 }
 
 func (bc *BlockChain) getProcInterrupt() bool {
@@ -1272,7 +1272,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		readBlockNr := parentNumber
 		var root common.Hash
 		if bc.trieDbState == nil {
-			bc.GetTrieDbState()
+			if _, err = bc.GetTrieDbState(); err != nil {
+				return k, events, coalescedLogs, err
+			}
 		}
 		root = bc.trieDbState.LastRoot()
 		var parentRoot common.Hash

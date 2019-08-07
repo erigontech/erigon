@@ -863,7 +863,10 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		block := pm.blockchain.GetBlockByHash(blockHash)
 		if block != nil {
 			// TODO [yperbasis] The concurrency, stupid!
-			tds := pm.blockchain.GetTrieDbState()
+			tds, err := pm.blockchain.GetTrieDbState()
+			if err != nil {
+				return err
+			}
 			tr := tds.AccountTrie()
 
 			// Gather nodes until the fetch or network limit is reached
