@@ -479,7 +479,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	}
 }
 
-func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+func (t *Trie) hook(hex []byte, n node) {
 	var nd = t.root
 	var parent node
 	pos := 0

@@ -3,12 +3,13 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
 
+	"github.com/valyala/bytebufferpool"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -127,9 +128,9 @@ func (tr *TrieResolver) Print() {
 	}
 }
 
-// Prepares information for the MultiWalk
+// PrepareResolveParams prepares information for the MultiWalk
 func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
-	// Remove requests strictly contained in the preceeding ones
+	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
 	tr.rss = nil
@@ -188,7 +189,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 			return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 		}
-		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
+		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 		tr.hb.Reset()
 		tr.groups = 0
 		tr.keyIdx = keyIdx
@@ -281,7 +282,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
 	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
+	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 	}
