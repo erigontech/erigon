@@ -181,13 +181,13 @@ func TestTrieResolver(t *testing.T) {
 	req2 := &ResolveRequest{
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  2, // 2 bytes is 4 nibbles
+		resolvePos:  2, // 1 bytes is 2 nibbles
 		resolveHash: hashNode(common.HexToHash("dc2332366fcf65ad75d09901e199e3dd52a5389ad85ff1d853803c5f40cbde56").Bytes()),
 	}
 	req3 := &ResolveRequest{
 		t:           tr,
 		resolveHex:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
-		resolvePos:  2, // 3 bytes is 6 nibbles
+		resolvePos:  2, // 1 bytes is 2 nibbles
 		resolveHash: hashNode(common.HexToHash("79d4d20420e467bc56adad82c454d68bc72ffbe7a26ad33028002bcbd1d41a05").Bytes()),
 	}
 	resolver := NewResolver(0, false, 0)
