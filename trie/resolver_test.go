@@ -221,3 +221,25 @@ func TestTwoStorageItems(t *testing.T) {
 		t.Errorf("Resolve error: %v", err)
 	}
 }
+
+func TestTwoAccounts(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	tr := New(common.Hash{})
+	if err := db.Put([]byte("AT"), common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), common.Hex2Bytes("c7808502540be400")); err != nil {
+		t.Error(err)
+	}
+	if err := db.Put([]byte("AT"), common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("f8448064a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc")); err != nil {
+		t.Error(err)
+	}
+	req := &ResolveRequest{
+		t:           tr,
+		resolveHex:  []byte{},
+		resolvePos:  0,
+		resolveHash: hashNode(common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7").Bytes()),
+	}
+	resolver := NewResolver(0, true, 0)
+	resolver.AddRequest(req)
+	if err := resolver.ResolveWithDb(db, 0); err != nil {
+		t.Errorf("Resolve error: %v", err)
+	}
+}

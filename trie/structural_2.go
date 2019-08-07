@@ -110,12 +110,12 @@ func step2(
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
 		groups = groups[:len(groups)-1]
 	}
-	if len(groups) <= 1 {
-		prefix = prefix[:0]
-	} else {
+	if len(groups) >= 1 {
 		prefix = prefix[:len(groups)-1]
+		newPrec = prefix
+	} else {
+		prefix = prefix[:0]
 	}
-	newPrec = prefix
 
 	// Recursion
 	newPrefix, newGroups = step2(hashOnly, true, newPrec, newCurr, succ, e, prefix, groups)

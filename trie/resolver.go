@@ -3,11 +3,12 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -31,23 +32,6 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	return nil
 }
 
-const Levels = 104
-
-type ResolveHexes [][]byte
-
-// ResolveHexes implements sort.Interface
-func (rh ResolveHexes) Len() int {
-	return len(rh)
-}
-
-func (rh ResolveHexes) Less(i, j int) bool {
-	return bytes.Compare(rh[i], rh[j]) < 0
-}
-
-func (rh ResolveHexes) Swap(i, j int) {
-	rh[i], rh[j] = rh[j], rh[i]
-}
-
 /* One resolver per trie (prefix) */
 type TrieResolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
@@ -59,12 +43,13 @@ type TrieResolver struct {
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	historical bool
 	blockNr    uint64
-	hb         *HashBuilder
+	hb         *HashBuilder2
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       bytes.Buffer
 	succ       bytes.Buffer
-	groups     uint64
+	groups     []uint32
+	prefix     []byte
 	a          accounts.Account
 }
 
@@ -75,7 +60,7 @@ func NewResolver(topLevels int, accounts bool, blockNr uint64) *TrieResolver {
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder(),
+		hb:         NewHashBuilder2(),
 	}
 	return &tr
 }
@@ -181,7 +166,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		if tr.curr.Len() > 0 {
-			tr.groups = step(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
 		}
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
@@ -190,7 +175,8 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
 		tr.hb.Reset()
-		tr.groups = 0
+		tr.groups = nil
+		tr.prefix = nil
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
@@ -217,7 +203,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = step(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
 		}
 		// Remember the current key and value
 		if tr.accounts {
@@ -229,7 +215,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			buf := pool.GetBuffer(encodeLen)
 
 			tr.a.EncodeForHashing(buf.B)
-			tr.hb.setKeyValue(skip, k, buf)
+			tr.hb.setKeyValue(skip, k, buf.B)
 		} else {
 			var vv *bytebufferpool.ByteBuffer
 			if len(v) > 1 || v[0] >= 128 {
@@ -240,7 +226,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				vv = pool.GetBuffer(1)
 				vv.B[0] = v[0]
 			}
-			tr.hb.setKeyValue(skip, k, vv)
+			tr.hb.setKeyValue(skip, k, vv.B)
 		}
 	}
 	return true, nil
@@ -276,7 +262,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = step(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
 	}
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
