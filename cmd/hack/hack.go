@@ -957,7 +957,7 @@ func upgradeBlocks() {
 }
 
 func readTrie(filename string) *trie.Trie {
-	f, err := os.Open("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/"+filename)
+	f, err := os.Open(filename)
 	check(err)
 	defer f.Close()
 	t, err := trie.Load(f)
@@ -972,7 +972,7 @@ func invTree(wrong, right, diff string, name string) {
 	fmt.Printf("Reading trie 2...\n")
 	t2 := readTrie(fmt.Sprintf("%s_%s.txt", right, name))
 	fmt.Printf("Root hash: %x\n", t2.Hash())
-	c, err := os.Create(fmt.Sprintf("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/%s_%s.txt", diff, name))
+	c, err := os.Create(fmt.Sprintf("%s_%s.txt", diff, name))
 	check(err)
 	defer c.Close()
 	t1.PrintDiff(t2, c)

@@ -638,7 +638,6 @@ func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memor
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
 	locFromState := interpreter.evm.IntraBlockState.GetState(contract.Address(), loc)
-	fmt.Println("core/vm/instructions.go:640 opSstore loc", loc,"val", val, "hashval", common.BigToHash(val))
 
 	interpreter.evm.IntraBlockState.SetState(contract.Address(), loc, common.BigToHash(val))
 	if interpreter.evm.chainConfig.IsEIP2027(interpreter.evm.BlockNumber) {

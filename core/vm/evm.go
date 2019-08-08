@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"fmt"
 	"math/big"
 	"sync/atomic"
 	"time"
@@ -396,7 +395,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Create a new account on the state
 	snapshot := evm.IntraBlockState.Snapshot()
 	evm.IntraBlockState.CreateAccount(address, true)
-	fmt.Println("core/vm/evm.go:399 evm create ", address.String())
+
 	if evm.ChainConfig().IsEIP158(evm.BlockNumber) {
 		evm.IntraBlockState.SetNonce(address, 1)
 	}
