@@ -20,11 +20,9 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"runtime"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -94,7 +92,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 			value, gotValue = accounts.Account{}, false
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
-				value, gotValue = accounts.Account(*v.Account), true
+				value, gotValue = *v.Account, true
 			} else {
 				value, gotValue = t.getAcoount(n.Val, key, pos+len(nKey), blockNr)
 			}
@@ -121,7 +119,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 		return accounts.Account{}, false
 
 	case *accountNode:
-		return accounts.Account(*n.Account), true
+		return *n.Account, true
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -136,7 +134,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 	case accountNode:
 		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 		n.EncodeForHashing(encodedAccount.B)
-		enc:=encodedAccount.Bytes()
+		enc := encodedAccount.Bytes()
 		pool.PutBuffer(encodedAccount)
 		return enc, true
 	case *shortNode:
@@ -149,7 +147,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 			} else if v, ok := n.Val.(accountNode); ok {
 				encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
 				v.EncodeForHashing(encodedAccount.B)
-				enc:=encodedAccount.Bytes()
+				enc := encodedAccount.Bytes()
 				pool.PutBuffer(encodedAccount)
 
 				return enc, true
@@ -305,7 +303,7 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 				} else if v, ok := n.Val.(accountNode); ok {
 					encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
 					v.EncodeForHashing(encodedAccount.B)
-					enc:=encodedAccount.Bytes()
+					enc := encodedAccount.Bytes()
 					pool.PutBuffer(encodedAccount)
 
 					pg.addValue(contract, proofHex, pos+len(nKey), enc)
@@ -330,10 +328,10 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 					} else if v, ok := s.Val.(accountNode); ok {
 						encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
 						v.EncodeForHashing(encodedAccount.B)
-						enc:=encodedAccount.Bytes()
+						enc := encodedAccount.Bytes()
 						pool.PutBuffer(encodedAccount)
 						pg.addValue(contract, proofHex, pos+1+len(nKey), enc)
-					}else {
+					} else {
 						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
 					}
 				}
@@ -380,7 +378,7 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 		case accountNode:
 			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 			n.EncodeForHashing(encodedAccount.B)
-			enc:=encodedAccount.Bytes()
+			enc := encodedAccount.Bytes()
 			pool.PutBuffer(encodedAccount)
 			pg.addValue(contract, hex, pos, enc)
 			return
@@ -398,8 +396,8 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	var nn node
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
-		vn,vnok := value.(valueNode)
-		if  origNok && vnok{
+		vn, vnok := value.(valueNode)
+		if origNok && vnok {
 			updated = !bytes.Equal(origN, vn)
 			if updated {
 				newNode = value
@@ -410,12 +408,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 		}
 		origAccN, origNok := origNode.(accountNode)
 		vAccN, vnok := value.(accountNode)
-		if  origNok && vnok{
+		if origNok && vnok {
 			updated = !origAccN.Equals(vAccN.Account)
 			if updated {
-				newNode=value
+				newNode = value
 			} else {
-				newNode=vAccN
+				newNode = vAccN
 			}
 			return
 		}
@@ -1074,14 +1072,4 @@ func (t *Trie) hashRoot() (node, error) {
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])
 	return hashNode(hn[:]), nil
-}
-
-
-func caller(n int) string {
-	buf:=new(bytes.Buffer)
-	for i:=1;i<=n;i++ {
-		_,f,l,_:=runtime.Caller(i)
-		fmt.Fprintln(buf, f,l)
-	}
-	return buf.String()
 }

@@ -190,7 +190,7 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 }
 
 func (dbs *DbState) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
-	fmt.Println("core/state/readonly.go:181 WriteAccountStorage", address.String(), "k=",key, "v=",value)
+	fmt.Println("core/state/readonly.go:181 WriteAccountStorage", address.String(), "k=", key, "v=", value)
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()

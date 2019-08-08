@@ -232,7 +232,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 			}
 		}
 		// Commented out because of the ineffectual assignment - uncomment if adding more fields
-		pos += 1 + storageSizeBytes
+		//pos += 1 + storageSizeBytes
 	}
 }
 
@@ -481,13 +481,13 @@ func (a *Account) Decode(enc []byte) error {
 		if storageSizeBytes == 0 && newPos == pos {
 			storageSize = uint64(enc[newPos])
 			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			pos = newPos + 1
+			//pos = newPos + 1
 		} else {
 			for _, b := range enc[newPos : newPos+storageSizeBytes] {
 				storageSize = (storageSize << 8) + uint64(b)
 			}
 			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			pos = newPos + storageSizeBytes
+			//pos = newPos + storageSizeBytes
 		}
 
 		a.StorageSize = storageSize

@@ -663,7 +663,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
-		newObj.data.SetIncarnation(prev.data.GetIncarnation()+1)
+		newObj.data.SetIncarnation(prev.data.GetIncarnation() + 1)
 	}
 }
 

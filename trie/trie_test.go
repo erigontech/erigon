@@ -104,35 +104,35 @@ func TestGet(t *testing.T) {
 }
 
 func TestGetAccount(t *testing.T) {
-	acc1:=accounts.Account{
-		Nonce:1,
-		Incarnation:1,
-		Balance:*big.NewInt(100),
+	acc1 := accounts.Account{
+		Nonce:       1,
+		Incarnation: 1,
+		Balance:     *big.NewInt(100),
 	}
-	acc2:=accounts.Account{
-		Nonce:2,
-		Incarnation:2,
-		Balance:*big.NewInt(200),
-		Root:common.BytesToHash([]byte("0x1")),
-		CodeHash:common.BytesToHash([]byte("0x01")),
+	acc2 := accounts.Account{
+		Nonce:       2,
+		Incarnation: 2,
+		Balance:     *big.NewInt(200),
+		Root:        common.BytesToHash([]byte("0x1")),
+		CodeHash:    common.BytesToHash([]byte("0x01")),
 	}
 	trie := newEmpty()
-	key1:=[]byte("acc1")
-	key2:=[]byte("acc2")
-	key3:=[]byte("unknown_acc")
+	key1 := []byte("acc1")
+	key2 := []byte("acc2")
+	key3 := []byte("unknown_acc")
 	trie.UpdateAccount(key1, acc1, 0)
 	trie.UpdateAccount(key2, acc2, 0)
 
-	accRes1,ok:=trie.GetAccount(key1, 0)
-	if reflect.DeepEqual(acc1, accRes1) ==false {
-		t.Fatal("not equal", key1 )
+	accRes1, _ := trie.GetAccount(key1, 0)
+	if reflect.DeepEqual(acc1, accRes1) == false {
+		t.Fatal("not equal", key1)
 	}
-	accRes2,ok:=trie.GetAccount(key2, 0)
+	accRes2, _ := trie.GetAccount(key2, 0)
 	if reflect.DeepEqual(acc2, accRes2) == false {
 		t.Fatal("not equal", key2)
 	}
-	accRes3,ok:=trie.GetAccount(key3, 0)
-	if ok==true {
+	accRes3, ok := trie.GetAccount(key3, 0)
+	if ok == true {
 		t.Fatal("Should be false", key3, accRes3)
 	}
 }
@@ -466,7 +466,7 @@ func TestDeepHash(t *testing.T) {
 		{{"key1", "value1"}, {"key2", "value2"}, {"\xffek3", "value3"}},
 	}
 	for i, keyVals := range testdata {
-		fmt.Println("Test",i)
+		fmt.Println("Test", i)
 		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)

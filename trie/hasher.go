@@ -23,7 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 	"hash"
-	"reflect"
 )
 
 type hasher struct {
@@ -66,7 +65,7 @@ func returnHasherToPool(h *hasher) {
 // original node initialized with the computed hash to replace the original one.
 func (h *hasher) hash(n node, force bool, storeTo []byte) int {
 	//n.makedirty()
-	hh:=h.hashInternal(n, force, storeTo, 0)
+	hh := h.hashInternal(n, force, storeTo, 0)
 	return hh
 }
 
@@ -272,7 +271,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		} else if ac, ok := n.Val.(accountNode); ok {
 			encodedAccount := pool.GetBuffer(ac.EncodingLengthForHashing())
 			ac.EncodeForHashing(encodedAccount.B)
-			b:=encodedAccount.Bytes()
+			b := encodedAccount.Bytes()
 			pool.PutBuffer(encodedAccount)
 
 			if len(b) == 1 && b[0] < 128 {
@@ -375,23 +374,20 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			}
 		}
 		var enc []byte
-		var err error
-		switch n:=n.Children[16].(type) {
+		switch n := n.Children[16].(type) {
 		case accountNode:
 			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 			n.EncodeForHashing(encodedAccount.B)
-			enc=encodedAccount.Bytes()
+			enc = encodedAccount.Bytes()
 			pool.PutBuffer(encodedAccount)
 		case valueNode:
-			enc=n
+			enc = n
 		case nil:
-		//		skip
+		//	skip
 		default:
-			fmt.Println("trie/hasher.go:385 !!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:384", reflect.TypeOf(n))
+			//	skip
 		}
-		if err!=nil {
-			fmt.Println("!!!!!!!!!!!!!!!!!!! accountNodeErr trie/hasher.go:387", err)
-		}
+
 		if enc == nil {
 			buffer[pos] = byte(128)
 			pos++
@@ -422,7 +418,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 	case accountNode:
 		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 		n.EncodeForHashing(encodedAccount.B)
-		enc:=encodedAccount.Bytes()
+		enc := encodedAccount.Bytes()
 		pool.PutBuffer(encodedAccount)
 		if len(enc) == 1 && enc[0] < 128 {
 			buffer[pos] = enc[0]

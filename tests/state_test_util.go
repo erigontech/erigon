@@ -22,8 +22,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
-	"os"
-	"strconv"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -182,8 +180,6 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
 
-	f,err:=os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/tries_dump/"+subtest.Fork+"_wrong_"+strconv.Itoa(subtest.Index)+".txt")
-	tds.PrintTrie(f)
 	root := roots[len(roots)-1]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.

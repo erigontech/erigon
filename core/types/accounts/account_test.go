@@ -17,7 +17,7 @@ func TestEmptyAccount(t *testing.T) {
 		Balance:     *new(big.Int),
 		Root:        emptyRoot,                         // extAccount doesn't have Root value
 		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
-		Incarnation:5,
+		Incarnation: 5,
 	}
 
 	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
@@ -41,7 +41,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		Incarnation:4,
+		Incarnation: 4,
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -66,7 +66,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		HasStorageSize: true,
 		StorageSize:    0,
-		Incarnation: 5,
+		Incarnation:    5,
 	}
 	a.StorageSize = 10
 
@@ -89,7 +89,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        emptyRoot,                         // extAccount doesn't have Root value
 		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
-		Incarnation:5,
+		Incarnation: 5,
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -112,7 +112,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-		Incarnation:5,
+		Incarnation: 5,
 	}
 	account.HasStorageSize = true
 	account.StorageSize = 10

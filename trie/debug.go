@@ -268,7 +268,6 @@ func (an accountNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
 }
 
-
 func printDiffSide(n node, w io.Writer, ind string, key string) {
 	switch n := n.(type) {
 	case *fullNode:

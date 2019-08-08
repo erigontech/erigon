@@ -17,7 +17,6 @@
 package vm
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -26,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"golang.org/x/crypto/sha3"
 	"math/big"
-	"runtime"
 )
 
 var (
@@ -958,14 +956,4 @@ func makeSwap(size int64) executionFunc {
 		stack.swap(int(size))
 		return nil, nil
 	}
-}
-
-
-func caller(n int) string {
-	buf:=new(bytes.Buffer)
-	for i:=1;i<=n;i++ {
-		_,f,l,_:=runtime.Caller(i)
-		fmt.Fprintln(buf, f,l)
-	}
-	return buf.String()
 }

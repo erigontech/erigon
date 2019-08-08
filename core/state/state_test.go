@@ -282,7 +282,6 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-
 func TestDump(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
@@ -300,36 +299,34 @@ func TestDump(t *testing.T) {
 	// write some of them to the trie
 	ctx := context.TODO()
 	err := tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 	err = tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	err = state.FinalizeTx(ctx, tds.TrieStateWriter())
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-
 
 	t.Log("last root", tds.LastRoot().String())
 	_, err = tds.ComputeTrieRoots()
 	t.Log("last root", tds.LastRoot().String())
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
-
 
 	tds.SetBlockNr(1)
 
 	err = state.CommitBlock(ctx, tds.DbStateWriter())
-	if err!=nil {
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	f,_:=os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trie_wrong.txt")
+	f, _ := os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trie_wrong.txt")
 	tds.t.Print(f)
 
 	// check that dump contains the state objects that are in trie

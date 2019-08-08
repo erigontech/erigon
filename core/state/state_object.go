@@ -165,7 +165,7 @@ func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		}
 	}
 	// Load from DB in case it is missing.
-	enc, err := so.db.stateReader.ReadAccountStorage(so.address,so.data.GetIncarnation(), &key)
+	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), &key)
 	if err != nil {
 		so.setError(err)
 		return common.Hash{}
@@ -208,7 +208,7 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
 
-		if err := stateWriter.WriteAccountStorage(so.address,so.data.GetIncarnation(), &key, &original, &value); err != nil {
+		if err := stateWriter.WriteAccountStorage(so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
 			return err
 		}
 	}
