@@ -362,8 +362,12 @@ constructing the root from from the sub-roots of the chunks. An alternative sche
 use case.
 
 1. `LEAF length-of-key`
-2. `ENDBRANCH set-of-digits`
+2. `LEAFHASH length-of-key`
 3. `EXTENSION key`
+4. `EXTENSIONHASH key`
+5. `BRANCH set-of-digits`
+6. `BRANCHHASH set-of-digits`
+7. `HASH number-of-hashes`
 
 The description of semantics would require the introduction of a stack, which can contain hashes, or nodes of the tree.
 
@@ -381,6 +385,10 @@ If the special, 17th digit is not present in the set, then the top of the stack 
 corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
 If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
 item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
+
+`ENDHASHER` opcode is similar to the `ENDBRANCH` with the difference is that instead of creating a
+branch node, it creates a 32-byte hash of such a node (without necessarily creating the node itself for
+better efficiency).
 
 `EXTENSION` opcode has a key as its operand. This key is a sequence of digits, which, in our example, can only be
 of length 1, but generally, it can be longer. The action of this opcode is to pop one item from the stack, create
