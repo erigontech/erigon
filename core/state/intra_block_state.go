@@ -644,7 +644,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
 func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
-	fmt.Println("core/state/intra_block_state.go:655 CreateAccount", addr.String(), checkPrev)
+	fmt.Println("core/state/intra_block_state.go:647 CreateAccount", addr.String(), checkPrev)
 	if sdb.tracer != nil {
 		err := sdb.tracer.CaptureAccountRead(addr)
 		if sdb.trace && err != nil {

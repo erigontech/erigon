@@ -889,50 +889,67 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	for pos < len(hexPrefix) {
 		switch n := nd.(type) {
 		case nil:
+			fmt.Println("----Nil node")
 			return false, common.Hash{}
 		case *shortNode:
+			fmt.Println("----Short node")
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hexPrefix[pos:], nKey)
 			//fmt.Printf("nKey: %x, hexPrefix[pos:]: %x, matchlen: %d\n", nKey, hexPrefix[pos:], matchlen)
 			if matchlen == len(nKey) {
 				nd = n.Val
 				pos += matchlen
+				fmt.Println("move to value")
+
 			} else if matchlen == len(hexPrefix)-pos {
 				// middle of the key
+				fmt.Println("move to short")
 				nd = &shortNode{Key: hexToCompact(nKey[matchlen:]), Val: n.Val}
 				pos += matchlen
 			} else {
+				fmt.Println("move to false")
 				return false, common.Hash{}
 			}
 		case *duoNode:
+			fmt.Println("----duo node")
 			i1, i2 := n.childrenIdx()
 			switch hexPrefix[pos] {
 			case i1:
+				fmt.Println("move to child1")
 				nd = n.child1
 				pos++
 			case i2:
+				fmt.Println("move to child2")
 				nd = n.child2
 				pos++
 			default:
+				fmt.Println("move to false")
 				return false, common.Hash{}
 			}
 		case *fullNode:
+			fmt.Println("----Full node")
 			child := n.Children[hexPrefix[pos]]
 			if child == nil {
+				fmt.Println("move to false")
 				return false, common.Hash{}
 			}
+			fmt.Println("move to child")
 			nd = child
 			pos++
 		case valueNode:
+			fmt.Println("----Value node")
 			return false, common.Hash{}
 		case accountNode:
+			fmt.Println("----Account node")
 			return false, common.Hash{}
 		case hashNode:
+			fmt.Println("----hash node")
 			return false, common.Hash{}
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
+	fmt.Println("Found node", nd.fstring(""))
 	h := newHasher(false)
 	defer returnHasherToPool(h)
 	var hn common.Hash

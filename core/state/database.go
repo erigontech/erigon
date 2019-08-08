@@ -561,6 +561,12 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
+	fmt.Println("core/state/database.go:564 tds.aggregateBuffer.accountUpdates+")
+	spew.Dump(tds.aggregateBuffer.accountUpdates)
+	fmt.Println("core/state/database.go:564 tds.aggregateBuffer.accountUpdates-")
+	fmt.Println("core/state/database.go:564 tds.aggregateBuffer.storageUpdates+")
+	spew.Dump(tds.aggregateBuffer.storageUpdates)
+	fmt.Println("core/state/database.go:564 tds.aggregateBuffer.storageUpdates-")
 	for i, b := range tds.buffers {
 		for address, m := range b.storageUpdates {
 			if _, ok := b.deleted[address]; ok {
@@ -578,6 +584,9 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				return nil, err
 			}
 
+			fmt.Println("--storageUpdates acc--", address.String())
+			spew.Dump(acc)
+
 			for keyHash, v := range m {
 				version:=uint8(0)
 				if acc!=nil {
@@ -589,12 +598,23 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 
 				cKey:=GenerateCompositeStorageKey(addrHash, version, keyHash)
+				fmt.Println(address.String(),"vers=", version)
 				if len(v) > 0 {
+					fmt.Println("Update", addrHash.String()," = ", v)
 					tds.storageTrie.Update(cKey, v, tds.blockNr)
 				} else {
+					fmt.Println("Delete", addrHash.String())
 					tds.storageTrie.Delete(cKey, tds.blockNr)
 				}
 			}
+
+			/**
+					if account == nil {
+				t = trie.New(common.Hash{})
+			} else {
+				t = trie.New(account.Root)
+			}
+			 */
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					addrHash,err:=tds.HashAddress(address, false)
@@ -603,10 +623,12 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 
 					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
-					fmt.Println("tds.storageTrie.DeepHash1", address.String(), addrHash.String())
-					fmt.Println("tds.storageTrie.DeepHash1", ok, root.String())
+					fmt.Println(address.String(), "tds.storageTrie.DeepHash1", addrHash.String(), account.GetIncarnation())
+					fmt.Println(ok, root.String())
 					if ok {
 						account.Root = root
+					} else {
+						account.Root = trie.EmptyRoot
 					}
 					//if ok==false {
 					//	fmt.Println("---------------------------------------")
@@ -621,11 +643,14 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 
 					ok,root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
-					fmt.Println("tds.storageTrie.DeepHash", address.String(), addrHash.String())
-					fmt.Println("tds.storageTrie.DeepHash", ok, root.String())
+					fmt.Println(address.String(), "tds.storageTrie.DeepHash2",  addrHash.String(), account.GetIncarnation())
+					fmt.Println(ok, root.String())
 
 					if ok {
 						account.Root = root
+					} else {
+						fmt.Println("core/state/database.go:670 set empty root to ", address.String())
+						account.Root = trie.EmptyRoot
 					}
 
 					//if ok==false {
@@ -686,7 +711,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
 			}
-			tds.storageTrie.Delete(GenerateStoragePrefix(addrHash,0), tds.blockNr)
+			tds.storageTrie.Delete(addrHash[:], tds.blockNr)
 		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
@@ -695,11 +720,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				account.EncodeForHashing(data)
 
 				acc:=*account
-				fmt.Println("core/state/database.go:685 tds.t.UpdateAccount", addrHash.String(), "block", tds.blockNr)
-				spew.Dump(acc)
+				//fmt.Println("core/state/database.go:685 tds.t.UpdateAccount", addrHash.String(), "block", tds.blockNr)
+				//spew.Dump(acc)
 				tds.t.UpdateAccount(addrHash[:], acc, tds.blockNr)
 			} else {
-				fmt.Println("core/state/database.go:685 tds.t.delete", addrHash.String(), "block", tds.blockNr)
+				//fmt.Println("core/state/database.go:685 tds.t.delete", addrHash.String(), "block", tds.blockNr)
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
 		}
@@ -839,7 +864,13 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		}
 	}
 
+	if tds.aggregateBuffer!=nil && tds.aggregateBuffer.accountUpdates!=nil {
+		if v,ok:= tds.aggregateBuffer.accountUpdates[buf]; ok {
+			return v, nil
+		}
+	}
 	acc, ok := tds.t.GetAccount(buf[:], tds.blockNr)
+	fmt.Println("tds.t.GetAccount", ok)
 	if ok {
 		return &acc, nil
 	}
@@ -1097,6 +1128,10 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 		return err
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
+	if _,ok:=tsw.tds.currentBuffer.storageUpdates[address]; !ok && account.GetIncarnation()>0 {
+		tsw.tds.currentBuffer.storageUpdates[address] = map[common.Hash][]byte{}
+	}
+
 	return nil
 }
 
@@ -1105,9 +1140,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
-	a:=accounts.Account{}
-	a.Decode(data)
-	fmt.Println("core/state/database.go:1105", a.GetIncarnation())
+
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
