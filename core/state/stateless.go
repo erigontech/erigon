@@ -373,7 +373,7 @@ func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.T
 	return t, nil
 }
 
-func (s *Stateless) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	//fmt.Printf("ReadAccountStorage\n")
 	h := newHasher()
 	defer returnHasherToPool(h)
@@ -547,7 +547,7 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (s *Stateless) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	m, ok := s.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)

@@ -521,12 +521,12 @@ func (a *Account) IsEmptyRoot() bool {
 	return a.Root == emptyRoot || a.Root == common.Hash{}
 }
 
-func (a *Account) GetIncarnation() uint8 {
-	return uint8(a.Incarnation)
+func (a *Account) GetIncarnation() uint64 {
+	return a.Incarnation
 }
 
-func (a *Account) SetIncarnation(v uint8) {
-	a.Incarnation = uint64(v)
+func (a *Account) SetIncarnation(v uint64) {
+	a.Incarnation = v
 }
 
 func (a *Account) Equals(acc *Account) bool {

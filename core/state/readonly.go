@@ -140,22 +140,16 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	return &acc, nil
 }
 
-func (dbs *DbState) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
-	fmt.Println("core/state/readonly.go:140 ReadAccountStorage addr=", address.String(), "version=", version, "k=", key.String())
+func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	fmt.Println("core/state/readonly.go:140 ReadAccountStorage addr=", address.String(), "version=", incarnation, "k=", key.String())
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
 	h.sha.Write(key[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	/*
-		storageKey:=append(address[:], uint8(version))
-		storageKey=append(storageKey, buf[:]...)
-		fmt.Println("core/state/readonly.go:149 storageKey=", storageKey)
-		enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, storageKey, dbs.blockNr+1)
 
-	*/
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, append(address[:], buf[:]...), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(address, incarnation,buf), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -189,7 +183,7 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
+func (dbs *DbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	fmt.Println("core/state/readonly.go:181 WriteAccountStorage", address.String(), "k=", key, "v=", value)
 	t, ok := dbs.storage[address]
 	if !ok {

@@ -202,7 +202,7 @@ func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Acc
 	return &acc, nil
 }
 
-func (rds *RepairDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (rds *RepairDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -375,7 +375,7 @@ func (rds *RepairDbState) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return rds.currentDb.Put(CodeBucket, codeHash[:], code)
 }
 
-func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (rds *RepairDbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()

@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"fmt"
 	"hash"
 	"io"
@@ -56,7 +57,7 @@ const (
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
-	ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error)
+	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
 	ReadAccountCode(codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(codeHash common.Hash) (int, error)
 }
@@ -65,7 +66,7 @@ type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error
+	WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -119,7 +120,7 @@ func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
+func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	return nil
 }
 
@@ -571,7 +572,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			for keyHash, v := range m {
-				incarnation := uint8(0)
+				incarnation := uint64(0)
 				if acc,ok:=tds.aggregateBuffer.accountUpdates[addrHash]; ok && acc!=nil {
 					incarnation = acc.GetIncarnation()
 				}
@@ -844,7 +845,7 @@ func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
 	return key
 }
 
-func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8, key *common.Hash) ([]byte, error) {
+func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	seckey, err := tds.HashKey(key, false /*save*/)
 	if err != nil {
 		return nil, err
@@ -868,7 +869,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, version uint8
 		}
 	}
 
-	cKey := GenerateCompositeStorageKey(address, version, seckey)
+	cKey := GenerateCompositeStorageKey(address, incarnation, seckey)
 	enc, ok := tds.storageTrie.Get(cKey)
 	if ok {
 		// Unwrap one RLP level
@@ -1123,7 +1124,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return dsw.tds.db.Put(CodeBucket, codeHash[:], code)
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	v := bytes.TrimLeft(value[:], "\x00")
 	m, ok := tsw.tds.currentBuffer.storageUpdates[address]
 	if !ok {
@@ -1152,7 +1153,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, version 
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version uint8, key, original, value *common.Hash) error {
+func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
 	}
@@ -1164,7 +1165,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, version ui
 	vv := make([]byte, len(v))
 	copy(vv, v)
 
-	compositeKey := GenerateCompositeStorageKey(address, version, seckey)
+	compositeKey := GenerateCompositeStorageKey(address, incarnation, seckey)
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(StorageBucket, compositeKey)
 	} else {
@@ -1186,15 +1187,19 @@ func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
 }
 
-func GenerateCompositeStorageKey(address common.Address, version uint8, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, 20+1+32)
-	compositeKey = append(compositeKey, GenerateStoragePrefix(address, version)...)
+func GenerateCompositeStorageKey(address common.Address, incarnation uint64, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.AddressLength+binary.MaxVarintLen64+common.HashLength)
+	compositeKey = append(compositeKey, GenerateStoragePrefix(address, incarnation)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
-func GenerateStoragePrefix(address common.Address, version uint8) []byte {
-	prefix := make([]byte, 0, 20+1)
+func GenerateStoragePrefix(address common.Address, incarnation uint64) []byte {
+	prefix := make([]byte, 0, common.AddressLength+binary.MaxVarintLen64)
 	prefix = append(prefix, address[:]...)
-	prefix = append(prefix, version)
+
+	//todo pool
+	buf := make([]byte, binary.MaxVarintLen64)
+	binary.PutUvarint(buf, incarnation)
+	prefix = append(prefix, buf...)
 	return prefix
 }

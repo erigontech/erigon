@@ -17,6 +17,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 
@@ -72,8 +73,13 @@ func (self *TrieDbState) RawDump() Dump {
 			account.StorageSize = &storageSize
 		}
 
-		err = self.db.Walk(StorageBucket, GenerateStoragePrefix(common.BytesToAddress(addr), acc.GetIncarnation()), uint(common.AddressLength*8+8), func(ks, vs []byte) (bool, error) {
-			key := self.GetKey(ks[common.AddressLength+1:]) //remove account address from composite key
+
+		buf := make([]byte, binary.MaxVarintLen64)
+		binary.PutUvarint(buf, acc.GetIncarnation())
+
+
+		err = self.db.Walk(StorageBucket, GenerateStoragePrefix(common.BytesToAddress(addr), acc.GetIncarnation()), uint(common.AddressLength*8+binary.MaxVarintLen64), func(ks, vs []byte) (bool, error) {
+			key := self.GetKey(ks[common.AddressLength+binary.MaxVarintLen64:]) //remove account address and version from composite key
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})
