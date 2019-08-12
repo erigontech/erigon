@@ -70,11 +70,19 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 
 // Get returns the value for key stored in the trie.
 func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
+	if t.root == nil {
+		return nil, false
+	}
+
 	hex := keybytesToHex(key)
 	return t.get(t.root, hex, 0)
 }
 
 func (t *Trie) GetAccount(key []byte, blockNr uint64) (value accounts.Account, gotValue bool) {
+	if t.root == nil {
+		return accounts.Account{}, false
+	}
+
 	hex := keybytesToHex(key)
 	return t.getAcoount(t.root, hex, 0, blockNr)
 }
