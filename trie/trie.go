@@ -188,6 +188,7 @@ type ResolveRequest struct {
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
+	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {

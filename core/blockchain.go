@@ -1765,6 +1765,6 @@ func (bc *BlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 	return bc.scope.Track(bc.logsFeed.Subscribe(ch))
 }
 
-func (bc *BlockChain) ChainDb() ethdb.Getter {
+func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
 }

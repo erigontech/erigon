@@ -37,7 +37,7 @@ type TrieResolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
 	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
 	requests   []*ResolveRequest
-	reqIndices []int // Indices pointing back to request slice from slices retured by PrepareResolveParams
+	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
 	keyIdx     int
 	currentReq *ResolveRequest // Request currently being handled
 	currentRs  *ResolveSet     // ResolveSet currently being used
@@ -170,10 +170,17 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 			return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 		}
-		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
+
+		hasher := newHasher(false)
+		defer returnHasherToPool(hasher)
+		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+
+		if tr.currentReq.t != nil {
+			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
+		}
 		tr.hb.Reset()
 		tr.groups = nil
 		tr.prefix = nil
@@ -237,7 +244,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	var err error
 	if db == nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.accounts: %t\n", tr.accounts)
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
@@ -266,10 +273,17 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
-	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
-	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+	if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+	}
+
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+	tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+
+	if tr.currentReq.t != nil {
+		tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
+		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 	}
 	return err
 }
