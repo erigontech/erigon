@@ -78,7 +78,13 @@ func (self *TrieDbState) RawDump() Dump {
 		binary.PutUvarint(buf, acc.GetIncarnation())
 
 
-		err = self.db.Walk(StorageBucket, GenerateStoragePrefix(common.BytesToAddress(addr), acc.GetIncarnation()), uint(common.AddressLength*8+binary.MaxVarintLen64), func(ks, vs []byte) (bool, error) {
+		addrHash,err:=self.HashAddress(common.BytesToAddress(addr), false)
+		if err!=nil {
+			return false, err
+		}
+
+
+		err = self.db.Walk(StorageBucket, GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.AddressLength*8+binary.MaxVarintLen64), func(ks, vs []byte) (bool, error) {
 			key := self.GetKey(ks[common.AddressLength+binary.MaxVarintLen64:]) //remove account address and version from composite key
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil

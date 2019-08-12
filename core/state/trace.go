@@ -62,7 +62,14 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address,incarnation u
 	h.sha.Write(key[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := tds.currentDb.Get(StorageBucket, GenerateCompositeStorageKey(address,incarnation, buf))
+
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addhHash common.Hash
+	h.sha.Read(addhHash[:])
+
+
+	enc, err := tds.currentDb.Get(StorageBucket, GenerateCompositeStorageKey(addhHash,incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}

@@ -577,7 +577,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					incarnation = acc.GetIncarnation()
 				}
 
-				cKey := GenerateCompositeStorageKey(address, incarnation, keyHash)
+				cKey := GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
 				if len(v) > 0 {
 					tds.storageTrie.Update(cKey, v, tds.blockNr)
 				} else {
@@ -587,7 +587,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation()))
+					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok {
 						account.Root = root
 					} else {
@@ -595,7 +595,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation()))
+					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if ok {
 						account.Root = root
 					} else {
@@ -605,7 +605,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			} else {
 				// Simply comparing the correctness of the storageRoot computations
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation()))
+					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -615,7 +615,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(address, account.GetIncarnation()))
+					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -869,7 +869,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
-	cKey := GenerateCompositeStorageKey(address, incarnation, seckey)
+	addrHash, err := tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return nil, err
+	}
+
+	cKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	enc, ok := tds.storageTrie.Get(cKey)
 	if ok {
 		// Unwrap one RLP level
@@ -1165,7 +1170,12 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	vv := make([]byte, len(v))
 	copy(vv, v)
 
-	compositeKey := GenerateCompositeStorageKey(address, incarnation, seckey)
+	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return  err
+	}
+
+	compositeKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(StorageBucket, compositeKey)
 	} else {
@@ -1187,15 +1197,15 @@ func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
 }
 
-func GenerateCompositeStorageKey(address common.Address, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.AddressLength+binary.MaxVarintLen64+common.HashLength)
-	compositeKey = append(compositeKey, GenerateStoragePrefix(address, incarnation)...)
+func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.HashLength+binary.MaxVarintLen64+common.HashLength)
+	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
-func GenerateStoragePrefix(address common.Address, incarnation uint64) []byte {
-	prefix := make([]byte, 0, common.AddressLength+binary.MaxVarintLen64)
-	prefix = append(prefix, address[:]...)
+func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
+	prefix := make([]byte, 0, common.HashLength+binary.MaxVarintLen64)
+	prefix = append(prefix, addressHash[:]...)
 
 	//todo pool
 	buf := make([]byte, binary.MaxVarintLen64)

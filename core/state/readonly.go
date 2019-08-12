@@ -149,7 +149,12 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	var buf common.Hash
 	h.sha.Read(buf[:])
 
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(address, incarnation,buf), dbs.blockNr+1)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addhHash common.Hash
+	h.sha.Read(addhHash[:])
+
+	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addhHash, incarnation,buf), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
