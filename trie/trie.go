@@ -238,6 +238,15 @@ func (rr *ResolveRequest) String() string {
 // NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
+
+
+//bool
+//incarnation
+//addrHash+key
+
+
+// 1 key
+// composite key addrHash+key
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
 	var nd = t.root
 	hex := keybytesToHex(key)
