@@ -573,13 +573,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 }
 
 func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+	if n == nil {
+		return
+	}
 	if t.root == nil && len(hex) == 0 {
 		t.root = n
 		return
-	}
-	if sn, ok := n.(*shortNode); ok {
-		hex = concat(hex, compactToHex(sn.Key)...)
-		n = sn.Val
 	}
 	if t.root == nil {
 		t.root = &shortNode{Key: hexToCompact(hex), Val: n}
@@ -637,6 +636,10 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 		}
 	}
 	if needInsert {
+		if sn, ok := n.(*shortNode); ok {
+			hex = concat(hex, compactToHex(sn.Key)...)
+			n = sn.Val
+		}
 		_, t.root = t.insert(t.root, hex, 0, n, blockNr)
 		return
 	}

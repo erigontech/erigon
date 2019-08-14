@@ -174,7 +174,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
+	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		tr.prec.Reset()
 		tr.prec.Write(tr.curr.Bytes())
@@ -295,9 +295,8 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
 	} else {
 		contractHex := keybytesToHex(tr.currentReq.contract)
-		contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble
+		contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
 		hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
-		fmt.Printf("hookKey %x\n", hookKey)
 	}
 	tr.currentReq.t.touchAll(hbRoot, hookKey, false)
 	tr.currentReq.t.hook(hookKey, hbRoot, tr.blockNr)

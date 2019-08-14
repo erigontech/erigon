@@ -24,7 +24,6 @@ import (
 	"hash"
 	"io"
 	"math/big"
-	"os"
 	"runtime"
 	"sort"
 
@@ -460,7 +459,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
-				fmt.Printf("Storage resolve request: %s\n", req.String())
+				//fmt.Printf("Storage resolve request: %s\n", req.String())
 				resolver.AddRequest(req)
 			}
 		}
@@ -613,10 +612,10 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			for keyHash, v := range m {
 				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
-					fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
+					//fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					tds.storageTrie.Update(cKey, v, tds.blockNr)
 				} else {
-					fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
+					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					tds.storageTrie.Delete(cKey, tds.blockNr)
 				}
 			}
@@ -625,26 +624,26 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.storageTrie.DeepHash(addrHash[:])
 					if ok {
-						fmt.Printf("....\n")
-						tds.PrintStorageTrie(os.Stdout)
-						fmt.Printf("....\n")
-						fmt.Printf("(b)Set root %x for addrHash %x\n", root, addrHash)
+						//fmt.Printf("....\n")
+						//tds.PrintStorageTrie(os.Stdout)
+						//fmt.Printf("....\n")
+						//fmt.Printf("(b)Set root %x for addrHash %x\n", root, addrHash)
 						account.Root = root
 					} else {
-						fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
+						//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.storageTrie.DeepHash(addrHash[:])
 					if ok {
-						fmt.Printf("....\n")
-						tds.PrintStorageTrie(os.Stdout)
-						fmt.Printf("....\n")
-						fmt.Printf("Set root %x for addrHash %x\n", root, addrHash)
+						//fmt.Printf("....\n")
+						//tds.PrintStorageTrie(os.Stdout)
+						//fmt.Printf("....\n")
+						//fmt.Printf("Set root %x for addrHash %x\n", root, addrHash)
 						account.Root = root
 					} else {
-						fmt.Printf("Set empty root for addrHash %x\n", addrHash)
+						//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
 					}
 				}

@@ -18,7 +18,6 @@ package trie
 
 import (
 	"bytes"
-	"fmt"
 	"math/bits"
 	"sort"
 
@@ -56,7 +55,7 @@ func step(hashOnly func(prefix []byte) bool, recursive bool, prec, curr, succ []
 	} else {
 		maxLen = succLen
 	}
-	fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d\n", prec, curr, succ, maxLen)
+	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d\n", prec, curr, succ, maxLen)
 	var existed bool
 	if succLen == precLen {
 		// We don't know if this is the beginning of the new prefix group, or continuation of the existing one, so we check
