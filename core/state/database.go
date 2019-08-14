@@ -24,6 +24,7 @@ import (
 	"hash"
 	"io"
 	"math/big"
+	"os"
 	"runtime"
 	"sort"
 
@@ -132,27 +133,28 @@ type Buffer struct {
 	accountUpdates map[common.Hash]*accounts.Account
 	accountReads   map[common.Hash]struct{}
 	deleted        map[common.Address]struct{}
-	deletedHashes        map[common.Hash]struct{}
+	deletedHashes  map[common.Hash]struct{}
 }
 
 func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) addressHashWithIncarnation {
 	var res addressHashWithIncarnation
 	copy(res[:common.HashLength], addrHash[:])
-	buf:=make([]byte, binary.MaxVarintLen64)
-	binary.PutUvarint(buf, incarnation)
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, incarnation)
 	copy(res[common.HashLength:], buf[:])
 	return res
 }
 
-type addressHashWithIncarnation [common.HashLength+binary.MaxVarintLen64]byte
+type addressHashWithIncarnation [common.HashLength + 8]byte
+
 func (this *addressHashWithIncarnation) AddrHash() common.Hash {
 	var addrHash common.Hash
 	copy(addrHash[:], this[:common.HashLength])
 	return addrHash
 }
 
-func (this *addressHashWithIncarnation) Incarnation() (uint64, error) {
-	return binary.ReadUvarint(bytes.NewBuffer(this[common.HashLength:common.HashLength+binary.MaxVarintLen64]))
+func (this *addressHashWithIncarnation) Incarnation() uint64 {
+	return binary.BigEndian.Uint64(this[common.HashLength : common.HashLength+8])
 }
 
 // Prepares buffer for work or clears previous data
@@ -321,7 +323,7 @@ func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.storageTrie.Print(w)
 }
 
-func (tds *TrieDbState) PrintStorageTrie(w io.Writer, address common.Address) {
+func (tds *TrieDbState) PrintStorageTrie(w io.Writer) {
 	tds.storageTrie.Print(w)
 }
 
@@ -453,11 +455,12 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 		var addressHash = addressHash // To avoid the value being overwritten, though still shared between continuations
 		for _, keyHash := range hashes {
 			//todo @need resolution for prefix
-			if need, req := tds.storageTrie.NeedResolution(addressHash.AddrHash().Bytes(), keyHash[:]); need {
+			if need, req := tds.storageTrie.NeedResolution(addressHash.AddrHash().Bytes(), addressHash.Incarnation(), keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
+				fmt.Printf("Storage resolve request: %s\n", req.String())
 				resolver.AddRequest(req)
 			}
 		}
@@ -513,14 +516,14 @@ func (tds *TrieDbState) buildAccountTouches() Hashes {
 }
 
 func (tds *TrieDbState) buildDeletedAccountTouches() error {
-	for i:=range tds.buffers {
+	for i := range tds.buffers {
 		tds.buffers[i].deletedHashes = make(map[common.Hash]struct{}, len(tds.buffers[i].deleted))
-		for k:=range tds.buffers[i].deleted {
-			h,err:=tds.HashAddress(k,false)
-			if err!=nil {
+		for k := range tds.buffers[i].deleted {
+			h, err := tds.HashAddress(k, false)
+			if err != nil {
 				return err
 			}
-			tds.buffers[i].deletedHashes[h]= struct{}{}
+			tds.buffers[i].deletedHashes[h] = struct{}{}
 		}
 	}
 	return nil
@@ -531,7 +534,7 @@ func (tds *TrieDbState) buildDeletedAccountTouches() error {
 func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	var resolver *trie.TrieResolver
 	for _, addrHash := range accountTouches {
-		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
+		if need, req := tds.t.NeedResolution(nil, 0, addrHash[:]); need {
 			if resolver == nil {
 				resolver = trie.NewResolver(0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
@@ -591,8 +594,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		tds.populateAccountBlockProof(accountTouches)
 	}
 
-	err :=tds.buildDeletedAccountTouches()
-	if err!=nil {
+	err := tds.buildDeletedAccountTouches()
+	if err != nil {
 		return nil, err
 	}
 	// Perform actual updates on the tries, and compute one trie root per buffer
@@ -600,49 +603,55 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
 		for addressHash, m := range b.storageUpdates {
-			addrHash:=addressHash.AddrHash()
+			addrHash := addressHash.AddrHash()
 
 			if _, ok := b.deletedHashes[addressHash.AddrHash()]; ok {
 				// Deleted contracts will be dealth with later, in the next loop
 				continue
 			}
 
-
 			for keyHash, v := range m {
-				incarnation := uint64(0)
-				if acc,ok:=tds.aggregateBuffer.accountUpdates[addressHash.AddrHash()]; ok && acc!=nil {
-					incarnation = acc.GetIncarnation()
-				}
-
-				cKey := GenerateCompositeStorageKey(addressHash.AddrHash(), incarnation, keyHash)
+				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
+					fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					tds.storageTrie.Update(cKey, v, tds.blockNr)
 				} else {
+					fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					tds.storageTrie.Delete(cKey, tds.blockNr)
 				}
 			}
 
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok, root := tds.storageTrie.DeepHash(addrHash[:])
 					if ok {
+						fmt.Printf("....\n")
+						tds.PrintStorageTrie(os.Stdout)
+						fmt.Printf("....\n")
+						fmt.Printf("(b)Set root %x for addrHash %x\n", root, addrHash)
 						account.Root = root
 					} else {
+						fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok, root := tds.storageTrie.DeepHash(addrHash[:])
 					if ok {
+						fmt.Printf("....\n")
+						tds.PrintStorageTrie(os.Stdout)
+						fmt.Printf("....\n")
+						fmt.Printf("Set root %x for addrHash %x\n", root, addrHash)
 						account.Root = root
 					} else {
+						fmt.Printf("Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
 					}
 				}
 			} else {
 				// Simply comparing the correctness of the storageRoot computations
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok, h := tds.storageTrie.DeepHash(addrHash[:])
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -652,7 +661,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(GenerateStoragePrefix(addrHash, account.GetIncarnation()))
+					ok, h := tds.storageTrie.DeepHash(addrHash[:])
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -740,9 +749,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var address common.Hash
 			copy(address[:], key[:common.HashLength])
 			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength+binary.MaxVarintLen64:])
+			copy(keyHash[:], key[common.HashLength+8:])
 			var addrHashWithVersion addressHashWithIncarnation
-			copy(addrHashWithVersion[:], key[:common.HashLength+binary.MaxVarintLen64])
+			copy(addrHashWithVersion[:], key[:common.HashLength+8])
 			m, ok := b.storageUpdates[addrHashWithVersion]
 			if !ok {
 				m = make(map[common.Hash][]byte)
@@ -896,7 +905,6 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		return nil, err
 	}
 
-
 	if tds.resolveReads {
 		var addReadRecord = false
 		if mWrite, ok := tds.currentBuffer.storageUpdates[newAddressHashWithIncarnation(addrHash, incarnation)]; ok {
@@ -916,8 +924,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
-	cKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
-	enc, ok := tds.storageTrie.Get(cKey)
+	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -926,12 +933,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	} else {
 		// Not present in the trie, try database
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, cKey, tds.blockNr)
+			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
 			}
 		} else {
-			enc, err = tds.db.Get(StorageBucket, cKey)
+			enc, err = tds.db.Get(StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
 				enc = nil
 			}
@@ -1087,7 +1094,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 
-	addrHashWithInc:=newAddressHashWithIncarnation(addrHash, account.GetIncarnation())
+	addrHashWithInc := newAddressHashWithIncarnation(addrHash, account.GetIncarnation())
 	if _, ok := tsw.tds.currentBuffer.storageUpdates[addrHashWithInc]; !ok && account.GetIncarnation() > 0 {
 		tsw.tds.currentBuffer.storageUpdates[addrHashWithInc] = map[common.Hash][]byte{}
 	}
@@ -1220,7 +1227,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
-		return  err
+		return err
 	}
 
 	compositeKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
@@ -1245,24 +1252,28 @@ func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
 }
 
+func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
+	compositeKey = append(compositeKey, addressHash[:]...)
+	compositeKey = append(compositeKey, seckey[:]...)
+	return compositeKey
+}
 func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.HashLength+binary.MaxVarintLen64+common.HashLength)
+	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
 	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
 func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
-	prefix := make([]byte, 0, common.HashLength+binary.MaxVarintLen64)
+	prefix := make([]byte, 0, common.HashLength+8)
 	prefix = append(prefix, addressHash[:]...)
 
 	//todo pool
-	buf := make([]byte, binary.MaxVarintLen64)
-	binary.PutUvarint(buf, incarnation)
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, incarnation)
 	prefix = append(prefix, buf...)
 	return prefix
 }
-
-
 
 //
 //func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {

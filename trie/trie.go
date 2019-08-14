@@ -19,7 +19,9 @@ package trie
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -96,7 +98,6 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			fmt.Println("if")
 			value, gotValue = accounts.Account{}, false
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
@@ -182,10 +183,8 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		value, gotValue = t.get(child, key, pos+1)
 		return
 	case hashNode:
-		return nil, false
+		return n, false
 
-	case *accountNode:
-		return nil, false
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -239,22 +238,26 @@ func (rr *ResolveRequest) String() string {
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
 
-
 //bool
 //incarnation
 //addrHash+key
 
-
 // 1 key
 // composite key addrHash+key
-func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
+func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (bool, *ResolveRequest) {
 	var nd = t.root
-	hex := keybytesToHex(key)
+	hex := keybytesToHex(concat(contract, key...))
 	pos := 0
 	for {
 		switch n := nd.(type) {
 		case nil:
-			return false, nil
+			if contract == nil {
+				return true, t.NewResolveRequest(contract, hex, pos, nil)
+			}
+			prefix := make([]byte, len(contract)+8, len(contract)+8)
+			copy(prefix, contract)
+			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
+			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos, nil)
 		case *shortNode:
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
@@ -289,7 +292,14 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 		case accountNode:
 			return false, nil
 		case hashNode:
-			return true, t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
+			if contract == nil {
+				return true, t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
+			}
+			prefix := make([]byte, len(contract)+8, len(contract)+8)
+			copy(prefix, contract)
+			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
+			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos, common.CopyBytes(n))
+
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
@@ -563,13 +573,26 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 }
 
 func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+	if t.root == nil && len(hex) == 0 {
+		t.root = n
+		return
+	}
+	if sn, ok := n.(*shortNode); ok {
+		hex = concat(hex, compactToHex(sn.Key)...)
+		n = sn.Val
+	}
+	if t.root == nil {
+		t.root = &shortNode{Key: hexToCompact(hex), Val: n}
+		return
+	}
 	var nd = t.root
 	var parent node
+	var needInsert bool // node needs to be inserted rather than "hooked"
 	pos := 0
-	for pos < len(hex) {
+	for !needInsert && pos < len(hex) {
 		switch n := nd.(type) {
 		case nil:
-			return
+			needInsert = true
 		case *shortNode:
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
@@ -578,7 +601,7 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 				nd = n.Val
 				pos += matchlen
 			} else {
-				return
+				needInsert = true
 			}
 		case *duoNode:
 			t.touchFunc(hex[:pos], false)
@@ -593,13 +616,13 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 				nd = n.child2
 				pos++
 			default:
-				return
+				needInsert = true
 			}
 		case *fullNode:
 			t.touchFunc(hex[:pos], false)
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return
+				needInsert = true
 			} else {
 				parent = n
 				nd = child
@@ -612,6 +635,10 @@ func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
+	}
+	if needInsert {
+		_, t.root = t.insert(t.root, hex, 0, n, blockNr)
+		return
 	}
 	if _, ok := nd.(hashNode); !ok {
 		return

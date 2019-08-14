@@ -3,11 +3,12 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -173,7 +174,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
+	fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		tr.prec.Reset()
 		tr.prec.Write(tr.curr.Bytes())
@@ -185,11 +186,20 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+		var hookKey []byte
+		if tr.currentReq.contract == nil {
+			hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
+		} else {
+			contractHex := keybytesToHex(tr.currentReq.contract)
+			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+			hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
+		}
+		tr.currentReq.t.touchAll(hbRoot, hookKey, false)
+		tr.currentReq.t.hook(hookKey, hbRoot, tr.blockNr)
+		tr.hb.Reset()
+		if tr.currentReq.resolveHash != nil && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 			return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 		}
-		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
-		tr.hb.Reset()
 		tr.groups = 0
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
@@ -280,9 +290,18 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	hbRoot := tr.hb.root()
 	hbHash := tr.hb.rootHash()
-	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
-	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+	var hookKey []byte
+	if tr.currentReq.contract == nil {
+		hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
+	} else {
+		contractHex := keybytesToHex(tr.currentReq.contract)
+		contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble
+		hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
+		fmt.Printf("hookKey %x\n", hookKey)
+	}
+	tr.currentReq.t.touchAll(hbRoot, hookKey, false)
+	tr.currentReq.t.hook(hookKey, hbRoot, tr.blockNr)
+	if tr.currentReq.resolveHash != nil && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 	}
 	return err
