@@ -179,9 +179,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			defer returnHasherToPool(hasher)
 			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
 
-			if tr.currentReq.t != nil {
-				tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
-			}
+			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 		}
 		tr.hb.Reset()
 		tr.groups = nil
@@ -284,10 +282,8 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		defer returnHasherToPool(hasher)
 		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
 
-		if tr.currentReq.t != nil {
-			tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
-		}
+		tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
+		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 	}
 	return err
 }
