@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
@@ -255,9 +254,6 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		}
 		// Encode value
 		if vn, ok := n.Val.(valueNode); ok {
-			fmt.Printf("n.Key      %s\n", common.ToHex(n.Key))
-			fmt.Printf("vn          %s\n", common.ToHex(vn))
-
 			if len(vn) == 1 && vn[0] < 128 {
 				buffer[pos] = vn[0]
 				pos++
