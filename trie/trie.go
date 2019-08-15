@@ -135,6 +135,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 }
 
 func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
+	fmt.Println("get", key, pos)
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -148,6 +149,11 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		return enc, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
+		fmt.Println("short", nKey, n.Key)
+		fmt.Println("pos", pos)
+		fmt.Println("len(key)-pos < len(nKey)", len(key)-pos < len(nKey))
+		fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
+		fmt.Println("nKey", nKey, "key[pos:pos+len(nKey)", key[pos:pos+len(nKey)])
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
 			value, gotValue = nil, true
 		} else {
@@ -166,6 +172,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return
 	case *duoNode:
+		fmt.Println("duo")
 		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
@@ -199,6 +206,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
+	fmt.Println("update", key, "-", hex)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		t.root = newnode
@@ -722,11 +730,13 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			k := make([]byte, len(cnodeKey)+1)
 			k[0] = byte(pos)
 			copy(k[1:], cnodeKey)
+			fmt.Println("trie/trie.go:703", hexToCompact(k), k, pos)
 			return &shortNode{Key: hexToCompact(k), Val: short.Val}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
+	fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
 	return &shortNode{Key: hexToCompact([]byte{byte(pos)}), Val: cnode}
 }
 
@@ -742,7 +752,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 		if matchlen < len(nKey) {
 			updated = false
 			newNode = n // don't replace n on mismatch
-		} else if matchlen == len(key)-keyStart {
+		} else if matchlen == len(key) {
 			updated = true
 			newNode = nil // remove n entirely for whole matches
 		} else {
@@ -896,6 +906,200 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
+}
+
+func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr uint64) (updated bool, newNode node) {
+	if keyStart+1 == len(key) {
+		return true, nil
+	}
+
+	fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
+	var nn node
+	switch n := origNode.(type) {
+	case *shortNode:
+		nKey := compactToHex(n.Key)
+		fmt.Println("trie/trie.go:887 short", "key", nKey)
+		fmt.Println("trie/trie.go:888 value", n.Val)
+		matchlen := prefixLen(key[keyStart:], nKey)
+		fmt.Println("trie/trie.go:890 keys", key[keyStart:], nKey, matchlen)
+		switch {
+		case len(key) == keyStart:
+			updated = true
+			newNode = nil
+
+		case matchlen < len(nKey) && matchlen != len(key[keyStart:]):
+			fmt.Println("trie/trie.go:890 sh Не совпал. не наш узел")
+			updated = false
+			newNode = n
+		case matchlen == len(key):
+			fmt.Println("trie/trie.go:894 sh full match")
+			return true, nil
+		default:
+			fmt.Println("trie/trie.go:897 sh else match. ищем глубже поддерево")
+
+			if keyStart+1 == len(key) {
+				return true, nil
+			}
+			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(nKey), blockNr)
+			fmt.Println("trie/trie.go:900 sh updated", updated, nn)
+			if !updated {
+				newNode = n
+			} else {
+				fmt.Println("trie/trie.go:904 sh nn", nn)
+				if nn == nil {
+					newNode = nil
+				} else {
+					if shortChild, ok := nn.(*shortNode); ok {
+						fmt.Println("trie/trie.go:909 sh nn - short")
+						// Deleting from the subtrie reduced it to another
+						// short node. Merge the nodes to avoid creating a
+						// shortNode{..., shortNode{...}}. Use concat (which
+						// always creates a new slice) instead of append to
+						// avoid modifying n.Key since it might be shared with
+						// other nodes.
+						childKey := compactToHex(shortChild.Key)
+						newNode = &shortNode{Key: hexToCompact(concat(nKey, childKey...)), Val: shortChild.Val}
+					} else {
+						n.Val = nn
+						newNode = n
+					}
+				}
+			}
+		}
+		return updated, newNode
+
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		fmt.Println("trie/trie.go:930 duo", "keys", i1, i2)
+		switch key[keyStart] {
+		case i1:
+			fmt.Println("trie/trie.go:935 duo case 1 result", i1, keyStart)
+			updated, nn = t.deleteSubtree(n.child1, key, keyStart+1, blockNr)
+			fmt.Println("trie/trie.go:935 duo case 1 result", updated, nn == nil, keyStart)
+			if !updated {
+				newNode = n
+			} else {
+				if nn == nil {
+					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2), blockNr)
+				} else {
+					n.child1 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
+			fmt.Println("trie/trie.go:983 duo new node", newNode)
+		case i2:
+			fmt.Println("trie/trie.go:947 duo case 2 result", i2, keyStart)
+			updated, nn = t.deleteSubtree(n.child2, key, keyStart+1, blockNr)
+			fmt.Println("trie/trie.go:949 duo case 2", updated, nn == nil, keyStart)
+			if !updated {
+				newNode = n
+			} else {
+				if nn == nil {
+					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1), blockNr)
+
+				} else {
+					n.child2 = nn
+					n.flags.dirty = true
+					newNode = n
+				}
+			}
+			fmt.Println("trie/trie.go:1000 duo new node", newNode)
+
+		default:
+			fmt.Println("trie/trie.go:935 duo case default", i1, i2, key, keyStart)
+			updated = false
+			newNode = n
+		}
+
+		return updated, newNode
+
+	case *fullNode:
+		child := n.Children[key[keyStart]]
+		updated, nn = t.delete(child, key, keyStart+1, blockNr)
+		if !updated {
+			t.touchFunc(key[:keyStart], false)
+			newNode = n
+		} else {
+			n.Children[key[keyStart]] = nn
+			// Check how many non-nil entries are left after deleting and
+			// reduce the full node to a short node if only one entry is
+			// left. Since n must've contained at least two children
+			// before deletion (otherwise it would not be a full node) n
+			// can never be reduced to nil.
+			//
+			// When the loop is done, pos contains the index of the single
+			// value that is left in n or -2 if n contains at least two
+			// values.
+			var pos1, pos2 int
+			count := 0
+			for i, cld := range n.Children {
+				if cld != nil {
+					if count == 0 {
+						pos1 = i
+					}
+					if count == 1 {
+						pos2 = i
+					}
+					count++
+					if count > 2 {
+						break
+					}
+				}
+			}
+			if count == 1 {
+				t.touchFunc(key[:keyStart], true)
+				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1), blockNr)
+			} else if count == 2 {
+				t.touchFunc(key[:keyStart], false)
+				duo := &duoNode{}
+				if pos1 == int(key[keyStart]) {
+					duo.child1 = nn
+				} else {
+					duo.child1 = n.Children[pos1]
+				}
+				if pos2 == int(key[keyStart]) {
+					duo.child2 = nn
+				} else {
+					duo.child2 = n.Children[pos2]
+				}
+				duo.flags.dirty = true
+				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
+				newNode = duo
+			} else if count > 2 {
+				t.touchFunc(key[:keyStart], false)
+				// n still contains at least three values and cannot be reduced.
+				n.flags.dirty = true
+				newNode = n
+			}
+		}
+		return
+	case valueNode:
+		fmt.Println("trie/trie.go:1016 - valueNode")
+		updated = true
+		newNode = nil
+		return
+
+	case accountNode:
+		fmt.Println("trie/trie.go:1022 - accountNode")
+		updated = true
+		newNode = nil
+		return
+
+	case nil:
+		fmt.Println("trie/trie.go:1028 - nil")
+		updated = false
+		newNode = nil
+		return
+
+	default:
+		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
+	}
+}
+
+func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
+	hexPrefix := keybytesToHex(keyPrefix)
+	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
 }
 
 func (t *Trie) PrepareToRemove() {
