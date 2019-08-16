@@ -280,6 +280,9 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 			err = db.MultiWalk([]byte("ST"), startkeys, fixedbits, tr.Walker)
 		}
 	}
+	if err != nil {
+		return err
+	}
 	tr.prec.Reset()
 	tr.prec.Write(tr.curr.Bytes())
 	tr.curr.Reset()

@@ -68,7 +68,7 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		structLength += uint(storageSizeBytes + 1)
 	}
 
-	if forStorage {
+	if forStorage && a.Incarnation != 0 {
 		var incarnationsBytes int
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationsBytes = 0
@@ -97,7 +97,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 func (a *Account) encode(buffer []byte, forStorage bool) {
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
-	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 {
+	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 && a.Incarnation == 0 {
 		buffer[0] = 192
 		return
 	}
@@ -122,7 +122,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	}
 
 	var incarnationBytes int
-	if forStorage {
+	if forStorage && a.Incarnation != 0 {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationBytes = 0
 		} else {
@@ -193,7 +193,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += balanceBytes
 	}
 
-	if forStorage {
+	if forStorage && a.Incarnation != 0 {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			buffer[pos] = byte(a.Incarnation)
 		} else {

@@ -213,7 +213,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
-	fmt.Println("update", key, "-", hex)
+	//fmt.Println("update", key, "-", hex)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		t.root = newnode
@@ -740,13 +740,13 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 			k := make([]byte, len(cnodeKey)+1)
 			k[0] = byte(pos)
 			copy(k[1:], cnodeKey)
-			fmt.Println("trie/trie.go:703", hexToCompact(k), k, pos)
+			//fmt.Println("trie/trie.go:703", hexToCompact(k), k, pos)
 			return &shortNode{Key: hexToCompact(k), Val: short.Val}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
-	fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
+	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
 	return &shortNode{Key: hexToCompact([]byte{byte(pos)}), Val: cnode}
 }
 

@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"hash"
 	"io"
 	"math/big"
@@ -693,10 +692,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				//dataLength := account.EncodingLengthForHashing()
 				//data := make([]byte, dataLength)
 				//account.EncodeForHashing(data)
-				spew.Dump(account)
-
+				//spew.Dump(account)
+				//fmt.Printf("Adding account for %x: %x\n", addrHash, data)
 				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
 			} else {
+				//fmt.Printf("Deleting account for %x\n", addrHash)
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
 		}
@@ -1111,6 +1111,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
+	//fmt.Printf("UpdateAccountData (db) %x: %x\n", addrHash, data)
 	if err = dsw.tds.db.Put(AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
