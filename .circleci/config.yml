@@ -11,6 +11,7 @@ jobs:
 
     steps:
       - checkout
+      - run: git submodule update --init
       - run: mkdir -p $TEST_RESULTS
 
       - restore_cache:

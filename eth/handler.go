@@ -41,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -710,7 +711,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	switch msg.Code {
 	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStateRangesMsg
+		var request getStateRangesOrNodes
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -836,7 +837,47 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStateNodesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStateRangesOrNodes
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		n := len(request.Prefixes)
+
+		var response stateNodesMsg
+		response.ID = request.ID
+		response.Nodes = make([][]byte, n)
+
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			resolver := trie.NewResolver(0, true, block.NumberU64())
+			resolver.SetHistorical(true)
+
+			var resRequests []*trie.ResolveRequest
+			tr := trie.New(common.Hash{})
+
+			for i := 0; i < n; i++ {
+				prefix := request.Prefixes[i]
+				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
+				resolver.AddRequest(rr)
+				resRequests = append(resRequests, rr)
+			}
+
+			if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+				return err2
+			}
+
+			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
+				node := resRequests[i].NodeRLP
+				response.Nodes[i] = node
+				responseSize += len(node)
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
+
+		return p2p.Send(p.rw, StateNodesCode, response)
 
 	case StateNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")
@@ -861,7 +902,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			return err
 		}
 
-		// Gather bytecodes until the fetch or network limits is reached
+		// Gather bytecodes until the fetch or network limit is reached
 		var (
 			responseSize int
 			code         [][]byte

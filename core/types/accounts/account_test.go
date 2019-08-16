@@ -2,9 +2,10 @@ package accounts
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -15,8 +16,8 @@ func TestEmptyAccount(t *testing.T) {
 		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(big.Int),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -35,9 +36,9 @@ func TestEmptyAccount(t *testing.T) {
 }
 
 func TestEmptyAccount2(t *testing.T) {
-	encodedAccount:=Account{}
+	encodedAccount := Account{}
 
-	b:=make([]byte,encodedAccount.EncodingLengthForStorage())
+	b := make([]byte, encodedAccount.EncodingLengthForStorage())
 	encodedAccount.EncodeForStorage(b)
 
 	var decodedAccount Account
@@ -46,11 +47,10 @@ func TestEmptyAccount2(t *testing.T) {
 	}
 }
 
-
 // fails if run package tests
 // account_test.go:57: cant decode the account malformed RLP for Account(c064): prefixLength(1) + dataLength(0) != sliceLength(2) �d
 func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
-	a:=Account{}
+	a := Account{}
 
 	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount.B)
@@ -114,8 +114,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 		Incarnation: 5,
 	}
 
@@ -197,8 +197,8 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()

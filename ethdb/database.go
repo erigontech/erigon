@@ -22,7 +22,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"os"
 	"path"
 	"sync"
@@ -429,10 +428,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	sl := l + len(suffix)
 	keyBuffer := make([]byte, l+len(EndSuffix))
 	if err := db.db.View(func(tx *bolt.Tx) error {
-		pre := tx.Bucket([]byte("secure-key-"))
-		if pre == nil {
-			return nil
-		}
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
@@ -449,7 +444,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		goOn := true
 		var err error
 		for goOn { // k != nil
-			kFit := k != nil
+			fit := k != nil
 			hKFit := hK != nil
 			if fixedbytes > 0 {
 				cmp := 1
@@ -493,9 +488,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 					}
 					if cmp > 0 && hCmp > 0 {
 						keyIdx++
-						if _, err := walker(keyIdx, nil, nil); err != nil {
-							return err
-						}
 						if keyIdx == len(startkeys) {
 							return nil
 						}
@@ -503,7 +495,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						startkey = startkeys[keyIdx]
 					}
 				}
-				kFit = cmp == 0
+				fit = cmp == 0
 				hKFit = hCmp == 0
 			}
 			if hKFit && bytes.Compare(hK[l:], suffix) < 0 {
@@ -513,7 +505,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				continue
 			}
 			var cmp int
-			if !kFit {
+			if !fit {
 				if !hKFit {
 					goOn = false
 					break
@@ -526,26 +518,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				cmp = bytes.Compare(k, hK[:l])
 			}
 			if cmp < 0 {
-				if l == 32 {
-					//addr := pre.Get(k)
-					//fmt.Printf("c %x (%x): %x\n", k, addr, v)
-				} else {
-					//fmt.Printf("c %x: %x\n", k, v)
-				}
 				hK1, _ := hC1.Seek(k)
 				if bytes.HasPrefix(hK1, k) {
 					goOn, err = walker(keyIdx, k, v)
 				}
 			} else {
-				if hKFit && bytes.Equal(hK[l:], suffix) && timestamp == 3436035 {
-					if l == 32 {
-						addr, _ := pre.Get(hK[:l])
-						fmt.Printf("h %x (%x): %x\n", hK[:l], addr, hV)
-					} else {
-						item, _ := pre.Get(hK[20:52])
-						fmt.Printf("h %x (%x): %x\n", hK[:l], item, hV)
-					}
-				}
 				goOn, err = walker(keyIdx, hK[:l], hV)
 			}
 			if goOn {
@@ -562,12 +539,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		return err
 	}); err != nil {
 		return err
-	}
-	for keyIdx < len(startkeys) {
-		keyIdx++
-		if _, err := walker(keyIdx, nil, nil); err != nil {
-			return err
-		}
 	}
 	return nil
 }
