@@ -58,11 +58,18 @@ func (dbs *DbState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
 }
 
+// TODO: support incarnations
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) {
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(addr[:])
+	var addrHash common.Hash
+	h.sha.Read(addrHash[:])
 	st := llrb.New()
-	var s [20 + 32]byte
-	copy(s[:], addr[:])
-	copy(s[20:], start)
+	var s [32 + 8 + 32]byte
+	copy(s[:], addrHash[:])
+	copy(s[32+8:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
 	emptyHash := common.Hash{}
@@ -81,14 +88,14 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	}
 	numDeletes := st.Len() - overrideCounter
 	dbs.db.WalkAsOf(StorageBucket, StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addr[:]) {
+		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[20:]
+		seckey := ks[32+8:]
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
 		copy(si.seckey[:], seckey)
