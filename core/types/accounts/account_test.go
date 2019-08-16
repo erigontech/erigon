@@ -34,6 +34,33 @@ func TestEmptyAccount(t *testing.T) {
 	pool.PutBuffer(encodedAccount)
 }
 
+func TestEmptyAccount2(t *testing.T) {
+	encodedAccount:=Account{}
+
+	b:=make([]byte,encodedAccount.EncodingLengthForStorage())
+	encodedAccount.EncodeForStorage(b)
+
+	var decodedAccount Account
+	if err := decodedAccount.Decode(b); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+}
+
+
+// fails if run package tests
+// account_test.go:57: cant decode the account malformed RLP for Account(c064): prefixLength(1) + dataLength(0) != sliceLength(2) �d
+func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
+	a:=Account{}
+
+	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount.B)
+
+	var decodedAccount Account
+	if err := decodedAccount.Decode(encodedAccount.Bytes()); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+}
+
 func TestAccountEncodeWithCode(t *testing.T) {
 	a := Account{
 		Initialised: true,

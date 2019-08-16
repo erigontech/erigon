@@ -3,15 +3,14 @@ package accounts
 import (
 	"bytes"
 	"fmt"
-	"io"
-	"math/big"
-	"math/bits"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/valyala/bytebufferpool"
+	"io"
+	"math/big"
+	"math/bits"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -29,6 +28,7 @@ type Account struct {
 }
 
 var emptyCodeHash = crypto.Keccak256(nil)
+var emptyAccount = []byte{uint8(192), uint8(0)}
 var emptyRoot = common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
 var b128 = big.NewInt(128)
 
@@ -292,6 +292,9 @@ func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos in
 }
 
 func (a *Account) Decode(enc []byte) error {
+	if bytes.Equal(enc, emptyAccount) {
+		return nil
+	}
 	length, structure, pos := decodeLength(enc, 0)
 	if pos+length != len(enc) {
 		return fmt.Errorf(
@@ -514,7 +517,7 @@ func (a *Account) decodeRLPFromBytes(b []byte) error {
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return bytes.Equal(a.CodeHash[:], emptyCodeHash)
+	return bytes.Equal(a.CodeHash[:], emptyCodeHash) || a.CodeHash==common.Hash{}
 }
 
 func (a *Account) IsEmptyRoot() bool {
