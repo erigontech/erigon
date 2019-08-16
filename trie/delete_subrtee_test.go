@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestTrieDeleteSubtree_ValueNode(t *testing.T) {
+func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 	trie := newEmpty()
 	key := []byte{uint8(1)}
 	val := []byte("1")
@@ -26,6 +26,41 @@ func TestTrieDeleteSubtree_ValueNode(t *testing.T) {
 
 	//remove by key
 	trie.DeleteSubtree(key, 0)
+
+	v, _ = trie.Get(key)
+	t.Log(v)
+	if v != nil {
+		t.Fatal("must be false")
+	}
+}
+func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
+	trie := newEmpty()
+	key := []byte{uint8(1),uint8(1)}
+	prefix := []byte{uint8(1)}
+	val := []byte("1")
+
+	trie.Update(key, val, 0)
+	v, ok := trie.Get(key)
+	if ok == false || bytes.Equal(v, val) == false {
+		t.Fatal("incorrect")
+	}
+	//remove unknown
+	trie.DeleteSubtree([]byte{uint8(2)}, 0)
+	v, ok = trie.Get(key)
+	if ok == false || bytes.Equal(v, val) == false {
+		t.Fatal("incorrect")
+	}
+
+	//remove by key
+	fmt.Println("+Print")
+	trie.PrintTrie()
+	fmt.Println("-Print")
+	fmt.Println("+Delete")
+	trie.DeleteSubtree(prefix, 0)
+	fmt.Println("-Delete")
+	fmt.Println("+Print")
+	trie.PrintTrie()
+	fmt.Println("-Print")
 
 	v, _ = trie.Get(key)
 	t.Log(v)

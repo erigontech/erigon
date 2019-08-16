@@ -918,7 +918,8 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 	switch n := origNode.(type) {
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		fmt.Println("trie/trie.go:887 short", "key", nKey)
+		fmt.Println("trie/trie.go:887 short", "nKey", nKey)
+		fmt.Println("trie/trie.go:887 short", "key", key)
 		fmt.Println("trie/trie.go:888 value", n.Val)
 		matchlen := prefixLen(key[keyStart:], nKey)
 		fmt.Println("trie/trie.go:890 keys", key[keyStart:], nKey, matchlen)
@@ -1016,7 +1017,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 	case *fullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.delete(child, key, keyStart+1, blockNr)
+		updated, nn = t.deleteSubtree(child, key, keyStart+1, blockNr)
 		if !updated {
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
