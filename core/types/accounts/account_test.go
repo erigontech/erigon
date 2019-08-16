@@ -25,7 +25,7 @@ func TestEmptyAccount(t *testing.T) {
 	a.EncodeForStorage(encodedAccount.B)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount.B); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount.B); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -42,7 +42,7 @@ func TestEmptyAccount2(t *testing.T) {
 	encodedAccount.EncodeForStorage(b)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(b); err != nil {
+	if err := decodedAccount.DecodeForStorage(b); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 }
@@ -56,7 +56,7 @@ func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
 	a.EncodeForStorage(encodedAccount.B)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount.Bytes()); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount.Bytes()); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 }
@@ -76,7 +76,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -102,7 +102,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -124,7 +124,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -149,7 +149,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 	account.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -180,7 +180,7 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 		a.EncodeForStorage(encodedAccount)
 
 		var decodedAccount Account
-		if err := decodedAccount.Decode(encodedAccount); err != nil {
+		if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 			t.Fatal("cant decode the account", err, encodedAccount)
 		}
 
@@ -206,7 +206,7 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
