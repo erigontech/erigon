@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"hash"
 	"io"
 	"math/big"
@@ -690,11 +689,6 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				//dataLength := account.EncodingLengthForHashing()
-				//data := make([]byte, dataLength)
-				//account.EncodeForHashing(data)
-				spew.Dump(account)
-
 				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)

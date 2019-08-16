@@ -34,6 +34,20 @@ func TestEmptyAccount(t *testing.T) {
 	pool.PutBuffer(encodedAccount)
 }
 
+func TestEmptyAccount2(t *testing.T) {
+	a:=Account{}
+
+	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount.B)
+
+	var decodedAccount Account
+	if err := decodedAccount.Decode(encodedAccount.Bytes()); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	t.Log(decodedAccount)
+}
+
 func TestAccountEncodeWithCode(t *testing.T) {
 	a := Account{
 		Initialised: true,
