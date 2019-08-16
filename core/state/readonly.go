@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -134,7 +135,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
@@ -154,7 +155,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	var addhHash common.Hash
 	h.sha.Read(addhHash[:])
 
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addhHash, incarnation,buf), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addhHash, incarnation, buf), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

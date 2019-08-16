@@ -344,7 +344,7 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 	err := tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(value) > 0 {
-				if err := acc.Decode(value); err != nil {
+				if err := acc.DecodeForStorage(value); err != nil {
 					return false, err
 				}
 				if i < maxItems {
@@ -736,7 +736,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			copy(addrHash[:], key)
 			if len(value) > 0 {
 				var acc accounts.Account
-				if err := acc.Decode(value); err != nil {
+				if err := acc.DecodeForStorage(value); err != nil {
 					return err
 				}
 				b.accountUpdates[addrHash] = &acc
@@ -854,7 +854,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, nil
 	}
 	var a accounts.Account
-	if err := a.Decode(enc); err != nil {
+	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &a, nil

@@ -96,7 +96,7 @@ func NewStateless(stateRoot common.Hash,
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		var acc accounts.Account
-		if err := acc.Decode(enc); err != nil {
+		if err := acc.DecodeForHashing(enc); err != nil {
 			return nil, err
 		}
 		if acc.Root != st.Hash() {
@@ -308,7 +308,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		var acc accounts.Account
-		if err := acc.Decode(enc); err != nil {
+		if err := acc.DecodeForHashing(enc); err != nil {
 			return err
 		}
 		if acc.Root != st.Hash() {
@@ -355,7 +355,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForHashing(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil

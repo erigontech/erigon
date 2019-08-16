@@ -10,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/valyala/bytebufferpool"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -301,7 +300,15 @@ func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos in
 	}
 }
 
-func (a *Account) Decode(enc []byte) error {
+func (a *Account) DecodeForStorage(enc []byte) error {
+	return a.decode(enc, true)
+}
+
+func (a *Account) DecodeForHashing(enc []byte) error {
+	return a.decode(enc, false)
+}
+
+func (a *Account) decode(enc []byte, forStorage bool) error {
 	length, structure, pos := decodeLength(enc, 0)
 	if pos+length != len(enc) {
 		return fmt.Errorf(
@@ -386,7 +393,8 @@ func (a *Account) Decode(enc []byte) error {
 		}
 	}
 
-	if pos < len(enc) {
+	// Skip incarnation decoding if this is not read from storage
+	if forStorage && pos < len(enc) {
 		incarnationBytes, s, newPos := decodeLength(enc, pos)
 		if s {
 			return fmt.Errorf(
@@ -513,14 +521,7 @@ func (a *Account) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	err = a.Decode(raw)
-	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: raw})
-	return err
-}
-
-func (a *Account) decodeRLPFromBytes(b []byte) error {
-	err := a.Decode(b)
-	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: b})
+	err = a.DecodeForHashing(raw)
 	return err
 }
 

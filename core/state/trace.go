@@ -49,13 +49,13 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
 }
 
-func (tds *TraceDbState) ReadAccountStorage(address common.Address,incarnation uint64, key *common.Hash) ([]byte, error) {
+func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -68,8 +68,7 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address,incarnation u
 	var addhHash common.Hash
 	h.sha.Read(addhHash[:])
 
-
-	enc, err := tds.currentDb.Get(StorageBucket, GenerateCompositeStorageKey(addhHash,incarnation, buf))
+	enc, err := tds.currentDb.Get(StorageBucket, GenerateCompositeStorageKey(addhHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}

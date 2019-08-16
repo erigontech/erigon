@@ -196,7 +196,7 @@ func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Acc
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil

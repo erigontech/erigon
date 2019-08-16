@@ -133,12 +133,14 @@ type HashBuilder2 struct {
 	nodeStack []node       // Stack of nodes
 	value     *bytebufferpool.ByteBuffer
 	sha       keccakState
+	leafFunc  func(b []byte) (node, error)
 }
 
 // NewHashBuilder2 creates a new HashBuilder2
-func NewHashBuilder2() *HashBuilder2 {
+func NewHashBuilder2(leafFunc func(b []byte) (node, error)) *HashBuilder2 {
 	return &HashBuilder2{
-		sha: sha3.NewLegacyKeccak256().(keccakState),
+		sha:      sha3.NewLegacyKeccak256().(keccakState),
+		leafFunc: leafFunc,
 	}
 }
 
@@ -175,7 +177,11 @@ func (hb *HashBuilder2) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
 	hex := hb.hexKey.Bytes()
 	key := hex[len(hex)-length:]
-	s := &shortNode{Key: hexToCompact(key), Val: valueNode(common.CopyBytes(hb.value.B))}
+	val, err := hb.leafFunc(hb.value.B)
+	if err != nil {
+		panic(err)
+	}
+	s := &shortNode{Key: hexToCompact(key), Val: val}
 	hb.nodeStack = append(hb.nodeStack, s)
 	hb.leafHash(length)
 }

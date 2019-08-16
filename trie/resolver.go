@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -52,14 +53,26 @@ type TrieResolver struct {
 	a          accounts.Account
 }
 
-func NewResolver(topLevels int, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver {
+	var leafFunc func(b []byte) (node, error)
+	if forAccounts {
+		leafFunc = func(b []byte) (node, error) {
+			var acc accounts.Account
+			if err := acc.DecodeForHashing(b); err != nil {
+				return nil, err
+			}
+			return accountNode{&acc}, nil
+		}
+	} else {
+		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
+	}
 	tr := TrieResolver{
-		accounts:   accounts,
+		accounts:   forAccounts,
 		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder2(),
+		hb:         NewHashBuilder2(leafFunc),
 	}
 	return &tr
 }
@@ -221,7 +234,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		// Remember the current key and value
 		if tr.accounts {
-			if err := tr.a.Decode(v); err != nil {
+			if err := tr.a.DecodeForStorage(v); err != nil {
 				return false, err
 			}
 

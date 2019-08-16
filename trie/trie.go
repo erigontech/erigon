@@ -87,7 +87,7 @@ func (t *Trie) GetAccount(key []byte, blockNr uint64) (value *accounts.Account, 
 
 	hex := keybytesToHex(key)
 
-	acc, gotValue := t.getAcoount(t.root, hex, 0, blockNr)
+	acc, gotValue := t.getAccount(t.root, hex, 0, blockNr)
 	if acc != nil {
 		value = new(accounts.Account)
 		value.Copy(acc)
@@ -96,21 +96,19 @@ func (t *Trie) GetAccount(key []byte, blockNr uint64) (value *accounts.Account, 
 	return nil, gotValue
 }
 
-func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (value *accounts.Account, gotValue bool) {
+func (t *Trie) getAccount(origNode node, key []byte, pos int, blockNr uint64) (value *accounts.Account, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
-		return nil, false
-	case valueNode:
-		return nil, false
+		return nil, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = nil, false
+			value, gotValue = nil, true
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
 				value, gotValue = v.Account, true
 			} else {
-				value, gotValue = t.getAcoount(n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.getAccount(n.Val, key, pos+len(nKey), blockNr)
 			}
 		}
 		return
@@ -119,17 +117,17 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.getAcoount(n.child1, key, pos+1, blockNr)
+			value, gotValue = t.getAccount(n.child1, key, pos+1, blockNr)
 		case i2:
-			value, gotValue = t.getAcoount(n.child2, key, pos+1, blockNr)
+			value, gotValue = t.getAccount(n.child2, key, pos+1, blockNr)
 		default:
-			value, gotValue = nil, false
+			value, gotValue = nil, true
 		}
 		return
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.getAcoount(child, key, pos+1, blockNr)
+		value, gotValue = t.getAccount(child, key, pos+1, blockNr)
 		return
 	case hashNode:
 		return nil, false
@@ -142,7 +140,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 }
 
 func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
-	fmt.Println("get", key, pos)
+	//fmt.Println("get", key, pos)
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
@@ -156,11 +154,11 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		return enc, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		fmt.Println("short", nKey, n.Key)
-		fmt.Println("pos", pos)
-		fmt.Println("len(key)-pos < len(nKey)", len(key)-pos < len(nKey))
-		fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
-		fmt.Println("nKey", nKey, "key[pos:pos+len(nKey)", key[pos:pos+len(nKey)])
+		//fmt.Println("short", nKey, n.Key)
+		//fmt.Println("pos", pos)
+		//fmt.Println("len(key)-pos < len(nKey)", len(key)-pos < len(nKey))
+		//fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
+		//fmt.Println("nKey", nKey, "key[pos:pos+len(nKey)", key[pos:pos+len(nKey)])
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
 			value, gotValue = nil, true
 		} else {
@@ -179,7 +177,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return
 	case *duoNode:
-		fmt.Println("duo")
+		//fmt.Println("duo")
 		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
