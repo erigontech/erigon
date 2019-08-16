@@ -362,12 +362,19 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
+// TODO: Support incarnations
 func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	startkey := make([]byte, common.AddressLength+common.HashLength)
-	copy(startkey, address[:])
-	copy(startkey[common.AddressLength:], prefix.Data)
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addrHash common.Hash
+	h.sha.Read(addrHash[:])
+	startkey := make([]byte, common.HashLength+8+common.HashLength)
+	copy(startkey, addrHash[:])
+	copy(startkey[common.HashLength+8:], prefix.Data)
 
-	fixedbits := (common.AddressLength + uint(len(prefix.Data))) * 8
+	fixedbits := (common.HashLength + 8 + uint(len(prefix.Data))) * 8
 	if prefix.Odd {
 		fixedbits -= 4
 	}
