@@ -7,9 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/valyala/bytebufferpool"
 
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -37,7 +37,7 @@ type TrieResolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
 	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
 	requests   []*ResolveRequest
-	reqIndices []int // Indices pointing back to request slice from slices retured by PrepareResolveParams
+	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
 	keyIdx     int
 	currentReq *ResolveRequest // Request currently being handled
 	currentRs  *ResolveSet     // ResolveSet currently being used
@@ -112,9 +112,9 @@ func (tr *TrieResolver) Print() {
 	}
 }
 
-// Prepares information for the MultiWalk
+// PrepareResolveParams prepares information for the MultiWalk
 func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
-	// Remove requests strictly contained in the preceeding ones
+	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
 	tr.rss = nil
@@ -168,12 +168,19 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		if tr.curr.Len() > 0 {
 			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
 		}
-		hbRoot := tr.hb.root()
-		hbHash := tr.hb.rootHash()
-		if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-			return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+		if tr.hb.hasRoot() {
+			hbRoot := tr.hb.root()
+			hbHash := tr.hb.rootHash()
+			if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+				return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+			}
+
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+
+			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 		}
-		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
 		tr.hb.Reset()
 		tr.groups = nil
 		tr.prefix = nil
@@ -237,7 +244,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	var err error
 	if db == nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.acounts: %t\n", tr.accounts)
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.accounts: %t\n", tr.accounts)
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
@@ -264,12 +271,19 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	if tr.curr.Len() > 0 {
 		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
 	}
-	hbRoot := tr.hb.root()
-	hbHash := tr.hb.rootHash()
-	tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-	tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot, tr.blockNr)
-	if !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-		return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+	if tr.hb.hasRoot() {
+		hbRoot := tr.hb.root()
+		hbHash := tr.hb.rootHash()
+		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+		}
+
+		hasher := newHasher(false)
+		defer returnHasherToPool(hasher)
+		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+
+		tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
+		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 	}
 	return err
 }

@@ -188,6 +188,7 @@ type ResolveRequest struct {
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
+	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
@@ -479,7 +480,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	}
 }
 
-func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+func (t *Trie) hook(hex []byte, n node) {
 	var nd = t.root
 	var parent node
 	pos := 0

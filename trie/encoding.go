@@ -81,6 +81,20 @@ type Keybytes struct {
 	Terminating bool
 }
 
+// Nibbles returns the number of nibbles.
+func (x *Keybytes) Nibbles() int {
+	n := len(x.Data) * 2
+	if x.Odd {
+		n--
+	}
+	return n
+}
+
+// ToHex translates from KEYBYTES to HEX encoding.
+func (x *Keybytes) ToHex() []byte {
+	return compactToHex(x.ToCompact())
+}
+
 // ToCompact translates from KEYBYTES to COMPACT encoding.
 func (x *Keybytes) ToCompact() []byte {
 	l := len(x.Data)

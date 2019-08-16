@@ -712,7 +712,6 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	case GetStateRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStateRangesOrNodes
-		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -763,7 +762,6 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	case GetStorageRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
 		var request getStorageRangesMsg
-		// TODO [yperbasis] don't use Decode to avoid attacks with very large messages
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -840,46 +838,39 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 	case GetStateNodesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		if _, err := msgStream.List(); err != nil {
-			return err
-		}
-		var reqID uint64
-		if err := msgStream.Decode(&reqID); err != nil {
+		var request getStateRangesOrNodes
+		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
 
-		var blockHash common.Hash
-		if err := msgStream.Decode(&blockHash); err != nil {
-			return errResp(ErrDecode, "msg %v: %v", msg, err)
-		}
-
-		if _, err := msgStream.List(); err != nil {
-			return err
-		}
+		n := len(request.Prefixes)
 
 		var response stateNodesMsg
-		response.ID = reqID
+		response.ID = request.ID
+		response.Nodes = make([][]byte, n)
 
-		block := pm.blockchain.GetBlockByHash(blockHash)
+		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			// TODO [yperbasis] The concurrency, stupid!
-			tds, err := pm.blockchain.GetTrieDbState()
-			if err != nil {
-				return err
-			}
-			tr := tds.AccountTrie()
+			resolver := trie.NewResolver(0, true, block.NumberU64())
+			resolver.SetHistorical(true)
 
-			// Gather nodes until the fetch or network limit is reached
-			responseSize := 0
-			for responseSize < softResponseLimit && len(response.Nodes) < downloader.MaxStateFetch {
-				var prefix trie.Keybytes
-				if err := msgStream.Decode(&prefix); err == rlp.EOL {
-					break
-				} else if err != nil {
-					return errResp(ErrDecode, "msg %v: %v", msg, err)
-				}
-				node := tr.GetNode(prefix)
-				response.Nodes = append(response.Nodes, node)
+			var resRequests []*trie.ResolveRequest
+			tr := trie.New(common.Hash{})
+
+			for i := 0; i < n; i++ {
+				prefix := request.Prefixes[i]
+				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
+				resolver.AddRequest(rr)
+				resRequests = append(resRequests, rr)
+			}
+
+			if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+				return err2
+			}
+
+			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
+				node := resRequests[i].NodeRLP
+				response.Nodes[i] = node
 				responseSize += len(node)
 			}
 		} else {

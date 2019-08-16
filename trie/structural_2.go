@@ -456,3 +456,7 @@ func (hb *HashBuilder2) rootHash() common.Hash {
 func (hb *HashBuilder2) root() node {
 	return hb.nodeStack[0]
 }
+
+func (hb *HashBuilder2) hasRoot() bool {
+	return len(hb.nodeStack) > 0
+}

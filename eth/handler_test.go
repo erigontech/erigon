@@ -825,17 +825,19 @@ func TestFirehoseStateNodes(t *testing.T) {
 	pm, peer := setUpDummyAccountsForFirehose(t)
 	defer peer.close()
 
+	// ------------------------------------------------------------------
+	// Firstly test the latest state where account3 has double the amount
+	// ------------------------------------------------------------------
+
 	var request getStateRangesOrNodes
 	request.ID = 0
-	// TODO [yperbasis] make it work with non-latest blocks
 	request.Block = pm.blockchain.GetBlockByNumber(5).Hash()
 
 	// All known account keys start with either 0, 1, 4, or a.
 	// Warning: we assume that the key of miner's account doesn't start with 2 or 4.
 	prefixA := trie.Keybytes{Data: common.FromHex("40"), Odd: true}
 	prefixB := trie.Keybytes{Data: common.FromHex("20"), Odd: true}
-	addr3prefix := trie.Keybytes{Data: addrHash[3].Bytes(), Odd: false}
-	request.Prefixes = []trie.Keybytes{prefixA, prefixB, addr3prefix}
+	request.Prefixes = []trie.Keybytes{prefixA, prefixB}
 
 	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
 
@@ -880,7 +882,35 @@ func TestFirehoseStateNodes(t *testing.T) {
 
 	var reply stateNodesMsg
 	reply.ID = 0
-	reply.Nodes = [][]byte{rlpA, nil, node3rlp}
+	reply.Nodes = [][]byte{rlpA, nil}
+
+	err = p2p.ExpectMsg(peer.app, StateNodesCode, reply)
+	if err != nil {
+		t.Errorf("unexpected StateNodes response: %v", err)
+	}
+
+	// -------------------------------------------------------------------
+	// Secondly test the previous state where account3 has once the amount
+	// -------------------------------------------------------------------
+	request.ID = 1
+	request.Block = pm.blockchain.GetBlockByNumber(4).Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStateNodesCode, request))
+
+	account3.Balance.Set(frhsAmnt)
+	account3rlp, err = rlp.EncodeToBytes(&account3)
+	assert.NoError(t, err)
+
+	addr3Node[1] = account3rlp
+	node3rlp, err = rlp.EncodeToBytes(addr3Node)
+	assert.NoError(t, err)
+
+	branchNode[6] = crypto.Keccak256(node3rlp)
+	rlpA, err = rlp.EncodeToBytes(branchNode)
+	assert.NoError(t, err)
+
+	reply.ID = 1
+	reply.Nodes = [][]byte{rlpA, nil}
 
 	err = p2p.ExpectMsg(peer.app, StateNodesCode, reply)
 	if err != nil {
