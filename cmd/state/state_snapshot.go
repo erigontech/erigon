@@ -234,7 +234,7 @@ func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := account.Decode(v); err != nil {
+			if err := account.DecodeForStorage(v); err != nil {
 				return err
 			}
 			if !account.IsEmptyCodeHash() {
@@ -349,7 +349,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 					roots[address] = common.Hash{}
 				} else {
 					var account accounts.Account
-					if err = account.Decode(enc); err != nil {
+					if err = account.DecodeForStorage(enc); err != nil {
 						return err
 					}
 					roots[address] = account.Root

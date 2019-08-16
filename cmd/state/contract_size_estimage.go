@@ -44,7 +44,7 @@ func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 			return fmt.Errorf("Could find account %x\n", contract)
 		}
 		var account accounts.Account
-		if err := account.Decode(enc); err != nil {
+		if err := account.DecodeForStorage(enc); err != nil {
 			return err
 		}
 		storageRoot = account.Root
