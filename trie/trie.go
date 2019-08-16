@@ -80,28 +80,35 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 	return t.get(t.root, hex, 0)
 }
 
-func (t *Trie) GetAccount(key []byte, blockNr uint64) (value accounts.Account, gotValue bool) {
+func (t *Trie) GetAccount(key []byte, blockNr uint64) (value *accounts.Account, gotValue bool) {
 	if t.root == nil {
-		return accounts.Account{}, false
+		return nil, false
 	}
 
 	hex := keybytesToHex(key)
-	return t.getAcoount(t.root, hex, 0, blockNr)
+
+	acc, gotValue := t.getAcoount(t.root, hex, 0, blockNr)
+	if acc != nil {
+		value = new(accounts.Account)
+		value.Copy(acc)
+		return value, gotValue
+	}
+	return nil, gotValue
 }
 
-func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (value accounts.Account, gotValue bool) {
+func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (value *accounts.Account, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
-		return accounts.Account{}, false
+		return nil, false
 	case valueNode:
-		return accounts.Account{}, false
+		return nil, false
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = accounts.Account{}, false
+			value, gotValue = nil, false
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
-				value, gotValue = *v.Account, true
+				value, gotValue = v.Account, true
 			} else {
 				value, gotValue = t.getAcoount(n.Val, key, pos+len(nKey), blockNr)
 			}
@@ -116,7 +123,7 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 		case i2:
 			value, gotValue = t.getAcoount(n.child2, key, pos+1, blockNr)
 		default:
-			value, gotValue = accounts.Account{}, false
+			value, gotValue = nil, false
 		}
 		return
 	case *fullNode:
@@ -125,10 +132,10 @@ func (t *Trie) getAcoount(origNode node, key []byte, pos int, blockNr uint64) (v
 		value, gotValue = t.getAcoount(child, key, pos+1, blockNr)
 		return
 	case hashNode:
-		return accounts.Account{}, false
+		return nil, false
 
 	case *accountNode:
-		return *n.Account, true
+		return n.Account, true
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
 	}
@@ -215,13 +222,16 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	}
 }
 
-func (t *Trie) UpdateAccount(key []byte, value accounts.Account, blockNr uint64) {
+func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account, blockNr uint64) {
+	//make account copy. There are some pointer into big.Int
+	value := new(accounts.Account)
+	value.Copy(acc)
 	hex := keybytesToHex(key)
 	if t.root == nil {
-		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{&value}}
+		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{value}}
 		t.root = newnode
 	} else {
-		_, t.root = t.insert(t.root, hex, 0, accountNode{&value}, blockNr)
+		_, t.root = t.insert(t.root, hex, 0, accountNode{value}, blockNr)
 	}
 }
 
