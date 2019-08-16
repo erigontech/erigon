@@ -814,7 +814,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 		if matchlen < len(nKey) {
 			updated = false
 			newNode = n // don't replace n on mismatch
-		} else if matchlen == len(key) {
+		} else if matchlen == len(key)-keyStart {
 			updated = true
 			newNode = nil // remove n entirely for whole matches
 		} else {
