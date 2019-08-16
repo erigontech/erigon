@@ -42,6 +42,9 @@ func NewAccount() Account {
 func (a *Account) encodingLength(forStorage bool) uint {
 	var structLength uint
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
+	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 && a.Incarnation == 0 {
+		return 1
+	}
 
 	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 {
 		var balanceBytes int
@@ -75,7 +78,7 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		structLength += uint(storageSizeBytes + 1)
 	}
 
-	if forStorage && a.Incarnation != 0 {
+	if forStorage {
 		var incarnationsBytes int
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationsBytes = 0
@@ -129,7 +132,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	}
 
 	var incarnationBytes int
-	if forStorage && a.Incarnation != 0 {
+	if forStorage {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationBytes = 0
 		} else {
@@ -200,7 +203,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += balanceBytes
 	}
 
-	if forStorage && a.Incarnation != 0 {
+	if forStorage {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			buffer[pos] = byte(a.Incarnation)
 		} else {
@@ -316,9 +319,12 @@ func (a *Account) Decode(enc []byte) error {
 	a.Nonce = 0
 	a.Balance.SetInt64(0)
 	a.Root = emptyRoot
-	copy(a.CodeHash[:], emptyCodeHash.Bytes())
+	a.CodeHash = emptyCodeHash
 	a.StorageSize = 0
 	a.HasStorageSize = false
+	if length == 0 && structure {
+		return nil
+	}
 
 	if pos < len(enc) {
 		nonceBytes, s, newPos := decodeLength(enc, pos)
@@ -400,13 +406,11 @@ func (a *Account) Decode(enc []byte) error {
 		var incarnation uint64
 		if incarnationBytes == 0 && newPos == pos {
 			incarnation = uint64(enc[newPos])
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
 			pos = newPos + 1
 		} else {
 			for _, b := range enc[newPos : newPos+incarnationBytes] {
 				incarnation = (incarnation << 8) + uint64(b)
 			}
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
 			pos = newPos + incarnationBytes
 		}
 

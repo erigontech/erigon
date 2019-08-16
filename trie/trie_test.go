@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -28,6 +27,8 @@ import (
 	"reflect"
 	"testing"
 	"testing/quick"
+
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -120,8 +121,8 @@ func TestGetAccount(t *testing.T) {
 	key1 := []byte("acc1")
 	key2 := []byte("acc2")
 	key3 := []byte("unknown_acc")
-	trie.UpdateAccount(key1, acc1, 0)
-	trie.UpdateAccount(key2, acc2, 0)
+	trie.UpdateAccount(key1, &acc1, 0)
+	trie.UpdateAccount(key2, &acc2, 0)
 
 	accRes1, _ := trie.GetAccount(key1, 0)
 	if reflect.DeepEqual(acc1, accRes1) == false {

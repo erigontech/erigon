@@ -689,6 +689,9 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
+				//data := make([]byte, account.EncodingLengthForHashing())
+				//account.EncodeForHashing(data)
+				//fmt.Printf("Updating account for %x: %x\n", addrHash, data)
 				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
 			} else {
 				//fmt.Printf("Deleting account for %x\n", addrHash)
