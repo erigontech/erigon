@@ -800,16 +800,15 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 		}
 	}
-	for address, m := range tds.aggregateBuffer.storageUpdates {
+	for addressHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash, value := range m {
 			if len(value) == 0 {
-				if err := tds.db.Delete(StorageBucket, append(address[:], keyHash[:]...)); err != nil {
+				if err := tds.db.Delete(StorageBucket, append(addressHash[:], keyHash[:]...)); err != nil {
 					return err
 				}
 			} else {
-				//todo missed incarnation
-				//cKey:=GenerateCompositeStorageKey(address, keyHash)
-				if err := tds.db.Put(StorageBucket, append(address[:], keyHash[:]...), value); err != nil {
+				cKey:=GenerateCompositeStorageKey(addressHash.AddrHash(),addressHash.Incarnation(), keyHash)
+				if err := tds.db.Put(StorageBucket, cKey, value); err != nil {
 					return err
 				}
 			}
