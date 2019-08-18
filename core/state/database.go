@@ -458,16 +458,26 @@ func (tds *TrieDbState) buildStorageTouches() map[addressHashWithIncarnation]Has
 func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWithIncarnation]Hashes) error {
 	var resolver *trie.TrieResolver
 	for addressHash, hashes := range storageTouches {
-		var addressHash = addressHash // To avoid the value being overwritten, though still shared between continuations
+		var addrHash = addressHash.AddrHash()
+		acc, err := tds.readAccountDataByHash(addrHash)
+		if err != nil {
+			return err
+		}
+		if acc == nil || acc.Root == trie.EmptyRoot {
+			continue
+		}
 		for _, keyHash := range hashes {
 			//todo @need resolution for prefix
-			if need, req := tds.storageTrie.NeedResolution(addressHash.AddrHash().Bytes(), addressHash.Incarnation(), keyHash[:]); need {
+			if need, req := tds.storageTrie.NeedResolution(addrHash[:], acc.Incarnation, keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
 				}
 				//fmt.Printf("Storage resolve request: %s\n", req.String())
 				resolver.AddRequest(req)
+				//fmt.Printf("Need resolution for %x %x, %s\n", addrHash, keyHash, req.String())
+			} else {
+				//fmt.Printf("Don't need resolution for %x %x\n", addrHash, keyHash)
 			}
 		}
 	}
@@ -807,7 +817,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					return err
 				}
 			} else {
-				cKey:=GenerateCompositeStorageKey(addressHash.AddrHash(),addressHash.Incarnation(), keyHash)
+				cKey := GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)
 				if err := tds.db.Put(StorageBucket, cKey, value); err != nil {
 					return err
 				}
@@ -824,20 +834,8 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	return nil
 }
 
-func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	if tds.resolveReads {
-		if _, ok := tds.currentBuffer.accountUpdates[buf]; !ok {
-			tds.currentBuffer.accountReads[buf] = struct{}{}
-		}
-	}
-
-	acc, ok := tds.t.GetAccount(buf[:], tds.blockNr)
+func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
+	acc, ok := tds.t.GetAccount(addrHash[:], tds.blockNr)
 	if ok {
 		return acc, nil
 	}
@@ -846,12 +844,12 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	var err error
 	var enc []byte
 	if tds.historical {
-		enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], tds.blockNr+1)
+		enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
 		}
 	} else {
-		enc, err = tds.db.Get(AccountsBucket, buf[:])
+		enc, err = tds.db.Get(AccountsBucket, addrHash[:])
 		if err != nil {
 			enc = nil
 		}
@@ -864,6 +862,21 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 		return nil, err
 	}
 	return &a, nil
+}
+
+func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
+	h := newHasher()
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(address[:])
+	var addrHash common.Hash
+	h.sha.Read(addrHash[:])
+	if tds.resolveReads {
+		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
+			tds.currentBuffer.accountReads[addrHash] = struct{}{}
+		}
+	}
+	return tds.readAccountDataByHash(addrHash)
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -928,6 +941,13 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
+	acc, err := tds.readAccountDataByHash(addrHash)
+	if err != nil {
+		return nil, err
+	}
+	if acc == nil || acc.Root == trie.EmptyRoot {
+		return nil, nil
+	}
 	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level

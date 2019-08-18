@@ -143,7 +143,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 	//fmt.Println("get", key, pos)
 	switch n := (origNode).(type) {
 	case nil:
-		return nil, true
+		return nil, len(key) == 65 || pos > 64
 	case valueNode:
 		return n, true
 	case accountNode:
@@ -160,7 +160,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		//fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
 		//fmt.Println("nKey", nKey, "key[pos:pos+len(nKey)", key[pos:pos+len(nKey)])
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = nil, true
+			value, gotValue = nil, len(key) == 65 || pos+len(nKey) > 64
 		} else {
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
@@ -186,14 +186,16 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		case i2:
 			value, gotValue = t.get(n.child2, key, pos+1)
 		default:
-			value, gotValue = nil, true
+			value, gotValue = nil, len(key) == 65 || pos+1 > 64
 		}
 		return
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.get(child, key, pos+1)
-		return
+		if child == nil {
+			return nil, len(key) == 65 || pos+1 > 64
+		}
+		return t.get(child, key, pos+1)
 	case hashNode:
 		return n, false
 
@@ -316,16 +318,11 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 	var nd = t.root
 	hex := keybytesToHex(concat(contract, key...))
 	pos := 0
-	for {
+	need := false
+	for !need {
 		switch n := nd.(type) {
 		case nil:
-			if contract == nil {
-				return true, t.NewResolveRequest(contract, hex, pos, nil)
-			}
-			prefix := make([]byte, len(contract)+8, len(contract)+8)
-			copy(prefix, contract)
-			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
-			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos, nil)
+			need = true
 		case *shortNode:
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
@@ -333,7 +330,8 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 				nd = n.Val
 				pos += matchlen
 			} else {
-				return false, nil
+				pos += len(nKey)
+				need = true
 			}
 		case *duoNode:
 			i1, i2 := n.childrenIdx()
@@ -345,12 +343,14 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 				nd = n.child2
 				pos++
 			default:
-				return false, nil
+				pos++
+				need = true
 			}
 		case *fullNode:
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return false, nil
+				pos++
+				need = true
 			} else {
 				nd = child
 				pos++
@@ -366,12 +366,19 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 			prefix := make([]byte, len(contract)+8, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
-			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos, common.CopyBytes(n))
+			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
+	if contract == nil || pos > 2*len(contract) {
+		return false, nil
+	}
+	prefix := make([]byte, len(contract)+8, len(contract)+8)
+	copy(prefix, contract)
+	binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
+	return true, t.NewResolveRequest(prefix, keybytesToHex(key), 0, nil)
 }
 
 func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
