@@ -88,6 +88,7 @@ type stateObject struct {
 	dirtyCode bool // true if the code was updated
 	suicided  bool
 	deleted   bool
+	removeStorageTrie bool
 }
 
 // empty returns whether the account is considered empty.
@@ -157,6 +158,9 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
+	if so.removeStorageTrie {
+		return common.Hash{}
+	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
@@ -250,6 +254,11 @@ func (so *stateObject) SetBalance(amount *big.Int) {
 func (so *stateObject) setBalance(amount *big.Int) {
 	so.data.Balance.Set(amount)
 	so.data.Initialised = true
+}
+
+func (so *stateObject) setIncarnation(incarnation uint64) {
+	so.data.SetIncarnation(incarnation)
+	so.removeStorageTrie=true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures

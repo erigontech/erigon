@@ -67,6 +67,7 @@ type StateWriter interface {
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error
+	RemoveStorage(address common.Address, incarnation uint64)
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
