@@ -860,6 +860,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 			for i := 0; i < n; i++ {
 				prefix := request.Prefixes[i]
 				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
+				rr.RequiresRLP = true
 				resolver.AddRequest(rr)
 				resRequests = append(resRequests, rr)
 			}

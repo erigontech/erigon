@@ -175,9 +175,11 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 			}
 
-			hasher := newHasher(false)
-			defer returnHasherToPool(hasher)
-			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+			if tr.currentReq.RequiresRLP {
+				hasher := newHasher(false)
+				defer returnHasherToPool(hasher)
+				tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+			}
 
 			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
 		}
@@ -278,9 +280,11 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
 		}
 
-		hasher := newHasher(false)
-		defer returnHasherToPool(hasher)
-		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		if tr.currentReq.RequiresRLP {
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		}
 
 		tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
 		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
