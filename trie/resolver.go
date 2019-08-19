@@ -181,9 +181,11 @@ func (tr *TrieResolver) finaliseRoot() error {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
 
-		hasher := newHasher(false)
-		defer returnHasherToPool(hasher)
-		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		if tr.currentReq.RequiresRLP {
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		}
 		var hookKey []byte
 		if tr.currentReq.contract == nil {
 			hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
