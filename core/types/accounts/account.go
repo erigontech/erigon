@@ -268,6 +268,7 @@ func (a *Account) Copy(image *Account) {
 	a.Balance.Set(&image.Balance)
 	a.Root = image.Root
 	a.CodeHash = image.CodeHash
+	a.Incarnation = image.Incarnation
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
 }
@@ -547,6 +548,7 @@ func (a *Account) Equals(acc *Account) bool {
 		a.Root == acc.Root &&
 		a.Balance.Cmp(&acc.Balance) == 0 &&
 		a.Incarnation == acc.Incarnation &&
+		a.HasStorageSize == acc.HasStorageSize &&
 		a.StorageSize == acc.StorageSize
 
 }

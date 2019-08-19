@@ -125,16 +125,16 @@ func TestGetAccount(t *testing.T) {
 	trie.UpdateAccount(key2, &acc2, 0)
 
 	accRes1, _ := trie.GetAccount(key1, 0)
-	if reflect.DeepEqual(acc1, accRes1) == false {
-		t.Fatal("not equal", key1)
+	if !acc1.Equals(accRes1) {
+		t.Fatalf("not equal %x: %v vs %v", key1, acc1, accRes1)
 	}
 	accRes2, _ := trie.GetAccount(key2, 0)
-	if reflect.DeepEqual(acc2, accRes2) == false {
-		t.Fatal("not equal", key2)
+	if !acc2.Equals(accRes2) {
+		t.Fatalf("not equal %x: %v vs %v", key2, acc2, accRes2)
 	}
 	accRes3, ok := trie.GetAccount(key3, 0)
-	if ok == true {
-		t.Fatal("Should be false", key3, accRes3)
+	if !ok {
+		t.Fatal("Should be true", key3, accRes3)
 	}
 }
 
