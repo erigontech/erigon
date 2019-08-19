@@ -71,18 +71,20 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 }
 
 // Get returns the value for key stored in the trie.
-func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
+// agg is number of bytes of the key that are used to aggregate multiple
+// tries into one. If agg == 0, there is no aggregation
+func (t *Trie) Get(key []byte, agg int) (value []byte, gotValue bool) {
 	if t.root == nil {
-		return nil, false
+		return nil, agg == 0
 	}
 
 	hex := keybytesToHex(key)
-	return t.get(t.root, hex, 0)
+	return t.get(agg*2, t.root, hex, 0)
 }
 
 func (t *Trie) GetAccount(key []byte, blockNr uint64) (value *accounts.Account, gotValue bool) {
 	if t.root == nil {
-		return nil, false
+		return nil, true
 	}
 
 	hex := keybytesToHex(key)
@@ -102,14 +104,15 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int, blockNr uint64) (v
 		return nil, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = nil, true
-		} else {
+		matchlen := prefixLen(key[pos:], nKey)
+		if matchlen == len(nKey) {
 			if v, ok := n.Val.(accountNode); ok {
 				value, gotValue = v.Account, true
 			} else {
-				value, gotValue = t.getAccount(n.Val, key, pos+len(nKey), blockNr)
+				value, gotValue = t.getAccount(n.Val, key, pos+matchlen, blockNr)
 			}
+		} else {
+			value, gotValue = nil, true
 		}
 		return
 	case *duoNode:
@@ -139,11 +142,10 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int, blockNr uint64) (v
 	}
 }
 
-func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue bool) {
-	//fmt.Println("get", key, pos)
+func (t *Trie) get(aggNibbles int, origNode node, key []byte, pos int) (value []byte, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
-		return nil, len(key) == 65 || pos > 64
+		return nil, aggNibbles == 0 || pos > aggNibbles
 	case valueNode:
 		return n, true
 	case accountNode:
@@ -154,13 +156,9 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		return enc, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		//fmt.Println("short", nKey, n.Key)
-		//fmt.Println("pos", pos)
-		//fmt.Println("len(key)-pos < len(nKey)", len(key)-pos < len(nKey))
-		//fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
-		//fmt.Println("nKey", nKey, "key[pos:pos+len(nKey)", key[pos:pos+len(nKey)])
-		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = nil, len(key) == 65 || pos+len(nKey) > 64
+		matchlen := prefixLen(key[pos:], nKey)
+		if matchlen < len(nKey) {
+			value, gotValue = nil, aggNibbles == 0 || pos+matchlen > aggNibbles
 		} else {
 			if v, ok := n.Val.(valueNode); ok {
 				value, gotValue = v, true
@@ -172,7 +170,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 
 				return enc, true
 			} else {
-				value, gotValue = t.get(n.Val, key, pos+len(nKey))
+				value, gotValue = t.get(aggNibbles, n.Val, key, pos+matchlen)
 			}
 		}
 		return
@@ -182,20 +180,20 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.get(n.child1, key, pos+1)
+			value, gotValue = t.get(aggNibbles, n.child1, key, pos+1)
 		case i2:
-			value, gotValue = t.get(n.child2, key, pos+1)
+			value, gotValue = t.get(aggNibbles, n.child2, key, pos+1)
 		default:
-			value, gotValue = nil, len(key) == 65 || pos+1 > 64
+			value, gotValue = nil, aggNibbles == 0 || pos+1 > aggNibbles
 		}
 		return
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
 		if child == nil {
-			return nil, len(key) == 65 || pos+1 > 64
+			return nil, aggNibbles == 0 || pos+1 > aggNibbles
 		}
-		return t.get(child, key, pos+1)
+		return t.get(aggNibbles, child, key, pos+1)
 	case hashNode:
 		return n, false
 
@@ -328,33 +326,29 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 			matchlen := prefixLen(hex[pos:], nKey)
 			if matchlen == len(nKey) {
 				nd = n.Val
-				pos += matchlen
 			} else {
-				pos += len(nKey)
 				need = true
 			}
+			pos += matchlen
 		case *duoNode:
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
 				nd = n.child1
-				pos++
 			case i2:
 				nd = n.child2
-				pos++
 			default:
-				pos++
 				need = true
 			}
+			pos++
 		case *fullNode:
 			child := n.Children[hex[pos]]
 			if child == nil {
-				pos++
 				need = true
 			} else {
 				nd = child
-				pos++
 			}
+			pos++
 		case valueNode:
 			return false, nil
 		case accountNode:

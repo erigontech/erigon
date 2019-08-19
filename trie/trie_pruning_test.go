@@ -50,7 +50,7 @@ func TestOnePerTimestamp(t *testing.T) {
 	for n := uint32(30); n < uint32(59); n++ {
 		tp.SetBlockNr(timestamp)
 		binary.BigEndian.PutUint32(key[:], n)
-		tr.Get(key[:]) // Each key is added within a new generation
+		tr.Get(key[:], 0) // Each key is added within a new generation
 		timestamp++
 	}
 	prunableNodes := tr.CountPrunableNodes()

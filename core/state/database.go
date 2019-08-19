@@ -948,7 +948,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	if acc == nil || acc.Root == trie.EmptyRoot {
 		return nil, nil
 	}
-	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey))
+	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey), len(addrHash))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
