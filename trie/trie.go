@@ -188,6 +188,7 @@ type ResolveRequest struct {
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
+	RequiresRLP   bool     // whether to output node's RLP
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
