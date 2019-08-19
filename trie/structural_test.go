@@ -155,8 +155,8 @@ func TestResolution(t *testing.T) {
 	// Check the availibility of the resolved keys
 	for _, hex := range rs.hexes {
 		key := hexToKeybytes(hex)
-		v, found := tr1.Get(key, 0)
-		if !found || v == nil {
+		_, found := tr1.Get(key, 0)
+		if !found {
 			t.Errorf("Key %x was not resolved", hex)
 		}
 	}
@@ -288,9 +288,8 @@ func TestV2Resolution(t *testing.T) {
 	// Check the availibility of the resolved keys
 	for _, hex := range rs.hexes {
 		key := hexToKeybytes(hex)
-		v, found := tr1.Get(key, 0)
-		if !found || v == nil {
-			fmt.Printf("Key %x was not resolved: %t\n", hex, found)
+		_, found := tr1.Get(key, 0)
+		if !found {
 			t.Errorf("Key %x was not resolved", hex)
 		}
 	}
