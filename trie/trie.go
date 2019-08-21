@@ -336,27 +336,28 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 			switch hex[pos] {
 			case i1:
 				nd = n.child1
+				pos++
 			case i2:
 				nd = n.child2
+				pos++
 			default:
 				need = true
 			}
-			pos++
 		case *fullNode:
 			child := n.Children[hex[pos]]
 			if child == nil {
 				need = true
 			} else {
 				nd = child
+				pos++
 			}
-			pos++
 		case valueNode:
 			return false, nil
 		case accountNode:
 			return false, nil
 		case hashNode:
 			if contract == nil {
-				return true, t.NewResolveRequest(contract, hex, pos, common.CopyBytes(n))
+				return true, t.NewResolveRequest(nil, hex, pos, common.CopyBytes(n))
 			}
 			prefix := make([]byte, len(contract)+8, len(contract)+8)
 			copy(prefix, contract)
@@ -367,7 +368,7 @@ func (t *Trie) NeedResolution(contract []byte, incarnation uint64, key []byte) (
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	if contract == nil || pos > 2*len(contract) {
+	if contract == nil || pos >= 2*len(contract) {
 		return false, nil
 	}
 	prefix := make([]byte, len(contract)+8, len(contract)+8)
@@ -549,6 +550,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
+				if pos+matchlen+1 > len(key) {
+					fmt.Printf("nKey: %x, key: %x, pos: %d, matchlen: %d\n", nKey, key, pos, matchlen)
+				}
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				c2 = s2
 			}
@@ -711,11 +715,13 @@ func (t *Trie) hook(hex []byte, n node) {
 			n = sn.Val
 		}
 		_, t.root = t.insert(t.root, hex, 0, n, 0)
+		t.touchAll(n, hex, false)
 		return
 	}
 	if _, ok := nd.(hashNode); !ok {
 		return
 	}
+	t.touchAll(n, hex, false)
 	switch p := parent.(type) {
 	case nil:
 		t.root = n
@@ -806,6 +812,14 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
 func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (updated bool, newNode node) {
+	if keyStart == len(key) {
+		t.touchAll(origNode, key, true)
+		return true, nil
+	}
+	if key[keyStart] == 16 {
+		t.touchAll(origNode, key[:keyStart], true)
+		return true, nil
+	}
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
@@ -816,6 +830,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 			newNode = n // don't replace n on mismatch
 		} else if matchlen == len(key)-keyStart {
 			updated = true
+			t.touchAll(n.Val, key[:keyStart+len(nKey)], true)
 			newNode = nil // remove n entirely for whole matches
 		} else {
 			// The key is longer than n.Key. Remove the remaining suffix
@@ -857,7 +872,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, blockNr uint64) (
 				newNode = n
 			} else {
 				if nn == nil {
-					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2), blockNr)
 				} else {
 					t.touchFunc(key[:keyStart], false)

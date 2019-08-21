@@ -237,13 +237,14 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		return nil, err
 	}
 	t := trie.New(root)
+	storageTrie := trie.New(common.Hash{})
 	tp := trie.NewTriePruning(blockNr)
 
 	tds := TrieDbState{
 		t:             t,
 		db:            db,
 		blockNr:       blockNr,
-		storageTrie:   trie.New(common.Hash{}),
+		storageTrie:   storageTrie,
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
@@ -251,6 +252,9 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
+	})
+	storageTrie.SetTouchFunc(func(hex []byte, del bool) {
+		tp.TouchStorage(hex, del)
 	})
 	return &tds, nil
 }
@@ -1020,43 +1024,21 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 var prevMemStats runtime.MemStats
 
 func (tds *TrieDbState) PruneTries(print bool) {
-	/*
-		if print {
-			mainPrunable := tds.t.CountPrunableNodes()
-			prunableNodes := mainPrunable
-			for _, storageTrie := range tds.storageTries {
-				prunableNodes += storageTrie.CountPrunableNodes()
-			}
-			fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
-		}
-	*/
-	pruned, emptyAddresses, err := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen), func(contract common.Address) (*trie.Trie, error) {
-		//@todo(b00ris) impliment pruning for tds.storageTrie
-		//return tds.getStorageTrie(contract, false)
-		return nil, nil
-	})
-	if err != nil {
-		fmt.Printf("Error while pruning: %v\n", err)
+	if print {
+		mainPrunable := tds.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		prunableNodes += tds.storageTrie.CountPrunableNodes()
+		fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
 	}
+	pruned := tds.tp.PruneTo(tds.t, tds.storageTrie, int(MaxTrieCacheGen))
 	if !pruned {
 		//return
 	}
-	/*
-		if print {
-			mainPrunable := tds.t.CountPrunableNodes()
-			prunableNodes := mainPrunable
-			for _, storageTrie := range tds.storageTries {
-				prunableNodes += storageTrie.CountPrunableNodes()
-			}
-			fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
-		}
-	*/
-	// Storage tries that were completely pruned
-	for _, address := range emptyAddresses {
-
-		//@todo(b00ris) Remove it from tds.storageTrie
-		//delete(tds.storageTries, address)
-		_ = address
+	if print {
+		mainPrunable := tds.t.CountPrunableNodes()
+		prunableNodes := mainPrunable
+		prunableNodes += tds.storageTrie.CountPrunableNodes()
+		fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)

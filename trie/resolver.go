@@ -194,7 +194,6 @@ func (tr *TrieResolver) finaliseRoot() error {
 			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
 			hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
 		}
-		tr.currentReq.t.touchAll(hbRoot, hookKey, false)
 		tr.currentReq.t.hook(hookKey, hbRoot)
 		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)

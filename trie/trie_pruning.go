@@ -27,12 +27,12 @@ import (
 )
 
 type TriePruning struct {
-	storageTimestamps      map[common.Address]map[string]uint64
+	storageTimestamps      map[string]uint64
 	accountTimestamps      map[string]uint64
 	accountTimestampsMutex sync.RWMutex
 
 	// Maps timestamp (uint64) to address of the contract to set of prefixes of nodes (string)
-	storage map[uint64]map[common.Address]map[string]struct{}
+	storage map[uint64]map[string]struct{}
 
 	// Maps timestamp (uint64) to set of prefixes of nodees (string)
 	accounts      map[uint64]map[string]struct{}
@@ -55,9 +55,9 @@ func NewTriePruning(oldestGeneration uint64) *TriePruning {
 	return &TriePruning{
 		oldestGeneration:  oldestGeneration,
 		blockNr:           oldestGeneration,
-		storageTimestamps: make(map[common.Address]map[string]uint64),
+		storageTimestamps: make(map[string]uint64),
 		accountTimestamps: make(map[string]uint64),
-		storage:           make(map[uint64]map[common.Address]map[string]struct{}),
+		storage:           make(map[uint64]map[string]struct{}),
 		accounts:          make(map[uint64]map[string]struct{}),
 		generationCounts:  make(map[uint64]int),
 	}
@@ -72,42 +72,31 @@ func (tp *TriePruning) BlockNr() uint64 {
 }
 
 // Updates a node to the current timestamp
-// contract is effectively address of the smart contract
 // hex is the prefix of the key
 // parent is the node that needs to be modified to unload the touched node
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
-func (tp *TriePruning) touchContract(contract common.Address, hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
+func (tp *TriePruning) touchStorage(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
+	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
 	}
 	if !del {
 		var newMap map[string]struct{}
 		if m, ok := tp.storage[newTimestamp]; ok {
-			if m1, ok1 := m[contract]; ok1 {
-				newMap = m1
-			} else {
-				newMap = make(map[string]struct{})
-				m[contract] = newMap
-			}
+			newMap = m
 		} else {
-			m = make(map[common.Address]map[string]struct{})
 			newMap = make(map[string]struct{})
-			m[contract] = newMap
-			tp.storage[newTimestamp] = m
+			tp.storage[newTimestamp] = newMap
 		}
+
 		newMap[hexS] = struct{}{}
 	}
 	if exists {
 		if m, ok := tp.storage[prevTimestamp]; ok {
-			if m1, ok1 := m[contract]; ok1 {
-				delete(m1, hexS)
-				if len(m1) == 0 {
-					delete(m, contract)
-					if len(m) == 0 {
-						delete(tp.storage, prevTimestamp)
-					}
-				}
+			delete(m, hexS)
+			if len(m) == 0 {
+				delete(tp.storage, prevTimestamp)
 			}
 		}
 	}
@@ -181,37 +170,28 @@ func (tp *TriePruning) Timestamp(hex []byte) uint64 {
 }
 
 // Returns timestamp for the given prunable node
-func (tp *TriePruning) TimestampContract(contract common.Address, hex []byte) uint64 {
-	if m, ok := tp.storageTimestamps[contract]; ok {
-		return m[string(hex)]
-	}
-	return 0
+func (tp *TriePruning) TimestampContract(hex []byte) uint64 {
+	ts := tp.storageTimestamps[string(hex)]
+	return ts
 }
 
-func (tp *TriePruning) TouchContract(contract common.Address, hex []byte, del bool) {
+func (tp *TriePruning) TouchStorage(hex []byte, del bool) {
 	var exists = false
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
-	if m, ok := tp.storageTimestamps[contract]; ok {
-		if m1, ok1 := m[hexS]; ok1 {
-			prevTimestamp = m1
-			exists = true
-			if del {
-				delete(m, hexS)
-				if len(m) == 0 {
-					delete(tp.storageTimestamps, contract)
-				}
-			}
+
+	if m, ok := tp.storageTimestamps[hexS]; ok {
+		prevTimestamp = m
+		exists = true
+		if del {
+			delete(tp.storageTimestamps, hexS)
 		}
-		if !del {
-			m[hexS] = tp.blockNr
-		}
-	} else if !del {
-		m = make(map[string]uint64)
-		tp.storageTimestamps[contract] = m
-		m[hexS] = tp.blockNr
 	}
-	tp.touchContract(contract, hexS, exists, prevTimestamp, del, tp.blockNr)
+	if !del {
+		tp.storageTimestamps[hexS] = tp.blockNr
+	}
+
+	tp.touchStorage(hexS, exists, prevTimestamp, del, tp.blockNr)
 }
 
 // Updates a node to the current timestamp
@@ -262,32 +242,15 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 
 // Prunes all nodes that are older than given timestamp
 func (tp *TriePruning) PruneToTimestamp(
-	mainTrie *Trie,
+	accountsTrie *Trie,
+	storageTrie *Trie,
 	targetTimestamp uint64,
-	storageTrieFunc func(contract common.Address) (*Trie, error),
-) ([]common.Address, error) {
+) {
 	// Remove (unload) nodes from storage tries and account trie
-	aggregateStorage := make(map[common.Address]map[string]struct{})
 	aggregateAccounts := make(map[string]struct{})
+	aggregateStorage := make(map[string]struct{})
 	for gen := tp.oldestGeneration; gen < targetTimestamp; gen++ {
 		tp.nodeCount -= tp.generationCounts[gen]
-		delete(tp.generationCounts, gen)
-		if m, ok := tp.storage[gen]; ok {
-			for address, m1 := range m {
-				var aggregateM map[string]struct{}
-				if m2, ok2 := aggregateStorage[address]; ok2 {
-					aggregateM = m2
-				} else {
-					aggregateM = make(map[string]struct{})
-					aggregateStorage[address] = aggregateM
-				}
-				for hexS := range m1 {
-					aggregateM[hexS] = struct{}{}
-				}
-			}
-		}
-		delete(tp.storage, gen)
-
 		tp.accountsMutex.Lock()
 		if m, ok := tp.accounts[gen]; ok {
 			for hexS := range m {
@@ -296,54 +259,39 @@ func (tp *TriePruning) PruneToTimestamp(
 		}
 		delete(tp.accounts, gen)
 		tp.accountsMutex.Unlock()
+		if m, ok := tp.storage[gen]; ok {
+			for hexS := range m {
+				aggregateStorage[hexS] = struct{}{}
+			}
+		}
+		delete(tp.storage, gen)
 	}
-	var emptyAddresses []common.Address
-	h := newHasher(true) // Create hasher appropriate for storage tries first
+	h := newHasher(false)
 	defer returnHasherToPool(h)
-	for address, m := range aggregateStorage {
-		storageTrie, err := storageTrieFunc(address)
-		if err != nil {
-			return nil, err
-		}
-		empty := pruneMap(storageTrie, m, h)
-		if empty {
-			emptyAddresses = append(emptyAddresses, address)
-		}
-	}
-	// Change hasher to be appropriate for the main trie
-	h.encodeToBytes = false
-	pruneMap(mainTrie, aggregateAccounts, h)
+	pruneMap(accountsTrie, aggregateAccounts, h)
 	// Remove fom the timestamp structure
-
 	tp.accountTimestampsMutex.Lock()
 	for hexS := range aggregateAccounts {
 		delete(tp.accountTimestamps, hexS)
 	}
-	for address, m := range aggregateStorage {
-		if m1, ok := tp.storageTimestamps[address]; ok {
-			for hexS := range m {
-				delete(m1, hexS)
-			}
-			if len(m1) == 0 {
-				delete(tp.storageTimestamps, address)
-			}
-		}
-	}
 	tp.accountTimestampsMutex.Unlock()
-
+	pruneMap(storageTrie, aggregateAccounts, h)
+	// Remove fom the timestamp structure
+	for hexS := range aggregateStorage {
+		delete(tp.storageTimestamps, hexS)
+	}
 	tp.oldestGeneration = targetTimestamp
-	return emptyAddresses, nil
 }
 
 // Prunes mininum number of generations necessary so that the total
 // number of prunable nodes is at most `targetNodeCount`
 func (tp *TriePruning) PruneTo(
-	mainTrie *Trie,
+	accountsTrie *Trie,
+	storageTrie *Trie,
 	targetNodeCount int,
-	storageTrieFunc func(contract common.Address) (*Trie, error),
-) (bool, []common.Address, error) {
+) bool {
 	if tp.nodeCount <= targetNodeCount {
-		return false, nil, nil
+		return false
 	}
 	excess := tp.nodeCount - targetNodeCount
 	prunable := 0
@@ -353,11 +301,8 @@ func (tp *TriePruning) PruneTo(
 		pruneGeneration++
 	}
 	//fmt.Printf("Will prune to generation %d, nodes to prune: %d, excess %d\n", pruneGeneration, prunable, excess)
-	emptyAddresses, err := tp.PruneToTimestamp(mainTrie, pruneGeneration, storageTrieFunc)
-	if err != nil {
-		return false, nil, err
-	}
-	return true, emptyAddresses, nil
+	tp.PruneToTimestamp(accountsTrie, storageTrie, pruneGeneration)
+	return true
 }
 
 func (tp *TriePruning) NodeCount() int {

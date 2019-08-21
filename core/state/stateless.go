@@ -79,9 +79,9 @@ func NewStateless(stateRoot common.Hash,
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		contractCopy := contract
+		//contractCopy := contract
 		touchFunc := func(hex []byte, del bool) {
-			tp.TouchContract(contractCopy, hex, del)
+			//tp.TouchStorage(contractCopy, hex, del)
 		}
 		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(touchFunc, blockNr, true,
 			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
@@ -199,9 +199,10 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 			}
 			aContracts = append(aContracts, contract)
 		} else {
-			contractCopy := contract
+			//contractCopy := contract
 			timeFunc := func(hex []byte) uint64 {
-				return s.tp.TimestampContract(contractCopy, hex)
+				return 0
+				//return s.tp.TimestampContract(contractCopy, hex)
 			}
 			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(timeFunc, cuttime,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:],
@@ -292,9 +293,9 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[contract]; !ok {
-			contractCopy := contract
+			//contractCopy := contract
 			touchFunc := func(hex []byte, del bool) {
-				s.tp.TouchContract(contractCopy, hex, del)
+				//s.tp.TouchContract(contractCopy, hex, del)
 			}
 			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(touchFunc, blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
@@ -366,7 +367,7 @@ func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.T
 	if !ok && create {
 		t = trie.New(common.Hash{})
 		t.SetTouchFunc(func(hex []byte, del bool) {
-			s.tp.TouchContract(address, hex, del)
+			//s.tp.TouchContract(address, hex, del)
 		})
 		s.storageTries[address] = t
 	}
@@ -590,12 +591,12 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		}
 		fmt.Printf("[Before pruning to %d] Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
 	}
-	emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
-		return s.getStorageTrie(contract, false)
-	})
-	if err != nil {
-		fmt.Printf("Error while pruning: %v\n", err)
-	}
+	//emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
+	//	return s.getStorageTrie(contract, false)
+	//})
+	//if err != nil {
+	//	fmt.Printf("Error while pruning: %v\n", err)
+	//}
 	if trace {
 		mainPrunable := s.t.CountPrunableNodes()
 		prunableNodes := mainPrunable
@@ -604,9 +605,9 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		}
 		fmt.Printf("[After pruning to %d Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
 	}
-	for _, address := range emptyAddresses {
-		delete(s.storageTries, address)
-	}
+	//for _, address := range emptyAddresses {
+	//	delete(s.storageTries, address)
+	//}
 	if m, ok := s.timeToCodeHash[oldest-1]; ok {
 		for codeHash := range m {
 			if trace {
