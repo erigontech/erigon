@@ -231,9 +231,13 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher, aggNibbles int) bool {
 	sort.Strings(hexes)
 	for i, hex := range hexes {
 		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes are pruned, there is no need to prune descendants
-			t.unload([]byte(hex), h, aggNibbles)
-			if len(hex) == 0 {
-				empty = true
+			if aggNibbles != 0 && len(hex) < aggNibbles {
+				_, t.root = t.delete(t.root, []byte(hex), 0, 0)
+			} else {
+				t.unload([]byte(hex), h)
+				if len(hex) == 0 {
+					empty = true
+				}
 			}
 		}
 	}
@@ -275,7 +279,7 @@ func (tp *TriePruning) PruneToTimestamp(
 		delete(tp.accountTimestamps, hexS)
 	}
 	tp.accountTimestampsMutex.Unlock()
-	pruneMap(storageTrie, aggregateAccounts, h, 64)
+	pruneMap(storageTrie, aggregateStorage, h, 64)
 	// Remove fom the timestamp structure
 	for hexS := range aggregateStorage {
 		delete(tp.storageTimestamps, hexS)
