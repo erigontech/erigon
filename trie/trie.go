@@ -1266,9 +1266,10 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	return true, hn
 }
 
-func (t *Trie) unload(hex []byte, h *hasher) {
+func (t *Trie) unload(hex []byte, h *hasher, aggNibbles int) {
 	nd := t.root
 	var parent node
+	var grandParent node
 	pos := 0
 	for pos < len(hex) {
 		switch n := nd.(type) {
@@ -1278,6 +1279,7 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 			nKey := compactToHex(n.Key)
 			matchlen := prefixLen(hex[pos:], nKey)
 			if matchlen == len(nKey) {
+				grandParent = parent
 				parent = n
 				nd = n.Val
 				pos += matchlen
@@ -1288,10 +1290,12 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
+				grandParent = parent
 				parent = n
 				nd = n.child1
 				pos++
 			case i2:
+				grandParent = parent
 				parent = n
 				nd = n.child2
 				pos++
@@ -1302,11 +1306,11 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 			child := n.Children[hex[pos]]
 			if child == nil {
 				return
-			} else {
-				parent = n
-				nd = child
-				pos++
 			}
+			grandParent = parent
+			parent = n
+			nd = child
+			pos++
 		case valueNode:
 			return
 		case accountNode:
@@ -1320,25 +1324,48 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 	if _, ok := nd.(hashNode); ok {
 		return
 	}
-	var hn common.Hash
-	h.hash(nd, len(hex) == 0, hn[:])
-	hnode := hashNode(hn[:])
-	switch p := parent.(type) {
-	case nil:
-		t.root = hnode
-	case *shortNode:
-		p.Val = hnode
-	case *duoNode:
-		i1, i2 := p.childrenIdx()
-		switch hex[len(hex)-1] {
-		case i1:
-			p.child1 = hnode
-		case i2:
-			p.child2 = hnode
+	if pos >= aggNibbles {
+		var hn common.Hash
+		h.hash(nd, len(hex) == 0, hn[:])
+		hnode := hashNode(hn[:])
+		switch p := parent.(type) {
+		case nil:
+			t.root = hnode
+		case *shortNode:
+			p.Val = hnode
+		case *duoNode:
+			i1, i2 := p.childrenIdx()
+			switch hex[len(hex)-1] {
+			case i1:
+				p.child1 = hnode
+			case i2:
+				p.child2 = hnode
+			}
+		case *fullNode:
+			idx := hex[len(hex)-1]
+			p.Children[idx] = hnode
 		}
-	case *fullNode:
-		idx := hex[len(hex)-1]
-		p.Children[idx] = hnode
+	} else {
+		if _, ok := parent.(*shortNode); ok {
+			parent = grandParent
+		}
+		switch p := parent.(type) {
+		case nil:
+			t.root = nil
+		case *duoNode:
+			i1, i2 := p.childrenIdx()
+			switch hex[len(hex)-1] {
+			case i1:
+				p.child1 = nil
+				p.mask &^= (uint32(1) << i1)
+			case i2:
+				p.child2 = nil
+				p.mask &^= (uint32(1) << i2)
+			}
+		case *fullNode:
+			idx := hex[len(hex)-1]
+			p.Children[idx] = nil
+		}
 	}
 }
 
