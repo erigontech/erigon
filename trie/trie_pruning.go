@@ -232,7 +232,7 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher, aggNibbles int) bool {
 	for i, hex := range hexes {
 		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes are pruned, there is no need to prune descendants
 			if aggNibbles != 0 && len(hex) < aggNibbles {
-				_, t.root = t.delete(t.root, []byte(hex), 0, 0)
+				_, t.root = t.delete(t.root, []byte(hex), 0, false)
 			} else {
 				t.unload([]byte(hex), h)
 				if len(hex) == 0 {
