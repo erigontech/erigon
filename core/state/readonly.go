@@ -212,3 +212,7 @@ func (dbs *DbState) WriteAccountStorage(address common.Address, incarnation uint
 	t.ReplaceOrInsert(i)
 	return nil
 }
+func (dbs *DbState) RemoveStorage(address common.Address, incarnation uint64) error {
+	dbs.storage[address] = nil
+	return nil
+}

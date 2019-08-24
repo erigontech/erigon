@@ -784,6 +784,11 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 				return err
 			}
 		}
+		if stateObject.removeStorageTrie {
+			if err := stateWriter.RemoveStorage(addr, stateObject.data.GetIncarnation()); err!=nil {
+				return err
+			}
+		}
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.

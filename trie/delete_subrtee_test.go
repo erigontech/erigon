@@ -33,6 +33,75 @@ func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 		t.Fatal("must be false")
 	}
 }
+
+func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
+	trie := newEmpty()
+	addr1:=common.HexToAddress("0x6295ee1b4f6dd65047762f924ecd367c17eabf8f")
+	addr2:=common.HexToAddress("0xfc597da4849c0d854629216d9e297bbca7bb4616")
+
+	key := []byte{uint8(1)}
+	val := []byte{uint8(1)}
+
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+	h.sha.Reset()
+	h.sha.Write(key[:])
+	var keyHash common.Hash
+	h.sha.Read(keyHash[:])
+
+	h.sha.Reset()
+	h.sha.Write(addr1[:])
+	var buf1 common.Hash
+	h.sha.Read(buf1[:])
+
+	h.sha.Reset()
+	h.sha.Write(addr2[:])
+	var buf2 common.Hash
+	h.sha.Read(buf2[:])
+
+
+
+	key1:=GenerateCompositeTrieKey(buf1, keyHash)
+	key2:=GenerateCompositeTrieKey(buf2, keyHash)
+	trie.Update(key1, val, 0)
+	trie.Update(key2, val, 0)
+
+	trie.PrintTrie()
+	trie.DeleteSubtree(buf1.Bytes(),0)
+	trie.PrintTrie()
+
+	v, ok := trie.Get(key2)
+	if ok == false || bytes.Equal(v, val) == false {
+		t.Fatal("incorrect")
+	}
+	v, _ = trie.Get(key1)
+	if v!=nil {
+		t.Fatal("must be nil")
+	}
+	////remove unknown
+	//trie.DeleteSubtree([]byte{uint8(2)}, 0)
+	//v, ok = trie.Get(key)
+	//if ok == false || bytes.Equal(v, val) == false {
+	//	t.Fatal("incorrect")
+	//}
+	//
+	////remove by key
+	//trie.DeleteSubtree(key, 0)
+	//
+	//v, _ = trie.Get(key)
+	//t.Log(v)
+	//if v != nil {
+	//	t.Fatal("must be false")
+	//}
+}
+
+func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
+	compositeKey = append(compositeKey, addressHash[:]...)
+	compositeKey = append(compositeKey, seckey[:]...)
+	return compositeKey
+}
+
 func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
 	trie := newEmpty()
 	key := []byte{uint8(1),uint8(1)}

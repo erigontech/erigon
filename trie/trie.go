@@ -262,7 +262,7 @@ func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
-	//fmt.Println("update", key, "-", hex)
+	fmt.Println("update", key, "-", hex)
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		t.root = newnode
@@ -1031,12 +1031,12 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
-		fmt.Println("trie/trie.go:930 duo", "keys", i1, i2)
+		fmt.Println("trie/trie.go:1034 duo", "keys", i1, i2)
 		switch key[keyStart] {
 		case i1:
-			fmt.Println("trie/trie.go:935 duo case 1 result", i1, keyStart)
+			fmt.Println("trie/trie.go:1037 duo case 1 result", i1, keyStart)
 			updated, nn = t.deleteSubtree(n.child1, key, keyStart+1, blockNr)
-			fmt.Println("trie/trie.go:935 duo case 1 result", updated, nn == nil, keyStart)
+			fmt.Println("trie/trie.go:1039 duo case 1 result", updated, nn == nil, keyStart)
 			if !updated {
 				newNode = n
 			} else {
@@ -1048,11 +1048,11 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = n
 				}
 			}
-			fmt.Println("trie/trie.go:983 duo new node", newNode)
+			fmt.Println("trie/trie.go:1051 duo new node", newNode)
 		case i2:
-			fmt.Println("trie/trie.go:947 duo case 2 result", i2, keyStart)
+			fmt.Println("trie/trie.go:1053 duo case 2 result", i2, keyStart)
 			updated, nn = t.deleteSubtree(n.child2, key, keyStart+1, blockNr)
-			fmt.Println("trie/trie.go:949 duo case 2", updated, nn == nil, keyStart)
+			fmt.Println("trie/trie.go:1055 duo case 2", updated, nn == nil, keyStart)
 			if !updated {
 				newNode = n
 			} else {
@@ -1159,8 +1159,14 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 }
 
 func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
+	fmt.Println("--Trie before:")
+	t.PrintTrie()
+	fmt.Println("==Trie before")
 	hexPrefix := keybytesToHex(keyPrefix)
 	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
+	fmt.Println("--Trie after:")
+	t.PrintTrie()
+	fmt.Println("==Trie after")
 }
 
 func (t *Trie) PrepareToRemove() {

@@ -67,7 +67,7 @@ type StateWriter interface {
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error
-	//RemoveStorage(address common.Address, incarnation uint64)
+	RemoveStorage(address common.Address, incarnation uint64) error
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -1245,6 +1245,27 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	return dsw.tds.db.PutS(StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
 }
 
+func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation uint64) error {
+	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return err
+	}
+
+	tsw.tds.storageTrie.DeleteSubtree(GenerateStoragePrefix(addrHash,incarnation), tsw.tds.blockNr)
+	return nil
+}
+
+func (dsw *DbStateWriter) RemoveStorage(address common.Address, incarnation uint64) error {
+	fmt.Println("core/state/database.go:1259 remove storage", address.String(), incarnation)
+	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return err
+	}
+
+	dsw.tds.storageTrie.DeleteSubtree(addrHash[:], dsw.tds.blockNr)
+	return nil
+}
+
 func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
 }
@@ -1272,23 +1293,3 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	return prefix
 }
 
-//
-//func (tds *TrieDbState) getStorageTrie(address common.Address, create bool) (*trie.Trie, error) {
-//	t, ok := tds.storageTries[address]
-//	if !ok && create {
-//		account, err := tds.ReadAccountData(address)
-//		if err != nil {
-//			return nil, err
-//		}
-//		if account == nil {
-//			t = trie.New(common.Hash{})
-//		} else {
-//			t = trie.New(account.Root)
-//		}
-//		t.SetTouchFunc(func(hex []byte, del bool) {
-//			tds.tp.TouchContract(address, hex, del)
-//		})
-//		tds.storageTries[address] = t
-//	}
-//	return t, nil
-//}
