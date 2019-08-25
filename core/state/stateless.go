@@ -91,7 +91,7 @@ func NewStateless(stateRoot common.Hash,
 		var addrHash common.Hash
 		h.sha.Read(addrHash[:])
 		storageTries[contract] = st
-		enc, ok := t.Get(addrHash[:], 0)
+		enc, ok := t.Get(addrHash[:])
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
@@ -304,7 +304,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		} else {
 			mIdx, hIdx, sIdx, vIdx = st.ApplyProof(blockNr, blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		}
-		enc, ok := s.t.Get(addrHash[:], 0)
+		enc, ok := s.t.Get(addrHash[:])
 		if !ok {
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
@@ -348,7 +348,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 	h.sha.Write(address[:])
 	var addrHash common.Hash
 	h.sha.Read(addrHash[:])
-	enc, ok := s.t.Get(addrHash[:], 0)
+	enc, ok := s.t.Get(addrHash[:])
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
 	}
@@ -389,7 +389,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 	h.sha.Write((*key)[:])
 	var secKey common.Hash
 	h.sha.Read(secKey[:])
-	enc, ok := t.Get(secKey[:], 0)
+	enc, ok := t.Get(secKey[:])
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {

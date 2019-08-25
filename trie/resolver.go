@@ -61,7 +61,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 			if err := acc.DecodeForHashing(b); err != nil {
 				return nil, err
 			}
-			return accountNode{&acc}, nil
+			return accountNode{&acc, hashNode(acc.Root[:]), true}, nil
 		}
 	} else {
 		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
@@ -196,7 +196,8 @@ func (tr *TrieResolver) finaliseRoot() error {
 		}
 		tr.currentReq.t.hook(hookKey, hbRoot)
 		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
+			return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
+				tr.currentReq.resolveHash, hbHash, tr.currentReq.contract, tr.currentReq.resolveHex, tr.currentReq.resolvePos)
 		}
 	}
 	return nil
@@ -204,7 +205,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
+	fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return false, err

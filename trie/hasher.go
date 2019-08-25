@@ -19,10 +19,11 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"hash"
+
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
-	"hash"
 )
 
 type hasher struct {
@@ -85,6 +86,8 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	hashLen := h.store(children, force, storeTo)
 	if hashLen == 32 {
 		switch n := n.(type) {
+		case accountNode:
+			n.hashCorrect = true
 		case *duoNode:
 			copy(n.flags.hash[:], storeTo)
 			n.flags.dirty = false
@@ -269,25 +272,17 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				pos += len(vn)
 			}
 		} else if ac, ok := n.Val.(accountNode); ok {
-			encodedAccount := pool.GetBuffer(ac.EncodingLengthForHashing())
-			ac.EncodeForHashing(encodedAccount.B)
-			b := encodedAccount.Bytes()
-			pool.PutBuffer(encodedAccount)
-
-			if len(b) == 1 && b[0] < 128 {
-				buffer[pos] = b[0]
-				pos++
+			// Hashing the storage trie if necessary
+			if ac.storage == nil {
+				ac.Root = EmptyRoot
 			} else {
-				if h.encodeToBytes {
-					// Wrapping into another byte array
-					pos = generateByteArrayLenDouble(buffer, pos, len(b))
-				} else {
-					pos = generateByteArrayLen(buffer, pos, len(b))
-				}
-				copy(buffer[pos:], b)
-				pos += len(b)
+				h.hashInternal(ac.storage, true, ac.Root[:], bufOffset+pos)
 			}
 
+			encodingLen := ac.EncodingLengthForHashing()
+			pos = generateByteArrayLen(buffer, pos, int(encodingLen))
+			ac.EncodeForHashing(buffer[pos:])
+			pos += int(encodingLen)
 		} else {
 			if n.Val == nil {
 				// empty byte array

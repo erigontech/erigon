@@ -214,7 +214,6 @@ type TrieDbState struct {
 	t               *trie.Trie
 	db              ethdb.Database
 	blockNr         uint64
-	storageTrie     *trie.Trie
 	buffers         []*Buffer
 	aggregateBuffer *Buffer // Merge of all buffers
 	currentBuffer   *Buffer
@@ -237,14 +236,12 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		return nil, err
 	}
 	t := trie.New(root)
-	storageTrie := trie.New(common.Hash{})
 	tp := trie.NewTriePruning(blockNr)
 
 	tds := TrieDbState{
 		t:             t,
 		db:            db,
 		blockNr:       blockNr,
-		storageTrie:   storageTrie,
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
@@ -252,9 +249,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
-	})
-	storageTrie.SetTouchFunc(func(hex []byte, del bool) {
-		tp.TouchStorage(hex, del)
 	})
 	return &tds, nil
 }
@@ -273,16 +267,14 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
-	tStorageCopy := *tds.storageTrie
 
 	tp := trie.NewTriePruning(tds.blockNr)
 
 	cpy := TrieDbState{
-		t:           &tcopy,
-		db:          tds.db,
-		blockNr:     tds.blockNr,
-		storageTrie: &tStorageCopy,
-		tp:          tp,
+		t:       &tcopy,
+		db:      tds.db,
+		blockNr: tds.blockNr,
+		tp:      tp,
 	}
 	return &cpy
 }
@@ -322,12 +314,6 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.t.Print(w)
-	fmt.Fprintln(w, "") //nolint
-	tds.storageTrie.Print(w)
-}
-
-func (tds *TrieDbState) PrintStorageTrie(w io.Writer) {
-	tds.storageTrie.Print(w)
 }
 
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
@@ -463,16 +449,9 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 	var resolver *trie.TrieResolver
 	for addressHash, hashes := range storageTouches {
 		var addrHash = addressHash.AddrHash()
-		acc, err := tds.readAccountDataByHash(addrHash)
-		if err != nil {
-			return err
-		}
-		if acc == nil || acc.Root == trie.EmptyRoot {
-			continue
-		}
 		for _, keyHash := range hashes {
 			//todo @need resolution for prefix
-			if need, req := tds.storageTrie.NeedResolution(addrHash[:], acc.Incarnation, keyHash[:]); need {
+			if need, req := tds.t.NeedResolution(addrHash[:], keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
@@ -554,7 +533,7 @@ func (tds *TrieDbState) buildDeletedAccountTouches() error {
 func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 	var resolver *trie.TrieResolver
 	for _, addrHash := range accountTouches {
-		if need, req := tds.t.NeedResolution(nil, 0, addrHash[:]); need {
+		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
 				resolver = trie.NewResolver(0, true, tds.blockNr)
 				resolver.SetHistorical(tds.historical)
@@ -591,19 +570,9 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	if tds.aggregateBuffer == nil {
 		return nil, nil
 	}
-	accountUpdates := tds.aggregateBuffer.accountUpdates
 
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches := tds.buildStorageTouches()
-
-	if err := tds.resolveStorageTouches(storageTouches); err != nil {
-		return nil, err
-	}
-	if tds.resolveReads {
-		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
-			return nil, err
-		}
-	}
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches := tds.buildAccountTouches()
@@ -618,12 +587,31 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if err := tds.resolveStorageTouches(storageTouches); err != nil {
+		return nil, err
+	}
+	if tds.resolveReads {
+		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
+			return nil, err
+		}
+	}
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
+		for addrHash, account := range b.accountUpdates {
+			if account != nil {
+				//data := make([]byte, account.EncodingLengthForHashing())
+				//account.EncodeForHashing(data)
+				//fmt.Printf("Updating account for %x: %x\n", addrHash, data)
+				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
+			} else {
+				//fmt.Printf("Deleting account for %x\n", addrHash)
+				tds.t.Delete(addrHash[:], tds.blockNr)
+			}
+		}
 		for addressHash, m := range b.storageUpdates {
-			addrHash := addressHash.AddrHash()
 
 			if _, ok := b.deletedHashes[addressHash.AddrHash()]; ok {
 				// Deleted contracts will be dealth with later, in the next loop
@@ -634,89 +622,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
-					tds.storageTrie.Update(cKey, v, tds.blockNr)
+					tds.t.Update(cKey, v, tds.blockNr)
 				} else {
 					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
-					tds.storageTrie.Delete(cKey, tds.blockNr)
+					tds.t.Delete(cKey, tds.blockNr)
 				}
-			}
-
-			if forward {
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(addrHash[:])
-					if ok {
-						//fmt.Printf("....\n")
-						//tds.PrintStorageTrie(os.Stdout)
-						//fmt.Printf("....\n")
-						//fmt.Printf("(b)Set root %x for addrHash %x\n", root, addrHash)
-						account.Root = root
-					} else {
-						//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(addrHash[:])
-					if ok {
-						//fmt.Printf("....\n")
-						//tds.PrintStorageTrie(os.Stdout)
-						//fmt.Printf("....\n")
-						//fmt.Printf("Set root %x for addrHash %x\n", root, addrHash)
-						account.Root = root
-					} else {
-						//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
-				}
-			} else {
-				// Simply comparing the correctness of the storageRoot computations
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addressHash, account.Root, h)
-					}
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addressHash, account.Root, h)
-					}
-				}
-			}
-		}
-
-		// For the contracts that got deleted
-		for address := range b.deleted {
-			addrHash, err := tds.HashAddress(address, false /*save*/)
-			if err != nil {
-				return nil, err
-			}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				account.Root = trie.EmptyRoot
-			}
-			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				account.Root = trie.EmptyRoot
-			}
-			tds.storageTrie.Delete(addrHash[:], tds.blockNr)
-			//tds.storageTrie.DeleteSubtrie(addrHash[:], tds.blockNr)
-		}
-		for addrHash, account := range b.accountUpdates {
-			if account != nil {
-				//data := make([]byte, account.EncodingLengthForHashing())
-				//account.EncodeForHashing(data)
-				//fmt.Printf("Updating account for %x: %x\n", addrHash, data)
-				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
-			} else {
-				//fmt.Printf("Deleting account for %x\n", addrHash)
-				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
 		}
 
@@ -839,7 +749,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
-	acc, ok := tds.t.GetAccount(addrHash[:], tds.blockNr)
+	acc, ok := tds.t.GetAccount(addrHash[:])
 	if ok {
 		return acc, nil
 	}
@@ -952,7 +862,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	if acc == nil || acc.Root == trie.EmptyRoot {
 		return nil, nil
 	}
-	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey), len(addrHash))
+	enc, ok := tds.t.Get(GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -1025,20 +935,16 @@ var prevMemStats runtime.MemStats
 
 func (tds *TrieDbState) PruneTries(print bool) {
 	if print {
-		mainPrunable := tds.t.CountPrunableNodes()
-		prunableNodes := mainPrunable
-		prunableNodes += tds.storageTrie.CountPrunableNodes()
-		fmt.Printf("[Before] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
+		prunableNodes := tds.t.CountPrunableNodes()
+		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
-	pruned := tds.tp.PruneTo(tds.t, tds.storageTrie, int(MaxTrieCacheGen))
+	pruned := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
 	if !pruned {
 		//return
 	}
 	if print {
-		mainPrunable := tds.t.CountPrunableNodes()
-		prunableNodes := mainPrunable
-		prunableNodes += tds.storageTrie.CountPrunableNodes()
-		fmt.Printf("[After] Actual prunable nodes: %d (main %d), accounted: %d\n", prunableNodes, mainPrunable, tds.tp.NodeCount())
+		prunableNodes := tds.t.CountPrunableNodes()
+		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)

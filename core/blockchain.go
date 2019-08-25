@@ -1381,7 +1381,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			bc.trieDbState.PruneTries(false)
+			bc.trieDbState.PruneTries(true)
 			log.Info("Database", "size", bc.db.Size(), "written", written)
 		}
 	}
