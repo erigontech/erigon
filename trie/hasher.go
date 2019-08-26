@@ -86,7 +86,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	hashLen := h.store(children, force, storeTo)
 	if hashLen == 32 {
 		switch n := n.(type) {
-		case accountNode:
+		case *accountNode:
 			n.hashCorrect = true
 		case *duoNode:
 			copy(n.flags.hash[:], storeTo)
@@ -271,7 +271,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				copy(buffer[pos:], vn)
 				pos += len(vn)
 			}
-		} else if ac, ok := n.Val.(accountNode); ok {
+		} else if ac, ok := n.Val.(*accountNode); ok {
 			// Hashing the storage trie if necessary
 			if ac.storage == nil {
 				ac.Root = EmptyRoot
@@ -370,7 +370,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		}
 		var enc []byte
 		switch n := n.Children[16].(type) {
-		case accountNode:
+		case *accountNode:
 			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 			n.EncodeForHashing(encodedAccount.B)
 			enc = encodedAccount.Bytes()
@@ -410,7 +410,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 		}
 		return buffer[4:pos]
 
-	case accountNode:
+	case *accountNode:
 		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
 		n.EncodeForHashing(encodedAccount.B)
 		enc := encodedAccount.Bytes()

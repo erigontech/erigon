@@ -596,6 +596,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			return nil, err
 		}
 	}
+	accountUpdates := tds.aggregateBuffer.accountUpdates
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
@@ -612,7 +613,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 		}
 		for addressHash, m := range b.storageUpdates {
-
+			addrHash := addressHash.AddrHash()
 			if _, ok := b.deletedHashes[addressHash.AddrHash()]; ok {
 				// Deleted contracts will be dealth with later, in the next loop
 				continue
@@ -621,11 +622,39 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			for keyHash, v := range m {
 				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
-					//fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
+					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					tds.t.Update(cKey, v, tds.blockNr)
 				} else {
 					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					tds.t.Delete(cKey, tds.blockNr)
+				}
+			}
+			if forward {
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					if ok, r := tds.t.DeepHash(addrHash[:]); ok {
+						account.Root = r
+					}
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					if ok, r := tds.t.DeepHash(addrHash[:]); ok {
+						account.Root = r
+					}
+				}
+			} else {
+				// Simply comparing the correctness of the storageRoot computations
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					if ok, r := tds.t.DeepHash(addrHash[:]); ok {
+						if account.Root != r {
+							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, r)
+						}
+					}
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					if ok, r := tds.t.DeepHash(addrHash[:]); ok {
+						if account.Root != r {
+							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, r)
+						}
+					}
 				}
 			}
 		}
@@ -855,19 +884,13 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
-	acc, err := tds.readAccountDataByHash(addrHash)
-	if err != nil {
-		return nil, err
-	}
-	if acc == nil || acc.Root == trie.EmptyRoot {
-		return nil, nil
-	}
 	enc, ok := tds.t.Get(GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
 			enc = enc[1:]
 		}
+		//fmt.Printf("ReadAccountStorage (trie) %x %x: %x\n", addrHash, seckey, enc)
 	} else {
 		// Not present in the trie, try database
 		if tds.historical {
@@ -881,6 +904,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 				enc = nil
 			}
 		}
+		//fmt.Printf("ReadAccountStorage (db) %x %x: %x\n", addrHash, seckey, enc)
 	}
 	return enc, nil
 }
@@ -1123,6 +1147,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 	} else {
 		m[seckey] = nil
 	}
+	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
 }
 
@@ -1149,6 +1174,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	} else {
 		err = dsw.tds.db.Put(StorageBucket, compositeKey, vv)
 	}
+	//fmt.Printf("WriteAccountStorage (db) %x %x: %x, buffer %d\n", addrHash, seckey, value, len(dsw.tds.buffers))
 	if err != nil {
 		return err
 	}
