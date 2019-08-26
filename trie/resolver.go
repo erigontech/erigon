@@ -61,7 +61,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 			if err := acc.DecodeForHashing(b); err != nil {
 				return nil, err
 			}
-			return accountNode{&acc}, nil
+			return accountNode{&acc, nil}, nil
 		}
 	} else {
 		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }

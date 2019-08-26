@@ -96,43 +96,49 @@ func (t *Trie) GetAccount(key []byte, blockNr uint64) (value *accounts.Account, 
 	return nil, gotValue
 }
 
-func (t *Trie) getAccount(origNode node, key []byte, pos int, blockNr uint64) (value *accounts.Account, gotValue bool) {
+func (t *Trie) getAccount(origNode node, key []byte, pos int, blockNr uint64) (*accounts.Account, bool) {
 	switch n := (origNode).(type) {
 	case nil:
 		return nil, true
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		if len(key)-pos < len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
-			value, gotValue = nil, true
+			fmt.Println(1)
+			fmt.Println("en(key)-pos < len(nKey)", len(key)-pos < len(nKey))
+			fmt.Println("!bytes.Equal(nKey, key[pos:pos+len(nKey)])", !bytes.Equal(nKey, key[pos:pos+len(nKey)]))
+			fmt.Printf("!bytes.Equal(%v, key[%v:%v+%v(len(%v)]))\n", nKey, pos,pos,len(nKey), nKey)
+			fmt.Println(nKey)
+			fmt.Println(key)
+			fmt.Println(key[pos:pos+len(nKey)])
+			return nil, true
 		} else {
 			if v, ok := n.Val.(accountNode); ok {
-				value, gotValue = v.Account, true
+				return v.Account, true
 			} else {
-				value, gotValue = t.getAccount(n.Val, key, pos+len(nKey), blockNr)
+				return t.getAccount(n.Val, key, pos+len(nKey), blockNr)
 			}
 		}
-		return
 	case *duoNode:
 		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.getAccount(n.child1, key, pos+1, blockNr)
+			 return t.getAccount(n.child1, key, pos+1, blockNr)
 		case i2:
-			value, gotValue = t.getAccount(n.child2, key, pos+1, blockNr)
+			return t.getAccount(n.child2, key, pos+1, blockNr)
 		default:
-			value, gotValue = nil, true
+			fmt.Println(2)
+			return nil, true
 		}
-		return
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.getAccount(child, key, pos+1, blockNr)
-		return
+		return t.getAccount(child, key, pos+1, blockNr)
 	case hashNode:
 		return nil, false
 
 	case *accountNode:
+		fmt.Println(3)
 		return n.Account, true
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v", origNode, origNode))
@@ -262,7 +268,7 @@ func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
-	fmt.Println("update", key, "-", hex)
+
 	if t.root == nil {
 		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
 		t.root = newnode
@@ -277,10 +283,10 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account, blockNr uint64) 
 	value.Copy(acc)
 	hex := keybytesToHex(key)
 	if t.root == nil {
-		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{value}}
+		newnode := &shortNode{Key: hexToCompact(hex), Val: accountNode{value, nil}}
 		t.root = newnode
 	} else {
-		_, t.root = t.insert(t.root, hex, 0, accountNode{value}, blockNr)
+		_, t.root = t.insert(t.root, hex, 0, accountNode{value, nil}, blockNr)
 	}
 }
 
@@ -517,6 +523,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 		newNode = value
 		return
 	}
+
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
@@ -550,7 +557,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				c2 = s2
 			}
-			branch := &duoNode{}
+ 			branch := &duoNode{}
 			if nKey[matchlen] < key[pos+matchlen] {
 				branch.child1 = c1
 				branch.child2 = c2
@@ -634,6 +641,13 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 		}
 		newNode = n
 		return
+	case *accountNode:
+		fmt.Println("---------------accNode-----------------")
+		fmt.Println("---------------accNode-----------------")
+		fmt.Println("---------------accNode-----------------")
+		fmt.Println("---------------accNode-----------------")
+		return
+
 	default:
 		fmt.Printf("Key: %x, Pos: %d\n", key, pos)
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))

@@ -56,6 +56,7 @@ type (
 
 	accountNode struct {
 		*accounts.Account
+		valueNode node
 	}
 )
 

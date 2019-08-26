@@ -215,7 +215,6 @@ type TrieDbState struct {
 	t               *trie.Trie
 	db              ethdb.Database
 	blockNr         uint64
-	storageTrie     *trie.Trie
 	buffers         []*Buffer
 	aggregateBuffer *Buffer // Merge of all buffers
 	currentBuffer   *Buffer
@@ -244,7 +243,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		t:             t,
 		db:            db,
 		blockNr:       blockNr,
-		storageTrie:   trie.New(common.Hash{}),
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
@@ -270,7 +268,6 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
-	tStorageCopy := *tds.storageTrie
 
 	tp := trie.NewTriePruning(tds.blockNr)
 
@@ -278,7 +275,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		t:           &tcopy,
 		db:          tds.db,
 		blockNr:     tds.blockNr,
-		storageTrie: &tStorageCopy,
 		tp:          tp,
 	}
 	return &cpy
@@ -288,7 +284,7 @@ func (tds *TrieDbState) Database() ethdb.Database {
 	return tds.db
 }
 
-func (tds *TrieDbState) AccountTrie() *trie.Trie {
+func (tds *TrieDbState) Trie() *trie.Trie {
 	return tds.t
 }
 
@@ -320,11 +316,7 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.t.Print(w)
 	fmt.Fprintln(w, "") //nolint
-	tds.storageTrie.Print(w)
-}
-
-func (tds *TrieDbState) PrintStorageTrie(w io.Writer) {
-	tds.storageTrie.Print(w)
+	tds.t.Print(w)
 }
 
 // WalkRangeOfAccounts calls the walker for each account whose key starts with a given prefix,
@@ -462,7 +454,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 		var addressHash = addressHash // To avoid the value being overwritten, though still shared between continuations
 		for _, keyHash := range hashes {
 			//todo @need resolution for prefix
-			if need, req := tds.storageTrie.NeedResolution(addressHash.AddrHash().Bytes(), addressHash.Incarnation(), keyHash[:]); need {
+			if need, req := tds.t.NeedResolution(addressHash.AddrHash().Bytes(), addressHash.Incarnation(), keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(0, false, tds.blockNr)
 					resolver.SetHistorical(tds.historical)
@@ -621,16 +613,16 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
-					tds.storageTrie.Update(cKey, v, tds.blockNr)
+					tds.t.Update(cKey, v, tds.blockNr)
 				} else {
 					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
-					tds.storageTrie.Delete(cKey, tds.blockNr)
+					tds.t.Delete(cKey, tds.blockNr)
 				}
 			}
 
 			if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(addrHash[:])
+					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
 						//fmt.Printf("....\n")
 						//tds.PrintStorageTrie(os.Stdout)
@@ -643,7 +635,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.storageTrie.DeepHash(addrHash[:])
+					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
 						//fmt.Printf("....\n")
 						//tds.PrintStorageTrie(os.Stdout)
@@ -658,7 +650,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			} else {
 				// Simply comparing the correctness of the storageRoot computations
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(addrHash[:])
+					ok, h := tds.t.DeepHash(addrHash[:])
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -668,7 +660,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.storageTrie.DeepHash(addrHash[:])
+					ok, h := tds.t.DeepHash(addrHash[:])
 					if !ok {
 						h = trie.EmptyRoot
 					}
@@ -692,7 +684,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
 			}
-			tds.storageTrie.Delete(addrHash[:], tds.blockNr)
+			tds.t.Delete(addrHash[:], tds.blockNr)
 			//tds.storageTrie.DeleteSubtrie(addrHash[:], tds.blockNr)
 		}
 		for addrHash, account := range b.accountUpdates {
@@ -720,7 +712,7 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	if err := tds.AccountTrie().Rebuild(tds.db, tds.blockNr); err != nil {
+	if err := tds.Trie().Rebuild(tds.db, tds.blockNr); err != nil {
 		return err
 	}
 	var m runtime.MemStats
@@ -929,7 +921,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
-	enc, ok := tds.storageTrie.Get(GenerateCompositeTrieKey(addrHash, seckey))
+	enc, ok := tds.t.Get(GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -1251,7 +1243,7 @@ func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation ui
 		return err
 	}
 
-	tsw.tds.storageTrie.DeleteSubtree(GenerateStoragePrefix(addrHash,incarnation), tsw.tds.blockNr)
+	tsw.tds.t.DeleteSubtree(GenerateStoragePrefix(addrHash,incarnation), tsw.tds.blockNr)
 	return nil
 }
 
@@ -1262,7 +1254,7 @@ func (dsw *DbStateWriter) RemoveStorage(address common.Address, incarnation uint
 		return err
 	}
 
-	dsw.tds.storageTrie.DeleteSubtree(addrHash[:], dsw.tds.blockNr)
+	dsw.tds.t.DeleteSubtree(addrHash[:], dsw.tds.blockNr)
 	return nil
 }
 

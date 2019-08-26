@@ -270,6 +270,7 @@ func (a *Account) Copy(image *Account) {
 	a.CodeHash = image.CodeHash
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
+	a.Incarnation = image.Incarnation
 }
 
 // Decodes length and determines whether it corresponds to a structure of a byte array
