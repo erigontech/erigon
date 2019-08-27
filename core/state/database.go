@@ -658,7 +658,19 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 		}
-
+		// For the contracts that got deleted
+		for address := range b.deleted {
+			addrHash, err := tds.HashAddress(address, false /*save*/)
+			if err != nil {
+				return nil, err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				account.Root = trie.EmptyRoot
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				account.Root = trie.EmptyRoot
+			}
+		}
 		roots[i] = tds.t.Hash()
 	}
 
