@@ -81,9 +81,15 @@ func testInsert(t *testing.T) {
 
 func TestGet(t *testing.T) {
 	trie := newEmpty()
+	fmt.Println("-1-")
 	updateString(trie, "doe", "reindeer")
+	fmt.Println("-2-")
 	updateString(trie, "dog", "puppy")
+	fmt.Println("-3-")
+	trie.PrintTrie()
+	fmt.Println("-3-")
 	updateString(trie, "dogglesworth", "cat")
+	fmt.Println("-4-")
 
 	for i := 0; i < 2; i++ {
 		res := getString(trie, "dog")
@@ -284,7 +290,7 @@ func runRandTest(rt randTest) bool {
 			tr.Delete(step.key, 0)
 			delete(values, string(step.key))
 		case opGet:
-			v, _ := tr.Get(step.key, 0)
+			v, _ := tr.Get(step.key)
 			want := values[string(step.key)]
 			if string(v) != want {
 				rt[i].err = fmt.Errorf("mismatch for key 0x%x, got 0x%x want 0x%x", step.key, v, want)
@@ -338,7 +344,7 @@ func benchGet(b *testing.B, commit bool) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		trie.Get(k, 0)
+		trie.Get(k)
 	}
 	b.StopTimer()
 
@@ -407,7 +413,7 @@ func tempDB() (string, ethdb.Database) {
 }
 
 func getString(trie *Trie, k string) []byte {
-	v, _ := trie.Get([]byte(k), 0)
+	v, _ := trie.Get([]byte(k))
 	return v
 }
 

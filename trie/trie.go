@@ -105,21 +105,21 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 		matchlen := prefixLen(key[pos:], nKey)
 		if matchlen == len(nKey) {
 			if v, ok := n.Val.(*accountNode); ok {
-				value, gotValue = v, true
+				return v, true
 			} else {
-				value, gotValue = t.getAccount(n.Val, key, pos+matchlen)
+				return t.getAccount(n.Val, key, pos+matchlen)
 			}
 		} else {
-			value, gotValue = nil, true
+			return nil, true
 		}
 	case *duoNode:
 		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			value, gotValue = t.getAccount(n.child1, key, pos+1)
+			return t.getAccount(n.child1, key, pos+1)
 		case i2:
-			value, gotValue = t.getAccount(n.child2, key, pos+1)
+			return t.getAccount(n.child2, key, pos+1)
 		default:
 			fmt.Println(2)
 			return nil, true
@@ -127,8 +127,7 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 	case *fullNode:
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
-		value, gotValue = t.getAccount(child, key, pos+1)
-		return
+		return t.getAccount(child, key, pos+1)
 	case hashNode:
 		return nil, false
 
@@ -426,7 +425,8 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
-	//fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
+	fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
+	fmt.Println(len(key), pos)
 	var nn node
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
@@ -438,7 +438,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			} else {
 				newNode = vn
 			}
-			return
+			return updated, newNode
 		}
 		origAccN, origNok := origNode.(*accountNode)
 		vAccN, vnok := value.(*accountNode)
@@ -447,21 +447,16 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if updated {
 				origAccN.Account.Copy(&vAccN.Account)
 			}
-			newNode = origAccN
-			return
+			return updated, origAccN
 		}
 
-		updated = true
-		newNode = value
-		return
+		return true, value
 	}
 
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
-		newNode = s
-		updated = true
-		return
+		return true, s
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
@@ -469,7 +464,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			n.hashCorrect = false
 		}
 		newNode = n
-		return
+		return updated, n
 	case *shortNode:
 		nKey := compactToHex(n.Key)
 		matchlen := prefixLen(key[pos:], nKey)
@@ -497,7 +492,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				c2 = s2
 			}
- 			branch := &duoNode{}
+			branch := &duoNode{}
 			if nKey[matchlen] < key[pos+matchlen] {
 				branch.child1 = c1
 				branch.child2 = c2
@@ -581,13 +576,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		}
 		newNode = n
 		return
-	case *accountNode:
-		fmt.Println("---------------accNode-----------------")
-		fmt.Println("---------------accNode-----------------")
-		fmt.Println("---------------accNode-----------------")
-		fmt.Println("---------------accNode-----------------")
-		return
-
 	default:
 		fmt.Printf("Key: %x, Pos: %d\n", key, pos)
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
@@ -935,7 +923,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 	}
 }
 
-
 func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr uint64) (updated bool, newNode node) {
 	if keyStart+1 == len(key) {
 		return true, nil
@@ -1009,7 +996,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				newNode = n
 			} else {
 				if nn == nil {
-					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2), blockNr)
+					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2))
 				} else {
 					n.child1 = nn
 					n.flags.dirty = true
@@ -1025,7 +1012,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				newNode = n
 			} else {
 				if nn == nil {
-					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1), blockNr)
+					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1))
 
 				} else {
 					n.child2 = nn
@@ -1078,7 +1065,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			}
 			if count == 1 {
 				t.touchFunc(key[:keyStart], true)
-				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1), blockNr)
+				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1))
 			} else if count == 2 {
 				t.touchFunc(key[:keyStart], false)
 				duo := &duoNode{}
@@ -1109,7 +1096,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		newNode = nil
 		return
 
-	case accountNode:
+	case *accountNode:
 		fmt.Println("trie/trie.go:1022 - accountNode")
 		updated = true
 		newNode = nil
@@ -1135,10 +1122,6 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
 	fmt.Println("--Trie after:")
 	t.PrintTrie()
 	fmt.Println("==Trie after")
-}
-
-func (t *Trie) PrepareToRemove() {
-	t.touchAll(t.root, []byte{}, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {

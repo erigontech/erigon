@@ -50,15 +50,13 @@ func TestOnePerTimestamp(t *testing.T) {
 	for n := uint32(30); n < uint32(59); n++ {
 		tp.SetBlockNr(timestamp)
 		binary.BigEndian.PutUint32(key[:], n)
-		tr.Get(key[:], 0) // Each key is added within a new generation
+		tr.Get(key[:]) // Each key is added within a new generation
 		timestamp++
 	}
 	prunableNodes := tr.CountPrunableNodes()
 	fmt.Printf("Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tp.NodeCount())
-	if _, _, err := tp.PruneTo(tr, 4, func(contract common.Address) (*Trie, error) {
-		return nil, nil
-	}); err != nil {
-		t.Errorf("Error while pruning: %v", err)
+	if b := tp.PruneTo(tr, 4); !b {
+		t.Fatal("Not pruned")
 	}
 	prunableNodes = tr.CountPrunableNodes()
 	fmt.Printf("Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tp.NodeCount())
