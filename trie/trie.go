@@ -993,10 +993,11 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	if accNode.storage == nil {
 		accNode.Root = EmptyRoot
 		accNode.hashCorrect = true
+	} else {
+		h := newHasher(false)
+		defer returnHasherToPool(h)
+		h.hash(accNode.storage, true, accNode.Root[:])
 	}
-	h := newHasher(false)
-	defer returnHasherToPool(h)
-	h.hash(accNode.storage, true, accNode.Root[:])
 	return true, accNode.Root
 }
 
