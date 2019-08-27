@@ -23,9 +23,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"io"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 func (t *Trie) Print(w io.Writer) {
@@ -305,7 +306,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "hash(%x)", []byte(n))
 	case valueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
-	case accountNode:
+	case *accountNode:
 		fmt.Fprintf(w, "account(%s %x)", key, n)
 	}
 }

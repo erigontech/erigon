@@ -833,18 +833,6 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 	return nil
 }
 
-// IntermediateRoot computes the current root hash of the state trie.
-// It is called in between transactions to get the root hash that
-// goes into transaction receipts.
-/*
-func (tds *TrieDbState) IntermediateRoot(s *IntraBlockState, deleteEmptyObjects bool) (common.Hash, error) {
-	if err := s.FinalizeTx(deleteEmptyObjects, tds.TrieStateWriter()); err != nil {
-		return common.Hash{}, err
-	}
-	return tds.TrieRoot()
-}
-*/
-
 // Prepare sets the current transaction hash and index and block hash which is
 // used when the EVM emits new state logs.
 func (sdb *IntraBlockState) Prepare(thash, bhash common.Hash, ti int) {

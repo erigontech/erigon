@@ -61,7 +61,11 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 			if err := acc.DecodeForHashing(b); err != nil {
 				return nil, err
 			}
-			return accountNode{&acc, nil}, nil
+			if acc.Root == EmptyRoot {
+				return &accountNode{acc, nil, true}, nil
+			} else {
+				return &accountNode{acc, hashNode(acc.Root[:]), true}, nil
+			}
 		}
 	} else {
 		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
@@ -168,38 +172,48 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
+func (tr *TrieResolver) finaliseRoot() error {
+	tr.prec.Reset()
+	tr.prec.Write(tr.curr.Bytes())
+	tr.curr.Reset()
+	tr.curr.Write(tr.succ.Bytes())
+	tr.succ.Reset()
+	if tr.curr.Len() > 0 {
+		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
+	}
+	if tr.hb.hasRoot() {
+		hbRoot := tr.hb.root()
+		hbHash := tr.hb.rootHash()
+
+		if tr.currentReq.RequiresRLP {
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		}
+		var hookKey []byte
+		if tr.currentReq.contract == nil {
+			hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
+		} else {
+			contractHex := keybytesToHex(tr.currentReq.contract)
+			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+			hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
+		}
+		//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
+		tr.currentReq.t.hook(hookKey, hbRoot)
+		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+			return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
+				tr.currentReq.resolveHash, hbHash, tr.currentReq.contract, tr.currentReq.resolveHex, tr.currentReq.resolvePos)
+		}
+	}
+	return nil
+}
+
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
-		tr.prec.Reset()
-		tr.prec.Write(tr.curr.Bytes())
-		tr.curr.Reset()
-		tr.curr.Write(tr.succ.Bytes())
-		tr.succ.Reset()
-		if tr.curr.Len() > 0 {
-			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
-		}
-		if tr.hb.hasRoot() {
-			hbRoot := tr.hb.root()
-			hbHash := tr.hb.rootHash()
-
-			hasher := newHasher(false)
-			defer returnHasherToPool(hasher)
-			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
-			var hookKey []byte
-			if tr.currentReq.contract == nil {
-				hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
-			} else {
-				contractHex := keybytesToHex(tr.currentReq.contract)
-				contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
-				hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
-			}
-			tr.currentReq.t.touchAll(hbRoot, hookKey, false)
-			tr.currentReq.t.hook(hookKey, hbRoot)
-			if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-				return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
-			}
+		if err := tr.finaliseRoot(); err != nil {
+			return false, err
 		}
 		tr.hb.Reset()
 		tr.groups = nil
@@ -286,37 +300,7 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	if err != nil {
 		return err
 	}
-	tr.prec.Reset()
-	tr.prec.Write(tr.curr.Bytes())
-	tr.curr.Reset()
-	tr.curr.Write(tr.succ.Bytes())
-	tr.succ.Reset()
-	if tr.curr.Len() > 0 {
-		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
-	}
-	if tr.hb.hasRoot() {
-		hbRoot := tr.hb.root()
-		hbHash := tr.hb.rootHash()
-
-		hasher := newHasher(false)
-		defer returnHasherToPool(hasher)
-		tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
-
-		var hookKey []byte
-		if tr.currentReq.contract == nil {
-			hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
-		} else {
-			contractHex := keybytesToHex(tr.currentReq.contract)
-			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
-			hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
-		}
-		tr.currentReq.t.touchAll(hbRoot, hookKey, false)
-		tr.currentReq.t.hook(hookKey, hbRoot)
-		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
-		}
-	}
-	return err
+	return tr.finaliseRoot()
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
