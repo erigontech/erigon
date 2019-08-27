@@ -464,7 +464,6 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 			}
 			if storageTrie != nil {
 				delete(s.storageTries, address)
-				storageTrie.PrepareToRemove()
 			}
 			continue
 		}

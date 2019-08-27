@@ -494,9 +494,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				if pos+matchlen+1 > len(key) {
-					fmt.Printf("nKey: %x, key: %x, pos: %d, matchlen: %d\n", nKey, key, pos, matchlen)
-				}
 				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
 				c2 = s2
 			}
@@ -677,18 +674,16 @@ func (t *Trie) hook(hex []byte, n node) {
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	switch n := n.(type) {
 	case *shortNode:
-		var hexVal []byte
-		switch n.Val.(type) {
-		case valueNode:
-			break
-		case *accountNode:
-			break
-		default:
+		if _, ok := n.Val.(valueNode); !ok {
 			// Don't need to compute prefix for a leaf
-			hexVal = concat(hex, compactToHex(n.Key)...)
-
+			h := compactToHex(n.Key)
+			// Remove terminator
+			if h[len(h)-1] == 16 {
+				h = h[:len(h)-1]
+			}
+			hexVal := concat(hex, h...)
+			t.touchAll(n.Val, hexVal, del)
 		}
-		t.touchAll(n.Val, hexVal, del)
 	case *duoNode:
 		t.touchFunc(hex, del)
 		i1, i2 := n.childrenIdx()
@@ -718,7 +713,7 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
-	_, t.root = t.delete(t.root, hex, 0, true)
+	_, t.root = t.delete(t.root, hex, 0)
 }
 
 func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint) node {
@@ -748,7 +743,7 @@ func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
-func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (updated bool, newNode node) {
+func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, newNode node) {
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
@@ -757,16 +752,18 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 		if matchlen == len(nKey) || nKey[matchlen] == 16 {
 			if matchlen == len(key)-keyStart {
 				updated = true
-				if touch {
-					t.touchAll(n.Val, key[:keyStart+matchlen], true)
+				touchKey := key[:keyStart+matchlen]
+				if touchKey[len(touchKey)-1] == 16 {
+					touchKey = touchKey[:len(touchKey)-1]
 				}
+				t.touchAll(n.Val, touchKey, true)
 				newNode = nil // remove n entirely for whole matches
 			} else {
 				// The key is longer than n.Key. Remove the remaining suffix
 				// from the subtrie. Child can never be nil here since the
 				// subtrie must contain at least two other values with keys
 				// longer than n.Key.
-				updated, nn = t.delete(n.Val, key, keyStart+matchlen, touch)
+				updated, nn = t.delete(n.Val, key, keyStart+matchlen)
 				if !updated {
 					newNode = n
 				} else {
@@ -799,53 +796,39 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.delete(n.child1, key, keyStart+1, touch)
+			updated, nn = t.delete(n.child1, key, keyStart+1)
 			if !updated {
-				if touch {
-					t.touchFunc(key[:keyStart], false)
-				}
+				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
 				if nn == nil {
-					if touch {
-						t.touchFunc(key[:keyStart], true)
-					}
+					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2))
 				} else {
-					if touch {
-						t.touchFunc(key[:keyStart], false)
-					}
+					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
 					n.flags.dirty = true
 					newNode = n
 				}
 			}
 		case i2:
-			updated, nn = t.delete(n.child2, key, keyStart+1, touch)
+			updated, nn = t.delete(n.child2, key, keyStart+1)
 			if !updated {
-				if touch {
-					t.touchFunc(key[:keyStart], false)
-				}
+				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
 				if nn == nil {
-					if touch {
-						t.touchFunc(key[:keyStart], true)
-					}
+					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1))
 				} else {
-					if touch {
-						t.touchFunc(key[:keyStart], false)
-					}
+					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
 					n.flags.dirty = true
 					newNode = n
 				}
 			}
 		default:
-			if touch {
-				t.touchFunc(key[:keyStart], false)
-			}
+			t.touchFunc(key[:keyStart], false)
 			updated = false
 			newNode = n
 		}
@@ -853,11 +836,9 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 
 	case *fullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.delete(child, key, keyStart+1, touch)
+		updated, nn = t.delete(child, key, keyStart+1)
 		if !updated {
-			if touch {
-				t.touchFunc(key[:keyStart], false)
-			}
+			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
 			n.Children[key[keyStart]] = nn
@@ -887,14 +868,10 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 				}
 			}
 			if count == 1 {
-				if touch {
-					t.touchFunc(key[:keyStart], true)
-				}
+				t.touchFunc(key[:keyStart], true)
 				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1))
 			} else if count == 2 {
-				if touch {
-					t.touchFunc(key[:keyStart], false)
-				}
+				t.touchFunc(key[:keyStart], false)
 				duo := &duoNode{}
 				if pos1 == int(key[keyStart]) {
 					duo.child1 = nn
@@ -910,9 +887,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
-				if touch {
-					t.touchFunc(key[:keyStart], false)
-				}
+				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
 				n.flags.dirty = true
 				newNode = n
@@ -934,7 +909,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 			}
 			return true, nil
 		}
-		updated, nn = t.delete(n.storage, key, keyStart, touch)
+		updated, nn = t.delete(n.storage, key, keyStart)
 		if updated {
 			n.storage = nn
 			n.hashCorrect = false
@@ -951,10 +926,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, touch bool) (upda
 	default:
 		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
-}
-
-func (t *Trie) PrepareToRemove() {
-	t.touchAll(t.root, []byte{}, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -1005,7 +976,8 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 	nd := t.root
 	var parent node
 	pos := 0
-	for pos < len(hex) {
+	var account bool
+	for pos < len(hex) || account {
 		switch n := nd.(type) {
 		case nil:
 			return
@@ -1016,6 +988,9 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 				parent = n
 				nd = n.Val
 				pos += matchlen
+				if _, ok := n.Val.(*accountNode); ok {
+					account = true
+				}
 			} else {
 				return
 			}
@@ -1044,7 +1019,9 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		case valueNode:
 			return
 		case *accountNode:
-			return
+			parent = n
+			nd = n.storage
+			account = false
 		case hashNode:
 			return
 		default:
@@ -1073,6 +1050,8 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 	case *fullNode:
 		idx := hex[len(hex)-1]
 		p.Children[idx] = hnode
+	case *accountNode:
+		p.storage = hnode
 	}
 }
 
@@ -1093,7 +1072,11 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 	case *shortNode:
 		var hexVal []byte
 		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			hexVal = concat(hex, compactToHex(n.Key)...)
+			h := compactToHex(n.Key)
+			if h[len(h)-1] == 16 {
+				h = h[:len(h)-1]
+			}
+			hexVal = concat(hex, h...)
 		}
 		//@todo accountNode?
 		return t.countPrunableNodes(n.Val, hexVal, print)
