@@ -28,8 +28,8 @@ func TestGetAccount(t *testing.T) {
 	key1 := []byte("acc1")
 	key2 := []byte("acc2")
 	key3 := []byte("unknown_acc")
-	trie.UpdateAccount(key1, acc1, 0)
-	trie.UpdateAccount(key2, acc2, 0)
+	trie.UpdateAccount(key1, acc1)
+	trie.UpdateAccount(key2, acc2)
 
 	accRes1, _ := trie.GetAccount(key1)
 	if reflect.DeepEqual(acc1, accRes1) == false {
@@ -62,7 +62,7 @@ func _TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 
 	trie := newEmpty()
 	keyAcc := addrHash[:]
-	trie.UpdateAccount(addrHash[:], acc, 0)
+	trie.UpdateAccount(addrHash[:], acc)
 
 	accRes1, _ := trie.GetAccount(keyAcc)
 	if reflect.DeepEqual(acc, accRes1) == false {

@@ -121,7 +121,6 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 		case i2:
 			return t.getAccount(n.child2, key, pos+1)
 		default:
-			fmt.Println(2)
 			return nil, true
 		}
 	case *fullNode:
@@ -201,7 +200,7 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	}
 }
 
-func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account, blockNr uint64) {
+func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	//make account copy. There are some pointer into big.Int
 	value := new(accounts.Account)
 	value.Copy(acc)
@@ -425,8 +424,8 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
-	fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
-	fmt.Println(len(key), pos)
+	//fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
+
 	var nn node
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
@@ -581,6 +580,48 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
 	}
 }
+
+//
+//func convertToDuoNode(orig *shortNode, pos uint64) node {
+//	// Otherwise branch out at the index where they differ.
+//	var c1 node
+//	if len(nKey) == matchlen+1 {
+//		c1 = n.Val
+//	} else {
+//		s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
+//		c1 = s1
+//	}
+//	var c2 node
+//	if len(key) == pos+matchlen+1 {
+//		c2 = value
+//	} else {
+//		s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
+//		c2 = s2
+//	}
+//	branch := &duoNode{}
+//	if nKey[matchlen] < key[pos+matchlen] {
+//		branch.child1 = c1
+//		branch.child2 = c2
+//	} else {
+//		branch.child1 = c2
+//		branch.child2 = c1
+//	}
+//	branch.mask = (1 << (nKey[matchlen])) | (1 << (key[pos+matchlen]))
+//	branch.flags.dirty = true
+//
+//	// Replace this shortNode with the branch if it occurs at index 0.
+//	if matchlen == 0 {
+//		t.touchFunc(key[:pos], false)
+//		newNode = branch // current node leaves the generation, but new node branch joins it
+//	} else {
+//		// Otherwise, replace it with a short node leading up to the branch.
+//		t.touchFunc(key[:pos+matchlen], false)
+//		n.Key = hexToCompact(key[pos : pos+matchlen])
+//		n.Val = branch
+//		newNode = n
+//	}
+//	updated = true
+//}
 
 func (t *Trie) hook(hex []byte, n node) {
 	var nd = t.root
@@ -928,40 +969,31 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return true, nil
 	}
 
-	fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
+	//fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
 		nKey := compactToHex(n.Key)
-		fmt.Println("trie/trie.go:887 short", "nKey", nKey)
-		fmt.Println("trie/trie.go:887 short", "key", key)
-		fmt.Println("trie/trie.go:888 value", n.Val)
 		matchlen := prefixLen(key[keyStart:], nKey)
-		fmt.Println("trie/trie.go:890 keys", key[keyStart:], nKey, matchlen)
 		switch {
 		case len(key) == keyStart:
 			updated = true
 			newNode = nil
 
 		case matchlen < len(nKey) && matchlen != len(key[keyStart:]):
-			fmt.Println("trie/trie.go:890 sh Не совпал. не наш узел")
 			updated = false
 			newNode = n
 		case matchlen == len(key):
-			fmt.Println("trie/trie.go:894 sh full match")
 			return true, nil
 		default:
-			fmt.Println("trie/trie.go:897 sh else match. ищем глубже поддерево")
 
 			if keyStart+1 == len(key) {
 				return true, nil
 			}
 			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(nKey), blockNr)
-			fmt.Println("trie/trie.go:900 sh updated", updated, nn)
 			if !updated {
 				newNode = n
 			} else {
-				fmt.Println("trie/trie.go:904 sh nn", nn)
 				if nn == nil {
 					newNode = nil
 				} else {
@@ -986,12 +1018,9 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
-		fmt.Println("trie/trie.go:1034 duo", "keys", i1, i2)
 		switch key[keyStart] {
 		case i1:
-			fmt.Println("trie/trie.go:1037 duo case 1 result", i1, keyStart)
 			updated, nn = t.deleteSubtree(n.child1, key, keyStart+1, blockNr)
-			fmt.Println("trie/trie.go:1039 duo case 1 result", updated, nn == nil, keyStart)
 			if !updated {
 				newNode = n
 			} else {
@@ -1003,11 +1032,8 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = n
 				}
 			}
-			fmt.Println("trie/trie.go:1051 duo new node", newNode)
 		case i2:
-			fmt.Println("trie/trie.go:1053 duo case 2 result", i2, keyStart)
 			updated, nn = t.deleteSubtree(n.child2, key, keyStart+1, blockNr)
-			fmt.Println("trie/trie.go:1055 duo case 2", updated, nn == nil, keyStart)
 			if !updated {
 				newNode = n
 			} else {
@@ -1020,10 +1046,8 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = n
 				}
 			}
-			fmt.Println("trie/trie.go:1000 duo new node", newNode)
 
 		default:
-			fmt.Println("trie/trie.go:935 duo case default", i1, i2, key, keyStart)
 			updated = false
 			newNode = n
 		}
@@ -1091,19 +1115,16 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		}
 		return
 	case valueNode:
-		fmt.Println("trie/trie.go:1016 - valueNode")
 		updated = true
 		newNode = nil
 		return
 
 	case *accountNode:
-		fmt.Println("trie/trie.go:1022 - accountNode")
 		updated = true
 		newNode = nil
 		return
 
 	case nil:
-		fmt.Println("trie/trie.go:1028 - nil")
 		updated = false
 		newNode = nil
 		return
@@ -1114,14 +1135,8 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 }
 
 func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
-	fmt.Println("--Trie before:")
-	t.PrintTrie()
-	fmt.Println("==Trie before")
 	hexPrefix := keybytesToHex(keyPrefix)
 	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
-	fmt.Println("--Trie after:")
-	t.PrintTrie()
-	fmt.Println("==Trie after")
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -1154,6 +1169,9 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	if !gotValue {
 		return false, common.Hash{}
 	}
+	//if accNode==nil {
+	//	return gotValue, common.Hash{}
+	//}
 	if accNode.hashCorrect {
 		return true, accNode.Root
 	}
