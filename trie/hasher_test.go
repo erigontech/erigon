@@ -6,7 +6,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-func testValue(t *testing.T) {
+func TestValue(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	h := newHasher(false)
 	var hn common.Hash
 	h.hash(valueNode([]byte("BLAH")), false, hn[:])
