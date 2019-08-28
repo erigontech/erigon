@@ -940,6 +940,10 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 
 var prevMemStats runtime.MemStats
 
+type TrieStateWriter struct {
+	tds *TrieDbState
+}
+
 func (tds *TrieDbState) PruneTries(print bool) {
 	/*
 		if print {
@@ -980,10 +984,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	if print {
 		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
-}
-
-type TrieStateWriter struct {
-	tds *TrieDbState
 }
 
 type DbStateWriter struct {
