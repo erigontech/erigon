@@ -969,7 +969,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return true, nil
 	}
 
-	//fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
+	fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
@@ -979,12 +979,11 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		case len(key) == keyStart:
 			updated = true
 			newNode = nil
-
+		case matchlen == len(key[keyStart:])-1:
+			return true, nil
 		case matchlen < len(nKey) && matchlen != len(key[keyStart:]):
 			updated = false
 			newNode = n
-		case matchlen == len(key):
-			return true, nil
 		default:
 
 			if keyStart+1 == len(key) {

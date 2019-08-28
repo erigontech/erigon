@@ -46,15 +46,6 @@ var StorageBucket = []byte("ST")
 var StorageHistoryBucket = []byte("hST")
 var CodeBucket = []byte("CODE")
 
-const (
-	// Number of past tries to keep. This value is chosen such that
-	// reasonable chain reorg depths will hit an existing trie.
-	maxPastTries = 12
-
-	// Number of codehash->size associations to keep.
-	codeSizeCacheSize = 100000
-)
-
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
@@ -272,10 +263,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tp := trie.NewTriePruning(tds.blockNr)
 
 	cpy := TrieDbState{
-		t:           &tcopy,
-		db:          tds.db,
-		blockNr:     tds.blockNr,
-		tp:          tp,
+		t:       &tcopy,
+		db:      tds.db,
+		blockNr: tds.blockNr,
+		tp:      tp,
 	}
 	return &cpy
 }
@@ -605,12 +596,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	for i, b := range tds.buffers {
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				//data := make([]byte, account.EncodingLengthForHashing())
-				//account.EncodeForHashing(data)
-				//fmt.Printf("Updating account for %x: %x\n", addrHash, data)
-				tds.t.UpdateAccount(addrHash[:], account, tds.blockNr)
+				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
-				//fmt.Printf("Deleting account for %x\n", addrHash)
 				tds.t.Delete(addrHash[:], tds.blockNr)
 			}
 		}
@@ -1214,7 +1201,7 @@ func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation ui
 		return err
 	}
 
-	tsw.tds.t.DeleteSubtree(GenerateStoragePrefix(addrHash,incarnation), tsw.tds.blockNr)
+	tsw.tds.t.DeleteSubtree(GenerateStoragePrefix(addrHash, incarnation), tsw.tds.blockNr)
 	return nil
 }
 
@@ -1255,4 +1242,3 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	prefix = append(prefix, buf...)
 	return prefix
 }
-

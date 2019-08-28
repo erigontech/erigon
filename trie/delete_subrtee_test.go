@@ -34,7 +34,6 @@ func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 }
 
 func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
-	t.SkipNow()
 	trie := newEmpty()
 	addr1 := common.HexToAddress("0x6295ee1b4f6dd65047762f924ecd367c17eabf8f")
 	addr2 := common.HexToAddress("0xfc597da4849c0d854629216d9e297bbca7bb4616")
@@ -51,29 +50,30 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 
 	h.sha.Reset()
 	h.sha.Write(addr1[:])
-	var buf1 common.Hash
-	h.sha.Read(buf1[:])
+	var addrHash1 common.Hash
+	h.sha.Read(addrHash1[:])
 
 	h.sha.Reset()
 	h.sha.Write(addr2[:])
-	var buf2 common.Hash
-	h.sha.Read(buf2[:])
+	var addrHash2 common.Hash
+	h.sha.Read(addrHash2[:])
 
-	key1 := GenerateCompositeTrieKey(buf1, keyHash)
-	key2 := GenerateCompositeTrieKey(buf2, keyHash)
+	key1 := GenerateCompositeTrieKey(addrHash1, keyHash)
+	key2 := GenerateCompositeTrieKey(addrHash2, keyHash)
 	trie.Update(key1, val, 0)
 	trie.Update(key2, val, 0)
 
 	trie.PrintTrie()
-	trie.Delete(buf1.Bytes(), 0)
+	trie.DeleteSubtree(addrHash1.Bytes(), 0)
 	trie.PrintTrie()
 
 	v, ok := trie.Get(key2)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
+
 	v, _ = trie.Get(key1)
-	if v != nil {
+	if v!=nil {
 		t.Fatal("must be nil")
 	}
 	////remove unknown
@@ -101,7 +101,6 @@ func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byt
 }
 
 func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
-	t.SkipNow()
 	trie := newEmpty()
 	key := []byte{uint8(1), uint8(1)}
 	prefix := []byte{uint8(1)}

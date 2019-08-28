@@ -780,12 +780,8 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			if err := stateObject.updateTrie(stateWriter); err != nil {
 				return err
 			}
+
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
-				return err
-			}
-		}
-		if stateObject.removeStorageTrie {
-			if err := stateWriter.RemoveStorage(addr, stateObject.data.GetIncarnation()); err!=nil {
 				return err
 			}
 		}
