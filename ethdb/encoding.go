@@ -1,11 +1,5 @@
 package ethdb
 
-import ()
-
-func encodingLen8to7(b []byte) int {
-	return (len(b)*8 + 6) / 7
-}
-
 // Transforms b into encoding where only
 // 7 bits of each byte are used to encode the bits of b
 // The most significant bit is left empty, for other purposes

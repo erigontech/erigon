@@ -28,6 +28,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	. "github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -38,12 +39,6 @@ import (
 
 // Trie cache generation limit after which to evict trie nodes from memory.
 var MaxTrieCacheGen = uint32(1024 * 1024)
-
-var AccountsBucket = []byte("AT")
-var AccountsHistoryBucket = []byte("hAT")
-var StorageBucket = []byte("ST")
-var StorageHistoryBucket = []byte("hST")
-var CodeBucket = []byte("CODE")
 
 const (
 	// Number of past tries to keep. This value is chosen such that

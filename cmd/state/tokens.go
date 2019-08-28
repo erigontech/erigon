@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	. "github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -218,7 +218,7 @@ func makeTokenBalances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(state.AccountsBucket, crypto.Keccak256(token[:]))
+		enc, err := ethDb.Get(AccountsBucket, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
@@ -277,7 +277,7 @@ func makeTokenBalances() {
 		if plen != 1 {
 			fmt.Printf(" balanceOf preimages: %d\n", plen)
 		}
-		err = ethDb.Walk(state.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(pBucket, k[20:])
 			var preimage []byte
@@ -439,7 +439,7 @@ func makeTokenAllowances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(state.AccountsBucket, crypto.Keccak256(token[:]))
+		enc, err := ethDb.Get(AccountsBucket, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
@@ -516,7 +516,7 @@ func makeTokenAllowances() {
 			fmt.Printf("allowance base not found\n")
 			continue
 		}
-		err = ethDb.Walk(state.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(pBucket, k[20:])
 			var index2 common.Hash

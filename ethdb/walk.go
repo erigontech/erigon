@@ -21,9 +21,8 @@ import (
 	"encoding/binary"
 	"fmt"
 
-	//"sort"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	. "github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -103,7 +102,7 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	startCode := encodeTimestamp(starttimestamp)
 	if err := db.Walk(SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := decodeTimestamp(k)
-		if !bytes.Equal(bucket, []byte("hAT")) {
+		if !bytes.Equal(bucket, AccountsHistoryBucket) {
 			return true, nil
 		}
 		if timestamp > endtimestamp {

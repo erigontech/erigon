@@ -3,15 +3,16 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-	"github.com/valyala/bytebufferpool"
 	"runtime/debug"
 	"sort"
 	"strings"
 
+	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/valyala/bytebufferpool"
 )
 
 var emptyHash [32]byte
@@ -259,15 +260,15 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	if tr.accounts {
 		if tr.historical {
-			err = db.MultiWalkAsOf([]byte("AT"), []byte("hAT"), startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(AccountsBucket, AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk([]byte("AT"), startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(AccountsBucket, startkeys, fixedbits, tr.Walker)
 		}
 	} else {
 		if tr.historical {
-			err = db.MultiWalkAsOf([]byte("ST"), []byte("hST"), startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(StorageBucket, StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk([]byte("ST"), startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(StorageBucket, startkeys, fixedbits, tr.Walker)
 		}
 	}
 	tr.prec.Reset()
