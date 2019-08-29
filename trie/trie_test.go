@@ -84,15 +84,10 @@ func TestInsert(t *testing.T) {
 func TestGet(t *testing.T) {
 	t.Skip("different length of key is not supported")
 	trie := newEmpty()
-	fmt.Println("-1-")
+
 	updateString(trie, "doe", "reindeer")
-	fmt.Println("-2-")
 	updateString(trie, "dog", "puppy")
-	fmt.Println("-3-")
-	trie.PrintTrie()
-	fmt.Println("-3-")
 	updateString(trie, "dogglesworth", "cat")
-	fmt.Println("-4-")
 
 	for i := 0; i < 2; i++ {
 		res := getString(trie, "dog")
@@ -455,8 +450,7 @@ func TestDeepHash(t *testing.T) {
 			// Add a prefix to every key
 			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
 		}
-		fmt.Println("prefix trie")
-		prefixTrie.PrintTrie()
+
 		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
 		if !got2 {
 			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)

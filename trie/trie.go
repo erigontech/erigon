@@ -155,7 +155,6 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return
 	case *duoNode:
-		//fmt.Println("duo")
 		t.touchFunc(key[:pos], false)
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
@@ -300,7 +299,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			if contract == nil {
 				return true, t.NewResolveRequest(nil, hex, pos, common.CopyBytes(n))
 			}
-			prefix := make([]byte, len(contract)+8, len(contract)+8)
+			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
 			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
@@ -462,7 +461,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			n.storage = nn
 			n.hashCorrect = false
 		}
-		newNode = n
 		return updated, n
 	case *shortNode:
 		nKey := compactToHex(n.Key)
@@ -752,7 +750,7 @@ func (t *Trie) Delete(key []byte, blockNr uint64) {
 	_, t.root = t.delete(t.root, hex, 0)
 }
 
-func (t *Trie) convertToShortNode(key []byte, keyStart int, child node, pos uint) node {
+func (t *Trie) convertToShortNode(child node, pos uint) node {
 	cnode := child
 	if pos != 16 {
 		// If the remaining entry is a short node, it replaces
@@ -839,7 +837,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 			} else {
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
-					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2))
+					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
@@ -855,7 +853,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 			} else {
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
-					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1))
+					newNode = t.convertToShortNode(n.child1, uint(i1))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
@@ -905,7 +903,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 			}
 			if count == 1 {
 				t.touchFunc(key[:keyStart], true)
-				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1))
+				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
 			} else if count == 2 {
 				t.touchFunc(key[:keyStart], false)
 				duo := &duoNode{}
@@ -969,7 +967,6 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return true, nil
 	}
 
-	fmt.Println("trie/trie.go:882 deleteSubtree key", key, "start", keyStart, compactToHex(key))
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
@@ -997,7 +994,6 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = nil
 				} else {
 					if shortChild, ok := nn.(*shortNode); ok {
-						fmt.Println("trie/trie.go:909 sh nn - short")
 						// Deleting from the subtrie reduced it to another
 						// short node. Merge the nodes to avoid creating a
 						// shortNode{..., shortNode{...}}. Use concat (which
@@ -1024,7 +1020,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				newNode = n
 			} else {
 				if nn == nil {
-					newNode = t.convertToShortNode(key, keyStart, n.child2, uint(i2))
+					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					n.child1 = nn
 					n.flags.dirty = true
@@ -1037,7 +1033,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				newNode = n
 			} else {
 				if nn == nil {
-					newNode = t.convertToShortNode(key, keyStart, n.child1, uint(i1))
+					newNode = t.convertToShortNode(n.child1, uint(i1))
 
 				} else {
 					n.child2 = nn
@@ -1088,7 +1084,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			}
 			if count == 1 {
 				t.touchFunc(key[:keyStart], true)
-				newNode = t.convertToShortNode(key, keyStart, n.Children[pos1], uint(pos1))
+				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
 			} else if count == 2 {
 				t.touchFunc(key[:keyStart], false)
 				duo := &duoNode{}

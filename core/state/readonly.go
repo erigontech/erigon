@@ -19,8 +19,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -60,12 +58,12 @@ func (dbs *DbState) SetBlockNr(blockNr uint64) {
 
 // TODO: support incarnations
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(addr[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(addr[:])
+	if err != nil {
+		log.Error("Error on hashing", "err", err)
+		return
+	}
+
 	st := llrb.New()
 	var s [32 + 8 + 32]byte
 	copy(s[:], addrHash[:])
@@ -131,13 +129,11 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 }
 
 func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := dbs.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], dbs.blockNr+1)
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+	enc, err := dbs.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -149,20 +145,17 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 }
 
 func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	fmt.Println("core/state/readonly.go:140 ReadAccountStorage addr=", address.String(), "version=", incarnation, "k=", key.String())
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
+	keyHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
 
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addhHash common.Hash
-	h.sha.Read(addhHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
 
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addhHash, incarnation, buf), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -197,18 +190,24 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 }
 
 func (dbs *DbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
-	fmt.Println("core/state/readonly.go:181 WriteAccountStorage", address.String(), "k=", key, "v=", value)
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()
 		dbs.storage[address] = t
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	_, err := h.Sha.Write(key[:])
+	if err != nil {
+		return err
+	}
 	i := &storageItem{key: *key, value: *value}
-	h.sha.Read(i.seckey[:])
+	_, err = h.Sha.Read(i.seckey[:])
+	if err != nil {
+		return err
+	}
+
 	t.ReplaceOrInsert(i)
 	return nil
 }

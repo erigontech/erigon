@@ -14,6 +14,3 @@ func AddExtraRLPLevel(v []byte) []byte {
 	}
 	return vv
 }
-
-
-

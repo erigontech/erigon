@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"hash"
 	"io"
 	"math/big"
 	"runtime"
@@ -34,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"golang.org/x/crypto/sha3"
 )
 
 // Trie cache generation limit after which to evict trie nodes from memory.
@@ -61,38 +59,6 @@ type StateWriter interface {
 	RemoveStorage(address common.Address, incarnation uint64) error
 }
 
-// keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
-// Read to get a variable amount of data from the hash state. Read is faster than Sum
-// because it doesn't copy the internal state, but also modifies the internal state.
-type keccakState interface {
-	hash.Hash
-	Read([]byte) (int, error)
-}
-
-type hasher struct {
-	sha keccakState
-}
-
-var hasherPool = make(chan *hasher, 128)
-
-func newHasher() *hasher {
-	var h *hasher
-	select {
-	case h = <-hasherPool:
-	default:
-		h = &hasher{sha: sha3.NewLegacyKeccak256().(keccakState)}
-	}
-	return h
-}
-
-func returnHasherToPool(h *hasher) {
-	select {
-	case hasherPool <- h:
-	default:
-		fmt.Printf("Allowing hasher to be garbage collected, pool is full\n")
-	}
-}
-
 type NoopWriter struct {
 }
 
@@ -113,6 +79,10 @@ func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error
 }
 
 func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+	return nil
+}
+
+func (nw *NoopWriter) RemoveStorage(address common.Address, incarnation uint64) error {
 	return nil
 }
 
@@ -138,14 +108,14 @@ func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) add
 
 type addressHashWithIncarnation [common.HashLength + 8]byte
 
-func (this *addressHashWithIncarnation) AddrHash() common.Hash {
+func (a *addressHashWithIncarnation) AddrHash() common.Hash {
 	var addrHash common.Hash
-	copy(addrHash[:], this[:common.HashLength])
+	copy(addrHash[:], a[:common.HashLength])
 	return addrHash
 }
 
-func (this *addressHashWithIncarnation) Incarnation() uint64 {
-	return binary.BigEndian.Uint64(this[common.HashLength : common.HashLength+8])
+func (a *addressHashWithIncarnation) Incarnation() uint64 {
+	return binary.BigEndian.Uint64(a[common.HashLength : common.HashLength+8])
 }
 
 // Prepares buffer for work or clears previous data
@@ -347,12 +317,10 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 // Returns whether all matching storage items were traversed (provided there was no error).
 // TODO: Support incarnations
 func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return false, err
+	}
 	startkey := make([]byte, common.HashLength+8+common.HashLength)
 	copy(startkey, addrHash[:])
 	copy(startkey[common.HashLength+8:], prefix.Data)
@@ -364,7 +332,7 @@ func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Key
 
 	i := 0
 
-	err := tds.db.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	err = tds.db.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			var val big.Int
 			if err := rlp.DecodeBytes(value, &val); err != nil {
@@ -452,7 +420,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 				//fmt.Printf("Storage resolve request: %s\n", req.String())
 				resolver.AddRequest(req)
 				//fmt.Printf("Need resolution for %x %x, %s\n", addrHash, keyHash, req.String())
-			} else {
+			} else { //nolint
 				//fmt.Printf("Don't need resolution for %x %x\n", addrHash, keyHash)
 			}
 		}
@@ -466,7 +434,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 }
 
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
-func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[addressHashWithIncarnation]Hashes) error {
+func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[addressHashWithIncarnation]Hashes) error { //nolint
 	for addresHash, hashes := range storageTouches {
 		if _, ok := tds.aggregateBuffer.deletedHashes[addresHash.AddrHash()]; ok && len(tds.aggregateBuffer.storageReads[addresHash]) == 0 {
 			// We can only skip the proof of storage entirely if
@@ -825,12 +793,10 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 }
 
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
 	if tds.resolveReads {
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
@@ -847,23 +813,19 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 }
 
 func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	return buf, tds.savePreimage(save, buf[:], address[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return addrHash, tds.savePreimage(save, addrHash[:], address[:])
 }
 
 func (tds *TrieDbState) HashKey(key *common.Hash, save bool) (common.Hash, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	return buf, tds.savePreimage(save, buf[:], key[:])
+	keyHash, err := common.HashData(key[:])
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return keyHash, tds.savePreimage(save, keyHash[:], key[:])
 }
 
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
@@ -981,6 +943,7 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	}
 	pruned := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
 	if !pruned {
+		fmt.Println(pruned)
 		//return
 	}
 	if print {
@@ -1206,7 +1169,6 @@ func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation ui
 }
 
 func (dsw *DbStateWriter) RemoveStorage(address common.Address, incarnation uint64) error {
-	fmt.Println("core/state/database.go:1259 remove storage", address.String(), incarnation)
 	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err

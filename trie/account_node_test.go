@@ -46,7 +46,8 @@ func TestGetAccount(t *testing.T) {
 	}
 }
 
-func _TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
+func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
+	t.Skip()
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,

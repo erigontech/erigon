@@ -211,9 +211,6 @@ func (so *stateObject) updateTrie(stateWriter StateWriter) error {
 		if err := stateWriter.RemoveStorage(so.address, so.data.GetIncarnation()); err != nil {
 			return err
 		}
-		fmt.Println("core/state/intra_block_state.go:784 stateObject.removeStorageTrie")
-		fmt.Println("stateObject.originStorage", so.originStorage)
-		fmt.Println("stateObject.dirtyStorage", so.dirtyStorage)
 	}
 	for key, value := range so.dirtyStorage {
 		key := key

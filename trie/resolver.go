@@ -63,9 +63,8 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 			}
 			if acc.Root == EmptyRoot {
 				return &accountNode{acc, nil, true}, nil
-			} else {
-				return &accountNode{acc, hashNode(acc.Root[:]), true}, nil
 			}
+			return &accountNode{acc, hashNode(acc.Root[:]), true}, nil
 		}
 	} else {
 		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }

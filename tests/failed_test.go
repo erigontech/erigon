@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-
 func TestStateDebug(t *testing.T) {
 	st := new(testMatcher)
 	st.whitelist(`^TestStateDebug/stSStoreTest/InitCollision.json`)
@@ -47,7 +46,7 @@ st.fails(`^stRevertTest/RevertInCreateInInit.json/Byzantium/0`, "work in progres
 st.fails(`^stRevertTest/RevertInCreateInInit.json/Constantinople/0`, "work in progress")
 st.fails(`^stRevertTest/RevertInCreateInInit.json/ConstantinopleFix/0`, "work in progress")
 
- */
+*/
 
 func TestStateDebug2(t *testing.T) {
 	st := new(testMatcher)

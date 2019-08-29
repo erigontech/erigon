@@ -1166,11 +1166,10 @@ func dumpStorage() {
 			fmt.Printf("Storage bucket not found\n")
 			return nil
 		}
-		err := sb.ForEach(func(k, v []byte) error {
+		return sb.ForEach(func(k, v []byte) error {
 			fmt.Printf("%x %x\n", k, v)
 			return nil
 		})
-		return err
 	})
 	check(err)
 	db.Close()
