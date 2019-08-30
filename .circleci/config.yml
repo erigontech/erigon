@@ -22,6 +22,8 @@ jobs:
 
       - restore_cache:
           keys:
+            - v1-pkg-cache-{{ checksum ".gitmodules" }}-{{ checksum "go.sum" }}
+            - v1-pkg-cache-{{ checksum ".gitmodules" }}
             - v1-pkg-cache
 
       - run: git submodule update --init
@@ -48,7 +50,7 @@ jobs:
           no_output_timeout: 10m
 
       - save_cache:
-          key: v1-pkg-cache
+          key: v1-pkg-cache-{{ checksum "go.sum" }}-{{ checksum ".gitmodules" }}
           paths:
             - "/go/pkg"
             - "/go/pkg/mod"
