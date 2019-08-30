@@ -81,7 +81,7 @@ func TestDifficulty(t *testing.T) {
 			t.Skip("difficulty below minimum")
 			return
 		}
-		if err := dt.checkFailure(t, name, test.Run(cfg)); err != nil {
+		if err := dt.checkFailure(t, test.Run(cfg)); err != nil {
 			t.Error(err)
 		}
 	})

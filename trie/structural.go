@@ -18,10 +18,11 @@ package trie
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
-	"github.com/valyala/bytebufferpool"
 	"math/bits"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+	"github.com/valyala/bytebufferpool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"golang.org/x/crypto/sha3"
@@ -210,6 +211,7 @@ func NewHashBuilder() *HashBuilder {
 func (hb *HashBuilder) Reset() {
 	hb.hexKey.Reset()
 	hb.digitStack = hb.digitStack[:0]
+	hb.bufferStack = hb.bufferStack[:0]
 	hb.branchStack = hb.branchStack[:0]
 	hb.topKey = nil
 
@@ -414,6 +416,7 @@ func (hb *HashBuilder) finaliseHasher() (common.Hash, error) {
 	if _, err := hb.sha.Write(prevBuffer.Bytes()); err != nil {
 		return common.Hash{}, err
 	}
+	//fmt.Printf("\n")
 	var hn common.Hash
 	if _, err := hb.sha.Read(hn[:]); err != nil {
 		return common.Hash{}, err
@@ -452,7 +455,7 @@ func (hb *HashBuilder) hasher(digit int) {
 
 func (hb *HashBuilder) leaf(length int) {
 	hex := hb.hexKey.Bytes()
-	//fmt.Printf("LEAF %d, hex: %d\n", length, len(hex))
+	//fmt.Printf("LEAF %d\n", length)
 	hb.topKey = hex[len(hex)-length:]
 	hb.topBranch = nil
 }

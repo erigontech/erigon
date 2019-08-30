@@ -632,7 +632,10 @@ func execToBlock(block int) {
 			blocks = types.Blocks{}
 		}
 	}
-	tds := bc.GetTrieDbState()
+	tds, err := bc.GetTrieDbState()
+	if err != nil {
+		panic(err)
+	}
 	root := tds.LastRoot()
 	fmt.Printf("Root hash: %x\n", root)
 	fmt.Printf("Last block root hash: %x\n", lastBlock.Root())

@@ -113,6 +113,57 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 	}
 }
 
+// GetNode returns node's RLP by its key/prefix.
+func (t *Trie) GetNode(key Keybytes) []byte {
+	key.Terminating = true
+	hex := compactToHex(key.ToCompact())
+	return t.getNode(t.root, hex, 0)
+}
+
+func (t *Trie) getNode(origNode node, key []byte, pos int) []byte {
+	if origNode == nil {
+		return nil
+	}
+
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+
+	if pos+1 >= len(key) { // mind the terminating byte
+		return h.hashChildren(origNode, 0)
+	}
+
+	switch n := (origNode).(type) {
+	case *shortNode:
+		nKey := compactToHex(n.Key)
+		if len(key) < pos+len(nKey) || !bytes.Equal(nKey, key[pos:pos+len(nKey)]) {
+			return nil
+		}
+
+		if _, ok := n.Val.(valueNode); ok {
+			return h.hashChildren(origNode, 0)
+		}
+
+		return t.getNode(n.Val, key, pos+len(nKey))
+	case *duoNode:
+		t.touchFunc(key[:pos], false)
+		i1, i2 := n.childrenIdx()
+		switch key[pos] {
+		case i1:
+			return t.getNode(n.child1, key, pos+1)
+		case i2:
+			return t.getNode(n.child2, key, pos+1)
+		default:
+			return nil
+		}
+	case *fullNode:
+		t.touchFunc(key[:pos], false)
+		child := n.Children[key[pos]]
+		return t.getNode(child, key, pos+1)
+	default:
+		return nil
+	}
+}
+
 // Update associates key with value in the trie. Subsequent calls to
 // Get will return value. If value has length zero, any existing value
 // is deleted from the trie and calls to Get will return nil.
@@ -137,6 +188,8 @@ type ResolveRequest struct {
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
+	RequiresRLP   bool     // whether to output node's RLP
+	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
@@ -428,7 +481,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node, blockNr ui
 	}
 }
 
-func (t *Trie) hook(hex []byte, n node, blockNr uint64) {
+func (t *Trie) hook(hex []byte, n node) {
 	var nd = t.root
 	var parent node
 	pos := 0

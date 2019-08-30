@@ -63,7 +63,7 @@ require (
 	github.com/uber/jaeger-client-go v0.0.0-20180607151842-f7e0d4744fa6
 	github.com/uber/jaeger-lib v0.0.0-20180615202729-a51202d6f4a7
 	github.com/urfave/cli v1.21.0
-	github.com/valyala/bytebufferpool v0.0.0-20180905182247-cdfbe9377474
+	github.com/valyala/bytebufferpool v1.0.0
 	github.com/wcharczuk/go-chart v2.0.1+incompatible
 	golang.org/x/crypto v0.0.0-20190103213133-ff983b9c42bc
 	golang.org/x/net v0.0.0-20180112015858-5ccada7d0a7b

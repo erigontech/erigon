@@ -2,9 +2,10 @@ package accounts
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"math/big"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -15,8 +16,8 @@ func TestEmptyAccount(t *testing.T) {
 		Initialised: true,
 		Nonce:       100,
 		Balance:     *new(big.Int),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
@@ -84,8 +85,8 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -165,8 +166,8 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 		Initialised: true,
 		Nonce:       2,
 		Balance:     *new(big.Int).SetInt64(1000),
-		Root:        emptyRoot,                         // extAccount doesn't have Root value
-		CodeHash:    common.BytesToHash(emptyCodeHash), // extAccount doesn't have CodeHash value
+		Root:        emptyRoot,     // extAccount doesn't have Root value
+		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
