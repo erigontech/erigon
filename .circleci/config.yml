@@ -23,7 +23,7 @@ jobs:
             - v1-pkg-cache-{{ checksum "go.sum" }}
             - v1-pkg-cache
 
-      - run: git submodule update --init --recurcive
+      - run: git submodule update --init --recursive
 
       - run: go mod download
       - run: go mod verify
