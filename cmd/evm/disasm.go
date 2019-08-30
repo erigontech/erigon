@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/core/asm"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var disasmCommand = cli.Command{

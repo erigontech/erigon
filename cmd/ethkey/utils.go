@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 // promptPassphrase prompts the user for a passphrase.  Set confirmation to true

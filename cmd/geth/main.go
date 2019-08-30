@@ -40,7 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/node"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 const (

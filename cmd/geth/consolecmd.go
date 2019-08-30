@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/console"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var (

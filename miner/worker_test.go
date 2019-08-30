@@ -138,10 +138,12 @@ func newTestWorker(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	return w, backend
 }
 
-func testPendingStateAndBlockEthash(t *testing.T) {
+func TestPendingStateAndBlockEthash(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	testPendingStateAndBlock(t, ethashChainConfig, ethash.NewFaker())
 }
-func testPendingStateAndBlockClique(t *testing.T) {
+func TestPendingStateAndBlockClique(t *testing.T) {
+	t.Skip("skipped for turbo-geth")
 	testPendingStateAndBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
 }
 
@@ -170,10 +172,12 @@ func testPendingStateAndBlock(t *testing.T, chainConfig *params.ChainConfig, eng
 	}
 }
 
-func testEmptyWorkEthash(t *testing.T) {
+func TestEmptyWorkEthash(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	testEmptyWork(t, ethashChainConfig, ethash.NewFaker())
 }
-func testEmptyWorkClique(t *testing.T) {
+func TestEmptyWorkClique(t *testing.T) {
+	t.Skip("skipped for turbo-geth")
 	testEmptyWork(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
 }
 
@@ -230,7 +234,9 @@ func testEmptyWork(t *testing.T, chainConfig *params.ChainConfig, engine consens
 	}
 }
 
-func testStreamUncleBlock(t *testing.T) {
+func TestStreamUncleBlock(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	ethash := ethash.NewFaker()
 	defer ethash.Close()
 
@@ -286,11 +292,13 @@ func testStreamUncleBlock(t *testing.T) {
 	}
 }
 
-func testRegenerateMiningBlockEthash(t *testing.T) {
+func TestRegenerateMiningBlockEthash(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	testRegenerateMiningBlock(t, ethashChainConfig, ethash.NewFaker())
 }
 
-func testRegenerateMiningBlockClique(t *testing.T) {
+func TestRegenerateMiningBlockClique(t *testing.T) {
+	t.Skip("skipped for turbo-geth")
 	testRegenerateMiningBlock(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
 }
 
@@ -351,11 +359,14 @@ func testRegenerateMiningBlock(t *testing.T, chainConfig *params.ChainConfig, en
 	}
 }
 
-func testAdjustIntervalEthash(t *testing.T) {
+func TestAdjustIntervalEthash(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	testAdjustInterval(t, ethashChainConfig, ethash.NewFaker())
 }
 
-func testAdjustIntervalClique(t *testing.T) {
+func TestAdjustIntervalClique(t *testing.T) {
+	t.Skip("skipped for turbo-geth")
+
 	testAdjustInterval(t, cliqueChainConfig, clique.New(cliqueChainConfig.Clique, ethdb.NewMemDatabase()))
 }
 
