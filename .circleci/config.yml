@@ -6,27 +6,23 @@ jobs:
 
     working_directory: /go/src/github.com/ledgerwatch/turbo-geth
 
-    environment:
-      - TEST_RESULTS: /tmp/test-results
-
     steps:
       - run:
           name: "Setup custom environment variables"
           command: |
               echo 'export GO111MODULE="on"' >> $BASH_ENV
+              echo 'export TEST_RESULTS="/tmp/test-results"' >> $BASH_ENV
               source $BASH_ENV
 
       - checkout
-      - run: mkdir -p $TEST_RESULTS
+      - run: mkdir -p ${TEST_RESULTS}
+      - run: ls -la ${TEST_RESULTS}
       - run: go env
 
       - restore_cache:
           keys:
-            - v1-pkg-cache-{{ checksum ".gitmodules" }}-{{ checksum "go.sum" }}
             - v1-pkg-cache-{{ checksum ".gitmodules" }}
             - v1-pkg-cache
-
-      - run: git submodule update --init
 
       - run: go mod download
       - run: go mod verify
@@ -50,16 +46,15 @@ jobs:
           no_output_timeout: 10m
 
       - save_cache:
-          key: v1-pkg-cache-{{ checksum "go.sum" }}-{{ checksum ".gitmodules" }}
+          key: v1-pkg-cache-{{ checksum "go.sum" }}
           paths:
             - "/go/pkg"
             - "/go/pkg/mod"
-            - "/go/src/github.com/ledgerwatch/turbo-geth/tests/testdata"
 
       - store_artifacts:
-          path: ${TEST_RESULTS}
+          path: /tmp/test-results
           destination: raw-test-output
 
       - store_test_results:
-          path: ${TEST_RESULTS}
+          path: /tmp/test-results
 
