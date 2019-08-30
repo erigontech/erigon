@@ -18,7 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var (

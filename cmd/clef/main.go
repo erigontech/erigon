@@ -49,7 +49,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/signer/core"
 	"github.com/ledgerwatch/turbo-geth/signer/rules"
 	"github.com/ledgerwatch/turbo-geth/signer/storage"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 const legalWarning = `

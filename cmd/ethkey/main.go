@@ -21,7 +21,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 const (

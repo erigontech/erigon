@@ -24,7 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 type outputInspect struct {

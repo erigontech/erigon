@@ -29,7 +29,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/tests"
 
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var stateTestCommand = cli.Command{

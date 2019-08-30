@@ -32,7 +32,7 @@ import (
 	"github.com/fjl/memsize/memsizeui"
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var Memsize memsizeui.Handler
