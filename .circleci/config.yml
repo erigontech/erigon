@@ -52,6 +52,7 @@ jobs:
           paths:
             - "/go/pkg"
             - "/go/pkg/mod"
+            - "/go/src/github.com/ledgerwatch/turbo-geth/tests/testdata"
 
       - store_artifacts:
           path: ${TEST_RESULTS}
