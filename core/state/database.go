@@ -943,7 +943,7 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	}
 	pruned := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
 	if !pruned {
-		fmt.Println(pruned)
+		_ = pruned
 		//return
 	}
 	if print {

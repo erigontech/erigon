@@ -31,7 +31,6 @@ import (
 )
 
 func TestState(t *testing.T) {
-	t.Skip()
 	t.Parallel()
 
 	st := new(testMatcher)
@@ -55,31 +54,6 @@ func TestState(t *testing.T) {
 	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/Constantinople\/3`, "bug in test")
 	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/0`, "bug in test")
 	st.fails(`(?m)^TestState/stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix\/3`, "bug in test")
-
-	//st.whitelist(`(?m)^TestState/stSStoreTest/InitCollision\.json`)
-
-	// Work in progress
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/0`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/1`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/2`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/Constantinople/3`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/1`, "work in progress")
-	st.fails(`(?m)^TestState/stSStoreTest/InitCollision\.json/ConstantinopleFix/3`, "work in progress")
-	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Byzantium/0`, "work in progress")
-	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/Constantinople/0`, "work in progress")
-	st.fails(`(?m)^TestState/stRevertTest/RevertInCreateInInit\.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/0`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/1`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/1`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/Constantinople/2`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/1`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/create2collisionStorage\.json/ConstantinopleFix/2`, "work in progress")
-	st.fails(`(?m)^TestState/stExtCodeHash/dynamicAccountOverwriteEmpty\.json/Constantinople/0`, "work in progress")
-	st.fails(`(?m)^TestState/stExtCodeHash/dynamicAccountOverwriteEmpty\.json/ConstantinopleFix/0`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/RevertInCreateInInitCreate2\.json/Constantinople/0`, "work in progress")
-	st.fails(`(?m)^TestState/stCreate2/RevertInCreateInInitCreate2\.json/ConstantinopleFix/0`, "work in progress")
 
 	st.walk(t, stateTestDir, func(t *testing.T, name string, test *StateTest) {
 		for _, subtest := range test.Subtests() {

@@ -214,6 +214,58 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 	isStorageSizeEqual(t, a, decodedAccount)
 }
 
+func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
+	a := Account{
+		Initialised:    true,
+		Nonce:          0,
+		Balance:        *big.NewInt(0),
+		Root:           common.HexToHash("123"),
+		CodeHash:       common.HexToHash("123"),
+		Incarnation:    1,
+		HasStorageSize: false,
+		StorageSize:    0,
+	}
+	encodedLen := a.EncodingLengthForStorage()
+	encodedAccount := make([]byte, encodedLen)
+	a.EncodeForStorage(encodedAccount)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
+}
+func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
+	a := Account{
+		Initialised:    true,
+		Nonce:          0,
+		Balance:        *big.NewInt(0),
+		Incarnation:    1,
+		HasStorageSize: false,
+		StorageSize:    0,
+	}
+	encodedLen := a.EncodingLengthForStorage()
+	encodedAccount := make([]byte, encodedLen)
+	a.EncodeForStorage(encodedAccount)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	if a.Incarnation != decodedAccount.Incarnation {
+		t.FailNow()
+	}
+	if a.Balance.Cmp(&decodedAccount.Balance) != 0 {
+		t.FailNow()
+	}
+	if a.Nonce != decodedAccount.Nonce {
+		t.FailNow()
+	}
+}
+
 func isAccountsEqual(t *testing.T, src, dst Account) {
 	if dst.Initialised != src.Initialised {
 		t.Fatal("cant decode the account Initialised", src.Initialised, dst.Initialised)

@@ -45,7 +45,7 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		return 1
 	}
 
-	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 {
+	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 || a.Incarnation != 0 {
 		var balanceBytes int
 		if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
 			balanceBytes = 0
