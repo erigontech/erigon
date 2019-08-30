@@ -20,6 +20,8 @@ jobs:
 
       - run: go get github.com/jstemmer/go-junit-report
 
+      - run: make
+
       - run: make lintci-deps
 
       - run:
@@ -33,8 +35,6 @@ jobs:
             trap "go-junit-report <${TEST_RESULTS}/go-test.out > ${TEST_RESULTS}/go-test-report.xml" EXIT
             make test | tee ${TEST_RESULTS}/go-test.out
           no_output_timeout: 10m
-
-      - run: make
 
       - save_cache:
           key: v1-pkg-cache
