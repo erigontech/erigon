@@ -24,6 +24,8 @@ jobs:
             - v1-pkg-cache-{{ checksum ".gitmodules" }}
             - v1-pkg-cache
 
+      - run: git submodule update --init --recurcive
+
       - run: go mod download
       - run: go mod verify
 
