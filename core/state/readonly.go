@@ -21,7 +21,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -79,7 +79,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	dbs.db.WalkAsOf(StorageBucket, StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	_ = dbs.db.WalkAsOf(bucket.Storage, bucket.StorageHistory, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addr[:]) {
 			return false, nil
 		}
@@ -129,7 +129,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	h.sha.Write(address[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := dbs.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, buf[:], dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(bucket.Accounts, bucket.AccountsHistory, buf[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -147,7 +147,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, key *common.Hash)
 	h.sha.Write(key[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, append(address[:], buf[:]...), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(bucket.Storage, bucket.StorageHistory, append(address[:], buf[:]...), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -158,7 +158,7 @@ func (dbs *DbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return dbs.db.Get(CodeBucket, codeHash[:])
+	return dbs.db.Get(bucket.Code, codeHash[:])
 }
 
 func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
@@ -169,11 +169,11 @@ func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	return len(code), nil
 }
 
-func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account, _ bool) error {
 	return nil
 }
 
-func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account, _ bool) error {
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (dbs *DbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash, _ bool) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()

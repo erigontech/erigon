@@ -22,7 +22,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -30,18 +30,18 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 // Generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
+func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucketKey, key, value []byte) error) error {
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string]struct{})
 	suffixDst := encodeTimestamp(timestampDst + 1)
 	if err := db.Walk(SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := decodeTimestamp(k)
+		timestamp, bucketKey := decodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
 		keycount := int(binary.BigEndian.Uint32(v))
 		if keycount > 0 {
-			bucketStr := string(common.CopyBytes(bucket))
+			bucketStr := string(common.CopyBytes(bucketKey))
 			var t map[string]struct{}
 			var ok bool
 			if t, ok = m[bucketStr]; !ok {
@@ -82,14 +82,14 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	//sort.Sort(buckets)
 	for bucketStr, t := range m {
 		//t := m[bucketStr]
-		bucket := []byte(bucketStr)
+		bucketKey := []byte(bucketStr)
 		for keyStr := range t {
 			key := []byte(keyStr)
-			value, err := db.GetAsOf(bucket[1:], bucket, key, timestampDst+1)
+			value, err := db.GetAsOf(bucketKey[1:], bucketKey, key, timestampDst+1)
 			if err != nil {
 				value = nil
 			}
-			if err := df(bucket, key, value); err != nil {
+			if err := df(bucketKey, key, value); err != nil {
 				return err
 			}
 		}
@@ -101,8 +101,8 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	t := llrb.New()
 	startCode := encodeTimestamp(starttimestamp)
 	if err := db.Walk(SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := decodeTimestamp(k)
-		if !bytes.Equal(bucket, AccountsHistoryBucket) {
+		timestamp, bucketKey := decodeTimestamp(k)
+		if !bytes.Equal(bucketKey, bucket.AccountsHistory) {
 			return true, nil
 		}
 		if timestamp > endtimestamp {

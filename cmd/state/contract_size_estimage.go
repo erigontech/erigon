@@ -3,16 +3,17 @@ package main
 import (
 	"bytes"
 	"fmt"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"image"
+	"image/color"
 	"math"
 	"math/big"
 	"time"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"image"
-	"image/color"
 	"github.com/llgcode/draw2d"
 	"github.com/llgcode/draw2d/draw2dimg"
 	"github.com/petar/GoLLRB/llrb"
@@ -30,7 +31,7 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
 	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(AccountsBucket)
+		b := tx.Bucket(bucket.Accounts)
 		if b == nil {
 			return fmt.Errorf("Could not find accounts bucket")
 		}
@@ -53,7 +54,7 @@ func actualContractSize(db *bolt.DB, contract common.Address) (int, error) {
 	copy(fk[:], contract[:])
 	actual := 0
 	if err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		c := b.Cursor()
 		for k, _ := c.Seek(fk[:]); k != nil && bytes.HasPrefix(k, contract[:]); k, _ = c.Next() {
 			actual++
@@ -301,8 +302,8 @@ func estimate() {
 	count := 0
 	contractCount := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		a := tx.Bucket(AccountsBucket)
-		b := tx.Bucket(StorageBucket)
+		a := tx.Bucket(bucket.Accounts)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}

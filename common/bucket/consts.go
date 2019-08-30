@@ -1,9 +1,9 @@
 package bucket
 
 var (
-	AccountsBucket        = []byte("AT")
-	AccountsHistoryBucket = []byte("hAT")
-	StorageBucket         = []byte("ST")
-	StorageHistoryBucket  = []byte("hST")
-	CodeBucket            = []byte("CODE")
+	Accounts        = []byte("AT")
+	AccountsHistory = []byte("hAT")
+	Storage         = []byte("ST")
+	StorageHistory  = []byte("hST")
+	Code            = []byte("CODE")
 )

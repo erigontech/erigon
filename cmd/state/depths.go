@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -20,7 +20,7 @@ func countDepths() {
 	var prev [32]byte
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(AccountsBucket)
+		b := tx.Bucket(bucket.Accounts)
 		if b == nil {
 			return nil
 		}
@@ -116,11 +116,11 @@ func countStorageDepths() {
 	var filtered int
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
-		ab := tx.Bucket(AccountsBucket)
+		ab := tx.Bucket(bucket.Accounts)
 		if ab == nil {
 			return nil
 		}

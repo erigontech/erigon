@@ -15,7 +15,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -197,7 +197,7 @@ func makeTokenBalances() {
 	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
 	check(err)
 	defer pdb.Close()
-	bucket := []byte("sha3")
+	bucketKey := []byte("sha3")
 	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
@@ -218,7 +218,7 @@ func makeTokenBalances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(AccountsBucket, crypto.Keccak256(token[:]))
+		enc, err := ethDb.Get(bucket.Accounts, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
@@ -277,13 +277,13 @@ func makeTokenBalances() {
 		if plen != 1 {
 			fmt.Printf(" balanceOf preimages: %d\n", plen)
 		}
-		err = ethDb.Walk(StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(bucket.Storage, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(pBucket, k[20:])
 			var preimage []byte
 			if key != nil {
 				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucket)
+					b := tx.Bucket(bucketKey)
 					if b == nil {
 						return nil
 					}
@@ -418,7 +418,7 @@ func makeTokenAllowances() {
 	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
 	check(err)
 	defer pdb.Close()
-	bucket := []byte("sha3")
+	bucketKey := []byte("sha3")
 	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
@@ -439,7 +439,7 @@ func makeTokenAllowances() {
 	var a accounts.Account
 	for _, token := range tokens {
 		// Exclude EOAs and removed accounts
-		enc, err := ethDb.Get(AccountsBucket, crypto.Keccak256(token[:]))
+		enc, err := ethDb.Get(bucket.Accounts, crypto.Keccak256(token[:]))
 		if enc == nil {
 			continue
 		}
@@ -516,14 +516,14 @@ func makeTokenAllowances() {
 			fmt.Printf("allowance base not found\n")
 			continue
 		}
-		err = ethDb.Walk(StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
+		err = ethDb.Walk(bucket.Storage, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
 			key, err = ethDb.Get(pBucket, k[20:])
 			var index2 common.Hash
 			var preimage []byte
 			if key != nil {
 				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucket)
+					b := tx.Bucket(bucketKey)
 					if b == nil {
 						return nil
 					}

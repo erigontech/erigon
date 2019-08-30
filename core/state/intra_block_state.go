@@ -771,15 +771,15 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 		}
 
 		if stateObject.suicided || (params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
+			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original, false); err != nil {
 				return err
 			}
 			stateObject.deleted = true
 		} else {
-			if err := stateObject.updateTrie(stateWriter); err != nil {
+			if err := stateObject.updateTrie(stateWriter, false); err != nil {
 				return err
 			}
-			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
+			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data, false); err != nil {
 				return err
 			}
 		}
@@ -801,7 +801,7 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 
 		if stateObject.suicided || (isDirty && params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
+			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original, false); err != nil {
 				return err
 			}
 			stateObject.deleted = true
@@ -813,11 +813,11 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 				}
 			}
 
-			if err := stateObject.updateTrie(stateWriter); err != nil {
+			if err := stateObject.updateTrie(stateWriter, false); err != nil {
 				return err
 			}
 
-			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
+			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data, false); err != nil {
 				return err
 			}
 		}

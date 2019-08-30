@@ -79,6 +79,8 @@ type CacheConfig struct {
 	TrieCleanLimit int           // Memory allowance (MB) to use for caching trie nodes in memory
 	TrieDirtyLimit int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit  time.Duration // Time limit after which to flush the current in-memory trie to disk
+
+	ArchiveSyncInterval uint64
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -137,11 +139,11 @@ type BlockChain struct {
 	validator Validator // block and state validator interface
 	vmConfig  vm.Config
 
-	badBlocks      *lru.Cache              // Bad block cache
-	shouldPreserve func(*types.Block) bool // Function used to determine whether should preserve the given block.
-	noHistory      bool
-	enableReceipts bool // Whether receipts need to be written to the database
-	resolveReads   bool
+	badBlocks         *lru.Cache // Bad block cache
+	noHistory         bool
+	highestKnownBlock uint64
+	enableReceipts    bool // Whether receipts need to be written to the database
+	resolveReads      bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -150,9 +152,10 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
-			TrieCleanLimit: 256,
-			TrieDirtyLimit: 256,
-			TrieTimeLimit:  5 * time.Minute,
+			TrieCleanLimit:      256,
+			TrieDirtyLimit:      256,
+			TrieTimeLimit:       5 * time.Minute,
+			ArchiveSyncInterval: 1024,
 		}
 	}
 	bodyCache, _ := lru.New(bodyCacheLimit)
@@ -1003,8 +1006,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	tds.SetBlockNr(block.NumberU64())
 	ctx := bc.chainConfig.WithEIPsFlags(context.Background(), block.Number())
 	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		// archive case
 		return NonStatTy, err
 	}
+	//todo: write archive and full sync if statements
 	if bc.enableReceipts {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
@@ -1767,4 +1772,12 @@ func (bc *BlockChain) SubscribeLogsEvent(ch chan<- []*types.Log) event.Subscript
 
 func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
+}
+
+func (bc *BlockChain) IsNoHistory(currentBlock uint64) bool {
+	return bc.noHistory || (currentBlock-bc.highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
+}
+
+func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
+	bc.highestKnownBlock = h
 }

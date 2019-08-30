@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
@@ -47,7 +47,7 @@ func (self *TrieDbState) RawDump() Dump {
 	}
 	var acc accounts.Account
 	var prefix [32]byte
-	err := self.db.Walk(AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	err := self.db.Walk(bucket.Accounts, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
 		var err error
 		if err = acc.Decode(v); err != nil {
@@ -56,7 +56,7 @@ func (self *TrieDbState) RawDump() Dump {
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {
-			if code, err = self.db.Get(CodeBucket, acc.CodeHash[:]); err != nil {
+			if code, err = self.db.Get(bucket.Code, acc.CodeHash[:]); err != nil {
 				return false, err
 			}
 		}
@@ -72,7 +72,7 @@ func (self *TrieDbState) RawDump() Dump {
 			var storageSize = acc.StorageSize
 			account.StorageSize = &storageSize
 		}
-		err = self.db.Walk(StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
+		err = self.db.Walk(bucket.Storage, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
 			key := self.GetKey(ks[common.AddressLength:]) //remove account address from composite key
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil

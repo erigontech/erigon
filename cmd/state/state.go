@@ -21,8 +21,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -150,7 +151,7 @@ func stateGrowth1() {
 		if pre == nil {
 			return nil
 		}
-		b := tx.Bucket(AccountsHistoryBucket)
+		b := tx.Bucket(bucket.AccountsHistory)
 		if b == nil {
 			return nil
 		}
@@ -194,7 +195,7 @@ func stateGrowth1() {
 		if pre == nil {
 			return nil
 		}
-		b := tx.Bucket(AccountsBucket)
+		b := tx.Bucket(bucket.Accounts)
 		if b == nil {
 			return nil
 		}
@@ -314,7 +315,7 @@ func stateGrowth2() {
 	var hash common.Hash
 	// Go through the history of account first
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageHistoryBucket)
+		b := tx.Bucket(bucket.StorageHistory)
 		if b == nil {
 			return nil
 		}
@@ -367,7 +368,7 @@ func stateGrowth2() {
 	check(err)
 	// Go through the current state
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
@@ -1099,8 +1100,8 @@ func storageUsage() {
 	count := 0
 	var leafSize uint64
 	err = db.View(func(tx *bolt.Tx) error {
-		a := tx.Bucket(AccountsBucket)
-		b := tx.Bucket(StorageBucket)
+		a := tx.Bucket(bucket.Accounts)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
@@ -1210,7 +1211,7 @@ func tokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
@@ -1286,7 +1287,7 @@ func nonTokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
@@ -1347,7 +1348,7 @@ func oldStorage() {
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(StorageBucket)
+		b := tx.Bucket(bucket.Storage)
 		if b == nil {
 			return nil
 		}
@@ -1364,7 +1365,7 @@ func oldStorage() {
 	})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(AccountsHistoryBucket)
+		b := tx.Bucket(bucket.AccountsHistory)
 		if b == nil {
 			return nil
 		}
@@ -1422,7 +1423,7 @@ func dustEOA() {
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(AccountsBucket)
+		b := tx.Bucket(bucket.Accounts)
 		if b == nil {
 			return nil
 		}

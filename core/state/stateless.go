@@ -430,7 +430,7 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	}
 }
 
-func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
+func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account, _ bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -532,7 +532,7 @@ func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
+func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account, _ bool) error {
 	h := newHasher()
 	defer returnHasherToPool(h)
 	h.sha.Reset()
@@ -547,7 +547,7 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (s *Stateless) WriteAccountStorage(address common.Address, key, original, value *common.Hash, _ bool) error {
 	m, ok := s.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)

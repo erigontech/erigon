@@ -279,6 +279,9 @@ func (dl *downloadTester) Rollback(hashes []common.Hash) {
 	}
 }
 
+func (dl *downloadTester) NotifyHeightKnownBlock(_ uint64) {
+}
+
 // newPeer registers a new block download source into the downloader.
 func (dl *downloadTester) newPeer(id string, version int, chain *testChain) error {
 	dl.lock.Lock()
@@ -1227,7 +1230,7 @@ func testForkedSyncProgress(t *testing.T, protocol int, mode SyncMode) {
 	pending.Wait()
 
 	// Simulate a successful sync above the fork
-	tester.downloader.syncStatsChainOrigin = tester.downloader.syncStatsChainHeight
+	tester.downloader.syncStatsChainOrigin = tester.downloader.GetSyncStatsChainHeight()
 
 	// Synchronise with the second fork and check progress resets
 	tester.newPeer("fork B", protocol, chainB)

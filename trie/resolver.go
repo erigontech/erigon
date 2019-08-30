@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -254,15 +254,15 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	if tr.accounts {
 		if tr.historical {
-			err = db.MultiWalkAsOf(AccountsBucket, AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(bucket.Accounts, bucket.AccountsHistory, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk(AccountsBucket, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(bucket.Accounts, startkeys, fixedbits, tr.Walker)
 		}
 	} else {
 		if tr.historical {
-			err = db.MultiWalkAsOf(StorageBucket, StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(bucket.Storage, bucket.StorageHistory, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk(StorageBucket, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(bucket.Storage, startkeys, fixedbits, tr.Walker)
 		}
 	}
 	tr.prec.Reset()

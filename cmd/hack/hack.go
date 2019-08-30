@@ -17,7 +17,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	. "github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -47,7 +47,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, AccountsBucket) {
+			if len(name) == 20 || bytes.Equal(name, bucket.Accounts) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -320,7 +320,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(AccountsBucket)
+		b := tx.Bucket(bucket.Accounts)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
@@ -802,7 +802,7 @@ func testResolve() {
 	} else {
 		check(err)
 	}
-	//enc, _ := ethDb.GetAsOf(AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
+	//enc, _ := ethDb.GetAsOf(Accounts, state.AccountsHistory, crypto.Keccak256(contract), 2701646)
 	//fmt.Printf("Account: %x\n", enc)
 }
 
@@ -1031,14 +1031,14 @@ func loadAccount() {
 	blockSuffix := encodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(AccountsBucket, AccountsHistoryBucket, secKey, blockNr+1)
+	accountData, err := ethDb.GetAsOf(bucket.Accounts, bucket.AccountsHistory, secKey, blockNr+1)
 	check(err)
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(bucket.Storage, bucket.StorageHistory, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v, blockNr)
@@ -1049,7 +1049,7 @@ func loadAccount() {
 	}
 	fmt.Printf("After %d updates, reconstructed storage root: %x\n", count, t.Hash())
 	var keys [][]byte
-	if err := ethDb.Walk(StorageHistoryBucket, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(bucket.StorageHistory, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
 		if !bytes.HasSuffix(k, blockSuffix) {
 			return true, nil
 		}
@@ -1061,11 +1061,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(StorageBucket, StorageHistoryBucket, k, blockNr+1)
+		v, err := ethDb.GetAsOf(bucket.Storage, bucket.StorageHistory, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(StorageBucket, StorageHistoryBucket, k, blockNr)
+		vOrig, err := ethDb.GetAsOf(bucket.Storage, bucket.StorageHistory, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
@@ -1232,7 +1232,7 @@ func readAccount() {
 	check(err)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	v, _ := ethDb.Get(AccountsBucket, secKey)
+	v, _ := ethDb.Get(bucket.Accounts, secKey)
 	fmt.Printf("%x:%x\n", secKey, v)
 }
 
@@ -1244,16 +1244,16 @@ func repairCurrent() {
 	check(err)
 	defer currentDb.Close()
 	check(historyDb.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(StorageBucket); err != nil {
+		if err := tx.DeleteBucket(bucket.Storage); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(StorageBucket, true)
+		newB, err := tx.CreateBucket(bucket.Storage, true)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(func(ctx *bolt.Tx) error {
-			b := ctx.Bucket(StorageBucket)
+			b := ctx.Bucket(bucket.Storage)
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
 				newB.Put(k, v)
