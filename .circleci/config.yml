@@ -16,12 +16,11 @@ jobs:
 
       - checkout
       - run: mkdir -p ${TEST_RESULTS}
-      - run: ls -la ${TEST_RESULTS}
       - run: go env
 
       - restore_cache:
           keys:
-            - v1-pkg-cache-{{ checksum ".gitmodules" }}
+            - v1-pkg-cache-{{ checksum "go.sum" }}
             - v1-pkg-cache
 
       - run: git submodule update --init --recurcive
