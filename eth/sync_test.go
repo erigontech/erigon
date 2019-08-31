@@ -28,7 +28,9 @@ import (
 
 // Tests that fast sync gets disabled as soon as a real block is successfully
 // imported into the blockchain.
-func testFastSyncDisabling(t *testing.T) {
+func TestFastSyncDisabling(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	// Create a pristine protocol manager, check that fast sync is left enabled
 	pmEmpty, _ := newTestProtocolManagerMust(t, downloader.FastSync, 0, nil, nil)
 	if atomic.LoadUint32(&pmEmpty.fastSync) == 0 {

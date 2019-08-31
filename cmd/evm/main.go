@@ -23,7 +23,7 @@ import (
 	"os"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var gitCommit = "" // Git SHA1 commit hash of the release (set via linker flags)
