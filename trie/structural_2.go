@@ -181,7 +181,7 @@ func (hb *HashBuilder2) leaf(length int) {
 	if err != nil {
 		panic(err)
 	}
-	s := &shortNode{Key: hexToCompact(key), Val: val}
+	s := &shortNode{Key: common.CopyBytes(key), Val: val}
 	hb.nodeStack = append(hb.nodeStack, s)
 	hb.leafHash(length)
 }
@@ -291,9 +291,9 @@ func (hb *HashBuilder2) extension(key []byte) {
 	switch n := nd.(type) {
 	case nil:
 		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-32:])
-		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: hexToCompact(key), Val: hashNode(branchHash)}
+		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: common.CopyBytes(key), Val: hashNode(branchHash)}
 	case *fullNode:
-		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: hexToCompact(key), Val: n}
+		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: common.CopyBytes(key), Val: n}
 	default:
 		panic(fmt.Errorf("wrong Val type for an extension: %T", nd))
 	}

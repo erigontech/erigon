@@ -42,6 +42,7 @@ type BlockProof struct {
 }
 
 type ProofGenerator struct {
+	touches        [][]byte
 	proofMasks     map[string]uint32
 	sMasks         map[string]map[string]uint32
 	proofHashes    map[string][16]common.Hash
@@ -79,6 +80,16 @@ func NewProofGenerator() *ProofGenerator {
 		proofCodes:     make(map[common.Hash][]byte),
 		createdCodes:   make(map[common.Hash][]byte),
 	}
+}
+
+func (pg *ProofGenerator) AddTouch(touch []byte) {
+	pg.touches = append(pg.touches, touch)
+}
+
+func (pg *ProofGenerator) ExtractTouches() [][]byte {
+	touches := pg.touches
+	pg.touches = nil
+	return touches
 }
 
 func (pg *ProofGenerator) extractProofs(prefix []byte, trace bool) (
@@ -571,7 +582,7 @@ func constructShortNode(touchFunc func(hex []byte, del bool), ctime uint64,
 	// short node (leaf or extension)
 	nKey := shortKeys[*shortIdx]
 	(*shortIdx)++
-	s := &shortNode{Key: hexToCompact(nKey)}
+	s := &shortNode{Key: common.CopyBytes(nKey)}
 	if trace {
 		fmt.Printf("\n")
 	}
@@ -941,12 +952,12 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	if (downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6 {
 		nKey = shortKeys[*shortIdx]
 		(*shortIdx)++
-		if ok && !bytes.Equal(compactToHex(s.Key), nKey) {
-			fmt.Printf("%s keys don't match: s.Key %x, nKey %x\n", strings.Repeat(" ", pos), compactToHex(s.Key), nKey)
+		if ok && !bytes.Equal(s.Key, nKey) {
+			fmt.Printf("%s keys don't match: s.Key %x, nKey %x\n", strings.Repeat(" ", pos), s.Key, nKey)
 		}
 	}
 	if !ok && ((downmask <= 1) || downmask == 2 || downmask == 4 || downmask == 6) {
-		s = &shortNode{Key: hexToCompact(nKey)}
+		s = &shortNode{Key: common.CopyBytes(nKey)}
 	}
 	if trace {
 		fmt.Printf("%spos: %d, down: %16b, nKey: %x", strings.Repeat(" ", pos), pos, downmask, nKey)
@@ -954,7 +965,7 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 	if trace {
 		fmt.Printf("\n")
 		if ok {
-			fmt.Printf("%skeep existing short node %x\n", strings.Repeat(" ", pos), compactToHex(s.Key))
+			fmt.Printf("%skeep existing short node %x\n", strings.Repeat(" ", pos), s.Key)
 		}
 	}
 	switch downmask {
@@ -997,7 +1008,7 @@ func applyShortNode(h *hasher, touchFunc func(hex []byte, del bool), ctime uint6
 		s.Val = applyFullNode(h, touchFunc, ctime, nil, concat(hex, nKey...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	case 7:
-		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, compactToHex(s.Key)...), masks, shortKeys, values, hashes,
+		s.Val = applyFullNode(h, touchFunc, ctime, s.Val, concat(hex, s.Key...), masks, shortKeys, values, hashes,
 			maskIdx, shortIdx, valueIdx, hashIdx, trace)
 	}
 	return s

@@ -1706,6 +1706,9 @@ func main() {
 	if *action == "stateless" {
 		stateless(*genLag, *consLag)
 	}
+	if *action == "stateless_chart" {
+		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)
+	}
 	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
 	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
 	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)

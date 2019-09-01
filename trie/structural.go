@@ -479,11 +479,11 @@ func (hb *HashBuilder) extension(key []byte) {
 
 func (hb *HashBuilder) shortNode() *shortNode {
 	if hb.topValue != nil {
-		return &shortNode{Key: hexToCompact(hb.topKey), Val: valueNode(common.CopyBytes(hb.topValue.B))}
+		return &shortNode{Key: common.CopyBytes(hb.topKey), Val: valueNode(common.CopyBytes(hb.topValue.B))}
 	} else if hb.topBranch != nil {
-		return &shortNode{Key: hexToCompact(hb.topKey), Val: hb.topBranch}
+		return &shortNode{Key: common.CopyBytes(hb.topKey), Val: hb.topBranch}
 	}
-	return &shortNode{Key: hexToCompact(hb.topKey), Val: hashNode(common.CopyBytes(hb.topHash[:]))}
+	return &shortNode{Key: common.CopyBytes(hb.topKey), Val: hashNode(common.CopyBytes(hb.topHash[:]))}
 }
 
 func (hb *HashBuilder) add(digit int) {

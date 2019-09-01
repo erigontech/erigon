@@ -180,6 +180,10 @@ func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	return len(code), nil
 }
 
+func (dbs *DbState) NextIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
 func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
@@ -214,7 +218,7 @@ func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Addres
 	t.ReplaceOrInsert(i)
 	return nil
 }
-func (dbs *DbState) RemoveStorage(address common.Address, incarnation uint64) error {
-	dbs.storage[address] = nil
+
+func (dbs *DbState) RemoveStorage(address common.Address) error {
 	return nil
 }

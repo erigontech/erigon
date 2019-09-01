@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -623,6 +623,14 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
+	newobj.created = true
+	// Figure out the latest incarnation of this account
+	incarnation, err := sdb.stateReader.NextIncarnation(addr)
+	// TODO [Alexey] Remove panic
+	if err != nil {
+		panic(err)
+	}
+	newobj.setIncarnation(incarnation)
 	newobj.setNonce(0) // sets the object to dirty
 	if prev == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
@@ -663,7 +671,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
-		newObj.setIncarnation(prev.data.GetIncarnation() + 1)
 	}
 }
 
@@ -780,7 +787,11 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
-
+			if stateObject.created {
+				if err := stateWriter.RemoveStorage(addr); err != nil {
+					return err
+				}
+			}
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
@@ -815,6 +826,11 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 				}
 			}
 
+			if stateObject.created {
+				if err := stateWriter.RemoveStorage(addr); err != nil {
+					return err
+				}
+			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}

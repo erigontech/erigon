@@ -21,72 +21,159 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 // Visual creates visualisation of trie with highlighting
-func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool) {
+// cutTerminals specify how many digits to cut from the terminal short node keys for a more convinient display
+func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool, cutTerminals int,
+	codeMap map[common.Hash][]byte, codeCompressed bool, valCompressed bool) {
 	var highlightsHex = make([][]byte, 0, len(highlights))
 	for _, h := range highlights {
-		highlightsHex = append(highlightsHex, keybytesToHex(h))
+		highlightsHex = append(highlightsHex, h)
+		//highlightsHex = append(highlightsHex, keybytesToHex(h))
 	}
 	var leaves map[string]struct{}
 	if values {
 		leaves = make(map[string]struct{})
 	}
 	hashes := make(map[string]struct{})
-	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes)
-	fmt.Fprintf(w, "{rank = same;")
-	for leaf := range leaves {
-		fmt.Fprintf(w, "n_%x;", leaf)
+	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes, cutTerminals, codeMap, codeCompressed, valCompressed)
+	/*
+	   	fmt.Fprintf(w, "{rank = same;")
+	   	for leaf := range leaves {
+	   		fmt.Fprintf(w, "n_%x;", leaf)
+	   	}
+	   	fmt.Fprintf(w, `};
+	   `)
+	   			fmt.Fprintf(w, "{rank = same;")
+	   			for hash := range hashes {
+	   				fmt.Fprintf(w, "n_%x;", hash)
+	   			}
+	   			fmt.Fprintf(w, `};
+	   		`)
+	*/
+}
+
+func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
+	columns := 32
+	fmt.Fprintf(w,
+		`
+	c_%x [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+	`, hex)
+	rows := (len(code) + columns - 1) / columns
+	row := 0
+	for rowStart := 0; rowStart < len(code); rowStart += columns {
+		if rows < 6 || !compressed || row < 2 || row > rows-3 {
+			fmt.Fprintf(w, "		<tr>")
+			col := 0
+			for ; rowStart+col < len(code) && col < columns; col++ {
+				if columns < 6 || !compressed || col < 2 || col > columns-3 {
+					h := code[rowStart+col]
+					fmt.Fprintf(w, `<td bgcolor="%s"></td>`, visual.HexIndexColors[h])
+				}
+				if compressed && columns >= 6 && col == 2 && (row == 0 || row == rows-2) {
+					fmt.Fprintf(w, `<td rowspan="2" border="0"></td>`)
+				}
+			}
+			if col < columns {
+				fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns-col)
+			}
+			fmt.Fprintf(w, `</tr>
+		`)
+		}
+		if compressed && rows >= 6 && row == 2 {
+			fmt.Fprintf(w, "		<tr>")
+			fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns)
+			fmt.Fprintf(w, `</tr>
+		`)
+		}
+		row++
 	}
-	fmt.Fprintf(w, `};
-`)
-	fmt.Fprintf(w, "{rank = same;")
-	for hash := range hashes {
-		fmt.Fprintf(w, "n_%x;", hash)
-	}
-	fmt.Fprintf(w, `};
-`)
+	fmt.Fprintf(w,
+		`
+	</table>
+	>];
+	`)
 }
 
 func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string,
-	leaves map[string]struct{}, hashes map[string]struct{}) {
+	leaves map[string]struct{}, hashes map[string]struct{}, cutTerminals int, codeMap map[common.Hash][]byte,
+	codeCompressed bool, valCompressed bool) {
 	switch n := nd.(type) {
 	case nil:
 	case *shortNode:
-		nKey := compactToHex(n.Key)
 		var pLenMax int
 		for _, h := range highlights {
-			pLen := prefixLen(nKey, h)
+			pLen := prefixLen(n.Key, h)
 			if pLen > pLenMax {
 				pLenMax = pLen
 			}
 		}
-		visual.Vertical(w, nKey, pLenMax, fmt.Sprintf("n_%x", hex), indexColors, fontColors)
-		if v, ok := n.Val.(valueNode); !ok {
+		visual.Vertical(w, n.Key, pLenMax, fmt.Sprintf("n_%x", hex), indexColors, fontColors, cutTerminals)
+		if v, ok := n.Val.(valueNode); ok {
+			if leaves != nil {
+				leaves[string(hex)] = struct{}{}
+				var valStr = fmt.Sprintf("%x", []byte(v))
+				if valCompressed && len(valStr) > 10 {
+					valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
+				}
+				visual.Circle(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), valStr, false)
+				fmt.Fprintf(w,
+					`n_%x -> e_%x;
+	`, hex, concat(hex, n.Key...))
+			}
+		} else if a, ok := n.Val.(*accountNode); ok {
+			balance := float64(big.NewInt(0).Div(&a.Balance, big.NewInt(1000000000000000)).Uint64()) / 1000.0
+			visual.Circle(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), fmt.Sprintf("%d \u039E%.3f", a.Nonce, balance), true)
+			accountHex := concat(hex, n.Key...)
+			fmt.Fprintf(w,
+				`n_%x -> e_%x;
+`, hex, accountHex)
+			if !a.IsEmptyCodeHash() {
+				codeHex := keybytesToHex(codeMap[a.CodeHash])
+				codeHex = codeHex[:len(codeHex)-1]
+				visualCode(w, accountHex, codeHex, codeCompressed)
+				fmt.Fprintf(w,
+					`e_%x -> c_%x;
+				`, accountHex, accountHex)
+			}
+			if !a.IsEmptyRoot() {
+				nKey := n.Key
+				if nKey[len(nKey)-1] == 16 {
+					nKey = nKey[:len(nKey)-1]
+				}
+				var newHighlights [][]byte
+				for _, h := range highlights {
+					if h != nil && bytes.HasPrefix(h, nKey) {
+						newHighlights = append(newHighlights, h[len(nKey):])
+					}
+				}
+				visualNode(a.storage, accountHex[:len(accountHex)-1], newHighlights, w, indexColors, fontColors, leaves, hashes,
+					cutTerminals, codeMap, codeCompressed, valCompressed)
+				fmt.Fprintf(w,
+					`e_%x -> n_%x;
+	`, accountHex, accountHex[:len(accountHex)-1])
+			}
+		} else {
 			fmt.Fprintf(w,
 				`
 
 	n_%x -> n_%x;
-`, hex, concat(hex, nKey...))
+`, hex, concat(hex, n.Key...))
 			var newHighlights [][]byte
 			for _, h := range highlights {
-				if h != nil && bytes.HasPrefix(h, nKey) {
-					newHighlights = append(newHighlights, h[len(nKey):])
+				if h != nil && bytes.HasPrefix(h, n.Key) {
+					newHighlights = append(newHighlights, h[len(n.Key):])
 				}
 			}
-			visualNode(n.Val, concat(hex, nKey...), newHighlights, w, indexColors, fontColors, leaves, hashes)
-		} else {
-			if leaves != nil {
-				leaves[string(hex)] = struct{}{}
-				visual.Circle(w, fmt.Sprintf("e_%s", string(v)), string(v))
-				fmt.Fprintf(w,
-					`n_%x -> e_%s;
-	`, hex, string(v))
-			}
+			visualNode(n.Val, concat(hex, n.Key...), newHighlights, w, indexColors, fontColors, leaves, hashes,
+				cutTerminals, codeMap, codeCompressed, valCompressed)
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
@@ -138,8 +225,10 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
     n_%x:h%d -> n_%x;
     n_%x:h%d -> n_%x;
 `, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
-		visualNode(n.child1, concat(hex, i1), highlights1, w, indexColors, fontColors, leaves, hashes)
-		visualNode(n.child2, concat(hex, i2), highlights2, w, indexColors, fontColors, leaves, hashes)
+		visualNode(n.child1, concat(hex, i1), highlights1, w, indexColors, fontColors, leaves, hashes,
+			cutTerminals, codeMap, codeCompressed, valCompressed)
+		visualNode(n.child2, concat(hex, i2), highlights2, w, indexColors, fontColors, leaves, hashes,
+			cutTerminals, codeMap, codeCompressed, valCompressed)
 	case *fullNode:
 		fmt.Fprintf(w,
 			`
@@ -193,7 +282,8 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 					newHighlights = append(newHighlights, h[1:])
 				}
 			}
-			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves, hashes)
+			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves, hashes,
+				cutTerminals, codeMap, codeCompressed, valCompressed)
 		}
 	case hashNode:
 		hashes[string(hex)] = struct{}{}
@@ -214,15 +304,14 @@ func (t *Trie) Fold(keys [][]byte) {
 func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 	switch n := nd.(type) {
 	case *shortNode:
-		nKey := compactToHex(n.Key)
 		var newHexes [][]byte
 		for _, hex := range hexes {
-			if bytes.Equal(nKey, hex) {
+			if bytes.Equal(n.Key, hex) {
 				var hn common.Hash
 				h.hash(n, isRoot, hn[:])
 				return true, hashNode(hn[:])
 			}
-			pLen := prefixLen(nKey, hex)
+			pLen := prefixLen(n.Key, hex)
 			if pLen > 0 {
 				newHexes = append(newHexes, hex[pLen:])
 			}
@@ -294,4 +383,201 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 		return false, n
 	}
 	return false, nd
+}
+
+// HexToQuad converts hexary trie to quad trie with the same set of keys
+func HexToQuad(t *Trie) *Trie {
+	newTrie := New(common.Hash{})
+	hexToQuad(t.root, []byte{}, newTrie)
+	return newTrie
+}
+
+func KeyToQuad(key []byte) []byte {
+	l := len(key)*2 + 1
+	var nibbles = make([]byte, l)
+	for i, b := range key {
+		nibbles[i*2] = b / 16
+		nibbles[i*2+1] = b % 16
+	}
+	nibbles[l-1] = 16
+	return keyHexToQuad(nibbles)
+}
+
+func keyHexToQuad(hex []byte) []byte {
+	quadLen := len(hex) * 2
+	if hex[len(hex)-1] == 16 {
+		quadLen--
+	}
+	quad := make([]byte, quadLen)
+	qi := 0
+	for _, h := range hex {
+		if h == 16 {
+			quad[qi] = 16
+			qi++
+		} else {
+			quad[qi] = h / 4
+			qi++
+			quad[qi] = h % 4
+			qi++
+		}
+	}
+	return quad
+}
+
+func hexToQuad(nd node, hex []byte, newTrie *Trie) {
+	switch n := nd.(type) {
+	case nil:
+		return
+	case valueNode:
+		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, n)
+		return
+	case *accountNode:
+		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, &accountNode{n.Account, nil, true})
+		aHex := hex
+		if aHex[len(aHex)-1] == 16 {
+			aHex = aHex[:len(aHex)-1]
+		}
+		hexToQuad(n.storage, aHex, newTrie)
+	case hashNode:
+		return
+	case *shortNode:
+		var hexVal []byte
+		hexVal = concat(hex, n.Key...)
+		hexToQuad(n.Val, hexVal, newTrie)
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		hexToQuad(n.child1, hex1, newTrie)
+		hexToQuad(n.child2, hex2, newTrie)
+	case *fullNode:
+		for i, child := range n.Children {
+			if child != nil {
+				hexToQuad(child, concat(hex, byte(i)), newTrie)
+			}
+		}
+	default:
+		panic("")
+	}
+}
+
+func MakeBlockProof(t *Trie, rs *ResolveSet) *Trie {
+	newTrie := New(common.Hash{})
+	hr := newHasher(false)
+	defer returnHasherToPool(hr)
+	newTrie.root = makeBlockProof(t.root, []byte{}, rs, hr, true)
+	return newTrie
+}
+
+func makeBlockProof(nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool) node {
+	switch n := nd.(type) {
+	case nil:
+		return nil
+	case valueNode:
+		return n
+	case *shortNode:
+		newNode := &shortNode{Key: n.Key}
+		h := n.Key
+		// Remove terminator
+		if h[len(h)-1] == 16 {
+			h = h[:len(h)-1]
+		}
+		hexVal := concat(hex, h...)
+		newNode.Val = makeBlockProof(n.Val, hexVal, rs, hr, false)
+		return newNode
+	case *duoNode:
+		if rs.HashOnly(hex) {
+			var hn common.Hash
+			hr.hash(n, force, hn[:])
+			return hashNode(hn[:])
+		}
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		newNode := &duoNode{}
+		newNode.flags.dirty = true
+		newNode.child1 = makeBlockProof(n.child1, hex1, rs, hr, false)
+		newNode.child2 = makeBlockProof(n.child2, hex2, rs, hr, false)
+		newNode.mask = n.mask
+		return newNode
+	case *fullNode:
+		if rs.HashOnly(hex) {
+			var hn common.Hash
+			hr.hash(n, len(hex) == 0, hn[:])
+			return hashNode(hn[:])
+		}
+		newNode := &fullNode{}
+		newNode.flags.dirty = true
+		for i, child := range n.Children {
+			if child != nil {
+				newNode.Children[i] = makeBlockProof(child, concat(hex, byte(i)), rs, hr, false)
+			}
+		}
+		return newNode
+	case *accountNode:
+		var ac accounts.Account
+		ac.Copy(&n.Account)
+		newNode := &accountNode{ac, nil, false}
+		if n.storage != nil && rs.HashOnly(hex) {
+			var hn common.Hash
+			hr.hash(n, len(hex) == 0, hn[:])
+			newNode.storage = hashNode(hn[:])
+		} else {
+			newNode.storage = makeBlockProof(n.storage, hex, rs, hr, true)
+		}
+		return newNode
+	default:
+		panic(fmt.Sprintf("%T", nd))
+	}
+}
+
+func FullKeys(t *Trie) []string {
+	return fullKeys(t.root, nil, nil)
+}
+
+func fullKeys(nd node, hex []byte, fk []string) []string {
+	switch n := nd.(type) {
+	case nil:
+		return fk
+	case hashNode:
+		return fk
+	case valueNode:
+		return append(fk, string(concat(hex, 16)))
+	case *shortNode:
+		h := n.Key
+		// Remove terminator
+		if h[len(h)-1] == 16 {
+			h = h[:len(h)-1]
+		}
+		hexVal := concat(hex, h...)
+		return fullKeys(n.Val, hexVal, fk)
+	case *duoNode:
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		return fullKeys(n.child2, hex2, fullKeys(n.child1, hex1, fk))
+	case *fullNode:
+		for i, child := range n.Children {
+			if child != nil {
+				fk = fullKeys(child, concat(hex, byte(i)), fk)
+			}
+		}
+		return fk
+	case *accountNode:
+		return append(fullKeys(n.storage, hex, fk), string(concat(hex, 16)))
+	default:
+		panic(fmt.Sprintf("%T", nd))
+	}
 }

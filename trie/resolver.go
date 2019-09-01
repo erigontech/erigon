@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"

@@ -101,9 +101,8 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 	case nil:
 		return nil, true
 	case *shortNode:
-		nKey := compactToHex(n.Key)
-		matchlen := prefixLen(key[pos:], nKey)
-		if matchlen == len(nKey) {
+		matchlen := prefixLen(key[pos:], n.Key)
+		if matchlen == len(n.Key) {
 			if v, ok := n.Val.(*accountNode); ok {
 				return v, true
 			} else {
@@ -146,9 +145,8 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 	case *accountNode:
 		return t.get(n.storage, key, pos)
 	case *shortNode:
-		nKey := compactToHex(n.Key)
-		matchlen := prefixLen(key[pos:], nKey)
-		if matchlen == len(nKey) || nKey[matchlen] == 16 {
+		matchlen := prefixLen(key[pos:], n.Key)
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			value, gotValue = t.get(n.Val, key, pos+matchlen)
 		} else {
 			value, gotValue = nil, true
@@ -192,7 +190,7 @@ func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
 
 	if t.root == nil {
-		newnode := &shortNode{Key: hexToCompact(hex), Val: valueNode(value)}
+		newnode := &shortNode{Key: hex, Val: valueNode(value)}
 		t.root = newnode
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value))
@@ -207,9 +205,9 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if t.root == nil {
 		var newnode node
 		if value.Root == EmptyRoot {
-			newnode = &shortNode{Key: hexToCompact(hex), Val: &accountNode{*value, nil, true}}
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true}}
 		} else {
-			newnode = &shortNode{Key: hexToCompact(hex), Val: &accountNode{*value, hashNode(value.Root[:]), true}}
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true}}
 		}
 		t.root = newnode
 	} else {
@@ -221,12 +219,23 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	}
 }
 
+// ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
+// subtrie is specifed by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
+// is useful to ensure that specific leaves of the trie are fully expanded (and not rolled into
+// the hashes). One might think of two uses of ResolveRequests (and perhaps we need to consider
+// splitting them into two types). First type is to fetch certain number of levels of a given
+// subtrie, but specifying resolveHex and resolvePos such that resolvePos == len(resolveHex).
+// In such situations, it want to also set topLevels field in the TrieResolver to a non-zero
+// value, otherwise only a hashNode will be resolved.
+// Second type is to fetch a subtrie in such a way that a set of keys will be fully expanded,
+// so that one can perform reads, inserts, and deletes on those keys without needing to do
+// any more resolving.
 type ResolveRequest struct {
-	t             *Trie  // trie to act upon
-	contract      []byte // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
-	resolveHex    []byte // Key for which the resolution is requested
-	resolvePos    int    // Position in the key for which resolution is requested
-	extResolvePos int
+	t             *Trie    // trie to act upon
+	contract      []byte   // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
+	resolveHex    []byte   // Key for which the resolution is requested
+	resolvePos    int      // Position in the key for which resolution is requested
+	extResolvePos int      // Internal field, does not need to be set when ResolveRequest is created
 	resolveHash   hashNode // Expected hash of the resolved node (for correctness checking)
 	RequiresRLP   bool     // whether to output node's RLP
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
@@ -257,9 +266,8 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 		case nil:
 			return false, nil
 		case *shortNode:
-			nKey := compactToHex(n.Key)
-			matchlen := prefixLen(hex[pos:], nKey)
-			if matchlen == len(nKey) || nKey[matchlen] == 16 {
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				nd = n.Val
 			} else {
 				return false, nil
@@ -317,27 +325,26 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 		case nil:
 			return
 		case *shortNode:
-			nKey := compactToHex(n.Key)
-			pg.addShort(contract, hex, pos, nKey)
-			matchlen := prefixLen(hex[pos:], nKey)
-			if matchlen == len(nKey) {
+			pg.addShort(contract, hex, pos, n.Key)
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) {
 				nd = n.Val
 				pos += matchlen
 			} else {
-				proofHex := make([]byte, pos+len(nKey))
+				proofHex := make([]byte, pos+len(n.Key))
 				copy(proofHex, hex[:pos])
-				copy(proofHex[pos:], nKey)
+				copy(proofHex[pos:], n.Key)
 				if v, ok := n.Val.(valueNode); ok {
-					pg.addValue(contract, proofHex, pos+len(nKey), common.CopyBytes(v))
+					pg.addValue(contract, proofHex, pos+len(n.Key), common.CopyBytes(v))
 				} else if v, ok := n.Val.(*accountNode); ok {
 					encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
 					v.EncodeForHashing(encodedAccount.B)
 					enc := encodedAccount.Bytes()
 					pool.PutBuffer(encodedAccount)
 
-					pg.addValue(contract, proofHex, pos+len(nKey), enc)
+					pg.addValue(contract, proofHex, pos+len(n.Key), enc)
 				} else {
-					pg.addSoleHash(contract, proofHex, pos+len(nKey), common.BytesToHash(n.Val.hash()))
+					pg.addSoleHash(contract, proofHex, pos+len(n.Key), common.BytesToHash(n.Val.hash()))
 				}
 				return
 			}
@@ -346,22 +353,21 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 			pg.addProof(contract, hex, pos, mask, hashes)
 			if m != nil {
 				for idx, s := range m {
-					nKey := compactToHex(s.Key)
-					proofHex := make([]byte, pos+1+len(nKey))
+					proofHex := make([]byte, pos+1+len(s.Key))
 					copy(proofHex, hex[:pos])
 					proofHex[pos] = idx
-					copy(proofHex[pos+1:], nKey)
-					pg.addShort(contract, proofHex, pos+1, nKey)
+					copy(proofHex[pos+1:], s.Key)
+					pg.addShort(contract, proofHex, pos+1, s.Key)
 					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
 					} else if v, ok := s.Val.(*accountNode); ok {
 						encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
 						v.EncodeForHashing(encodedAccount.B)
 						enc := encodedAccount.Bytes()
 						pool.PutBuffer(encodedAccount)
-						pg.addValue(contract, proofHex, pos+1+len(nKey), enc)
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), enc)
 					} else {
-						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
 					}
 				}
 			}
@@ -381,16 +387,15 @@ func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGene
 			pg.addProof(contract, hex, pos, mask, hashes)
 			if m != nil {
 				for idx, s := range m {
-					nKey := compactToHex(s.Key)
-					proofHex := make([]byte, pos+1+len(nKey))
+					proofHex := make([]byte, pos+1+len(s.Key))
 					copy(proofHex, hex[:pos])
 					proofHex[pos] = idx
-					copy(proofHex[pos+1:], nKey)
-					pg.addShort(contract, proofHex, pos+1, nKey)
+					copy(proofHex[pos+1:], s.Key)
+					pg.addShort(contract, proofHex, pos+1, s.Key)
 					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(contract, proofHex, pos+1+len(nKey), common.CopyBytes(v))
+						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
 					} else {
-						pg.addSoleHash(contract, proofHex, pos+1+len(nKey), common.BytesToHash(s.Val.hash()))
+						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
 					}
 				}
 			}
@@ -451,7 +456,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 	switch n := origNode.(type) {
 	case nil:
-		s := &shortNode{Key: hexToCompact(key[pos:]), Val: value}
+		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
 		return true, s
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
@@ -461,11 +466,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		}
 		return updated, n
 	case *shortNode:
-		nKey := compactToHex(n.Key)
-		matchlen := prefixLen(key[pos:], nKey)
+		matchlen := prefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
-		if matchlen == len(nKey) || nKey[matchlen] == 16 {
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
 				n.Val = nn
@@ -474,28 +478,28 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		} else {
 			// Otherwise branch out at the index where they differ.
 			var c1 node
-			if len(nKey) == matchlen+1 {
+			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
+				s1 := &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val}
 				c1 = s1
 			}
 			var c2 node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
+				s2 := &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value}
 				c2 = s2
 			}
 			branch := &duoNode{}
-			if nKey[matchlen] < key[pos+matchlen] {
+			if n.Key[matchlen] < key[pos+matchlen] {
 				branch.child1 = c1
 				branch.child2 = c2
 			} else {
 				branch.child1 = c2
 				branch.child2 = c1
 			}
-			branch.mask = (1 << (nKey[matchlen])) | (1 << (key[pos+matchlen]))
+			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
 			branch.flags.dirty = true
 
 			// Replace this shortNode with the branch if it occurs at index 0.
@@ -505,7 +509,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
 				t.touchFunc(key[:pos+matchlen], false)
-				n.Key = hexToCompact(key[pos : pos+matchlen])
+				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
 				newNode = n
 			}
@@ -536,7 +540,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 				child = short
 			}
 			newnode := &fullNode{}
@@ -557,7 +561,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				short := &shortNode{Key: hexToCompact(key[pos+1:]), Val: value}
+				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 				n.Children[key[pos]] = short
 			}
 			updated = true
@@ -629,9 +633,8 @@ func (t *Trie) hook(hex []byte, n node) {
 		case nil:
 			return
 		case *shortNode:
-			nKey := compactToHex(n.Key)
-			matchlen := prefixLen(hex[pos:], nKey)
-			if matchlen == len(nKey) || nKey[matchlen] == 16 {
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				parent = n
 				nd = n.Val
 				pos += matchlen
@@ -708,7 +711,7 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	case *shortNode:
 		if _, ok := n.Val.(valueNode); !ok {
 			// Don't need to compute prefix for a leaf
-			h := compactToHex(n.Key)
+			h := n.Key
 			// Remove terminator
 			if h[len(h)-1] == 16 {
 				h = h[:len(h)-1]
@@ -758,18 +761,16 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 		// might not be loaded yet, resolve it just for this
 		// check.
 		if short, ok := child.(*shortNode); ok {
-			cnodeKey := compactToHex(short.Key)
-			k := make([]byte, len(cnodeKey)+1)
+			k := make([]byte, len(short.Key)+1)
 			k[0] = byte(pos)
-			copy(k[1:], cnodeKey)
-			//fmt.Println("trie/trie.go:703", hexToCompact(k), k, pos)
-			return &shortNode{Key: hexToCompact(k), Val: short.Val}
+			copy(k[1:], short.Key)
+			return &shortNode{Key: k, Val: short.Val}
 		}
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
 	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
-	return &shortNode{Key: hexToCompact([]byte{byte(pos)}), Val: cnode}
+	return &shortNode{Key: []byte{byte(pos)}, Val: cnode}
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -779,9 +780,8 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
-		nKey := compactToHex(n.Key)
-		matchlen := prefixLen(key[keyStart:], nKey)
-		if matchlen == len(nKey) || nKey[matchlen] == 16 {
+		matchlen := prefixLen(key[keyStart:], n.Key)
+		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			if matchlen == len(key)-keyStart {
 				updated = true
 				touchKey := key[:keyStart+matchlen]
@@ -809,8 +809,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 							// always creates a new slice) instead of append to
 							// avoid modifying n.Key since it might be shared with
 							// other nodes.
-							childKey := compactToHex(shortChild.Key)
-							newNode = &shortNode{Key: hexToCompact(concat(nKey, childKey...)), Val: shortChild.Val}
+							newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
 						} else {
 							n.Val = nn
 							newNode = n
@@ -968,15 +967,14 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
-		nKey := compactToHex(n.Key)
-		matchlen := prefixLen(key[keyStart:], nKey)
+		matchlen := prefixLen(key[keyStart:], n.Key)
 		switch {
 		case len(key) == keyStart:
 			updated = true
 			newNode = nil
 		case matchlen == len(key[keyStart:])-1:
 			return true, nil
-		case matchlen < len(nKey) && matchlen != len(key[keyStart:]):
+		case matchlen < len(n.Key) && matchlen != len(key[keyStart:]):
 			updated = false
 			newNode = n
 		default:
@@ -984,7 +982,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			if keyStart+1 == len(key) {
 				return true, nil
 			}
-			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(nKey), blockNr)
+			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(n.Key), blockNr)
 			if !updated {
 				newNode = n
 			} else {
@@ -998,8 +996,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 						// always creates a new slice) instead of append to
 						// avoid modifying n.Key since it might be shared with
 						// other nodes.
-						childKey := compactToHex(shortChild.Key)
-						newNode = &shortNode{Key: hexToCompact(concat(nKey, childKey...)), Val: shortChild.Val}
+						newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
 					} else {
 						n.Val = nn
 						newNode = n
@@ -1120,6 +1117,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				t.touchAll(n.storage, key[:keyStart], true)
 			}
 			n.storage = nil
+			n.hashCorrect = false
 			return true, n
 		}
 
@@ -1205,9 +1203,8 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		case nil:
 			return
 		case *shortNode:
-			nKey := compactToHex(n.Key)
-			matchlen := prefixLen(hex[pos:], nKey)
-			if matchlen == len(nKey) || nKey[matchlen] == 16 {
+			matchlen := prefixLen(hex[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				parent = n
 				nd = n.Val
 				pos += matchlen
@@ -1295,7 +1292,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 	case *shortNode:
 		var hexVal []byte
 		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			h := compactToHex(n.Key)
+			h := n.Key
 			if h[len(h)-1] == 16 {
 				h = h[:len(h)-1]
 			}
