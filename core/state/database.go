@@ -534,9 +534,13 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches := tds.buildStorageTouches()
+	//fmt.Println("core/state/database.go:537 storageTouches")
+	//spew.Dump(storageTouches)
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches := tds.buildAccountTouches()
+	//fmt.Println("core/state/database.go:543 accountTouches")
+	//spew.Dump(accountTouches)
 	if err := tds.resolveAccountTouches(accountTouches); err != nil {
 		return nil, err
 	}
@@ -641,8 +645,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
 			}
-			tds.t.Delete(addrHash[:], tds.blockNr)
-			//tds.storageTrie.DeleteSubtrie(addrHash[:], tds.blockNr)
+			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
 		}
 		roots[i] = tds.t.Hash()
 	}

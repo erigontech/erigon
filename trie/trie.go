@@ -1115,8 +1115,24 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return
 
 	case *accountNode:
+		if keyStart >= len(key) || key[keyStart] == 16 {
+			// Key terminates here
+			if n.storage != nil {
+				// Mark all the storage nodes as deleted
+				t.touchAll(n.storage, key[:keyStart], true)
+			}
+			n.storage = nil
+			return true, n
+		}
+
+		updated, nn = t.deleteSubtree(n.storage, key, keyStart, 0)
+		if updated {
+			n.storage = nn
+			n.hashCorrect = false
+		}
 		updated = true
-		newNode = nil
+		newNode = n
+
 		return
 
 	case nil:

@@ -2,7 +2,12 @@ package trie
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
+	"math/big"
+	"reflect"
 	"testing"
 )
 
@@ -355,4 +360,58 @@ func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
 	if ok == false || bytes.Equal(v, valExist) == false {
 		t.Fatal("must be true")
 	}
+}
+
+func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
+	acc := &accounts.Account{
+		Nonce:       2,
+		Incarnation: 2,
+		Balance:     *big.NewInt(200),
+		Root:        EmptyRoot,
+		CodeHash:    emptyState,
+	}
+
+	trie := newEmpty()
+	key, err := crypto.GenerateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	addrHash, err := common.HashData(crypto.PubkeyToAddress(key.PublicKey).Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	trie.UpdateAccount(addrHash.Bytes(), acc)
+
+	accRes1, _ := trie.GetAccount(addrHash.Bytes())
+	if reflect.DeepEqual(acc, accRes1) == false {
+		t.Fatal("not equal", addrHash)
+	}
+
+	val1 := []byte("1")
+	dataKey1, err := common.HashData([]byte("1"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	val2 := []byte("2")
+	dataKey2, err := common.HashData([]byte("2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("=============================")
+	trie.PrintTrie()
+	fmt.Println("=============================")
+	ck1 := GenerateCompositeTrieKey(addrHash, dataKey1)
+	ck2 := GenerateCompositeTrieKey(addrHash, dataKey2)
+	trie.Update(ck1, val1, 0)
+	trie.Update(ck2, val2, 0)
+
+	trie.DeleteSubtree(addrHash.Bytes(), 0)
+
+	accRes2, _ := trie.GetAccount(addrHash.Bytes())
+	if reflect.DeepEqual(acc, accRes2) == false {
+		t.Fatal("account was deleted", addrHash)
+	}
+
 }
