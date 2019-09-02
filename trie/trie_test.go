@@ -106,7 +106,9 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func testDelete(t *testing.T) {
+func TestDelete(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
@@ -133,7 +135,8 @@ func testDelete(t *testing.T) {
 	}
 }
 
-func testEmptyValues(t *testing.T) {
+func TestEmptyValues(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	trie := newEmpty()
 
 	vals := []struct{ k, v string }{
@@ -157,7 +160,9 @@ func testEmptyValues(t *testing.T) {
 	}
 }
 
-func testReplication(t *testing.T) {
+func TestReplication(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	trie := newEmpty()
 	vals := []struct{ k, v string }{
 		{"do", "verb"},
@@ -310,7 +315,9 @@ func runRandTest(rt randTest) bool {
 	return true
 }
 
-func testRandom(t *testing.T) {
+func TestRandom(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	if err := quick.Check(runRandTest, nil); err != nil {
 		if cerr, ok := err.(*quick.CheckError); ok {
 			t.Fatalf("random test iteration %d failed: %s", cerr.Count, spew.Sdump(cerr.In))

@@ -616,7 +616,9 @@ func testInsertNonceError(t *testing.T, full bool) {
 
 // Tests that fast importing a block chain produces the same chain data as the
 // classical full block processing.
-func testFastVsFullChains(t *testing.T) {
+func TestFastVsFullChains(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -704,7 +706,8 @@ func testFastVsFullChains(t *testing.T) {
 
 // Tests that various import methods move the chain head pointers to the correct
 // positions.
-func testLightVsFastVsFullChainHeads(t *testing.T) {
+func TestLightVsFastVsFullChainHeads(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -951,7 +954,8 @@ func TestLogReorgs(t *testing.T) {
 	}
 }
 
-func testReorgSideEvent(t *testing.T) {
+func TestReorgSideEvent(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 	var (
 		db      = ethdb.NewMemDatabase()
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")

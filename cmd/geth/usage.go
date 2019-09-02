@@ -26,7 +26,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 // AppHelpTemplate is the test template for the default, global app help topic.

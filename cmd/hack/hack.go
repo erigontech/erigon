@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
-	chart "github.com/wcharczuk/go-chart"
+	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -462,7 +462,7 @@ func trieChart() {
 			StrokeColor: chart.DefaultStrokeColor,
 			StrokeWidth: 1.0,
 		},
-		Range: &chart.LogRange{
+		Range: &chart.ContinuousRange{
 			Min: thresholds[0],
 			Max: thresholds[len(thresholds)-1],
 		},

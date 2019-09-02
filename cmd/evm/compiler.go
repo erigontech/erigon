@@ -23,7 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/cmd/evm/internal/compiler"
 
-	cli "gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var compileCommand = cli.Command{

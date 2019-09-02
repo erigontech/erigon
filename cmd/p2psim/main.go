@@ -51,7 +51,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/simulations"
 	"github.com/ledgerwatch/turbo-geth/p2p/simulations/adapters"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/urfave/cli"
 )
 
 var client *simulations.Client
