@@ -47,7 +47,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, bucket.Accounts) {
+			if len(name) == 20 || bytes.Equal(name, []byte("AT")) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -320,7 +320,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket.Accounts)
+		b := tx.Bucket([]byte("AT"))
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
@@ -802,7 +802,7 @@ func testResolve() {
 	} else {
 		check(err)
 	}
-	//enc, _ := ethDb.GetAsOf(Accounts, state.AccountsHistory, crypto.Keccak256(contract), 2701646)
+	//enc, _ := ethDb.GetAsOf(bucket.Accounts, bucket.AccountsHistory, crypto.Keccak256(contract), 2701646)
 	//fmt.Printf("Account: %x\n", enc)
 }
 
