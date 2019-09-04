@@ -35,7 +35,7 @@ import (
 
 var OpenFileLimit = 64
 var ErrKeyNotFound = errors.New("boltdb: key not found in range")
-var SuffixBucket = []byte("SUFFIX")
+var SuffixBucket = []byte("SUFFIX") //howManyAddressesWereChanged-4+(addressLength-1+addressHash-32)*
 
 const HeapSize = 512 * 1024 * 1024
 
@@ -87,14 +87,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
-	suffix = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(suffix))
-	copy(composite, key)
-	copy(composite[len(key):], suffix)
-	return composite, suffix
-}
-
 func historyBucket(bucket []byte) []byte {
 	hb := make([]byte, len(bucket)+1)
 	hb[0] = byte('h')
@@ -130,10 +122,18 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		copy(dv, dat)
 		binary.BigEndian.PutUint32(dv, 1+binary.BigEndian.Uint32(dv)) // Increment the counter of keys
 		dv[l] = byte(len(key))
-		copy(dv[l+1:], key)
+		copy(dv[l+1:], key) //howManyAddressesWereChanged-4+(addressLength-1+addressHash-32)*
 		return sb.Put(suffixkey, dv)
 	})
 	return err
+}
+
+func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
+	suffix = encodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(suffix))
+	copy(composite, key)
+	copy(composite[len(key):], suffix)
+	return composite, suffix
 }
 
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
@@ -244,6 +244,8 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				return nil
 			}
 		}
+
+		//todo: if key doesn't present in bucket and hBucket we should try restore the state from the blockchain
 		return ErrKeyNotFound
 	})
 	return dat, err

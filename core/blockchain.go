@@ -1774,8 +1774,12 @@ func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
 }
 
-func (bc *BlockChain) IsNoHistory(currentBlock uint64) bool {
-	return bc.noHistory || (currentBlock-bc.highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
+func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
+	if currentBlock == nil {
+		return bc.noHistory
+	}
+
+	return bc.noHistory || (currentBlock.Uint64()-bc.highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
 }
 
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {

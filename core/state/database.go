@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"hash"
 	"io"
 	"math/big"
@@ -57,10 +58,10 @@ type StateReader interface {
 }
 
 type StateWriter interface {
-	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account, noHistory bool) error
+	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
-	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account, noHistory bool) error
-	WriteAccountStorage(address common.Address, key, original, value *common.Hash, noHistory bool) error
+	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
+	WriteAccountStorage(ctx context.Context, address common.Address, key, original, value *common.Hash) error
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -102,11 +103,11 @@ func NewNoopWriter() *NoopWriter {
 	return &NoopWriter{}
 }
 
-func (nw *NoopWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account, _ bool) error {
+func (nw *NoopWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account, _ bool) error {
+func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -114,7 +115,7 @@ func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash, _ bool) error {
+func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Address, key, original, value *common.Hash) error {
 	return nil
 }
 
@@ -193,7 +194,6 @@ type TrieDbState struct {
 	codeCache       *lru.Cache
 	codeSizeCache   *lru.Cache
 	historical      bool
-	noHistory       bool
 	resolveReads    bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
@@ -236,7 +236,7 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 }
 
 func (tds *TrieDbState) SetNoHistory(nh bool) {
-	tds.noHistory = nh
+	//todo: remove
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -1021,7 +1021,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	return true
 }
 
-func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account, _ bool) error {
+func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
@@ -1030,7 +1030,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address commo
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account, noHistory bool) error {
+func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
@@ -1041,7 +1041,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(bucket.Accounts, addrHash[:], data); err != nil {
 		return err
 	}
-	if noHistory {
+	if params.GetNoHistory(ctx) {
 		return nil
 	}
 	// Don't write historical record if the account did not change
@@ -1059,7 +1059,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	return dsw.tds.db.PutS(bucket.AccountsHistory, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
-func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account, _ bool) error {
+func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != err {
 		return err
@@ -1069,7 +1069,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account, noHistory bool) error {
+func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
 	if err != nil {
 		return err
@@ -1077,7 +1077,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(bucket.Accounts, addrHash[:]); err != nil {
 		return err
 	}
-	if noHistory {
+	if params.GetNoHistory(ctx) {
 		return nil
 	}
 	var originalData []byte
@@ -1106,7 +1106,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return dsw.tds.db.Put(bucket.Code, codeHash[:], code)
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash, _ bool) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, key, original, value *common.Hash) error {
 	v := bytes.TrimLeft(value[:], "\x00")
 	m, ok := tsw.tds.currentBuffer.storageUpdates[address]
 	if !ok {
@@ -1135,7 +1135,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, key, ori
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, original, value *common.Hash, noHistory bool) error {
+func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
 	}
@@ -1155,7 +1155,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, key, origi
 	if err != nil {
 		return err
 	}
-	if noHistory {
+	if params.GetNoHistory(ctx) {
 		return nil
 	}
 	o := bytes.TrimLeft(original[:], "\x00")

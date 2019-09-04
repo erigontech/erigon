@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/big"
 
@@ -200,14 +201,14 @@ func (so *stateObject) setState(key, value common.Hash) {
 }
 
 // updateTrie writes cached storage modifications into the object's storage trie.
-func (so *stateObject) updateTrie(stateWriter StateWriter, noHistory bool) error {
+func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {
 		key := key
 		value := value
 
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(so.address, &key, &original, &value, noHistory); err != nil {
+		if err := stateWriter.WriteAccountStorage(ctx, so.address, &key, &original, &value); err != nil {
 			return err
 		}
 	}

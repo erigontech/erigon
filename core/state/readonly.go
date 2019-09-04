@@ -169,11 +169,11 @@ func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 	return len(code), nil
 }
 
-func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account, _ bool) error {
+func (dbs *DbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	return nil
 }
 
-func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account, _ bool) error {
+func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	return nil
 }
 
@@ -181,7 +181,7 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash, _ bool) error {
+func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, key, original, value *common.Hash) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()

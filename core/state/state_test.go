@@ -51,9 +51,9 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	// write some of them to the trie
 	ctx := context.TODO()
-	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account), true)
+	err := s.tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
-	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account), true)
+	err = s.tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
 	c.Check(err, checker.IsNil)
 
 	err = s.state.FinalizeTx(ctx, s.tds.TrieStateWriter())
