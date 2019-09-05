@@ -18,6 +18,7 @@ package eth
 
 import (
 	"context"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -103,7 +104,7 @@ func NewBloomIndexer(db ethdb.Database, size, confirms uint64) *core.ChainIndexe
 		size: size,
 	}
 
-	return core.NewChainIndexer(db, rawdb.BloomBitsIndexPrefix, backend, size, confirms, bloomThrottling, "bloombits")
+	return core.NewChainIndexer(db, dbutils.BloomBitsIndexPrefix, backend, size, confirms, bloomThrottling, "bloombits")
 }
 
 // Reset implements core.ChainIndexerBackend, starting a new bloombits index

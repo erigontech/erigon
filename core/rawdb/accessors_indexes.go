@@ -18,15 +18,24 @@ package rawdb
 
 import (
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+// TxLookupEntry is a positional metadata to help looking up the data content of
+// a transaction or receipt given only its hash.
+type TxLookupEntry struct {
+	BlockHash  common.Hash
+	BlockIndex uint64
+	Index      uint64
+}
+
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) (common.Hash, uint64, uint64) {
-	data, _ := db.Get(txLookupPrefix, hash.Bytes())
+	data, _ := db.Get(dbutils.TxLookupPrefix, hash.Bytes())
 	if len(data) == 0 {
 		return common.Hash{}, 0, 0
 	}
@@ -51,15 +60,15 @@ func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
 		if err != nil {
 			log.Crit("Failed to encode transaction lookup entry", "err", err)
 		}
-		if err := db.Put(txLookupPrefix, tx.Hash().Bytes(), data); err != nil {
+		if err := db.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
 	}
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
-func DeleteTxLookupEntry(db DatabaseDeleter, hash common.Hash) {
-	db.Delete(txLookupPrefix, hash.Bytes())
+func DeleteTxLookupEntry(db DatabaseDeleter, hash common.Hash) error {
+	return db.Delete(dbutils.TxLookupPrefix, hash.Bytes())
 }
 
 // ReadTransaction retrieves a specific transaction from the database, along with
@@ -95,13 +104,13 @@ func ReadReceipt(db DatabaseReader, hash common.Hash) (*types.Receipt, common.Ha
 // ReadBloomBits retrieves the compressed bloom bit vector belonging to the given
 // section and bit index from the.
 func ReadBloomBits(db DatabaseReader, bit uint, section uint64, head common.Hash) ([]byte, error) {
-	return db.Get(bloomBitsPrefix, bloomBitsKey(bit, section, head))
+	return db.Get(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head))
 }
 
 // WriteBloomBits stores the compressed bloom bits vector belonging to the given
 // section and bit index.
 func WriteBloomBits(db DatabaseWriter, bit uint, section uint64, head common.Hash, bits []byte) {
-	if err := db.Put(bloomBitsPrefix, bloomBitsKey(bit, section, head), bits); err != nil {
+	if err := db.Put(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head), bits); err != nil {
 		log.Crit("Failed to store bloom bits", "err", err)
 	}
 }

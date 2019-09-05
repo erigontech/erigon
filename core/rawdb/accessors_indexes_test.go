@@ -60,7 +60,9 @@ func TestLookupStorage(t *testing.T) {
 	}
 	// Delete the transactions and check purge
 	for i, tx := range txs {
-		DeleteTxLookupEntry(db, tx.Hash())
+		if err := DeleteTxLookupEntry(db, tx.Hash()); err != nil {
+			t.Fatal(err)
+		}
 		if txn, _, _, _ := ReadTransaction(db, tx.Hash()); txn != nil {
 			t.Fatalf("tx #%d [%x]: deleted transaction returned: %v", i, tx.Hash(), txn)
 		}

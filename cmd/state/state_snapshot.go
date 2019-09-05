@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 
 	//"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -29,10 +29,10 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	var startKey [32]byte
 	txDisk, err := diskDb.Begin(true)
 	check(err)
-	bDisk, err := txDisk.CreateBucket(state.AccountsBucket, true)
+	bDisk, err := txDisk.CreateBucket(dbutils.AccountsBucket, true)
 	check(err)
 	count := 0
-	err = ethDb.WalkAsOf(state.AccountsBucket, state.AccountsHistoryBucket, startKey[:], 0, blockNum+1,
+	err = ethDb.WalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startKey[:], 0, blockNum+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(value) == 0 {
 				return true, nil
@@ -51,7 +51,7 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 				if err != nil {
 					return false, err
 				}
-				bDisk = txDisk.Bucket(state.AccountsBucket)
+				bDisk = txDisk.Bucket(dbutils.AccountsBucket)
 			}
 			return true, nil
 		},
@@ -61,15 +61,15 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	check(err)
 	txDisk, err = diskDb.Begin(true)
 	check(err)
-	b := txDisk.Bucket(state.AccountsBucket)
-	sbDisk, err := txDisk.CreateBucket(state.StorageBucket, true)
+	b := txDisk.Bucket(dbutils.AccountsBucket)
+	sbDisk, err := txDisk.CreateBucket(dbutils.StorageBucket, true)
 	check(err)
 	count = 0
 	var address common.Address
 	//var hash common.Hash
 	exist := make(map[common.Address]bool)
 	var sk [52]byte
-	err = ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, sk[:], 0, blockNum,
+	err = ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, sk[:], 0, blockNum,
 		func(key []byte, value []byte) (bool, error) {
 			if len(value) == 0 {
 				return true, nil
@@ -97,8 +97,8 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 				if err != nil {
 					return false, err
 				}
-				b = txDisk.Bucket(state.AccountsBucket)
-				sbDisk = txDisk.Bucket(state.StorageBucket)
+				b = txDisk.Bucket(dbutils.AccountsBucket)
+				sbDisk = txDisk.Bucket(dbutils.StorageBucket)
 			}
 			return true, nil
 		},
@@ -115,13 +115,13 @@ func save_snapshot(db *bolt.DB, filename string) {
 	defer diskDb.Close()
 	diskTx, err := diskDb.Begin(true)
 	check(err)
-	bDisk, err := diskTx.CreateBucket(state.AccountsBucket, true)
+	bDisk, err := diskTx.CreateBucket(dbutils.AccountsBucket, true)
 	check(err)
-	sbDisk, err := diskTx.CreateBucket(state.StorageBucket, true)
+	sbDisk, err := diskTx.CreateBucket(dbutils.StorageBucket, true)
 	check(err)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.AccountsBucket)
+		b := tx.Bucket(dbutils.AccountsBucket)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if err := bDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
@@ -134,11 +134,11 @@ func save_snapshot(db *bolt.DB, filename string) {
 				}
 				fmt.Printf("Commited %d records\n", count)
 				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(state.AccountsBucket)
-				sbDisk = diskTx.Bucket(state.StorageBucket)
+				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
+				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
 			}
 		}
-		b = tx.Bucket(state.StorageBucket)
+		b = tx.Bucket(dbutils.StorageBucket)
 		c = b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if err := sbDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
@@ -151,8 +151,8 @@ func save_snapshot(db *bolt.DB, filename string) {
 				}
 				fmt.Printf("Commited %d records\n", count)
 				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(state.AccountsBucket)
-				sbDisk = diskTx.Bucket(state.StorageBucket)
+				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
+				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
 			}
 		}
 		return nil
@@ -168,12 +168,13 @@ func load_snapshot(db *bolt.DB, filename string) {
 	check(err)
 	tx, err := db.Begin(true)
 	check(err)
-	b, err := tx.CreateBucket(state.AccountsBucket, true)
-	sb, err := tx.CreateBucket(state.StorageBucket, true)
+	b, err := tx.CreateBucket(dbutils.AccountsBucket, true)
+	check(err)
+	sb, err := tx.CreateBucket(dbutils.StorageBucket, true)
 	check(err)
 	count := 0
 	err = diskDb.View(func(txDisk *bolt.Tx) error {
-		bDisk := txDisk.Bucket(state.AccountsBucket)
+		bDisk := txDisk.Bucket(dbutils.AccountsBucket)
 		cDisk := bDisk.Cursor()
 		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
 			if err := b.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
@@ -190,11 +191,11 @@ func load_snapshot(db *bolt.DB, filename string) {
 				if err != nil {
 					return err
 				}
-				b = tx.Bucket(state.AccountsBucket)
-				sb = tx.Bucket(state.StorageBucket)
+				b = tx.Bucket(dbutils.AccountsBucket)
+				sb = tx.Bucket(dbutils.StorageBucket)
 			}
 		}
-		sbDisk := txDisk.Bucket(state.StorageBucket)
+		sbDisk := txDisk.Bucket(dbutils.StorageBucket)
 		count = 0
 		cDisk = sbDisk.Cursor()
 		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
@@ -212,8 +213,8 @@ func load_snapshot(db *bolt.DB, filename string) {
 				if err != nil {
 					return err
 				}
-				b = tx.Bucket(state.AccountsBucket)
-				sb = tx.Bucket(state.StorageBucket)
+				b = tx.Bucket(dbutils.AccountsBucket)
+				sb = tx.Bucket(dbutils.StorageBucket)
 			}
 		}
 		return nil
@@ -227,8 +228,8 @@ func load_snapshot(db *bolt.DB, filename string) {
 func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 	var account accounts.Account
 	err := db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.AccountsBucket)
-		cb, err := tx.CreateBucket(state.CodeBucket, true)
+		b := tx.Bucket(dbutils.AccountsBucket)
+		cb, err := tx.CreateBucket(dbutils.CodeBucket, true)
 		if err != nil {
 			return err
 		}
@@ -238,7 +239,7 @@ func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
 				return err
 			}
 			if !account.IsEmptyCodeHash() {
-				code, _ := codeDb.Get(state.CodeBucket, account.CodeHash[:])
+				code, _ := codeDb.Get(dbutils.CodeBucket, account.CodeHash[:])
 				if code != nil {
 					if err := cb.Put(account.CodeHash[:], code); err != nil {
 						return err
@@ -257,12 +258,12 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	check(err)
 	defer diskDb.Close()
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.AccountsBucket)
-		sb := tx.Bucket(state.StorageBucket)
+		b := tx.Bucket(dbutils.AccountsBucket)
+		sb := tx.Bucket(dbutils.StorageBucket)
 		preimage := tx.Bucket([]byte("secure-key-"))
 		count := 0
 		err = diskDb.View(func(txDisk *bolt.Tx) error {
-			bDisk := txDisk.Bucket(state.AccountsBucket)
+			bDisk := txDisk.Bucket(dbutils.AccountsBucket)
 			cDisk := bDisk.Cursor()
 			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
 				vv, _ := b.Get(k)
@@ -275,7 +276,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 					fmt.Printf("Compared %d records\n", count)
 				}
 			}
-			sbDisk := txDisk.Bucket(state.StorageBucket)
+			sbDisk := txDisk.Bucket(dbutils.StorageBucket)
 			count = 0
 			cDisk = sbDisk.Cursor()
 			for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
@@ -339,8 +340,8 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	var address common.Address
 	roots := make(map[common.Address]common.Hash)
 	err = db.View(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(state.StorageBucket)
-		b := tx.Bucket(state.AccountsBucket)
+		sb := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.AccountsBucket)
 		c := sb.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			copy(address[:], k[:20])

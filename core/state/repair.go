@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"sort"
 
@@ -90,10 +91,10 @@ func (rds *RepairDbState) CheckKeys() {
 	aSet := make(map[string]struct{})
 	suffix := encodeTimestamp(rds.blockNr)
 	{
-		suffixkey := make([]byte, len(suffix)+len(AccountsHistoryBucket))
+		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
 		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], AccountsHistoryBucket)
-		v, _ := rds.historyDb.Get(ethdb.SuffixBucket, suffixkey)
+		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
+		v, _ := rds.historyDb.Get(dbutils.SuffixBucket, suffixkey)
 		if len(v) > 0 {
 			keycount := int(binary.BigEndian.Uint32(v))
 			for i, ki := 4, 0; ki < keycount; ki++ {
@@ -128,19 +129,19 @@ func (rds *RepairDbState) CheckKeys() {
 			copy(dv[i:], key)
 			i += len(key)
 		}
-		suffixkey := make([]byte, len(suffix)+len(AccountsHistoryBucket))
+		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
 		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], AccountsHistoryBucket)
+		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
 		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
 		//	panic(err)
 		//}
 	}
 	sSet := make(map[string]struct{})
 	{
-		suffixkey := make([]byte, len(suffix)+len(StorageHistoryBucket))
+		suffixkey := make([]byte, len(suffix)+len(dbutils.StorageHistoryBucket))
 		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], StorageHistoryBucket)
-		v, _ := rds.historyDb.Get(ethdb.SuffixBucket, suffixkey)
+		copy(suffixkey[len(suffix):], dbutils.StorageHistoryBucket)
+		v, _ := rds.historyDb.Get(dbutils.SuffixBucket, suffixkey)
 		if len(v) > 0 {
 			keycount := int(binary.BigEndian.Uint32(v))
 			for i, ki := 4, 0; ki < keycount; ki++ {
@@ -175,9 +176,9 @@ func (rds *RepairDbState) CheckKeys() {
 			copy(dv[i:], key)
 			i += len(key)
 		}
-		suffixkey := make([]byte, len(suffix)+len(StorageHistoryBucket))
+		suffixkey := make([]byte, len(suffix)+len(dbutils.StorageHistoryBucket))
 		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], StorageHistoryBucket)
+		copy(suffixkey[len(suffix):], dbutils.StorageHistoryBucket)
 		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
 		//	panic(err)
 		//}
@@ -191,7 +192,7 @@ func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Acc
 	h.sha.Write(address[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := rds.currentDb.Get(AccountsBucket, buf[:])
+	enc, err := rds.currentDb.Get(dbutils.AccountsBucket, buf[:])
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -209,7 +210,7 @@ func (rds *RepairDbState) ReadAccountStorage(address common.Address, key *common
 	h.sha.Write(key[:])
 	var buf common.Hash
 	h.sha.Read(buf[:])
-	enc, err := rds.currentDb.Get(StorageBucket, append(address[:], buf[:]...))
+	enc, err := rds.currentDb.Get(dbutils.StorageBucket, append(address[:], buf[:]...))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -220,7 +221,7 @@ func (rds *RepairDbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) 
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return rds.currentDb.Get(CodeBucket, codeHash[:])
+	return rds.currentDb.Get(dbutils.CodeBucket, codeHash[:])
 }
 
 func (rds *RepairDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
@@ -319,7 +320,7 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
-	if err = rds.currentDb.Put(AccountsBucket, addrHash[:], data); err != nil {
+	if err = rds.currentDb.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
 	var originalData []byte
@@ -330,10 +331,10 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
+	v, _ := rds.historyDb.GetS(dbutils.AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
 		fmt.Printf("REPAIR (UpdateAccountData): At block %d, address: %x, expected %x, found %x\n", rds.blockNr, address, originalData, v)
-		//return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		//return rds.historyDb.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
 		return nil
 	}
 	return nil
@@ -350,7 +351,7 @@ func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Addr
 
 	delete(rds.storageUpdates, address)
 
-	if err := rds.currentDb.Delete(AccountsBucket, addrHash[:]); err != nil {
+	if err := rds.currentDb.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
 	var originalData []byte
@@ -362,17 +363,17 @@ func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Addr
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	v, _ := rds.historyDb.GetS(AccountsHistoryBucket, addrHash[:], rds.blockNr)
+	v, _ := rds.historyDb.GetS(dbutils.AccountsHistoryBucket, addrHash[:], rds.blockNr)
 	if !bytes.Equal(v, originalData) {
 		fmt.Printf("REPAIR (DeleteAccount): At block %d, address: %x, expected %x, found %x\n", rds.blockNr, address, originalData, v)
-		//return rds.historyDb.PutS(AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
+		//return rds.historyDb.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, rds.blockNr)
 		return nil
 	}
 	return nil
 }
 
 func (rds *RepairDbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	return rds.currentDb.Put(CodeBucket, codeHash[:], code)
+	return rds.currentDb.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
 func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
@@ -384,11 +385,11 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 	h.sha.Read(seckey[:])
 	compositeKey := append(address[:], seckey[:]...)
 	if *original == *value {
-		val, _ := rds.historyDb.GetS(StorageHistoryBucket, compositeKey, rds.blockNr)
+		val, _ := rds.historyDb.GetS(dbutils.StorageHistoryBucket, compositeKey, rds.blockNr)
 		if val != nil {
 			fmt.Printf("REPAIR (WriteAccountStorage): At block %d, address: %x, key %x, expected nil, found %x\n", rds.blockNr, address, key, val)
 			//suffix := encodeTimestamp(rds.blockNr)
-			//return rds.historyDb.Delete(StorageHistoryBucket, append(compositeKey, suffix...))
+			//return rds.historyDb.Delete(dbutils.StorageHistoryBucket, append(compositeKey, suffix...))
 			return nil
 		}
 		return nil
@@ -417,9 +418,9 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 	rds.storageKeys[string(compositeKey)] = struct{}{}
 	var err error
 	if len(v) == 0 {
-		err = rds.currentDb.Delete(StorageBucket, compositeKey)
+		err = rds.currentDb.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
-		err = rds.currentDb.Put(StorageBucket, compositeKey, common.CopyBytes(v))
+		err = rds.currentDb.Put(dbutils.StorageBucket, compositeKey, common.CopyBytes(v))
 	}
 	if err != nil {
 		return err
@@ -428,10 +429,10 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 	o := bytes.TrimLeft(original[:], "\x00")
 	oo := make([]byte, len(o))
 	copy(oo, o)
-	val, _ := rds.historyDb.GetS(StorageHistoryBucket, compositeKey, rds.blockNr)
+	val, _ := rds.historyDb.GetS(dbutils.StorageHistoryBucket, compositeKey, rds.blockNr)
 	if !bytes.Equal(val, oo) {
 		fmt.Printf("REPAIR (WriteAccountStorage): At block %d, address: %x, key %x, expected %x, found %x\n", rds.blockNr, address, key, oo, val)
-		//return rds.historyDb.PutS(StorageHistoryBucket, compositeKey, oo, rds.blockNr)
+		//return rds.historyDb.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, rds.blockNr)
 		return nil
 	}
 	return nil
