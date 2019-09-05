@@ -9,6 +9,7 @@ import (
 
 	"github.com/valyala/bytebufferpool"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -254,15 +255,15 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	if tr.accounts {
 		if tr.historical {
-			err = db.MultiWalkAsOf([]byte("AT"), []byte("hAT"), startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk([]byte("AT"), startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.Walker)
 		}
 	} else {
 		if tr.historical {
-			err = db.MultiWalkAsOf([]byte("ST"), []byte("hST"), startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk([]byte("ST"), startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.Walker)
 		}
 	}
 	tr.prec.Reset()

@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"sync"
@@ -35,7 +36,6 @@ import (
 
 var OpenFileLimit = 64
 var ErrKeyNotFound = errors.New("boltdb: key not found in range")
-var SuffixBucket = []byte("SUFFIX")
 
 const HeapSize = 512 * 1024 * 1024
 
@@ -115,7 +115,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		if err = hb.Put(composite, value); err != nil {
 			return err
 		}
-		sb, err := tx.CreateBucketIfNotExists(SuffixBucket, true)
+		sb, err := tx.CreateBucketIfNotExists(dbutils.SuffixBucket, true)
 		if err != nil {
 			return err
 		}
@@ -565,7 +565,7 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	suffix := encodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(SuffixBucket)
+		sb := tx.Bucket(dbutils.SuffixBucket)
 		if sb == nil {
 			return nil
 		}
@@ -967,11 +967,11 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
 	var ok bool
-	if t, ok = m.puts[string(SuffixBucket)]; !ok {
+	if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
 		t = llrb.New()
-		m.puts[string(SuffixBucket)] = t
+		m.puts[string(dbutils.SuffixBucket)] = t
 	}
-	err := m.Walk(SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
+	err := m.Walk(dbutils.SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
 		hBucket := k[len(suffix):]
 		keycount := int(binary.BigEndian.Uint32(v))
 		var ht *llrb.LLRB
@@ -1007,9 +1007,9 @@ func (m *mutation) Commit() (uint64, error) {
 	var t *llrb.LLRB
 	var ok bool
 	if len(m.suffixkeys) > 0 {
-		if t, ok = m.puts[string(SuffixBucket)]; !ok {
+		if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
 			t = llrb.New()
-			m.puts[string(SuffixBucket)] = t
+			m.puts[string(dbutils.SuffixBucket)] = t
 		}
 	}
 	for timestamp, suffix_m := range m.suffixkeys {
@@ -1019,7 +1019,7 @@ func (m *mutation) Commit() (uint64, error) {
 			suffixkey := make([]byte, len(suffix)+len(hBucket))
 			copy(suffixkey, suffix)
 			copy(suffixkey[len(suffix):], hBucket)
-			dat, err := m.getNoLock(SuffixBucket, suffixkey)
+			dat, err := m.getNoLock(dbutils.SuffixBucket, suffixkey)
 			if err != nil && err != ErrKeyNotFound {
 				return 0, err
 			}
