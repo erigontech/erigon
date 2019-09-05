@@ -20,4 +20,4 @@ cd "$ethdir/turbo-geth"
 PWD="$ethdir/turbo-geth"
 
 # Launch the arguments with the configured environment.
-exec "$@"
+GO111MODULE=on exec "$@"
