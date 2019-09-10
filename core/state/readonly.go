@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -112,7 +111,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		if item.value != emptyHash {
 			// Skip if value == 0
 			if item.key == emptyHash {
-				key, err := dbs.db.Get(trie.SecureKeyPrefix, item.seckey[:])
+				key, err := dbs.db.Get(dbutils.PreimagePrefix, item.seckey[:])
 				if err == nil {
 					copy(item.key[:], key)
 				} else {

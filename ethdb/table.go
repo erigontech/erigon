@@ -98,7 +98,7 @@ func (dt *table) Size() int {
 	return dt.db.Size()
 }
 
-func (dt *table) Keys() [][]byte {
+func (dt *table) Keys() ([][]byte, error) {
 	panic("Not supported")
 }
 

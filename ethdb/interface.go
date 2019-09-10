@@ -58,7 +58,7 @@ type Database interface {
 	Close()
 	NewBatch() Mutation
 	Size() int
-	Keys() [][]byte
+	Keys() ([][]byte, error)
 	MemCopy() Database
 }
 
