@@ -66,3 +66,26 @@ func PreimageKey(hash common.Hash) []byte {
 func ConfigKey(hash common.Hash) []byte {
 	return append(ConfigPrefix, hash.Bytes()...)
 }
+
+func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
+	compositeKey = append(compositeKey, addressHash[:]...)
+	compositeKey = append(compositeKey, seckey[:]...)
+	return compositeKey
+}
+func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
+	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
+	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
+	compositeKey = append(compositeKey, seckey[:]...)
+	return compositeKey
+}
+func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
+	prefix := make([]byte, 0, common.HashLength+8)
+	prefix = append(prefix, addressHash[:]...)
+
+	//todo pool
+	buf := make([]byte, 8)
+	binary.BigEndian.PutUint64(buf, incarnation)
+	prefix = append(prefix, buf...)
+	return prefix
+}

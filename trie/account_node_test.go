@@ -3,6 +3,7 @@ package trie
 import (
 	"crypto/ecdsa"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"golang.org/x/crypto/sha3"
@@ -47,13 +48,12 @@ func TestGetAccount(t *testing.T) {
 }
 
 func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
-	t.Skip()
 	acc := &accounts.Account{
 		Nonce:       2,
 		Incarnation: 2,
 		Balance:     *big.NewInt(200),
-		Root:        common.BytesToHash([]byte("0x1")),
-		CodeHash:    common.BytesToHash([]byte("0x01")),
+		Root:        EmptyRoot,
+		CodeHash:    emptyState,
 	}
 
 	_, _, addrHash, err := generateAcc()
@@ -73,28 +73,24 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	value1 := common.HexToHash("0x3").Bytes()
 	value2 := common.HexToHash("0x5").Bytes()
 
-	storageKey1 := common.HexToHash("0x1").Bytes()
-	storageKey2 := common.HexToHash("0x5").Bytes()
+	storageKey1 := common.HexToHash("0x1")
+	storageKey2 := common.HexToHash("0x5")
 
-	fullStorageKey1 := append(addrHash.Bytes(), storageKey1...)
-	fullStorageKey2 := append(addrHash.Bytes(), storageKey2...)
+	fullStorageKey1 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey1)
+	fullStorageKey2 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey2)
 
 	trie.Update(fullStorageKey1, value1, 0)
 	trie.Update(fullStorageKey2, value2, 0)
 
 	expectedTrie := newEmpty()
-	expectedTrie.Update(storageKey1, value1, 0)
-	expectedTrie.Update(storageKey2, value2, 0)
+	expectedTrie.Update(storageKey1.Bytes(), value1, 0)
+	expectedTrie.Update(storageKey2.Bytes(), value2, 0)
 
-	ok, h1 := trie.DeepHash(addrHash.Bytes())
-	t.Log(ok)
-	t.Log(h1.String())
-	t.Log(expectedTrie.Hash().String())
-
-	//accRes3, _ := trie.GetAccount(key3, 0)
-	//if accRes3 !=nil {
-	//	t.Fatal("Should be false", key3, accRes3)
-	//}
+	_, h1 := trie.DeepHash(addrHash.Bytes())
+	h2 := expectedTrie.Hash()
+	if h1 != h2 {
+		t.Fatal("not equals", h1.String(), h2.String())
+	}
 }
 
 func TestHash(t *testing.T) {

@@ -160,7 +160,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 		return nil, err
 	}
 
-	enc, err := dbs.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}

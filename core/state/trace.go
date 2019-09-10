@@ -64,7 +64,7 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation 
 		return nil, err
 	}
 
-	enc, err := tds.currentDb.Get(dbutils.StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, buf))
+	enc, err := tds.currentDb.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}

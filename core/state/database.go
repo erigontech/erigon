@@ -39,7 +39,6 @@ import (
 // Trie cache generation limit after which to evict trie nodes from memory.
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
-
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
@@ -530,13 +529,9 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches := tds.buildStorageTouches()
-	//fmt.Println("core/state/database.go:537 storageTouches")
-	//spew.Dump(storageTouches)
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches := tds.buildAccountTouches()
-	//fmt.Println("core/state/database.go:543 accountTouches")
-	//spew.Dump(accountTouches)
 	if err := tds.resolveAccountTouches(accountTouches); err != nil {
 		return nil, err
 	}
@@ -577,7 +572,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			for keyHash, v := range m {
-				cKey := GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
+				cKey := dbutils.GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					tds.t.Update(cKey, v, tds.blockNr)
@@ -700,17 +695,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				b.storageUpdates[addrHashWithVersion] = m
 			}
 			if len(value) > 0 {
-				// Write into 1 extra RLP level
-				var vv []byte
-				if len(value) > 1 || value[0] >= 128 {
-					vv = make([]byte, len(value)+1)
-					vv[0] = byte(128 + len(value))
-					copy(vv[1:], value)
-				} else {
-					vv = make([]byte, 1)
-					vv[0] = value[0]
-				}
-				m[keyHash] = vv
+				m[keyHash] = AddExtraRLPLevel(value)
 			} else {
 				m[keyHash] = nil
 			}
@@ -740,11 +725,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	for addressHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash, value := range m {
 			if len(value) == 0 {
-				if err := tds.db.Delete(dbutils.StorageBucket, append(addressHash[:], keyHash[:]...)); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)); err != nil {
 					return err
 				}
 			} else {
-				cKey := GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)
+				cKey := dbutils.GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)
 				if err := tds.db.Put(dbutils.StorageBucket, cKey, value); err != nil {
 					return err
 				}
@@ -862,7 +847,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
-	enc, ok := tds.t.Get(GenerateCompositeTrieKey(addrHash, seckey))
+	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if ok {
 		// Unwrap one RLP level
 		if len(enc) > 1 {
@@ -872,12 +857,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	} else {
 		// Not present in the trie, try database
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
+			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
 			}
 		} else {
-			enc, err = tds.db.Get(dbutils.StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+			enc, err = tds.db.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
 				enc = nil
 			}
@@ -1137,7 +1122,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 		return err
 	}
 
-	compositeKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
@@ -1162,7 +1147,7 @@ func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation ui
 		return err
 	}
 
-	tsw.tds.t.DeleteSubtree(GenerateStoragePrefix(addrHash, incarnation), tsw.tds.blockNr)
+	tsw.tds.t.DeleteSubtree(dbutils.GenerateStoragePrefix(addrHash, incarnation), tsw.tds.blockNr)
 	return nil
 }
 
@@ -1178,27 +1163,4 @@ func (dsw *DbStateWriter) RemoveStorage(address common.Address, incarnation uint
 
 func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
-}
-
-func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
-	compositeKey = append(compositeKey, addressHash[:]...)
-	compositeKey = append(compositeKey, seckey[:]...)
-	return compositeKey
-}
-func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
-	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
-	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
-	compositeKey = append(compositeKey, seckey[:]...)
-	return compositeKey
-}
-func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
-	prefix := make([]byte, 0, common.HashLength+8)
-	prefix = append(prefix, addressHash[:]...)
-
-	//todo pool
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, incarnation)
-	prefix = append(prefix, buf...)
-	return prefix
 }

@@ -1162,7 +1162,7 @@ func dumpStorage() {
 	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(state.StorageHistoryBucket)
+		sb := tx.Bucket(dbutils.StorageHistoryBucket)
 		if sb == nil {
 			fmt.Printf("Storage bucket not found\n")
 			return nil
