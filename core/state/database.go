@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io"
 	"math/big"
 	"runtime"
@@ -38,11 +39,6 @@ import (
 // Trie cache generation limit after which to evict trie nodes from memory.
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
-var AccountsBucket = []byte("AT")
-var AccountsHistoryBucket = []byte("hAT")
-var StorageBucket = []byte("ST")
-var StorageHistoryBucket = []byte("hST")
-var CodeBucket = []byte("CODE")
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
@@ -294,7 +290,7 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 	i := 0
 
 	var acc accounts.Account
-	err := tds.db.WalkAsOf(AccountsBucket, AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	err := tds.db.WalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			if len(value) > 0 {
 				if err := acc.DecodeForStorage(value); err != nil {
@@ -332,7 +328,7 @@ func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Key
 
 	i := 0
 
-	err = tds.db.WalkAsOf(StorageBucket, StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			var val big.Int
 			if err := rlp.DecodeBytes(value, &val); err != nil {
@@ -679,7 +675,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	b := tds.currentBuffer
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
 		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
-		if bytes.Equal(bucket, AccountsHistoryBucket) {
+		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
@@ -691,7 +687,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			} else {
 				b.accountUpdates[addrHash] = nil
 			}
-		} else if bytes.Equal(bucket, StorageHistoryBucket) {
+		} else if bytes.Equal(bucket, dbutils.StorageHistoryBucket) {
 			var address common.Hash
 			copy(address[:], key[:common.HashLength])
 			var keyHash common.Hash
@@ -728,7 +724,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {
 		if account == nil {
-			if err := tds.db.Delete(AccountsBucket, addrHash[:]); err != nil {
+			if err := tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 				return err
 			}
 		} else {
@@ -736,7 +732,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			valueLen := account.EncodingLengthForStorage()
 			value := make([]byte, valueLen)
 			account.EncodeForStorage(value)
-			if err := tds.db.Put(AccountsBucket, addrHash[:], value); err != nil {
+			if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
 				return err
 			}
 		}
@@ -744,12 +740,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	for addressHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash, value := range m {
 			if len(value) == 0 {
-				if err := tds.db.Delete(StorageBucket, append(addressHash[:], keyHash[:]...)); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, append(addressHash[:], keyHash[:]...)); err != nil {
 					return err
 				}
 			} else {
 				cKey := GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)
-				if err := tds.db.Put(StorageBucket, cKey, value); err != nil {
+				if err := tds.db.Put(dbutils.StorageBucket, cKey, value); err != nil {
 					return err
 				}
 			}
@@ -775,12 +771,12 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var err error
 	var enc []byte
 	if tds.historical {
-		enc, err = tds.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
+		enc, err = tds.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
 		}
 	} else {
-		enc, err = tds.db.Get(AccountsBucket, addrHash[:])
+		enc, err = tds.db.Get(dbutils.AccountsBucket, addrHash[:])
 		if err != nil {
 			enc = nil
 		}
@@ -876,12 +872,12 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	} else {
 		// Not present in the trie, try database
 		if tds.historical {
-			enc, err = tds.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
+			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
 			}
 		} else {
-			enc, err = tds.db.Get(StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey))
+			enc, err = tds.db.Get(dbutils.StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, seckey))
 			if err != nil {
 				enc = nil
 			}
@@ -898,7 +894,7 @@ func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) (code []byte, err 
 	if cached, ok := tds.codeCache.Get(codeHash); ok {
 		code, err = cached.([]byte), nil
 	} else {
-		code, err = tds.db.Get(CodeBucket, codeHash[:])
+		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
 		if err == nil {
 			tds.codeSizeCache.Add(codeHash, len(code))
 			tds.codeCache.Add(codeHash, code)
@@ -1030,8 +1026,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-	//fmt.Printf("UpdateAccountData (db) %x: %x\n", addrHash, data)
-	if err = dsw.tds.db.Put(AccountsBucket, addrHash[:], data); err != nil {
+	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
 	if dsw.tds.noHistory {
@@ -1049,7 +1044,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
@@ -1067,7 +1062,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	if err := dsw.tds.db.Delete(AccountsBucket, addrHash[:]); err != nil {
+	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
 	if dsw.tds.noHistory {
@@ -1082,7 +1077,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	return dsw.tds.db.PutS(AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
 func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
@@ -1096,7 +1091,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	if dsw.tds.resolveReads {
 		dsw.tds.pg.CreateCode(codeHash, code)
 	}
-	return dsw.tds.db.Put(CodeBucket, codeHash[:], code)
+	return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -1144,9 +1139,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 
 	compositeKey := GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		err = dsw.tds.db.Delete(StorageBucket, compositeKey)
+		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
-		err = dsw.tds.db.Put(StorageBucket, compositeKey, vv)
+		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
 	}
 	//fmt.Printf("WriteAccountStorage (db) %x %x: %x, buffer %d\n", addrHash, seckey, value, len(dsw.tds.buffers))
 	if err != nil {
@@ -1158,7 +1153,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	o := bytes.TrimLeft(original[:], "\x00")
 	oo := make([]byte, len(o))
 	copy(oo, o)
-	return dsw.tds.db.PutS(StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
 }
 
 func (tsw *TrieStateWriter) RemoveStorage(address common.Address, incarnation uint64) error {

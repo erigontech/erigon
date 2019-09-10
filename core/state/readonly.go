@@ -19,6 +19,8 @@ package state
 import (
 	"bytes"
 	"context"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -85,7 +87,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	dbs.db.WalkAsOf(StorageBucket, StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err = dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
@@ -108,6 +110,9 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		}
 		return st.Len() < maxResults+overrideCounter+numDeletes, nil
 	})
+	if err != nil {
+		log.Error("ForEachStorage walk error", "err", err)
+	}
 	results := 0
 	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*storageItem)
@@ -133,7 +138,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil {
 		return nil, err
 	}
-	enc, err := dbs.db.GetAsOf(AccountsBucket, AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -155,7 +160,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 		return nil, err
 	}
 
-	enc, err := dbs.db.GetAsOf(StorageBucket, StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -166,7 +171,7 @@ func (dbs *DbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return dbs.db.Get(CodeBucket, codeHash[:])
+	return dbs.db.Get(dbutils.CodeBucket, codeHash[:])
 }
 
 func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {

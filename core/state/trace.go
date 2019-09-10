@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
@@ -42,7 +43,7 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
-	enc, err := tds.currentDb.Get(AccountsBucket, buf[:])
+	enc, err := tds.currentDb.Get(dbutils.AccountsBucket, buf[:])
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -63,7 +64,7 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation 
 		return nil, err
 	}
 
-	enc, err := tds.currentDb.Get(StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, buf))
+	enc, err := tds.currentDb.Get(dbutils.StorageBucket, GenerateCompositeStorageKey(addrHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -74,7 +75,7 @@ func (tds *TraceDbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return tds.currentDb.Get(CodeBucket, codeHash[:])
+	return tds.currentDb.Get(dbutils.CodeBucket, codeHash[:])
 }
 
 func (tds *TraceDbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
@@ -97,7 +98,7 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
-	return tds.currentDb.Put(AccountsBucket, addrHash[:], data)
+	return tds.currentDb.Put(dbutils.AccountsBucket, addrHash[:], data)
 }
 
 func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
@@ -105,11 +106,11 @@ func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address
 	if err != nil {
 		return err
 	}
-	return tds.currentDb.Delete(AccountsBucket, addrHash[:])
+	return tds.currentDb.Delete(dbutils.AccountsBucket, addrHash[:])
 }
 
 func (tds *TraceDbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	return tds.currentDb.Put(CodeBucket, codeHash[:], code)
+	return tds.currentDb.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
 func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -125,8 +126,8 @@ func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation
 	vv := make([]byte, len(v))
 	copy(vv, v)
 	if len(v) == 0 {
-		return tds.currentDb.Delete(StorageBucket, compositeKey)
+		return tds.currentDb.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
-		return tds.currentDb.Put(StorageBucket, compositeKey, vv)
+		return tds.currentDb.Put(dbutils.StorageBucket, compositeKey, vv)
 	}
 }

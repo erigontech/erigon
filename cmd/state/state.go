@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io"
 	"io/ioutil"
 	"log"
@@ -149,7 +150,7 @@ func stateGrowth1() {
 		if pre == nil {
 			return nil
 		}
-		b := tx.Bucket(state.AccountsHistoryBucket)
+		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
 		}
@@ -193,7 +194,7 @@ func stateGrowth1() {
 		if pre == nil {
 			return nil
 		}
-		b := tx.Bucket(state.AccountsBucket)
+		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
 			return nil
 		}
@@ -313,7 +314,7 @@ func stateGrowth2() {
 	var hash common.Hash
 	// Go through the history of account first
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageHistoryBucket)
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
 		}
@@ -366,7 +367,7 @@ func stateGrowth2() {
 	check(err)
 	// Go through the current state
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageBucket)
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
@@ -1098,8 +1099,8 @@ func storageUsage() {
 	count := 0
 	var leafSize uint64
 	err = db.View(func(tx *bolt.Tx) error {
-		a := tx.Bucket(state.AccountsBucket)
-		b := tx.Bucket(state.StorageBucket)
+		a := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
@@ -1209,7 +1210,7 @@ func tokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageBucket)
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
@@ -1285,7 +1286,7 @@ func nonTokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageBucket)
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
@@ -1346,7 +1347,7 @@ func oldStorage() {
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.StorageBucket)
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
@@ -1363,7 +1364,7 @@ func oldStorage() {
 	})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.AccountsHistoryBucket)
+		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
 		}
@@ -1421,7 +1422,7 @@ func dustEOA() {
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(state.AccountsBucket)
+		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
 			return nil
 		}

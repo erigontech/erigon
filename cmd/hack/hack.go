@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -47,7 +48,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, []byte("AT")) {
+			if len(name) == 20 || bytes.Equal(name, dbutils.AccountsBucket) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -320,7 +321,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("AT"))
+		b := tx.Bucket(dbutils.AccountsBucket)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
@@ -1038,14 +1039,14 @@ func loadAccount() {
 	blockSuffix := encodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, secKey, blockNr+1)
+	accountData, err := ethDb.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
 	check(err)
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(state.StorageBucket, state.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v, blockNr)
@@ -1056,7 +1057,7 @@ func loadAccount() {
 	}
 	fmt.Printf("After %d updates, reconstructed storage root: %x\n", count, t.Hash())
 	var keys [][]byte
-	if err := ethDb.Walk(state.StorageHistoryBucket, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.StorageHistoryBucket, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
 		if !bytes.HasSuffix(k, blockSuffix) {
 			return true, nil
 		}
@@ -1068,11 +1069,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr+1)
+		v, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(state.StorageBucket, state.StorageHistoryBucket, k, blockNr)
+		vOrig, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
@@ -1119,7 +1120,7 @@ func readAccount() {
 	check(err)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	v, _ := ethDb.Get(state.AccountsBucket, secKey)
+	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
 	fmt.Printf("%x:%x\n", secKey, v)
 }
 
@@ -1131,16 +1132,16 @@ func repairCurrent() {
 	check(err)
 	defer currentDb.Close()
 	check(historyDb.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(state.StorageBucket); err != nil {
+		if err := tx.DeleteBucket(dbutils.StorageBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(state.StorageBucket, true)
+		newB, err := tx.CreateBucket(dbutils.StorageBucket, true)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(func(ctx *bolt.Tx) error {
-			b := ctx.Bucket(state.StorageBucket)
+			b := ctx.Bucket(dbutils.StorageBucket)
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
 				newB.Put(k, v)

@@ -2,6 +2,8 @@ package trie
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+
 	//"fmt"
 	"testing"
 
@@ -15,7 +17,7 @@ var testbucket = []byte("test")
 func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
-	bucket := []byte("AT")
+	bucket := dbutils.AccountsBucket
 	tr := New(common.Hash{})
 
 	keys := []string{
@@ -58,7 +60,7 @@ func testRebuild(t *testing.T) {
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
@@ -78,10 +80,10 @@ func TestResolve1(t *testing.T) {
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
@@ -101,10 +103,10 @@ func TestResolve2(t *testing.T) {
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
@@ -124,13 +126,13 @@ func TestResolve2Keep(t *testing.T) {
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
@@ -150,26 +152,26 @@ func TestResolve3Keep(t *testing.T) {
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 
-	if err := db.Put([]byte("ST"), []byte("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")); err != nil {
 		t.Error(err)
 	}
 	req1 := &ResolveRequest{
@@ -203,10 +205,10 @@ func TestTrieResolver(t *testing.T) {
 func TestTwoStorageItems(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("ST"), common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5"), common.Hex2Bytes("02")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5"), common.Hex2Bytes("02")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("ST"), common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7"), common.Hex2Bytes("03")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7"), common.Hex2Bytes("03")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
@@ -225,10 +227,10 @@ func TestTwoStorageItems(t *testing.T) {
 func TestTwoAccounts(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put([]byte("AT"), common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), common.Hex2Bytes("c8808502540be40080")); err != nil {
+	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), common.Hex2Bytes("c8808502540be40080")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put([]byte("AT"), common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("f845806480a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc")); err != nil {
+	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("f845806480a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{
