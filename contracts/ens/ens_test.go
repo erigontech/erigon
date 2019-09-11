@@ -17,6 +17,7 @@
 package ens
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -44,6 +45,7 @@ func TestENS(t *testing.T) {
 	if err != nil {
 		t.Fatalf("can't deploy root registry: %v", err)
 	}
+	fmt.Printf("Before commit\n")
 	contractBackend.Commit()
 
 	// Set ourself as the owner of the name.

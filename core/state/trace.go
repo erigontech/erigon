@@ -39,31 +39,32 @@ func NewTraceDbState(db ethdb.Database) *TraceDbState {
 }
 
 func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
+	buf, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
 	enc, err := tds.currentDb.Get(dbutils.AccountsBucket, buf[:])
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
 }
 
-func (tds *TraceDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := tds.currentDb.Get(dbutils.StorageBucket, append(address[:], buf[:]...))
+func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	buf, err := common.HashData(key[:])
+	if err != nil {
+		return nil, err
+	}
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	enc, err := tds.currentDb.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -90,12 +91,10 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	if accountsEqual(original, account) {
 		return nil
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
@@ -103,12 +102,10 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 }
 
 func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
 	return tds.currentDb.Delete(dbutils.AccountsBucket, addrHash[:])
 }
 
@@ -116,16 +113,14 @@ func (tds *TraceDbState) UpdateAccountCode(codeHash common.Hash, code []byte) er
 	return tds.currentDb.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
-func (tds *TraceDbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
+func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var seckey common.Hash
-	h.sha.Read(seckey[:])
+	seckey, err := common.HashData(key[:])
+	if err != nil {
+		return err
+	}
 	compositeKey := append(address[:], seckey[:]...)
 	v := bytes.TrimLeft(value[:], "\x00")
 	vv := make([]byte, len(v))

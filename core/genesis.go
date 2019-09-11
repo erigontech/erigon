@@ -119,7 +119,6 @@ func (h *storageJSON) UnmarshalText(text []byte) error {
 	}
 	offset := len(h) - len(text)/2 // pad on the left
 	if _, err := hex.Decode(h[offset:], text); err != nil {
-		fmt.Println(err)
 		return fmt.Errorf("invalid hex storage key/value %q", text)
 	}
 	return nil
@@ -291,6 +290,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 // The block is committed as the canonical head block.
 func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockState, error) {
 	batch := db.NewBatch()
+	//fmt.Printf("Generating genesis\n")
 	block, statedb, tds, err := g.ToBlock(batch)
 	if err != nil {
 		return nil, nil, err
@@ -306,6 +306,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err
 	}
+	//fmt.Printf("Generated genesis\n")
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
 	rawdb.WriteBlock(db, block)
 	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)

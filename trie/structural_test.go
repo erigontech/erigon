@@ -188,7 +188,7 @@ func TestV2HashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder2()
+	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
 	var groups []uint32
 	var prefix []byte
@@ -252,7 +252,7 @@ func TestV2Resolution(t *testing.T) {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
-	hb := NewHashBuilder2()
+	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
 	var groups []uint32
 	var prefix []byte

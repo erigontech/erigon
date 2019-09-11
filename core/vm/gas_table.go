@@ -120,6 +120,7 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 		y, x    = stack.Back(1), stack.Back(0)
 		current = evm.IntraBlockState.GetState(contract.Address(), common.BigToHash(x))
 	)
+
 	// The legacy gas metering only takes into consideration the current state
 	// Legacy rules should be applied if we are in Petersburg (removal of EIP-1283)
 	// OR Constantinople is not active
@@ -181,6 +182,7 @@ func gasSStore(gt params.GasTable, evm *EVM, contract *Contract, stack *Stack, m
 			evm.IntraBlockState.AddRefund(params.NetSstoreResetRefund)
 		}
 	}
+
 	return params.NetSstoreDirtyGas, nil
 }
 

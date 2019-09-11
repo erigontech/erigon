@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"hash"
 
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
 )
@@ -65,7 +66,8 @@ func returnHasherToPool(h *hasher) {
 // original node initialized with the computed hash to replace the original one.
 func (h *hasher) hash(n node, force bool, storeTo []byte) int {
 	//n.makedirty()
-	return h.hashInternal(n, force, storeTo, 0)
+	hh := h.hashInternal(n, force, storeTo, 0)
+	return hh
 }
 
 // hash collapses a node down into a hash node, also returning a copy of the
@@ -84,6 +86,8 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	hashLen := h.store(children, force, storeTo)
 	if hashLen == 32 {
 		switch n := n.(type) {
+		case *accountNode:
+			n.hashCorrect = true
 		case *duoNode:
 			copy(n.flags.hash[:], storeTo)
 			n.flags.dirty = false
@@ -267,6 +271,18 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				copy(buffer[pos:], vn)
 				pos += len(vn)
 			}
+		} else if ac, ok := n.Val.(*accountNode); ok {
+			// Hashing the storage trie if necessary
+			if ac.storage == nil {
+				ac.Root = EmptyRoot
+			} else {
+				h.hashInternal(ac.storage, true, ac.Root[:], bufOffset+pos)
+			}
+
+			encodingLen := ac.EncodingLengthForHashing()
+			pos = generateByteArrayLen(buffer, pos, int(encodingLen))
+			ac.EncodeForHashing(buffer[pos:])
+			pos += int(encodingLen)
 		} else {
 			if n.Val == nil {
 				// empty byte array
@@ -352,17 +368,31 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				}
 			}
 		}
-		vn, _ := n.Children[16].(valueNode)
-		if vn == nil {
+		var enc []byte
+		switch n := n.Children[16].(type) {
+		case *accountNode:
+			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+			n.EncodeForHashing(encodedAccount.B)
+			enc = encodedAccount.Bytes()
+			pool.PutBuffer(encodedAccount)
+		case valueNode:
+			enc = n
+		case nil:
+		//	skip
+		default:
+			//	skip
+		}
+
+		if enc == nil {
 			buffer[pos] = byte(128)
 			pos++
-		} else if len(vn) == 1 && vn[0] < 128 {
-			buffer[pos] = vn[0]
+		} else if len(enc) == 1 && enc[0] < 128 {
+			buffer[pos] = enc[0]
 			pos++
 		} else {
-			pos = generateByteArrayLen(buffer, pos, len(vn))
-			copy(buffer[pos:], vn)
-			pos += len(vn)
+			pos = generateByteArrayLen(buffer, pos, len(enc))
+			copy(buffer[pos:], enc)
+			pos += len(enc)
 		}
 		return finishRLP(buffer, pos)
 
@@ -377,6 +407,24 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			}
 			copy(buffer[pos:], n)
 			pos += len(n)
+		}
+		return buffer[4:pos]
+
+	case *accountNode:
+		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+		n.EncodeForHashing(encodedAccount.B)
+		enc := encodedAccount.Bytes()
+		pool.PutBuffer(encodedAccount)
+		if len(enc) == 1 && enc[0] < 128 {
+			buffer[pos] = enc[0]
+			pos++
+		} else {
+			if h.encodeToBytes {
+				// Wrapping into another byte array
+				pos = generateByteArrayLen(buffer, pos, len(enc))
+			}
+			copy(buffer[pos:], enc)
+			pos += len(enc)
 		}
 		return buffer[4:pos]
 

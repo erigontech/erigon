@@ -18,13 +18,14 @@ func TestEmptyAccount(t *testing.T) {
 		Balance:     *new(big.Int),
 		Root:        emptyRoot,     // extAccount doesn't have Root value
 		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Incarnation: 5,
 	}
 
 	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
 	a.EncodeForStorage(encodedAccount.B)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount.B); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount.B); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -34,6 +35,32 @@ func TestEmptyAccount(t *testing.T) {
 	pool.PutBuffer(encodedAccount)
 }
 
+func TestEmptyAccount2(t *testing.T) {
+	encodedAccount := Account{}
+
+	b := make([]byte, encodedAccount.EncodingLengthForStorage())
+	encodedAccount.EncodeForStorage(b)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(b); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+}
+
+// fails if run package tests
+// account_test.go:57: cant decode the account malformed RLP for Account(c064): prefixLength(1) + dataLength(0) != sliceLength(2) �d
+func TestEmptyAccount_BufferStrangeBehaviour(t *testing.T) {
+	a := Account{}
+
+	encodedAccount := pool.GetBuffer(a.EncodingLengthForStorage())
+	a.EncodeForStorage(encodedAccount.B)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(encodedAccount.Bytes()); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+}
+
 func TestAccountEncodeWithCode(t *testing.T) {
 	a := Account{
 		Initialised: true,
@@ -41,6 +68,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 4,
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -48,7 +76,7 @@ func TestAccountEncodeWithCode(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -65,6 +93,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 		CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
 		HasStorageSize: true,
 		StorageSize:    0,
+		Incarnation:    5,
 	}
 	a.StorageSize = 10
 
@@ -73,7 +102,7 @@ func TestAccountEncodeWithCodeWithStorageSizeHack(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -87,6 +116,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        emptyRoot,     // extAccount doesn't have Root value
 		CodeHash:    emptyCodeHash, // extAccount doesn't have CodeHash value
+		Incarnation: 5,
 	}
 
 	encodedLen := a.EncodingLengthForStorage()
@@ -94,7 +124,7 @@ func TestAccountEncodeWithoutCode(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -109,6 +139,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 		Balance:     *new(big.Int).SetInt64(1000),
 		Root:        common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
 		CodeHash:    common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
+		Incarnation: 5,
 	}
 	account.HasStorageSize = true
 	account.StorageSize = 10
@@ -118,7 +149,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 	account.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
@@ -149,7 +180,7 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 		a.EncodeForStorage(encodedAccount)
 
 		var decodedAccount Account
-		if err := decodedAccount.Decode(encodedAccount); err != nil {
+		if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 			t.Fatal("cant decode the account", err, encodedAccount)
 		}
 
@@ -175,12 +206,64 @@ func TestAccountEncodeWithoutCodeEIP2027(t *testing.T) {
 	a.EncodeForStorage(encodedAccount)
 
 	var decodedAccount Account
-	if err := decodedAccount.Decode(encodedAccount); err != nil {
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
 		t.Fatal("cant decode the account", err, encodedAccount)
 	}
 
 	isAccountsEqual(t, a, decodedAccount)
 	isStorageSizeEqual(t, a, decodedAccount)
+}
+
+func TestEncodeAccountWithEmptyBalanceNonNilContractAndNotZeroIncarnation(t *testing.T) {
+	a := Account{
+		Initialised:    true,
+		Nonce:          0,
+		Balance:        *big.NewInt(0),
+		Root:           common.HexToHash("123"),
+		CodeHash:       common.HexToHash("123"),
+		Incarnation:    1,
+		HasStorageSize: false,
+		StorageSize:    0,
+	}
+	encodedLen := a.EncodingLengthForStorage()
+	encodedAccount := make([]byte, encodedLen)
+	a.EncodeForStorage(encodedAccount)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	isAccountsEqual(t, a, decodedAccount)
+	isStorageSizeEqual(t, a, decodedAccount)
+}
+func TestEncodeAccountWithEmptyBalanceAndNotZeroIncarnation(t *testing.T) {
+	a := Account{
+		Initialised:    true,
+		Nonce:          0,
+		Balance:        *big.NewInt(0),
+		Incarnation:    1,
+		HasStorageSize: false,
+		StorageSize:    0,
+	}
+	encodedLen := a.EncodingLengthForStorage()
+	encodedAccount := make([]byte, encodedLen)
+	a.EncodeForStorage(encodedAccount)
+
+	var decodedAccount Account
+	if err := decodedAccount.DecodeForStorage(encodedAccount); err != nil {
+		t.Fatal("cant decode the account", err, encodedAccount)
+	}
+
+	if a.Incarnation != decodedAccount.Incarnation {
+		t.FailNow()
+	}
+	if a.Balance.Cmp(&decodedAccount.Balance) != 0 {
+		t.FailNow()
+	}
+	if a.Nonce != decodedAccount.Nonce {
+		t.FailNow()
+	}
 }
 
 func isAccountsEqual(t *testing.T, src, dst Account) {
@@ -202,6 +285,9 @@ func isAccountsEqual(t *testing.T, src, dst Account) {
 
 	if dst.Nonce != src.Nonce {
 		t.Fatal("cant decode the account Nonce", src.Nonce, dst.Nonce)
+	}
+	if dst.Incarnation != src.Incarnation {
+		t.Fatal("cant decode the account Version", src.Incarnation, dst.Incarnation)
 	}
 }
 

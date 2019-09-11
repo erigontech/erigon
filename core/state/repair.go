@@ -186,31 +186,27 @@ func (rds *RepairDbState) CheckKeys() {
 }
 
 func (rds *RepairDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := rds.currentDb.Get(dbutils.AccountsBucket, buf[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+	enc, err := rds.currentDb.Get(dbutils.AccountsBucket, addrHash[:])
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
 }
 
-func (rds *RepairDbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := rds.currentDb.Get(dbutils.StorageBucket, append(address[:], buf[:]...))
+func (rds *RepairDbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	keyHash, err := common.HashData(address[:])
+	if err != nil {
+		return []byte{}, err
+	}
+	enc, err := rds.currentDb.Get(dbutils.StorageBucket, append(address[:], keyHash[:]...))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -310,12 +306,10 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 	if accountsEqual(original, account) {
 		return nil
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
@@ -341,12 +335,10 @@ func (rds *RepairDbState) UpdateAccountData(ctx context.Context, address common.
 }
 
 func (rds *RepairDbState) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
 	rds.accountsKeys[string(addrHash[:])] = struct{}{}
 
 	delete(rds.storageUpdates, address)
@@ -376,13 +368,11 @@ func (rds *RepairDbState) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return rds.currentDb.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
-func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, original, value *common.Hash) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var seckey common.Hash
-	h.sha.Read(seckey[:])
+func (rds *RepairDbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+	seckey, err := common.HashData(key[:])
+	if err != nil {
+		return err
+	}
 	compositeKey := append(address[:], seckey[:]...)
 	if *original == *value {
 		val, _ := rds.historyDb.GetS(dbutils.StorageHistoryBucket, compositeKey, rds.blockNr)
@@ -401,22 +391,11 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, key, origi
 		rds.storageUpdates[address] = m
 	}
 	if len(v) > 0 {
-		// Write into 1 extra RLP level
-		var vv []byte
-		if len(v) > 1 || v[0] >= 128 {
-			vv = make([]byte, len(v)+1)
-			vv[0] = byte(128 + len(v))
-			copy(vv[1:], v)
-		} else {
-			vv = make([]byte, 1)
-			vv[0] = v[0]
-		}
-		m[seckey] = vv
+		m[seckey] = AddExtraRLPLevel(v)
 	} else {
 		m[seckey] = nil
 	}
 	rds.storageKeys[string(compositeKey)] = struct{}{}
-	var err error
 	if len(v) == 0 {
 		err = rds.currentDb.Delete(dbutils.StorageBucket, compositeKey)
 	} else {

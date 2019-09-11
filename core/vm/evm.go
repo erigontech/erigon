@@ -394,6 +394,7 @@ func (evm *EVM) create(caller ContractRef, codeAndHash *codeAndHash, gas uint64,
 	// Create a new account on the state
 	snapshot := evm.IntraBlockState.Snapshot()
 	evm.IntraBlockState.CreateAccount(address, true)
+
 	if evm.ChainConfig().IsEIP158(evm.BlockNumber) {
 		evm.IntraBlockState.SetNonce(address, 1)
 	}

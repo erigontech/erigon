@@ -25,6 +25,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 func (t *Trie) Print(w io.Writer) {
@@ -251,6 +253,22 @@ func (n valueNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", []byte(n))
 }
 
+func (an accountNode) fstring(string) string {
+	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount.B)
+	defer pool.PutBuffer(encodedAccount)
+
+	return fmt.Sprintf("%x ", encodedAccount.String())
+}
+
+func (an accountNode) print(w io.Writer) {
+	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
+	an.EncodeForHashing(encodedAccount.B)
+	defer pool.PutBuffer(encodedAccount)
+
+	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
+}
+
 func printDiffSide(n node, w io.Writer, ind string, key string) {
 	switch n := n.(type) {
 	case *fullNode:
@@ -288,6 +306,8 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "hash(%x)", []byte(n))
 	case valueNode:
 		fmt.Fprintf(w, "value(%s %x)", key, []byte(n))
+	case *accountNode:
+		fmt.Fprintf(w, "account(%s %x)", key, n)
 	}
 }
 
