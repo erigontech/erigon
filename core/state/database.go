@@ -796,7 +796,7 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 	if !save {
 		return nil
 	}
-	return tds.db.Put(trie.SecureKeyPrefix, hash, preimage)
+	return tds.db.Put(dbutils.PreimagePrefix, hash, preimage)
 }
 
 func (tds *TrieDbState) HashAddress(address common.Address, save bool) (common.Hash, error) {
@@ -816,7 +816,7 @@ func (tds *TrieDbState) HashKey(key *common.Hash, save bool) (common.Hash, error
 }
 
 func (tds *TrieDbState) GetKey(shaKey []byte) []byte {
-	key, _ := tds.db.Get(trie.SecureKeyPrefix, shaKey)
+	key, _ := tds.db.Get(dbutils.PreimagePrefix, shaKey)
 	return key
 }
 

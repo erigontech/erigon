@@ -995,7 +995,7 @@ func preimage() {
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x578e9478d8a7287fd7720ca220095ee48ec0fd16a4279772a2d323927b00e30f"))
+	p, err := ethDb.Get(dbutils.PreimagePrefix, common.FromHex("0x578e9478d8a7287fd7720ca220095ee48ec0fd16a4279772a2d323927b00e30f"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }

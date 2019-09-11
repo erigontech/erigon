@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
@@ -146,7 +145,7 @@ func stateGrowth1() {
 	var address common.Address
 	// Go through the history of account first
 	err = db.View(func(tx *bolt.Tx) error {
-		pre := tx.Bucket(trie.SecureKeyPrefix)
+		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
 		}
@@ -190,7 +189,7 @@ func stateGrowth1() {
 	check(err)
 	// Go through the current state
 	err = db.View(func(tx *bolt.Tx) error {
-		pre := tx.Bucket(trie.SecureKeyPrefix)
+		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
 		}

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"math"
 	"math/big"
 	"math/rand"
@@ -37,7 +38,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 // Tests that updating a state trie does not leak any database writes prior to
@@ -69,8 +69,12 @@ func TestUpdateLeaks(t *testing.T) {
 	}
 
 	// Ensure that no data was leaked into the database
-	for keys, i := db.Keys(), 0; i < len(keys); i += 2 {
-		if bytes.Equal(keys[i], trie.SecureKeyPrefix) {
+	keys, err := db.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(keys); i += 2 {
+		if bytes.Equal(keys[i], dbutils.PreimagePrefix) {
 			continue
 		}
 		value, _ := db.Get(keys[i], keys[i+1])
@@ -154,8 +158,12 @@ func TestIntermediateLeaks(t *testing.T) {
 	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
-	for finalKeys, i := finalDb.Keys(), 0; i < len(finalKeys); i += 2 {
-		if bytes.Equal(finalKeys[i], trie.SecureKeyPrefix) {
+	finalKeys, err := finalDb.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(finalKeys); i += 2 {
+		if bytes.Equal(finalKeys[i], dbutils.PreimagePrefix) {
 			continue
 		}
 		if _, err := transDb.Get(finalKeys[i], finalKeys[i+1]); err != nil {
@@ -163,8 +171,12 @@ func TestIntermediateLeaks(t *testing.T) {
 			t.Errorf("entry missing from the transition database: %x:%x -> %x", finalKeys[i], finalKeys[i+1], val)
 		}
 	}
-	for transKeys, i := transDb.Keys(), 0; i < len(transKeys); i += 2 {
-		if bytes.Equal(transKeys[i], trie.SecureKeyPrefix) {
+	transKeys, err := transDb.Keys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < len(transKeys); i += 2 {
+		if bytes.Equal(transKeys[i], dbutils.PreimagePrefix) {
 			continue
 		}
 		if _, err := finalDb.Get(transKeys[i], transKeys[i+1]); err != nil {
