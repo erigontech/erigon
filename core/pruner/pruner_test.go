@@ -100,11 +100,4 @@ func TestOne(t *testing.T) {
 	}
 	fmt.Println("=============================================================================================")
 
-	//db.Get(dbutils.SuffixBucket, )
-
-	//st, _, _ := blockchain.State()
-	//if !st.Exist(address) {
-	//	t.Error("expected account to exist")
-	//}
-
 }

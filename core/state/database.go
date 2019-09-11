@@ -1030,7 +1030,6 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	//fmt.Println("core/state/database.go:1060 Update account",address.String(), dsw.tds.blockNr,  addrHash)
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
 }
 
