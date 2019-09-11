@@ -82,8 +82,8 @@ func (self *TrieDbState) RawDump() Dump {
 			return false, err
 		}
 
-		err = self.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+8), func(ks, vs []byte) (bool, error) {
-			key := self.GetKey(ks[common.HashLength+8:]) //remove account address and version from composite key
+		err = self.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := self.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})

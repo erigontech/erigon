@@ -39,6 +39,8 @@ import (
 // Trie cache generation limit after which to evict trie nodes from memory.
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
+const IncarnationLength = 8
+
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
@@ -101,16 +103,17 @@ func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) add
 	return res
 }
 
-type addressHashWithIncarnation [common.HashLength + 8]byte
+type addressHashWithIncarnation [common.HashLength + IncarnationLength]byte
 
-func (a *addressHashWithIncarnation) AddrHash() common.Hash {
+// returns address hash
+func (a *addressHashWithIncarnation) Hash() common.Hash {
 	var addrHash common.Hash
 	copy(addrHash[:], a[:common.HashLength])
 	return addrHash
 }
 
 func (a *addressHashWithIncarnation) Incarnation() uint64 {
-	return binary.BigEndian.Uint64(a[common.HashLength : common.HashLength+8])
+	return binary.BigEndian.Uint64(a[common.HashLength : common.HashLength+IncarnationLength])
 }
 
 // Prepares buffer for work or clears previous data
@@ -316,11 +319,11 @@ func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Key
 	if err != nil {
 		return false, err
 	}
-	startkey := make([]byte, common.HashLength+8+common.HashLength)
+	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
-	copy(startkey[common.HashLength+8:], prefix.Data)
+	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 
-	fixedbits := (common.HashLength + 8 + uint(len(prefix.Data))) * 8
+	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8
 	if prefix.Odd {
 		fixedbits -= 4
 	}
@@ -404,7 +407,7 @@ func (tds *TrieDbState) buildStorageTouches() map[addressHashWithIncarnation]Has
 func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWithIncarnation]Hashes) error {
 	var resolver *trie.TrieResolver
 	for addressHash, hashes := range storageTouches {
-		var addrHash = addressHash.AddrHash()
+		var addrHash = addressHash.Hash()
 		for _, keyHash := range hashes {
 			//todo @need resolution for prefix
 			if need, req := tds.t.NeedResolution(addrHash[:], keyHash[:]); need {
@@ -431,7 +434,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWith
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[addressHashWithIncarnation]Hashes) error { //nolint
 	for addresHash, hashes := range storageTouches {
-		if _, ok := tds.aggregateBuffer.deletedHashes[addresHash.AddrHash()]; ok && len(tds.aggregateBuffer.storageReads[addresHash]) == 0 {
+		if _, ok := tds.aggregateBuffer.deletedHashes[addresHash.Hash()]; ok && len(tds.aggregateBuffer.storageReads[addresHash]) == 0 {
 			// We can only skip the proof of storage entirely if
 			// there were no reads before writes and account got deleted
 			continue
@@ -565,14 +568,14 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 		}
 		for addressHash, m := range b.storageUpdates {
-			addrHash := addressHash.AddrHash()
-			if _, ok := b.deletedHashes[addressHash.AddrHash()]; ok {
+			addrHash := addressHash.Hash()
+			if _, ok := b.deletedHashes[addressHash.Hash()]; ok {
 				// Deleted contracts will be dealth with later, in the next loop
 				continue
 			}
 
 			for keyHash, v := range m {
-				cKey := dbutils.GenerateCompositeTrieKey(addressHash.AddrHash(), keyHash)
+				cKey := dbutils.GenerateCompositeTrieKey(addressHash.Hash(), keyHash)
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					tds.t.Update(cKey, v, tds.blockNr)
@@ -686,9 +689,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var address common.Hash
 			copy(address[:], key[:common.HashLength])
 			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength+8:])
+			copy(keyHash[:], key[common.HashLength+IncarnationLength:])
 			var addrHashWithVersion addressHashWithIncarnation
-			copy(addrHashWithVersion[:], key[:common.HashLength+8])
+			copy(addrHashWithVersion[:], key[:common.HashLength+IncarnationLength])
 			m, ok := b.storageUpdates[addrHashWithVersion]
 			if !ok {
 				m = make(map[common.Hash][]byte)
@@ -725,11 +728,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	for addressHash, m := range tds.aggregateBuffer.storageUpdates {
 		for keyHash, value := range m {
 			if len(value) == 0 {
-				if err := tds.db.Delete(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addressHash.Hash(), addressHash.Incarnation(), keyHash)); err != nil {
 					return err
 				}
 			} else {
-				cKey := dbutils.GenerateCompositeStorageKey(addressHash.AddrHash(), addressHash.Incarnation(), keyHash)
+				cKey := dbutils.GenerateCompositeStorageKey(addressHash.Hash(), addressHash.Incarnation(), keyHash)
 				if err := tds.db.Put(dbutils.StorageBucket, cKey, value); err != nil {
 					return err
 				}
@@ -925,11 +928,9 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
-	pruned := tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
-	if !pruned {
-		_ = pruned
-		//return
-	}
+
+	tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
+
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())

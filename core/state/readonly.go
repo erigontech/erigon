@@ -67,9 +67,9 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	}
 
 	st := llrb.New()
-	var s [32 + 8 + 32]byte
+	var s [common.HashLength + IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
-	copy(s[32+8:], start)
+	copy(s[common.HashLength+IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
 	emptyHash := common.Hash{}
@@ -95,7 +95,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[32+8:]
+		seckey := ks[common.HashLength+IncarnationLength:]
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
 		copy(si.seckey[:], seckey)

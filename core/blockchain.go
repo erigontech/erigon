@@ -1273,7 +1273,6 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		var root common.Hash
 		if bc.trieDbState == nil {
 			if _, err = bc.GetTrieDbState(); err != nil {
-				fmt.Printf("%v\n", err)
 				return k, events, coalescedLogs, err
 			}
 		}
