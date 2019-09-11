@@ -17,6 +17,7 @@
 package core
 
 import (
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -120,19 +121,26 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 // otherwise nil and an error is returned.
 func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, receipts types.Receipts, usedGas uint64) error {
 	header := block.Header()
+	var errorBuf strings.Builder
 	if block.GasUsed() != usedGas {
-		return fmt.Errorf("invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
+		fmt.Fprintf(&errorBuf, "invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
 	}
 	// Validate the received block's bloom with the one derived from the generated receipts.
 	// For valid blocks this should always validate to true.
 	rbloom := types.CreateBloom(receipts)
 	if rbloom != header.Bloom {
-		return fmt.Errorf("invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
 	}
 	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, R1]]))
 	receiptSha := types.DeriveSha(receipts)
 	if receiptSha != header.ReceiptHash {
-		return fmt.Errorf("invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 	}
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
@@ -144,7 +152,10 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 			defer f.Close()
 			tds.PrintTrie(f)
 		}
-		return fmt.Errorf("invalid merkle root (remote: %x local: %x)", header.Root, root)
+		if errorBuf.Len() > 0 {
+			errorBuf.WriteString("; ")
+		}
+		fmt.Fprintf(&errorBuf, "invalid merkle root (remote: %x local: %x)", header.Root, root)
 	} else if has, ok := v.dblks[block.NumberU64()]; ok && has {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		log.Warn("Generating deep snapshot of right tries...", "file", filename)
@@ -153,6 +164,9 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 			defer f.Close()
 			tds.PrintTrie(f)
 		}
+	}
+	if errorBuf.Len() > 0 {
+		return errors.New(errorBuf.String())
 	}
 	return nil
 }

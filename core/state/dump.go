@@ -17,6 +17,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -50,7 +51,7 @@ func (self *TrieDbState) RawDump() Dump {
 	err := self.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
 		addr := self.GetKey(k)
 		var err error
-		if err = acc.Decode(v); err != nil {
+		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
 		}
 		var code []byte
@@ -72,8 +73,17 @@ func (self *TrieDbState) RawDump() Dump {
 			var storageSize = acc.StorageSize
 			account.StorageSize = &storageSize
 		}
-		err = self.db.Walk(dbutils.StorageBucket, addr, uint(len(addr)*8), func(ks, vs []byte) (bool, error) {
-			key := self.GetKey(ks[common.AddressLength:]) //remove account address from composite key
+
+		buf := make([]byte, binary.MaxVarintLen64)
+		binary.PutUvarint(buf, acc.GetIncarnation())
+
+		addrHash, err := self.HashAddress(common.BytesToAddress(addr), false)
+		if err != nil {
+			return false, err
+		}
+
+		err = self.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := self.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
 			account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
 			return true, nil
 		})

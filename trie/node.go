@@ -19,6 +19,8 @@ package trie
 import (
 	"io"
 
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -52,6 +54,12 @@ type (
 	}
 	hashNode  []byte
 	valueNode []byte
+
+	accountNode struct {
+		accounts.Account
+		storage     node
+		hashCorrect bool
+	}
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
@@ -254,21 +262,24 @@ type nodeFlag struct {
 	dirty bool        // whether the hash field represent the true hash
 }
 
-func (n hashNode) dirty() bool   { return false }
-func (n valueNode) dirty() bool  { return true }
-func (n *fullNode) dirty() bool  { return n.flags.dirty }
-func (n *duoNode) dirty() bool   { return n.flags.dirty }
-func (n *shortNode) dirty() bool { return true }
+func (n hashNode) dirty() bool      { return false }
+func (n valueNode) dirty() bool     { return true }
+func (n *fullNode) dirty() bool     { return n.flags.dirty }
+func (n *duoNode) dirty() bool      { return n.flags.dirty }
+func (n *shortNode) dirty() bool    { return true }
+func (an *accountNode) dirty() bool { return true }
 
-func (n hashNode) hash() []byte   { return n }
-func (n valueNode) hash() []byte  { return nil }
-func (n *fullNode) hash() []byte  { return n.flags.hash[:] }
-func (n *duoNode) hash() []byte   { return n.flags.hash[:] }
-func (n *shortNode) hash() []byte { return nil }
+func (n hashNode) hash() []byte      { return n }
+func (n valueNode) hash() []byte     { return nil }
+func (n *fullNode) hash() []byte     { return n.flags.hash[:] }
+func (n *duoNode) hash() []byte      { return n.flags.hash[:] }
+func (n *shortNode) hash() []byte    { return nil }
+func (an *accountNode) hash() []byte { return nil }
 
 // Pretty printing.
-func (n fullNode) String() string  { return n.fstring("") }
-func (n duoNode) String() string   { return n.fstring("") }
-func (n shortNode) String() string { return n.fstring("") }
-func (n hashNode) String() string  { return n.fstring("") }
-func (n valueNode) String() string { return n.fstring("") }
+func (n fullNode) String() string     { return n.fstring("") }
+func (n duoNode) String() string      { return n.fstring("") }
+func (n shortNode) String() string    { return n.fstring("") }
+func (n hashNode) String() string     { return n.fstring("") }
+func (n valueNode) String() string    { return n.fstring("") }
+func (an accountNode) String() string { return an.fstring("") }

@@ -1,4 +1,2 @@
-right_1.txt
-right_3.txt
-root_1.txt
-root_3.txt
+right_*.txt
+root_*.txt
