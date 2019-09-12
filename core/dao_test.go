@@ -39,16 +39,16 @@ func TestDAOForkRangeExtradata(t *testing.T) {
 
 	proDb := ethdb.NewMemDatabase()
 	gspec.MustCommit(proDb)
-	proBc, _ := NewBlockChain(proDb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	defer proBc.Stop()
-	ctx := proBc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-
-	prefix, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), db, int(forkBlock.Int64()-1), func(i int, gen *BlockGen) {})
 
 	// Create the concurrent, conflicting two nodes
 	proConf := *params.TestChainConfig
 	proConf.DAOForkBlock = forkBlock
 	proConf.DAOForkSupport = true
+	proBc, _ := NewBlockChain(proDb, nil, &proConf, ethash.NewFaker(), vm.Config{}, nil)
+	defer proBc.Stop()
+	ctx := proBc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
+	prefix, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), db, int(forkBlock.Int64()-1), func(i int, gen *BlockGen) {})
 
 	conDb := ethdb.NewMemDatabase()
 	gspec.MustCommit(conDb)
