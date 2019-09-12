@@ -235,10 +235,6 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
 }
 
-func (tds *TrieDbState) SetNoHistory(nh bool) {
-	//todo: remove
-}
-
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
 
@@ -1021,7 +1017,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	return true
 }
 
-func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
@@ -1041,7 +1037,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(bucket.Accounts, addrHash[:], data); err != nil {
 		return err
 	}
-	if params.GetNoHistory(ctx) {
+	noHistory, ctx := params.GetNoHistory(ctx)
+	if noHistory {
 		return nil
 	}
 	// Don't write historical record if the account did not change
@@ -1077,7 +1074,8 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(bucket.Accounts, addrHash[:]); err != nil {
 		return err
 	}
-	if params.GetNoHistory(ctx) {
+	noHistory, ctx := params.GetNoHistory(ctx)
+	if noHistory {
 		return nil
 	}
 	var originalData []byte
@@ -1155,7 +1153,8 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	if params.GetNoHistory(ctx) {
+	noHistory, ctx := params.GetNoHistory(ctx)
+	if noHistory {
 		return nil
 	}
 	o := bytes.TrimLeft(original[:], "\x00")

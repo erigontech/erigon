@@ -19,6 +19,7 @@ package core
 import (
 	//"time"
 
+	"context"
 	//"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -101,7 +102,7 @@ func newInsertIterator(chain types.Blocks, results <-chan error, validator Valid
 
 // next returns the next block in the iterator, along with any potential validation
 // error for that block. When the end is reached, it will return (nil, nil).
-func (it *insertIterator) next() (*types.Block, error) {
+func (it *insertIterator) next(ctx context.Context) (*types.Block, error) {
 	if it.index+1 >= len(it.chain) {
 		it.index = len(it.chain)
 		return nil, nil
@@ -110,7 +111,7 @@ func (it *insertIterator) next() (*types.Block, error) {
 	if err := <-it.results; err != nil {
 		return it.chain[it.index], err
 	}
-	return it.chain[it.index], it.validator.ValidateBody(it.chain[it.index])
+	return it.chain[it.index], it.validator.ValidateBody(ctx, it.chain[it.index])
 }
 
 // previous returns the previous block was being processed, or nil

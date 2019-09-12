@@ -73,7 +73,6 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
@@ -84,13 +83,14 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -282,13 +282,14 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -416,13 +417,14 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -603,13 +605,14 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -807,13 +810,14 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -991,13 +995,14 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
 		)
 
-		ctx := gspec.Config.WithEIPsFlags(context.Background(), block.Number())
+		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		switch i {
 		case 0:
@@ -1168,7 +1173,8 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 2, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 2, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {

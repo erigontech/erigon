@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"math/big"
 
@@ -80,7 +81,9 @@ type CacheConfig struct {
 	TrieDirtyLimit int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit  time.Duration // Time limit after which to flush the current in-memory trie to disk
 
-	ArchiveSyncInterval uint64
+	ArchiveSyncInterval      uint64
+	ArchiveSyncFirstInterval uint64
+	NoHistory                bool
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -140,7 +143,6 @@ type BlockChain struct {
 	vmConfig  vm.Config
 
 	badBlocks         *lru.Cache // Bad block cache
-	noHistory         bool
 	highestKnownBlock uint64
 	enableReceipts    bool // Whether receipts need to be written to the database
 	resolveReads      bool
@@ -152,11 +154,16 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
-			TrieCleanLimit:      256,
-			TrieDirtyLimit:      256,
-			TrieTimeLimit:       5 * time.Minute,
-			ArchiveSyncInterval: 1024,
+			TrieCleanLimit:           256,
+			TrieDirtyLimit:           256,
+			TrieTimeLimit:            5 * time.Minute,
 		}
+	}
+	if cacheConfig.ArchiveSyncFirstInterval == 0 {
+		cacheConfig.ArchiveSyncFirstInterval = 1024
+	}
+	if cacheConfig.ArchiveSyncInterval == 0 {
+		cacheConfig.ArchiveSyncInterval = 1024
 	}
 	bodyCache, _ := lru.New(bodyCacheLimit)
 	bodyRLPCache, _ := lru.New(bodyCacheLimit)
@@ -215,10 +222,6 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	return bc, nil
 }
 
-func (bc *BlockChain) SetNoHistory(nh bool) {
-	bc.noHistory = nh
-}
-
 func (bc *BlockChain) SetResolveReads(rr bool) {
 	bc.resolveReads = rr
 }
@@ -236,7 +239,6 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 		if err != nil {
 			return nil, err
 		}
-		bc.trieDbState.SetNoHistory(bc.noHistory)
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
 			return nil, err
@@ -985,7 +987,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
-	if !bc.noHistory {
+	ctx := bc.WithContext(context.Background(), block.Number())
+	noHistory, ctx := params.GetNoHistoryByBlock(ctx, block.Number())
+	if !noHistory {
+		// archive sync
 		// Calculate the total difficulty of the block
 		ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 		if ptd == nil {
@@ -1000,11 +1005,11 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 		rawdb.WriteBlock(bc.db, block)
 	} else {
+		// full sync
 		rawdb.WriteHeader(bc.db, block.Header())
 	}
 
 	tds.SetBlockNr(block.NumberU64())
-	ctx := bc.chainConfig.WithEIPsFlags(context.Background(), block.Number())
 	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		// archive case
 		return NonStatTy, err
@@ -1080,6 +1085,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	if len(chain) == 0 {
 		return 0, nil
 	}
+
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i := 1; i < len(chain); i++ {
 		if chain[i].NumberU64() != chain[i-1].NumberU64()+1 || chain[i].ParentHash() != chain[i-1].Hash() {
@@ -1094,8 +1100,9 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	// Only insert if the difficulty of the inserted chain is bigger than existing chain
 	// Pre-checks passed, start the full block imports
 	bc.wg.Add(1)
+	ctx := bc.WithContext(context.Background(), chain[0].Number())
 	bc.chainmu.Lock()
-	n, events, logs, err := bc.insertChain(chain, true)
+	n, events, logs, err := bc.insertChain(ctx, chain, true)
 	bc.chainmu.Unlock()
 	bc.wg.Done()
 
@@ -1111,7 +1118,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []interface{}, []*types.Log, error) {
+func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, []interface{}, []*types.Log, error) {
 	// If the chain is terminating, don't even bother starting u
 	if atomic.LoadInt32(&bc.procInterrupt) == 1 {
 		return 0, nil, nil, nil
@@ -1140,8 +1147,10 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		lastCanon     *types.Block
 		coalescedLogs []*types.Log
 	)
-	var verifyFrom int = len(chain)
-	if !bc.noHistory {
+	var verifyFrom = len(chain)
+	noHistory, ctx := params.GetNoHistoryByBlock(ctx, chain[0].Number())
+	//fmt.Println("no", noHistory)
+	if !noHistory {
 		externTd := big.NewInt(0)
 		if len(chain) > 0 && chain[0].NumberU64() > 0 {
 			d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
@@ -1150,6 +1159,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 			}
 		}
 		localTd := bc.GetTd(bc.CurrentBlock().Hash(), bc.CurrentBlock().NumberU64())
+		if localTd == nil {
+			fmt.Println("!!!", bc.CurrentBlock().Hash().String(), bc.CurrentBlock().NumberU64(), localTd)
+		}
 		for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 			header := chain[verifyFrom].Header()
 			err := <-results
@@ -1177,7 +1189,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
 	// Find correct insertion point for this chain
-	if !bc.noHistory {
+	if !noHistory {
 		preBlocks := []*types.Block{}
 		parentHash := chain[0].ParentHash()
 		parent = bc.GetBlock(parentHash, parentNumber)
@@ -1211,6 +1223,9 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 
 	// Iterate over the blocks and insert when the verifier permits
 	for i, block := range chain {
+		_, ctx = params.GetNoHistoryByBlock(ctx, block.Number())
+		//fmt.Println("xxx 1", block.Number().String(), testNoHistory)
+
 		start := time.Now()
 		k := 0
 		if i >= offset {
@@ -1232,7 +1247,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 			err = <-results
 		}
 		if err == nil {
-			err = bc.Validator().ValidateBody(block)
+			err = bc.Validator().ValidateBody(ctx, block)
 		}
 		switch {
 		case err == ErrKnownBlock:
@@ -1774,14 +1789,76 @@ func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
 }
 
+func (bc *BlockChain) NoHistory() bool {
+	return bc.cacheConfig.NoHistory
+}
+
 func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
-	if currentBlock == nil {
-		return bc.noHistory
+	if bc.cacheConfig.ArchiveSyncInterval == 0 {
+		return false
 	}
 
-	return bc.noHistory || (currentBlock.Uint64()-bc.highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
+	if currentBlock == nil {
+		if bc.cacheConfig.NoHistory {
+			fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, firstSyncInterval %v, callers %v\n\n",
+				0,
+				currentBlock.Int64(),
+				bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+				bc.cacheConfig.ArchiveSyncInterval, bc.cacheConfig.ArchiveSyncFirstInterval,
+				debug.Callers(10))
+		}
+		return bc.cacheConfig.NoHistory
+	}
+
+	if currentBlock.Uint64() <= bc.cacheConfig.ArchiveSyncFirstInterval {
+		return false
+	}
+
+	var isArchiveInterval bool
+	currentBlockNumber := bc.CurrentBlock().Number().Uint64()
+	if bc.highestKnownBlock > currentBlockNumber {
+		//todo: поверитьб что пишется в bc.highestKnownBlock
+		//todo: проверить почему currentBlock.Uint64() > currentBlockNumber
+		//todo: проверить почему bc.highestKnownBlock <= currentBlockNumber
+
+		isArchiveInterval = (currentBlock.Uint64() - bc.highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
+		if isArchiveInterval {
+			fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, firstSyncInterval %v, callers %v\n\n",
+				1,
+				currentBlock.Int64(),
+				bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+				bc.cacheConfig.ArchiveSyncInterval, bc.cacheConfig.ArchiveSyncFirstInterval,
+				debug.Callers(10))
+		}
+	} else {
+		isArchiveInterval = (currentBlock.Uint64() - currentBlockNumber) <= bc.cacheConfig.ArchiveSyncInterval
+		if isArchiveInterval {
+			fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, firstSyncInterval %v, callers %v\n\n",
+				2,
+				currentBlock.Int64(),
+				bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+				bc.cacheConfig.ArchiveSyncInterval, bc.cacheConfig.ArchiveSyncFirstInterval,
+				debug.Callers(10))
+		}
+	}
+
+	if bc.cacheConfig.NoHistory {
+		fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, firstSyncInterval %v, callers %v\n\n",
+			3,
+			currentBlock.Int64(),
+			bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+			bc.cacheConfig.ArchiveSyncInterval, bc.cacheConfig.ArchiveSyncFirstInterval,
+			debug.Callers(10))
+	}
+	return bc.cacheConfig.NoHistory || isArchiveInterval
 }
 
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
 	bc.highestKnownBlock = h
+}
+
+func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {
+	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
+	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
+	return ctx
 }

@@ -17,6 +17,8 @@
 package core
 
 import (
+	"context"
+	"math/big"
 	"runtime"
 	"testing"
 	"time"
@@ -35,16 +37,18 @@ func TestHeaderVerification(t *testing.T) {
 		testdb    = ethdb.NewMemDatabase()
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _ = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
 	)
+	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	defer chain.Stop()
+
+	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
 		headers[i] = block.Header()
 	}
 	// Run the header checker for blocks one-by-one, checking for both valid and invalid nonces
-	chain, _ := NewBlockChain(testdb, nil, params.TestChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	defer chain.Stop()
-
 	for i := 0; i < len(blocks); i++ {
 		for j, valid := range []bool{true, false} {
 			var results <-chan error
@@ -87,7 +91,7 @@ func testHeaderConcurrentVerification(t *testing.T, threads int) {
 		testdb    = ethdb.NewMemDatabase()
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _ = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+		blocks, _ = GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
 	)
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
@@ -159,7 +163,7 @@ func testHeaderConcurrentAbortion(t *testing.T, threads int) {
 		testdb    = ethdb.NewMemDatabase()
 		gspec     = &Genesis{Config: params.TestChainConfig}
 		genesis   = gspec.MustCommit(testdb)
-		blocks, _ = GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil)
+		blocks, _ = GenerateChain(context.Background(), params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 1024, nil)
 	)
 	headers := make([]*types.Header, len(blocks))
 	seals := make([]bool, len(blocks))
