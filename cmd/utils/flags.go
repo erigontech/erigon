@@ -343,6 +343,15 @@ var (
 		Usage: "Number of trie node generations to keep in memory",
 		Value: int(state.MaxTrieCacheGen),
 	}
+	NoHistory = cli.BoolTFlag{
+		Name:  "no-history",
+		Usage: "write the whole state history",
+	}
+	ArchiveSyncInterval = cli.IntFlag{
+		Name:  "archive-sync-interval",
+		Usage: "when to switch from full to archive sync",
+		Value: 1024,
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -1293,6 +1302,12 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
 	}
 	cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+
+	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
+	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
+
+	log.Warn("=== 1", "v", cfg.NoHistory)
+	log.Warn("=== 2", "v", cfg.ArchiveSyncInterval)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {
 		cfg.TrieCleanCache = ctx.GlobalInt(CacheFlag.Name) * ctx.GlobalInt(CacheTrieFlag.Name) / 100

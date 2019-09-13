@@ -163,7 +163,7 @@ type noHistFunc func(currentBlock *big.Int) bool
 
 func getIsNoHistory(defaultValue bool, f noHistFunc) noHistFunc {
 	return func(currentBlock *big.Int) bool {
-		if defaultValue == true {
+		if !defaultValue {
 			return true
 		}
 

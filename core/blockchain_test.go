@@ -1305,7 +1305,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		})
 		forks[i] = fork[0]
 		// Move db forward by 1 block
-		GenerateChain(ctx, params.TestChainConfig, parent, engine, db, 1, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+		GenerateChain(ctx, params.TestChainConfig, parent, engine, db.MemCopy(), 1, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
@@ -1345,7 +1345,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	}
 
 	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	shared, _ := GenerateChain(ctx, config, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+	shared, _ := GenerateChain(ctx, config, genesis, engine, db.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 
 	ctx = chain.WithContext(context.Background(), big.NewInt(shared[len(shared)-1].Number().Int64()+1))
 	original, _ := GenerateChain(ctx, config, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
@@ -1421,7 +1421,7 @@ func benchmarkLargeNumberOfValueToNonexisting(b *testing.B, numTxs, numBlocks in
 	}
 	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	shared, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db, numBlocks, blockGenerator)
+	shared, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db.MemCopy(), numBlocks, blockGenerator)
 	b.StopTimer()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

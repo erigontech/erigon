@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"math/big"
 	"runtime"
 	"time"
@@ -199,6 +201,7 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 	for i := 0; i < 7; i++ {
 		ancestor := chain.GetBlock(parent, number)
 		if ancestor == nil {
+			log.Warn("*** 1", "block", parent.String())
 			break
 		}
 		ancestors[ancestor.Hash()] = ancestor.Header()
@@ -224,6 +227,9 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 			return errUncleIsAncestor
 		}
 		if ancestors[uncle.ParentHash] == nil || uncle.ParentHash == block.ParentHash() {
+			log.Error("errDanglingUncle", "v1", spew.Sdump(ancestors))
+			log.Error("errDanglingUncle", "block", block.NumberU64(), "uncleNumber", uncle.Number, "uncle", uncle.ParentHash.String())
+			log.Error("errDanglingUncle", "v1", ancestors[uncle.ParentHash] == nil, "v2", uncle.ParentHash == block.ParentHash())
 			return errDanglingUncle
 		}
 		if err := ethash.verifyHeader(chain, uncle, ancestors[uncle.ParentHash], true, true); err != nil {

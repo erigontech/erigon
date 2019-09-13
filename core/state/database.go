@@ -1015,6 +1015,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if noHistory {
 		return nil
 	}
+	log.Warn("storing state", "method", "UpdateAccountData")
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
 		return nil
@@ -1052,6 +1053,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if noHistory {
 		return nil
 	}
+	log.Warn("storing state", "method", "DeleteAccount")
 	var originalData []byte
 	if !original.Initialised {
 		// Account has been created and deleted in the same block
@@ -1135,6 +1137,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if noHistory {
 		return nil
 	}
+	log.Warn("storing state", "method", "WriteAccountStorage")
 	o := bytes.TrimLeft(original[:], "\x00")
 	oo := make([]byte, len(o))
 	copy(oo, o)

@@ -91,8 +91,8 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	//}
 	// Check whether the block is linkable
 	noHistory, ctx := params.GetNoHistoryByBlock(ctx, block.Number())
-	//fmt.Println("xxx 2", block.Number().String(), noHistory)
 	if !noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
+		//fixme what kind of sync it is?
 		return consensus.ErrUnknownAncestor
 	}
 	// Header validity is known at this point, check the uncles and transactions
@@ -109,6 +109,7 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	if noHistory {
 		return nil
 	}
+	log.Warn("storing state", "block", block.NumberU64(), "method", "ValidateBody1")
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
 		if !v.bc.HasBlock(block.ParentHash(), block.NumberU64()-1) {
 			return consensus.ErrUnknownAncestor
