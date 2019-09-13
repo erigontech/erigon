@@ -21,11 +21,10 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/bucket"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -57,11 +56,18 @@ func (dbs *DbState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
 }
 
+// TODO: support incarnations
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) {
+	addrHash, err := common.HashData(addr[:])
+	if err != nil {
+		log.Error("Error on hashing", "err", err)
+		return
+	}
+
 	st := llrb.New()
-	var s [20 + 32]byte
-	copy(s[:], addr[:])
-	copy(s[20:], start)
+	var s [common.HashLength + IncarnationLength + common.HashLength]byte
+	copy(s[:], addrHash[:])
+	copy(s[common.HashLength+IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
 	emptyHash := common.Hash{}
@@ -79,15 +85,15 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	_ = dbs.db.WalkAsOf(bucket.Storage, bucket.StorageHistory, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
-		if !bytes.HasPrefix(ks, addr[:]) {
+	err = dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[20:]
+		seckey := ks[common.HashLength+IncarnationLength:]
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
 		copy(si.seckey[:], seckey)
@@ -102,13 +108,16 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		}
 		return st.Len() < maxResults+overrideCounter+numDeletes, nil
 	})
+	if err != nil {
+		log.Error("ForEachStorage walk error", "err", err)
+	}
 	results := 0
 	st.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*storageItem)
 		if item.value != emptyHash {
 			// Skip if value == 0
 			if item.key == emptyHash {
-				key, err := dbs.db.Get(trie.SecureKeyPrefix, item.seckey[:])
+				key, err := dbs.db.Get(dbutils.PreimagePrefix, item.seckey[:])
 				if err == nil {
 					copy(item.key[:], key)
 				} else {
@@ -123,31 +132,33 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 }
 
 func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := dbs.db.GetAsOf(bucket.Accounts, bucket.AccountsHistory, buf[:], dbs.blockNr+1)
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+	enc, err := dbs.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
 }
 
-func (dbs *DbState) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
-	var buf common.Hash
-	h.sha.Read(buf[:])
-	enc, err := dbs.db.GetAsOf(bucket.Storage, bucket.StorageHistory, append(address[:], buf[:]...), dbs.blockNr+1)
+func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
+	keyHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	enc, err := dbs.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash), dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -158,7 +169,7 @@ func (dbs *DbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	return dbs.db.Get(bucket.Code, codeHash[:])
+	return dbs.db.Get(dbutils.CodeBucket, codeHash[:])
 }
 
 func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
@@ -181,18 +192,29 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, key, original, value *common.Hash) error {
+func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()
 		dbs.storage[address] = t
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(key[:])
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	_, err := h.Sha.Write(key[:])
+	if err != nil {
+		return err
+	}
 	i := &storageItem{key: *key, value: *value}
-	h.sha.Read(i.seckey[:])
+	_, err = h.Sha.Read(i.seckey[:])
+	if err != nil {
+		return err
+	}
+
 	t.ReplaceOrInsert(i)
+	return nil
+}
+func (dbs *DbState) RemoveStorage(address common.Address, incarnation uint64) error {
+	dbs.storage[address] = nil
 	return nil
 }

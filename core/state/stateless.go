@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
 	"sort"
 
@@ -52,8 +53,8 @@ func NewStateless(stateRoot common.Hash,
 	blockNr uint64,
 	trace bool,
 ) (*Stateless, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	tp := trie.NewTriePruning(blockNr)
 
 	if trace {
@@ -79,31 +80,35 @@ func NewStateless(stateRoot common.Hash,
 		if trace {
 			fmt.Printf("TRIE %x ==============================================\n", contract)
 		}
-		contractCopy := contract
+		//contractCopy := contract
 		touchFunc := func(hex []byte, del bool) {
-			tp.TouchContract(contractCopy, hex, del)
+			//tp.TouchStorage(contractCopy, hex, del)
 		}
 		st, mIdx, hIdx, sIdx, vIdx := trie.NewFromProofs(touchFunc, blockNr, true,
 			blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
 		st.SetTouchFunc(touchFunc)
-		h.sha.Reset()
-		h.sha.Write(contract[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(contract[:]); err != nil {
+			return nil, err
+		}
 		var addrHash common.Hash
-		h.sha.Read(addrHash[:])
+		if _, err := h.Sha.Read(addrHash[:]); err != nil {
+			return nil, err
+		}
 		storageTries[contract] = st
 		enc, ok := t.Get(addrHash[:])
 		if !ok {
 			return nil, fmt.Errorf("[THIN] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		var acc accounts.Account
-		if err := acc.Decode(enc); err != nil {
+		if err := acc.DecodeForHashing(enc); err != nil {
 			return nil, err
 		}
 		if acc.Root != st.Hash() {
 			filename := fmt.Sprintf("root_%d.txt", blockNr-1)
 			f, err := os.Create(filename)
 			if err == nil {
-				defer f.Close()
+				defer f.Close() //nolint
 				st.Print(f)
 			}
 			return nil, fmt.Errorf("[THIN] Expected storage root for %x: %x, constructed root: %x", contract, acc.Root, st.Hash())
@@ -117,9 +122,13 @@ func NewStateless(stateRoot common.Hash,
 	timeToCodeHash := make(map[uint64]map[common.Hash]struct{})
 	var codeHash common.Hash
 	for _, code := range blockProof.Codes {
-		h.sha.Reset()
-		h.sha.Write(code)
-		h.sha.Read(codeHash[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(code); err != nil {
+			return nil, err
+		}
+		if _, err := h.Sha.Read(codeHash[:]); err != nil {
+			return nil, err
+		}
 		if codeTime, ok := codeMap[codeHash]; ok {
 			m := timeToCodeHash[codeTime.t]
 			delete(m, codeHash)
@@ -154,8 +163,8 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 	if blockNr != s.tp.BlockNr() {
 		panic(fmt.Sprintf("blockNr %d != s.tp.BlockNr() %d", blockNr, s.tp.BlockNr()))
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	if trace {
 		fmt.Printf("THIN\n")
 	}
@@ -174,10 +183,14 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 		if trace {
 			fmt.Printf("THIN TRIE %x ==============================================\n", contract)
 		}
-		h.sha.Reset()
-		h.sha.Write(contract[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(contract[:]); err != nil {
+			log.Error("error on sha", "err", err)
+		}
 		var addrHash common.Hash
-		h.sha.Read(addrHash[:])
+		if _, err := h.Sha.Read(addrHash[:]); err != nil {
+			log.Error("error on sha", "err", err)
+		}
 		var st *trie.Trie
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
@@ -199,9 +212,10 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 			}
 			aContracts = append(aContracts, contract)
 		} else {
-			contractCopy := contract
+			//contractCopy := contract
 			timeFunc := func(hex []byte) uint64 {
-				return s.tp.TimestampContract(contractCopy, hex)
+				return 0
+				//return s.tp.TimestampContract(contractCopy, hex)
 			}
 			mIdx, hIdx, sIdx, vIdx, acMasks, acShortKeys, acValues, acHashes = st.AmmendProofs(timeFunc, cuttime,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:],
@@ -217,9 +231,13 @@ func (s *Stateless) ThinProof(blockProof trie.BlockProof, blockNr uint64, cuttim
 	aCodes := [][]byte{}
 	var codeHash common.Hash
 	for _, code := range blockProof.Codes {
-		h.sha.Reset()
-		h.sha.Write(code)
-		h.sha.Read(codeHash[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(code); err != nil {
+			log.Error("error on sha", "err", err)
+		}
+		if _, err := h.Sha.Read(codeHash[:]); err != nil {
+			log.Error("error on sha", "err", err)
+		}
 		if codeTime, ok := s.codeMap[codeHash]; ok {
 			if trace {
 				fmt.Printf("%d Code hash: %x, codeTime.t: %d, cuttime: %d\n", blockNr, codeHash, codeTime.t, cuttime)
@@ -262,8 +280,8 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 	if blockNr != s.tp.BlockNr() {
 		panic(fmt.Sprintf("blockNr %d != s.tp.BlockNr() %d", blockNr, s.tp.BlockNr()))
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	if trace {
 		fmt.Printf("APPLY\n")
 	}
@@ -284,17 +302,21 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 		if trace {
 			fmt.Printf("APPLY TRIE %x ==============================================\n", contract)
 		}
-		h.sha.Reset()
-		h.sha.Write(contract[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(contract[:]); err != nil {
+			return err
+		}
 		var addrHash common.Hash
-		h.sha.Read(addrHash[:])
+		if _, err := h.Sha.Read(addrHash[:]); err != nil {
+			return err
+		}
 		var st *trie.Trie
 		var ok bool
 		var mIdx, hIdx, sIdx, vIdx int
 		if st, ok = s.storageTries[contract]; !ok {
-			contractCopy := contract
+			//contractCopy := contract
 			touchFunc := func(hex []byte, del bool) {
-				s.tp.TouchContract(contractCopy, hex, del)
+				//s.tp.TouchContract(contractCopy, hex, del)
 			}
 			st, mIdx, hIdx, sIdx, vIdx = trie.NewFromProofs(touchFunc, blockNr, true,
 				blockProof.CMasks[maskIdx:], blockProof.CShortKeys[shortIdx:], blockProof.CValues[valueIdx:], blockProof.CHashes[hashIdx:], trace)
@@ -308,7 +330,7 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 			return fmt.Errorf("[APPLY] account %x (hash %x) is not present in the proof", contract, addrHash)
 		}
 		var acc accounts.Account
-		if err := acc.Decode(enc); err != nil {
+		if err := acc.DecodeForHashing(enc); err != nil {
 			return err
 		}
 		if acc.Root != st.Hash() {
@@ -327,9 +349,13 @@ func (s *Stateless) ApplyProof(stateRoot common.Hash, blockProof trie.BlockProof
 	}
 	var codeHash common.Hash
 	for _, code := range blockProof.Codes {
-		h.sha.Reset()
-		h.sha.Write(code)
-		h.sha.Read(codeHash[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(code); err != nil {
+			log.Error("error on sha", "err", err)
+		}
+		if _, err := h.Sha.Read(codeHash[:]); err != nil {
+			log.Error("error on sha", "err", err)
+		}
 		s.touchCodeHash(codeHash, code, blockNr)
 	}
 	return nil
@@ -341,12 +367,16 @@ func (s *Stateless) SetBlockNr(blockNr uint64) {
 }
 
 func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, error) {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	if _, err := h.Sha.Write(address[:]); err != nil {
+		return nil, err
+	}
 	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	if _, err := h.Sha.Read(addrHash[:]); err != nil {
+		return nil, err
+	}
 	enc, ok := s.t.Get(addrHash[:])
 	if !ok {
 		return nil, fmt.Errorf("Account %x (hash %x) is not present in the proof", address, addrHash)
@@ -355,7 +385,7 @@ func (s *Stateless) ReadAccountData(address common.Address) (*accounts.Account, 
 		return nil, nil
 	}
 	var acc accounts.Account
-	if err := acc.Decode(enc); err != nil {
+	if err := acc.DecodeForHashing(enc); err != nil {
 		return nil, err
 	}
 	return &acc, nil
@@ -366,17 +396,17 @@ func (s *Stateless) getStorageTrie(address common.Address, create bool) (*trie.T
 	if !ok && create {
 		t = trie.New(common.Hash{})
 		t.SetTouchFunc(func(hex []byte, del bool) {
-			s.tp.TouchContract(address, hex, del)
+			//s.tp.TouchContract(address, hex, del)
 		})
 		s.storageTries[address] = t
 	}
 	return t, nil
 }
 
-func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash) ([]byte, error) {
+func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
 	//fmt.Printf("ReadAccountStorage\n")
-	h := newHasher()
-	defer returnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	t, err := s.getStorageTrie(address, false)
 	if err != nil {
 		return nil, err
@@ -384,10 +414,14 @@ func (s *Stateless) ReadAccountStorage(address common.Address, key *common.Hash)
 	if t == nil {
 		return nil, nil
 	}
-	h.sha.Reset()
-	h.sha.Write((*key)[:])
+	h.Sha.Reset()
+	if _, err := h.Sha.Write((*key)[:]); err != nil {
+		return nil, err
+	}
 	var secKey common.Hash
-	h.sha.Read(secKey[:])
+	if _, err := h.Sha.Read(secKey[:]); err != nil {
+		return nil, err
+	}
 	enc, ok := t.Get(secKey[:])
 	if ok {
 		// Unwrap one RLP level
@@ -431,12 +465,16 @@ func (s *Stateless) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
 }
 
 func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	if _, err := h.Sha.Write(address[:]); err != nil {
+		return err
+	}
 	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	if _, err := h.Sha.Read(addrHash[:]); err != nil {
+		return err
+	}
 	s.accountUpdates[addrHash] = account
 	if s.trace {
 		fmt.Printf("UpdateAccount %x, hash %x\n", address, addrHash)
@@ -445,14 +483,18 @@ func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address,
 }
 
 func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
 	// Process updates first, deletes next
 	for address, m := range s.storageUpdates {
-		h.sha.Reset()
-		h.sha.Write(address[:])
+		h.Sha.Reset()
+		if _, err := h.Sha.Write(address[:]); err != nil {
+			return err
+		}
 		var addrHash common.Hash
-		h.sha.Read(addrHash[:])
+		if _, err := h.Sha.Read(addrHash[:]); err != nil {
+			return err
+		}
 		if _, ok := s.deleted[addrHash]; ok {
 			if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 				account.Root = trie.EmptyRoot
@@ -463,7 +505,6 @@ func (s *Stateless) CheckRoot(expected common.Hash, check bool) error {
 			}
 			if storageTrie != nil {
 				delete(s.storageTries, address)
-				storageTrie.PrepareToRemove()
 			}
 			continue
 		}
@@ -533,12 +574,10 @@ func (s *Stateless) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 }
 
 func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write(address[:])
-	var addrHash common.Hash
-	h.sha.Read(addrHash[:])
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
 	s.accountUpdates[addrHash] = nil
 	s.deleted[addrHash] = struct{}{}
 	if s.trace {
@@ -547,31 +586,25 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Address, key, original, value *common.Hash) error {
+func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	m, ok := s.storageUpdates[address]
 	if !ok {
 		m = make(map[common.Hash][]byte)
 		s.storageUpdates[address] = m
 	}
-	h := newHasher()
-	defer returnHasherToPool(h)
-	h.sha.Reset()
-	h.sha.Write((*key)[:])
+	h := common.NewHasher()
+	defer common.ReturnHasherToPool(h)
+	h.Sha.Reset()
+	if _, err := h.Sha.Write((*key)[:]); err != nil {
+		return err
+	}
 	var secKey common.Hash
-	h.sha.Read(secKey[:])
+	if _, err := h.Sha.Read(secKey[:]); err != nil {
+		return err
+	}
 	v := bytes.TrimLeft(value[:], "\x00")
 	if len(v) > 0 {
-		// Write into 1 extra RLP level
-		var vv []byte
-		if len(v) > 1 || v[0] >= 128 {
-			vv = make([]byte, len(v)+1)
-			vv[0] = byte(128 + len(v))
-			copy(vv[1:], v)
-		} else {
-			vv = make([]byte, 1)
-			vv[0] = v[0]
-		}
-		m[secKey] = vv
+		m[secKey] = AddExtraRLPLevel(v)
 	} else {
 		m[secKey] = nil
 	}
@@ -590,12 +623,12 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		}
 		fmt.Printf("[Before pruning to %d] Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
 	}
-	emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
-		return s.getStorageTrie(contract, false)
-	})
-	if err != nil {
-		fmt.Printf("Error while pruning: %v\n", err)
-	}
+	//emptyAddresses, err := s.tp.PruneToTimestamp(s.t, oldest, func(contract common.Address) (*trie.Trie, error) {
+	//	return s.getStorageTrie(contract, false)
+	//})
+	//if err != nil {
+	//	fmt.Printf("Error while pruning: %v\n", err)
+	//}
 	if trace {
 		mainPrunable := s.t.CountPrunableNodes()
 		prunableNodes := mainPrunable
@@ -604,9 +637,9 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		}
 		fmt.Printf("[After pruning to %d Actual prunable nodes: %d (main %d), accounted: %d\n", oldest, prunableNodes, mainPrunable, s.tp.NodeCount())
 	}
-	for _, address := range emptyAddresses {
-		delete(s.storageTries, address)
-	}
+	//for _, address := range emptyAddresses {
+	//	delete(s.storageTries, address)
+	//}
 	if m, ok := s.timeToCodeHash[oldest-1]; ok {
 		for codeHash := range m {
 			if trace {
@@ -616,4 +649,9 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 		}
 	}
 	delete(s.timeToCodeHash, oldest-1)
+}
+
+func (s *Stateless) RemoveStorage(address common.Address, incarnation uint64) error {
+	//todo
+	return nil
 }

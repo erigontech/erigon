@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -17,7 +18,6 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -47,7 +47,7 @@ func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
 	err := db.View(func(tx *bolt.Tx) error {
 		err := tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if len(name) == 20 || bytes.Equal(name, []byte("AT")) {
+			if len(name) == 20 || bytes.Equal(name, dbutils.AccountsBucket) {
 				n := make([]byte, len(name))
 				copy(n, name)
 				bucketList = append(bucketList, n)
@@ -320,7 +320,7 @@ func accountSavings(db *bolt.DB) (int, int) {
 	emptyRoots := 0
 	emptyCodes := 0
 	db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("AT"))
+		b := tx.Bucket(dbutils.AccountsBucket)
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if bytes.Contains(v, trie.EmptyRoot.Bytes()) {
@@ -769,8 +769,8 @@ func testStartup() {
 func testResolve() {
 	startTime := time.Now()
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -781,28 +781,35 @@ func testResolve() {
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-	//contract := common.FromHex("0x87b127ee022abcf9881b9bad6bb6aac25229dff0")
-	r := trie.NewResolver(0, true, 806548)
-	key := common.FromHex("0x050a08070e090006010a05090c02050d050e0b0a06010a00060d060b03020f0a0203040c00090d0f050d020b080f020307010803050a0e0b00010b0a090b030a10")
-	resolveHash := common.FromHex("0xda5f3503cf2b72df779991a3862551da2a5aac66b59cd463eb03da0a47864350")
-	t := trie.New(common.BytesToHash(resolveHash))
-	req := t.NewResolveRequest(nil, key, 0, resolveHash)
+	contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
+	r := trie.NewResolver(2, false, 225281)
+	r.SetHistorical(true)
+	key := []byte{}
+	resolveHash := common.FromHex("a3a02e29c6dc8fbb769555a80e3f2b0789a0376296be013a956676d58deaf791")
+	t := trie.New(common.Hash{})
+	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 806548)
+	//err = r.ResolveWithDb(ethDb, 225281)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
-	fmt.Printf("%s\n", req)
-	filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
-	f, err := os.Create(filename)
-	if err == nil {
-		t.Print(f)
-		f.Close()
-	} else {
-		check(err)
-	}
-	//enc, _ := ethDb.GetAsOf(bucket.Accounts, bucket.AccountsHistory, crypto.Keccak256(contract), 2701646)
+	t.Update(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52757c17435002e70fd7d982a101b0549945244f496bf4bb5503d5de3aa770842bce"),
+		common.FromHex("0xa06fe9c682fbb890c09eec59047f97d165875d4f3c86bc65c2870d577b8245f111"), 0)
+	_, h := t.DeepHash(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd5275"))
+	fmt.Printf("deep hash: %x\n", h)
+	//t.Print(os.Stdout)
+	/*
+		filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
+		f, err := os.Create(filename)
+		if err == nil {
+			t.Print(f)
+			f.Close()
+		} else {
+			check(err)
+		}
+	*/
+	//enc, _ := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
 	//fmt.Printf("Account: %x\n", enc)
 }
 
@@ -982,12 +989,12 @@ func invTree(wrong, right, diff string, name string) {
 }
 
 func preimage() {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(trie.SecureKeyPrefix, common.FromHex("0x3b0f7ca0936ea2f0ebaea01a52a93ee10f854a104c04668ae49eac21ca9e8b5c"))
+	p, err := ethDb.Get(dbutils.PreimagePrefix, common.FromHex("0x578e9478d8a7287fd7720ca220095ee48ec0fd16a4279772a2d323927b00e30f"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1031,14 +1038,14 @@ func loadAccount() {
 	blockSuffix := encodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	accountData, err := ethDb.GetAsOf(bucket.Accounts, bucket.AccountsHistory, secKey, blockNr+1)
+	accountData, err := ethDb.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)
 	check(err)
 	fmt.Printf("Account data: %x\n", accountData)
 	startkey := make([]byte, len(accountBytes)+32)
 	copy(startkey, accountBytes)
 	t := trie.New(common.Hash{})
 	count := 0
-	if err := ethDb.WalkAsOf(bucket.Storage, bucket.StorageHistory, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
+	if err := ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
 		t.Update(key, v, blockNr)
@@ -1049,7 +1056,7 @@ func loadAccount() {
 	}
 	fmt.Printf("After %d updates, reconstructed storage root: %x\n", count, t.Hash())
 	var keys [][]byte
-	if err := ethDb.Walk(bucket.StorageHistory, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
+	if err := ethDb.Walk(dbutils.StorageHistoryBucket, accountBytes, uint(len(accountBytes)*8), func(k, v []byte) (bool, error) {
 		if !bytes.HasSuffix(k, blockSuffix) {
 			return true, nil
 		}
@@ -1061,11 +1068,11 @@ func loadAccount() {
 	}
 	fmt.Printf("%d keys updated\n", len(keys))
 	for _, k := range keys {
-		v, err := ethDb.GetAsOf(bucket.Storage, bucket.StorageHistory, k, blockNr+1)
+		v, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr+1)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
-		vOrig, err := ethDb.GetAsOf(bucket.Storage, bucket.StorageHistory, k, blockNr)
+		vOrig, err := ethDb.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, k, blockNr)
 		if err != nil {
 			fmt.Printf("for key %x err %v\n", k, err)
 		}
@@ -1107,132 +1114,12 @@ func printBranches(block uint64) {
 	}
 }
 
-// Some weird constants to avoid constant memory allocs for them.
-var (
-	big8  = big.NewInt(8)
-	big32 = big.NewInt(32)
-)
-
-/*
-// accumulateRewards credits the coinbase of the given block with the mining
-// reward. The total reward consists of the static block reward and rewards for
-// included uncles. The coinbase of each uncle block is also rewarded.
-func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
-	// select the correct block reward based on chain progression
-	blockReward := ethash.FrontierBlockReward
-	if config.IsByzantium(header.Number) {
-		blockReward = ethash.ByzantiumBlockReward
-	}
-
-	// accumulate the rewards for the miner and any included uncles
-	reward := new(big.Int).Set(blockReward)
-	r := new(big.Int)
-
-	for _, uncle := range uncles {
-		r.Add(uncle.Number, big8)
-		r.Sub(r, header.Number)
-		r.Mul(r, blockReward)
-		r.Div(r, big8)
-		state.AddBalance(uncle.Coinbase, r)
-		r.Div(blockReward, big32)
-		reward.Add(reward, r)
-	}
-
-	state.AddBalance(header.Coinbase, reward)
-}
-
-func repair() {
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-
-	//historyDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	historyDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//historyDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//historyDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//historyDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata")
-	check(err)
-	defer historyDb.Close()
-	//if *block == 1 {
-	//	os.Remove("statedb")
-	//	os.Remove("statedb.hash")
-	//}
-	currentDb := ethdb.NewMemDatabase()
-	//check(err)
-	defer currentDb.Close()
-	if *block == 1 {
-		_, _, _, err = core.SetupGenesisBlock(currentDb, core.DefaultGenesisBlock())
-		check(err)
-	}
-	chainConfig := params.MainnetChainConfig
-	vmConfig := vm.Config{}
-	bc, err := core.NewBlockChain(historyDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
-	check(err)
-	blockNum := uint64(*block)
-	interrupt := false
-	noopWriter := state.NewNoopWriter()
-	currentM := currentDb.NewBatch()
-	dbstate := state.NewRepairDbState(currentM, historyDb, blockNum-1)
-	for !interrupt {
-		block := bc.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
-		}
-		statedb := state.New(dbstate)
-		var (
-			usedGas = new(uint64)
-			gp      = new(core.GasPool).AddGas(block.GasLimit())
-		)
-		if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-			misc.ApplyDAOHardFork(statedb)
-		}
-		header := block.Header()
-		for _, tx := range block.Transactions() {
-			if _, _, err := core.ApplyTransaction(chainConfig, bc, nil, gp, statedb, noopWriter, header, tx, usedGas, vmConfig); err != nil {
-				panic(fmt.Errorf("at block %d, tx %x: %v", block.NumberU64(), tx.Hash(), err))
-			}
-		}
-		// apply mining rewards to the geth stateDB
-		accumulateRewards(chainConfig, statedb, header, block.Uncles())
-		dbstate.SetBlockNr(block.NumberU64())
-		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
-		if err = statedb.CommitBlock(ctx, dbstate); err != nil {
-			panic(err)
-		}
-		dbstate.CheckKeys()
-		if currentM.BatchSize() >= 200000 {
-			_, err := currentM.Commit()
-			check(err)
-			dbstate.PruneTries()
-		}
-		blockNum++
-		if blockNum%100000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
-		}
-		// Check for interrupts
-		select {
-		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
-		default:
-		}
-	}
-	_, err = currentM.Commit()
-	check(err)
-	fmt.Printf("Next time specify -block %d\n", blockNum)
-}
-*/
-
 func readAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
-	v, _ := ethDb.Get(bucket.Accounts, secKey)
+	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
 	fmt.Printf("%x:%x\n", secKey, v)
 }
 
@@ -1244,16 +1131,16 @@ func repairCurrent() {
 	check(err)
 	defer currentDb.Close()
 	check(historyDb.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(bucket.Storage); err != nil {
+		if err := tx.DeleteBucket(dbutils.StorageBucket); err != nil {
 			return err
 		}
-		newB, err := tx.CreateBucket(bucket.Storage, true)
+		newB, err := tx.CreateBucket(dbutils.StorageBucket, true)
 		if err != nil {
 			return err
 		}
 		count := 0
 		if err := currentDb.View(func(ctx *bolt.Tx) error {
-			b := ctx.Bucket(bucket.Storage)
+			b := ctx.Bucket(dbutils.StorageBucket)
 			c := b.Cursor()
 			for k, v := c.First(); k != nil; k, v = c.Next() {
 				newB.Put(k, v)
@@ -1268,6 +1155,24 @@ func repairCurrent() {
 		}
 		return nil
 	}))
+}
+
+func dumpStorage() {
+	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	err = db.View(func(tx *bolt.Tx) error {
+		sb := tx.Bucket(dbutils.StorageHistoryBucket)
+		if sb == nil {
+			fmt.Printf("Storage bucket not found\n")
+			return nil
+		}
+		return sb.ForEach(func(k, v []byte) error {
+			fmt.Printf("%x %x\n", k, v)
+			return nil
+		})
+	})
+	check(err)
+	db.Close()
 }
 
 func testMemBolt() {
@@ -1314,7 +1219,9 @@ func main() {
 	}
 	//hashFile()
 	//buildHashFromFile()
-	//testResolve()
+	if *action == "testResolve" {
+		testResolve()
+	}
 	//rlpIndices()
 	//printFullNodeRLPs()
 	//testStartup()
@@ -1331,7 +1238,7 @@ func main() {
 	//upgradeBlocks()
 	//compareTries()
 	if *action == "invTree" {
-		invTree("tries/root", "tries/right", "tries/diff", *name)
+		invTree("root", "right", "diff", *name)
 	}
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
@@ -1341,10 +1248,13 @@ func main() {
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)
-	//fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x040c0668aebe0bc41be1f70ebbed671dfdcd118be767a1ad6f78861c5e81abfc")))
+	fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x0000000000000000000000000000000000000000000000000000000000036fff")))
 	//repair()
 	//readAccount()
 	//repairCurrent()
 	//testMemBolt()
 	//fmt.Printf("\u00b3\n")
+	if *action == "dumpStorage" {
+		dumpStorage()
+	}
 }

@@ -86,9 +86,10 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked suicided it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode bool // true if the code was updated
-	suicided  bool
-	deleted   bool
+	dirtyCode         bool // true if the code was updated
+	suicided          bool
+	deleted           bool
+	removeStorageTrie bool
 }
 
 // empty returns whether the account is considered empty.
@@ -158,6 +159,9 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
+	if so.removeStorageTrie {
+		return common.Hash{}
+	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
@@ -166,7 +170,7 @@ func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 		}
 	}
 	// Load from DB in case it is missing.
-	enc, err := so.db.stateReader.ReadAccountStorage(so.address, &key)
+	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), &key)
 	if err != nil {
 		so.setError(err)
 		return common.Hash{}
@@ -202,13 +206,21 @@ func (so *stateObject) setState(key, value common.Hash) {
 
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) error {
+	if so.removeStorageTrie {
+		so.originStorage = make(Storage)
+		so.data.Root = trie.EmptyRoot
+		if err := stateWriter.RemoveStorage(so.address, so.data.GetIncarnation()); err != nil {
+			return err
+		}
+	}
 	for key, value := range so.dirtyStorage {
 		key := key
 		value := value
 
 		original := so.blockOriginStorage[key]
 		so.originStorage[key] = value
-		if err := stateWriter.WriteAccountStorage(ctx, so.address, &key, &original, &value); err != nil {
+
+		if err := stateWriter.WriteAccountStorage(ctx, so.address, so.data.GetIncarnation(), &key, &original, &value); err != nil {
 			return err
 		}
 	}
@@ -250,6 +262,11 @@ func (so *stateObject) SetBalance(amount *big.Int) {
 func (so *stateObject) setBalance(amount *big.Int) {
 	so.data.Balance.Set(amount)
 	so.data.Initialised = true
+}
+
+func (so *stateObject) setIncarnation(incarnation uint64) {
+	so.data.SetIncarnation(incarnation)
+	so.removeStorageTrie = true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures

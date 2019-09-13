@@ -19,13 +19,12 @@ package vm
 import (
 	"errors"
 	"fmt"
-	"math/big"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"golang.org/x/crypto/sha3"
+	"math/big"
 )
 
 var (
@@ -636,7 +635,6 @@ func opSload(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory
 func opSstore(pc *uint64, interpreter *EVMInterpreter, contract *Contract, memory *Memory, stack *Stack) ([]byte, error) {
 	loc := common.BigToHash(stack.pop())
 	val := stack.pop()
-
 	locFromState := interpreter.evm.IntraBlockState.GetState(contract.Address(), loc)
 
 	interpreter.evm.IntraBlockState.SetState(contract.Address(), loc, common.BigToHash(val))

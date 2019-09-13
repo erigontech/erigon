@@ -55,10 +55,8 @@ func TestOnePerTimestamp(t *testing.T) {
 	}
 	prunableNodes := tr.CountPrunableNodes()
 	fmt.Printf("Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tp.NodeCount())
-	if _, _, err := tp.PruneTo(tr, 4, func(contract common.Address) (*Trie, error) {
-		return nil, nil
-	}); err != nil {
-		t.Errorf("Error while pruning: %v", err)
+	if b := tp.PruneTo(tr, 4); !b {
+		t.Fatal("Not pruned")
 	}
 	prunableNodes = tr.CountPrunableNodes()
 	fmt.Printf("Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tp.NodeCount())

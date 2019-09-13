@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/bucket"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -34,14 +34,14 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucketKey,
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string]struct{})
 	suffixDst := encodeTimestamp(timestampDst + 1)
-	if err := db.Walk(SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucketKey := decodeTimestamp(k)
+	if err := db.Walk(dbutils.SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, bucket := decodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
 		keycount := int(binary.BigEndian.Uint32(v))
 		if keycount > 0 {
-			bucketStr := string(common.CopyBytes(bucketKey))
+			bucketStr := string(common.CopyBytes(bucket))
 			var t map[string]struct{}
 			var ok bool
 			if t, ok = m[bucketStr]; !ok {
@@ -100,9 +100,9 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucketKey,
 func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
 	t := llrb.New()
 	startCode := encodeTimestamp(starttimestamp)
-	if err := db.Walk(SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucketKey := decodeTimestamp(k)
-		if !bytes.Equal(bucketKey, bucket.AccountsHistory) {
+	if err := db.Walk(dbutils.SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
+		timestamp, bucket := decodeTimestamp(k)
+		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			return true, nil
 		}
 		if timestamp > endtimestamp {

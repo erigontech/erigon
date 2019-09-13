@@ -20,13 +20,12 @@ package ethdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"sync"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/bolt"
@@ -35,7 +34,6 @@ import (
 
 var OpenFileLimit = 64
 var ErrKeyNotFound = errors.New("boltdb: key not found in range")
-var SuffixBucket = []byte("SUFFIX") //howManyAddressesWereChanged-4+(addressLength-1+addressHash-32)*
 
 const HeapSize = 512 * 1024 * 1024
 
@@ -107,23 +105,13 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		if err = hb.Put(composite, value); err != nil {
 			return err
 		}
-		sb, err := tx.CreateBucketIfNotExists(SuffixBucket, true)
+		sb, err := tx.CreateBucketIfNotExists(dbutils.SuffixBucket, true)
 		if err != nil {
 			return err
 		}
 		dat, _ := sb.Get(suffixkey)
-		var l int
-		if dat == nil {
-			l = 4
-		} else {
-			l = len(dat)
-		}
-		dv := make([]byte, l+1+len(key))
-		copy(dv, dat)
-		binary.BigEndian.PutUint32(dv, 1+binary.BigEndian.Uint32(dv)) // Increment the counter of keys
-		dv[l] = byte(len(key))
-		copy(dv[l+1:], key) //howManyAddressesWereChanged-4+(addressLength-1+addressHash-32)*
-		return sb.Put(suffixkey, dv)
+		dat = dbutils.ToSuffix(dat).Add(key)
+		return sb.Put(suffixkey, dat)
 	})
 	return err
 }
@@ -245,7 +233,6 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			}
 		}
 
-		//todo: if key doesn't present in bucket and hBucket we should try restore the state from the blockchain
 		return ErrKeyNotFound
 	})
 	return dat, err
@@ -567,7 +554,7 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	suffix := encodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(SuffixBucket)
+		sb := tx.Bucket(dbutils.SuffixBucket)
 		if sb == nil {
 			return nil
 		}
@@ -578,17 +565,16 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			keycount := int(binary.BigEndian.Uint32(v))
-			for i, ki := 4, 0; ki < keycount; ki++ {
-				l := int(v[i])
-				i++
-				kk := make([]byte, l+len(suffix))
-				copy(kk, v[i:i+l])
-				copy(kk[l:], suffix)
+			changedAccounts := dbutils.ToSuffix(v)
+			err := changedAccounts.Walk(func(kk []byte) error {
+				kk = append(kk, suffix...)
 				if err := hb.Delete(kk); err != nil {
 					return err
 				}
-				i += l
+				return nil
+			})
+			if err != nil {
+				return err
 			}
 			keys = append(keys, k)
 		}
@@ -632,9 +618,9 @@ func (db *BoltDatabase) Close() {
 	}
 }
 
-func (db *BoltDatabase) Keys() [][]byte {
+func (db *BoltDatabase) Keys() ([][]byte, error) {
 	var keys [][]byte
-	db.db.View(func(tx *bolt.Tx) error {
+	err := db.db.View(func(tx *bolt.Tx) error {
 		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
 			var nameCopy = make([]byte, len(name))
 			copy(nameCopy, name)
@@ -646,7 +632,10 @@ func (db *BoltDatabase) Keys() [][]byte {
 			})
 		})
 	})
-	return keys
+	if err != nil {
+		return nil, err
+	}
+	return keys, err
 }
 
 func (db *BoltDatabase) DB() *bolt.DB {
@@ -662,13 +651,6 @@ func (a *PutItem) Less(b llrb.Item) bool {
 	return bytes.Compare(a.key, bi.key) < 0
 }
 
-type mutation struct {
-	puts       map[string]*llrb.LLRB // Map buckets to RB tree containing items
-	suffixkeys map[uint64]map[string][][]byte
-	mu         sync.RWMutex
-	db         Database
-}
-
 func (db *BoltDatabase) NewBatch() Mutation {
 	m := &mutation{
 		db:         db,
@@ -676,448 +658,4 @@ func (db *BoltDatabase) NewBatch() Mutation {
 		suffixkeys: make(map[uint64]map[string][][]byte),
 	}
 	return m
-}
-
-func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if t, ok := m.puts[string(bucket)]; ok {
-		i := t.Get(&PutItem{key: key})
-		if i == nil {
-			return nil, false
-		}
-		if item, ok := i.(*PutItem); ok {
-			if item.value == nil {
-				return nil, true
-			}
-			v := make([]byte, len(item.value))
-			copy(v, item.value)
-			return v, true
-		}
-		return nil, false
-	} else {
-		return nil, false
-	}
-}
-
-// Can only be called from the worker thread
-func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
-	if value, ok := m.getMem(bucket, key); ok {
-		if value == nil {
-			return nil, ErrKeyNotFound
-		}
-		return value, nil
-	}
-	if m.db != nil {
-		return m.db.Get(bucket, key)
-	}
-	return nil, ErrKeyNotFound
-}
-
-func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := compositeKeySuffix(key, timestamp)
-	return m.Get(hBucket, composite)
-}
-
-func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
-	if t, ok := m.puts[string(bucket)]; ok {
-		i := t.Get(&PutItem{key: key})
-		if i != nil {
-			if item, ok := i.(*PutItem); ok {
-				if item.value == nil {
-					return nil, ErrKeyNotFound
-				}
-				return common.CopyBytes(item.value), nil
-			}
-		}
-	}
-	if m.db != nil {
-		return m.db.Get(bucket, key)
-	}
-	return nil, ErrKeyNotFound
-}
-
-func (m *mutation) hasMem(bucket, key []byte) bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	if t, ok := m.puts[string(bucket)]; ok {
-		return t.Has(&PutItem{key: key})
-	}
-	return false
-}
-
-func (m *mutation) Has(bucket, key []byte) (bool, error) {
-	if m.hasMem(bucket, key) {
-		return true, nil
-	}
-	if m.db != nil {
-		return m.db.Has(bucket, key)
-	}
-	return false, nil
-}
-
-func (m *mutation) Size() int {
-	if m.db == nil {
-		return 0
-	}
-	return m.db.Size()
-}
-
-func (m *mutation) Put(bucket, key []byte, value []byte) error {
-	bb := make([]byte, len(bucket))
-	copy(bb, bucket)
-	k := make([]byte, len(key))
-	copy(k, key)
-	v := make([]byte, len(value))
-	copy(v, value)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(bb)]; !ok {
-		t = llrb.New()
-		m.puts[string(bb)] = t
-	}
-	t.ReplaceOrInsert(&PutItem{key: k, value: v})
-	return nil
-}
-
-// Assumes that bucket, key, and value won't be modified
-func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
-	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
-	composite, _ := compositeKeySuffix(key, timestamp)
-	suffix_m, ok := m.suffixkeys[timestamp]
-	if !ok {
-		suffix_m = make(map[string][][]byte)
-		m.suffixkeys[timestamp] = suffix_m
-	}
-	suffix_l, ok := suffix_m[string(hBucket)]
-	if !ok {
-		suffix_l = [][]byte{}
-	}
-	suffix_l = append(suffix_l, key)
-	suffix_m[string(hBucket)] = suffix_l
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var ht *llrb.LLRB
-	if ht, ok = m.puts[string(hBucket)]; !ok {
-		ht = llrb.New()
-		m.puts[string(hBucket)] = ht
-	}
-	ht.ReplaceOrInsert(&PutItem{key: composite, value: value})
-	return nil
-}
-
-func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	l := len(tuples)
-	for i := 0; i < l; i += 3 {
-		var t *llrb.LLRB
-		var ok bool
-		if t, ok = m.puts[string(tuples[i])]; !ok {
-			t = llrb.New()
-			m.puts[string(tuples[i])] = t
-		}
-		t.ReplaceOrInsert(&PutItem{key: tuples[i+1], value: tuples[i+2]})
-	}
-	return 0, nil
-}
-
-func (m *mutation) BatchSize() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	return size
-}
-
-func (m *mutation) getAsOfMem(hBucket, key []byte, timestamp uint64) ([]byte, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(hBucket)]; !ok {
-		return nil, false
-	}
-	composite, _ := compositeKeySuffix(key, timestamp)
-	var dat []byte
-	t.AscendGreaterOrEqual(&PutItem{key: composite}, func(i llrb.Item) bool {
-		item := i.(*PutItem)
-		if !bytes.HasPrefix(item.key, key) {
-			return false
-		}
-		if item.value == nil {
-			return true
-		}
-		dat = make([]byte, len(item.value))
-		copy(dat, item.value)
-		return false
-	})
-	if dat != nil {
-		return dat, true
-	}
-	return nil, false
-}
-
-func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if m.db == nil {
-		panic("Not implemented")
-	} else {
-		return m.db.GetAsOf(bucket, hBucket, key, timestamp)
-	}
-}
-
-func (m *mutation) walkMem(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
-	fixedbytes, mask := bytesmask(fixedbits)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(bucket)]; !ok {
-		return nil
-	}
-	for nextkey := startkey; nextkey != nil; {
-		from := nextkey
-		nextkey = nil
-		var extErr error
-		t.AscendGreaterOrEqual(&PutItem{key: from}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			if item.value == nil {
-				return true
-			}
-			if fixedbits > 0 && (!bytes.Equal(item.key[:fixedbytes-1], startkey[:fixedbytes-1]) || (item.key[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask)) {
-				return true
-			}
-			goOn, err := walker(item.key, item.value)
-			if err != nil {
-				extErr = err
-				return false
-			}
-			return goOn
-		})
-		if extErr != nil {
-			return extErr
-		}
-	}
-	return nil
-}
-
-func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		return m.walkMem(bucket, startkey, fixedbits, walker)
-	} else {
-		return m.db.Walk(bucket, startkey, fixedbits, walker)
-	}
-}
-
-func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
-	panic("Not implemented")
-}
-
-func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
-	} else {
-		return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
-	}
-}
-
-func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		panic("Not implemented")
-	} else {
-		return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
-	}
-}
-
-func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		panic("Not implemented")
-	} else {
-		return m.db.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
-	}
-}
-
-func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return rewindData(m, timestampSrc, timestampDst, df)
-}
-
-func (m *mutation) Delete(bucket, key []byte) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	bb := make([]byte, len(bucket))
-	copy(bb, bucket)
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(bb)]; !ok {
-		t = llrb.New()
-		m.puts[string(bb)] = t
-	}
-	k := make([]byte, len(key))
-	copy(k, key)
-	t.ReplaceOrInsert(&PutItem{key: k, value: nil})
-	return nil
-}
-
-// Deletes all keys with specified suffix from all the buckets
-func (m *mutation) DeleteTimestamp(timestamp uint64) error {
-	suffix := encodeTimestamp(timestamp)
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(SuffixBucket)]; !ok {
-		t = llrb.New()
-		m.puts[string(SuffixBucket)] = t
-	}
-	err := m.Walk(SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
-		hBucket := k[len(suffix):]
-		keycount := int(binary.BigEndian.Uint32(v))
-		var ht *llrb.LLRB
-		var ok bool
-		if keycount > 0 {
-			hBucketStr := string(common.CopyBytes(hBucket))
-			if ht, ok = m.puts[hBucketStr]; !ok {
-				ht = llrb.New()
-				m.puts[hBucketStr] = ht
-			}
-		}
-		for i, ki := 4, 0; ki < keycount; ki++ {
-			l := int(v[i])
-			i++
-			kk := make([]byte, l+len(suffix))
-			copy(kk, v[i:i+l])
-			copy(kk[l:], suffix)
-			ht.ReplaceOrInsert(&PutItem{key: kk, value: nil})
-			i += l
-		}
-		t.ReplaceOrInsert(&PutItem{key: common.CopyBytes(k), value: nil})
-		return true, nil
-	})
-	return err
-}
-
-func (m *mutation) Commit() (uint64, error) {
-	if m.db == nil {
-		return 0, nil
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var t *llrb.LLRB
-	var ok bool
-	if len(m.suffixkeys) > 0 {
-		if t, ok = m.puts[string(SuffixBucket)]; !ok {
-			t = llrb.New()
-			m.puts[string(SuffixBucket)] = t
-		}
-	}
-	for timestamp, suffix_m := range m.suffixkeys {
-		suffix := encodeTimestamp(timestamp)
-		for bucketStr, suffix_l := range suffix_m {
-			hBucket := []byte(bucketStr)
-			suffixkey := make([]byte, len(suffix)+len(hBucket))
-			copy(suffixkey, suffix)
-			copy(suffixkey[len(suffix):], hBucket)
-			dat, err := m.getNoLock(SuffixBucket, suffixkey)
-			if err != nil && err != ErrKeyNotFound {
-				return 0, err
-			}
-			var l int
-			if dat == nil {
-				l = 4
-			} else {
-				l = len(dat)
-			}
-			newlen := len(suffix_l)
-			for _, key := range suffix_l {
-				newlen += len(key)
-			}
-			dv := make([]byte, l+newlen)
-			copy(dv, dat)
-			binary.BigEndian.PutUint32(dv, uint32(len(suffix_l))+binary.BigEndian.Uint32(dv))
-			i := l
-			for _, key := range suffix_l {
-				dv[i] = byte(len(key))
-				i++
-				copy(dv[i:], key)
-				i += len(key)
-			}
-			t.ReplaceOrInsert(&PutItem{key: suffixkey, value: dv})
-		}
-	}
-	m.suffixkeys = make(map[uint64]map[string][][]byte)
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	tuples := make([][]byte, size*3)
-	var index int
-	for bucketStr, bt := range m.puts {
-		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			tuples[index] = []byte(bucketStr)
-			index++
-			tuples[index] = item.key
-			index++
-			tuples[index] = item.value
-			index++
-			return true
-		})
-	}
-	var written uint64
-	var putErr error
-	if written, putErr = m.db.MultiPut(tuples...); putErr != nil {
-		return 0, putErr
-	}
-	m.puts = make(map[string]*llrb.LLRB)
-	return written, nil
-}
-
-func (m *mutation) Rollback() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.suffixkeys = make(map[uint64]map[string][][]byte)
-	m.puts = make(map[string]*llrb.LLRB)
-}
-
-func (m *mutation) Keys() [][]byte {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	pairs := make([][]byte, 2*size)
-	idx := 0
-	for bucketStr, bt := range m.puts {
-		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			pairs[idx] = []byte(bucketStr)
-			idx++
-			pairs[idx] = item.key
-			idx++
-			return true
-		})
-	}
-	return pairs
-}
-
-func (m *mutation) Close() {
-	m.Rollback()
-}
-
-func (m *mutation) NewBatch() Mutation {
-	mm := &mutation{
-		db:         m,
-		puts:       make(map[string]*llrb.LLRB),
-		suffixkeys: make(map[uint64]map[string][][]byte),
-	}
-	return mm
-}
-
-func (m *mutation) MemCopy() Database {
-	panic("Not implemented")
 }

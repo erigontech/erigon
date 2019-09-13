@@ -161,6 +161,8 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
+	//fmt.Printf("\n before\n%s\n", tds.Dump())
+
 	// Add 0-value mining reward. This only makes a difference in the cases
 	// where
 	// - the coinbase suicided, or
@@ -173,12 +175,13 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
-	//fmt.Printf("\n%s\n", tds.Dump())
+	//fmt.Printf("\nbefore%s\n", tds.Dump())
 
 	roots, err := tds.ComputeTrieRoots()
 	if err != nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("error calculating state root: %v", err)
 	}
+
 	root := roots[len(roots)-1]
 	// N.B: We need to do this in a two-step process, because the first Commit takes care
 	// of suicides, and we need to touch the coinbase _after_ it has potentially suicided.
@@ -214,9 +217,11 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, err
 	}
+
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		return nil, nil, err
 	}
+
 	tds.SetBlockNr(blockNr + 1)
 	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		return nil, nil, err

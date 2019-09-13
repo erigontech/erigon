@@ -7,7 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common/bucket"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -53,14 +55,29 @@ type TrieResolver struct {
 	a          accounts.Account
 }
 
-func NewResolver(topLevels int, accounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver {
+	var leafFunc func(b []byte) (node, error)
+	if forAccounts {
+		leafFunc = func(b []byte) (node, error) {
+			var acc accounts.Account
+			if err := acc.DecodeForHashing(b); err != nil {
+				return nil, err
+			}
+			if acc.Root == EmptyRoot {
+				return &accountNode{acc, nil, true}, nil
+			}
+			return &accountNode{acc, hashNode(acc.Root[:]), true}, nil
+		}
+	} else {
+		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
+	}
 	tr := TrieResolver{
-		accounts:   accounts,
+		accounts:   forAccounts,
 		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder2(),
+		hb:         NewHashBuilder2(leafFunc),
 	}
 	return &tr
 }
@@ -156,32 +173,48 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
+func (tr *TrieResolver) finaliseRoot() error {
+	tr.prec.Reset()
+	tr.prec.Write(tr.curr.Bytes())
+	tr.curr.Reset()
+	tr.curr.Write(tr.succ.Bytes())
+	tr.succ.Reset()
+	if tr.curr.Len() > 0 {
+		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
+	}
+	if tr.hb.hasRoot() {
+		hbRoot := tr.hb.root()
+		hbHash := tr.hb.rootHash()
+
+		if tr.currentReq.RequiresRLP {
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+		}
+		var hookKey []byte
+		if tr.currentReq.contract == nil {
+			hookKey = tr.currentReq.resolveHex[:tr.currentReq.resolvePos]
+		} else {
+			contractHex := keybytesToHex(tr.currentReq.contract)
+			contractHex = contractHex[:len(contractHex)-1-16] // Remove terminal nibble and incarnation bytes
+			hookKey = append(contractHex, tr.currentReq.resolveHex[:tr.currentReq.resolvePos]...)
+		}
+		//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
+		tr.currentReq.t.hook(hookKey, hbRoot)
+		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
+			return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
+				tr.currentReq.resolveHash, hbHash, tr.currentReq.contract, tr.currentReq.resolveHex, tr.currentReq.resolvePos)
+		}
+	}
+	return nil
+}
+
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
-	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
+	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
-		tr.prec.Reset()
-		tr.prec.Write(tr.curr.Bytes())
-		tr.curr.Reset()
-		tr.curr.Write(tr.succ.Bytes())
-		tr.succ.Reset()
-		if tr.curr.Len() > 0 {
-			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
-		}
-		if tr.hb.hasRoot() {
-			hbRoot := tr.hb.root()
-			hbHash := tr.hb.rootHash()
-			if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-				return false, fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
-			}
-
-			if tr.currentReq.RequiresRLP {
-				hasher := newHasher(false)
-				defer returnHasherToPool(hasher)
-				tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
-			}
-
-			tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
+		if err := tr.finaliseRoot(); err != nil {
+			return false, err
 		}
 		tr.hb.Reset()
 		tr.groups = nil
@@ -216,7 +249,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		// Remember the current key and value
 		if tr.accounts {
-			if err := tr.a.Decode(v); err != nil {
+			if err := tr.a.DecodeForStorage(v); err != nil {
 				return false, err
 			}
 
@@ -254,42 +287,21 @@ func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 	if tr.accounts {
 		if tr.historical {
-			err = db.MultiWalkAsOf(bucket.Accounts, bucket.AccountsHistory, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk(bucket.Accounts, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.Walker)
 		}
 	} else {
 		if tr.historical {
-			err = db.MultiWalkAsOf(bucket.Storage, bucket.StorageHistory, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
 		} else {
-			err = db.MultiWalk(bucket.Storage, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.Walker)
 		}
 	}
-	tr.prec.Reset()
-	tr.prec.Write(tr.curr.Bytes())
-	tr.curr.Reset()
-	tr.curr.Write(tr.succ.Bytes())
-	tr.succ.Reset()
-	if tr.curr.Len() > 0 {
-		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
+	if err != nil {
+		return err
 	}
-	if tr.hb.hasRoot() {
-		hbRoot := tr.hb.root()
-		hbHash := tr.hb.rootHash()
-		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-			return fmt.Errorf("mismatching hash: %s %x", tr.currentReq.resolveHash, hbHash)
-		}
-
-		if tr.currentReq.RequiresRLP {
-			hasher := newHasher(false)
-			defer returnHasherToPool(hasher)
-			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
-		}
-
-		tr.currentReq.t.touchAll(hbRoot, tr.currentReq.resolveHex[:tr.currentReq.resolvePos], false)
-		tr.currentReq.t.hook(tr.currentReq.resolveHex[:tr.currentReq.resolvePos], hbRoot)
-	}
-	return err
+	return tr.finaliseRoot()
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {

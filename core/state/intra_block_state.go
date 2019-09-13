@@ -663,6 +663,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
+		newObj.setIncarnation(prev.data.GetIncarnation() + 1)
 	}
 }
 
@@ -779,6 +780,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
+
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
@@ -826,18 +828,6 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 	sdb.clearJournalAndRefund()
 	return nil
 }
-
-// IntermediateRoot computes the current root hash of the state trie.
-// It is called in between transactions to get the root hash that
-// goes into transaction receipts.
-/*
-func (tds *TrieDbState) IntermediateRoot(s *IntraBlockState, deleteEmptyObjects bool) (common.Hash, error) {
-	if err := s.FinalizeTx(deleteEmptyObjects, tds.TrieStateWriter()); err != nil {
-		return common.Hash{}, err
-	}
-	return tds.TrieRoot()
-}
-*/
 
 // Prepare sets the current transaction hash and index and block hash which is
 // used when the EVM emits new state logs.

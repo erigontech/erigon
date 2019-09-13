@@ -1,7 +1,6 @@
 package accounts
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"math/big"
@@ -11,7 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/valyala/bytebufferpool"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -23,6 +21,7 @@ type Account struct {
 	Balance        big.Int
 	Root           common.Hash // merkle root of the storage trie
 	CodeHash       common.Hash // hash of the bytecode
+	Incarnation    uint64
 	HasStorageSize bool
 	StorageSize    uint64
 }
@@ -42,8 +41,11 @@ func NewAccount() Account {
 func (a *Account) encodingLength(forStorage bool) uint {
 	var structLength uint
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
+	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 && a.Incarnation == 0 {
+		return 1
+	}
 
-	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 {
+	if !forStorage || !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 || a.Incarnation != 0 {
 		var balanceBytes int
 		if b128.Cmp(&a.Balance) == 1 && a.Balance.Sign() == 1 {
 			balanceBytes = 0
@@ -75,6 +77,16 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		structLength += uint(storageSizeBytes + 1)
 	}
 
+	if forStorage {
+		var incarnationsBytes int
+		if a.Incarnation < 128 && a.Incarnation != 0 {
+			incarnationsBytes = 0
+		} else {
+			incarnationsBytes = (bits.Len64(a.Incarnation) + 7) / 8
+		}
+		structLength += uint(incarnationsBytes + 1)
+	}
+
 	if structLength < 56 {
 		return 1 + structLength
 	}
@@ -94,7 +106,7 @@ func (a *Account) EncodingLengthForHashing() uint {
 
 func (a *Account) encode(buffer []byte, forStorage bool) {
 	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
-	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 {
+	if forStorage && nonContract && a.Balance.Sign() == 0 && a.Nonce == 0 && a.Incarnation == 0 {
 		buffer[0] = 192
 		return
 	}
@@ -116,6 +128,16 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	var structLength = uint(balanceBytes + nonceBytes + 2)
 	if !forStorage || !nonContract {
 		structLength += 66 // Two 32-byte arrays + 2 prefixes
+	}
+
+	var incarnationBytes int
+	if forStorage {
+		if a.Incarnation < 128 && a.Incarnation != 0 {
+			incarnationBytes = 0
+		} else {
+			incarnationBytes = (bits.Len64(a.Incarnation) + 7) / 8
+		}
+		structLength += uint(incarnationBytes + 1)
 	}
 
 	var storageSizeBytes int
@@ -180,6 +202,20 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += balanceBytes
 	}
 
+	if forStorage {
+		if a.Incarnation < 128 && a.Incarnation != 0 {
+			buffer[pos] = byte(a.Incarnation)
+		} else {
+			buffer[pos] = byte(128 + incarnationBytes)
+			var incarnation = a.Incarnation
+			for i := incarnationBytes; i > 0; i-- {
+				buffer[pos+i] = byte(incarnation)
+				incarnation >>= 8
+			}
+		}
+		pos += 1 + incarnationBytes
+	}
+
 	// Encoding Root and CodeHash
 	if !forStorage || !nonContract {
 		buffer[pos] = 128 + 32
@@ -232,8 +268,10 @@ func (a *Account) Copy(image *Account) {
 	a.Balance.Set(&image.Balance)
 	a.Root = image.Root
 	a.CodeHash = image.CodeHash
+	a.Incarnation = image.Incarnation
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
+	a.Incarnation = image.Incarnation
 }
 
 // Decodes length and determines whether it corresponds to a structure of a byte array
@@ -264,7 +302,15 @@ func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos in
 	}
 }
 
-func (a *Account) Decode(enc []byte) error {
+func (a *Account) DecodeForStorage(enc []byte) error {
+	return a.decode(enc, true)
+}
+
+func (a *Account) DecodeForHashing(enc []byte) error {
+	return a.decode(enc, false)
+}
+
+func (a *Account) decode(enc []byte, forStorage bool) error {
 	length, structure, pos := decodeLength(enc, 0)
 	if pos+length != len(enc) {
 		return fmt.Errorf(
@@ -282,9 +328,12 @@ func (a *Account) Decode(enc []byte) error {
 	a.Nonce = 0
 	a.Balance.SetInt64(0)
 	a.Root = emptyRoot
-	copy(a.CodeHash[:], emptyCodeHash.Bytes())
+	a.CodeHash = emptyCodeHash
 	a.StorageSize = 0
 	a.HasStorageSize = false
+	if length == 0 && structure {
+		return nil
+	}
 
 	if pos < len(enc) {
 		nonceBytes, s, newPos := decodeLength(enc, pos)
@@ -344,6 +393,38 @@ func (a *Account) Decode(enc []byte) error {
 			}
 			pos = newPos + balanceBytes
 		}
+	}
+
+	// Skip incarnation decoding if this is not read from storage
+	if forStorage && pos < len(enc) {
+		incarnationBytes, s, newPos := decodeLength(enc, pos)
+		if s {
+			return fmt.Errorf(
+				"encoding of Account.Incarnation should be byte array, got RLP struct: %x",
+				enc[pos:newPos+incarnationBytes],
+			)
+		}
+
+		if newPos+incarnationBytes > len(enc) {
+			return fmt.Errorf(
+				"malformed RLP for Account.Incarnation(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+				enc[pos:newPos+incarnationBytes],
+				newPos-pos, incarnationBytes, len(enc)-pos,
+			)
+		}
+
+		var incarnation uint64
+		if incarnationBytes == 0 && newPos == pos {
+			incarnation = uint64(enc[newPos])
+			pos = newPos + 1
+		} else {
+			for _, b := range enc[newPos : newPos+incarnationBytes] {
+				incarnation = (incarnation << 8) + uint64(b)
+			}
+			pos = newPos + incarnationBytes
+		}
+
+		a.Incarnation = incarnation
 	}
 
 	if pos < len(enc) {
@@ -442,21 +523,33 @@ func (a *Account) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	err = a.Decode(raw)
-	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: raw})
-	return err
-}
-
-func (a *Account) decodeRLPFromBytes(b []byte) error {
-	err := a.Decode(b)
-	pool.PutBuffer(&bytebufferpool.ByteBuffer{B: b})
+	err = a.DecodeForHashing(raw)
 	return err
 }
 
 func (a *Account) IsEmptyCodeHash() bool {
-	return bytes.Equal(a.CodeHash[:], emptyCodeHash.Bytes())
+	return a.CodeHash == emptyCodeHash || a.CodeHash == (common.Hash{})
 }
 
 func (a *Account) IsEmptyRoot() bool {
 	return a.Root == emptyRoot || a.Root == common.Hash{}
+}
+
+func (a *Account) GetIncarnation() uint64 {
+	return a.Incarnation
+}
+
+func (a *Account) SetIncarnation(v uint64) {
+	a.Incarnation = v
+}
+
+func (a *Account) Equals(acc *Account) bool {
+	return a.Nonce == acc.Nonce &&
+		a.CodeHash == acc.CodeHash &&
+		a.Root == acc.Root &&
+		a.Balance.Cmp(&acc.Balance) == 0 &&
+		a.Incarnation == acc.Incarnation &&
+		a.HasStorageSize == acc.HasStorageSize &&
+		a.StorageSize == acc.StorageSize
+
 }

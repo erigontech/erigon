@@ -49,12 +49,6 @@ var (
 	memcacheCommitSizeMeter  = metrics.NewRegisteredMeter("trie/memcache/commit/size", nil)
 )
 
-// SecureKeyPrefix is the database key prefix used to store trie node preimages.
-var SecureKeyPrefix = []byte("secure-key-")
-
-// secureKeyLength is the length of the above prefix + 32byte hash.
-const secureKeyLength = 11 + 32
-
 // DatabaseReader wraps the Get method of a backing store for the trie.
 type DatabaseReader interface {
 	// Get retrieves the value associated with key from the database.
@@ -80,7 +74,6 @@ type Database struct {
 	newest  common.Hash                 // Newest tracked node, flush-list tail
 
 	preimages map[common.Hash][]byte // Preimages of nodes from the secure trie
-	seckeybuf [secureKeyLength]byte  // Ephemeral buffer for calculating preimage keys
 
 	gctime  time.Duration      // Time spent on garbage collection since last commit
 	gcnodes uint64             // Nodes garbage collected since last commit
@@ -281,30 +274,6 @@ func (db *Database) node(hash common.Hash, cachegen uint16) node {
 // cached, the method queries the persistent database for the content.
 func (db *Database) Node(hash common.Hash) ([]byte, error) {
 	return db.diskdb.Get(nil, hash[:])
-}
-
-// preimage retrieves a cached trie node pre-image from memory. If it cannot be
-// found cached, the method queries the persistent database for the content.
-func (db *Database) preimage(hash common.Hash) ([]byte, error) {
-	// Retrieve the node from cache if available
-	db.lock.RLock()
-	preimage := db.preimages[hash]
-	db.lock.RUnlock()
-
-	if preimage != nil {
-		return preimage, nil
-	}
-	// Content unavailable in memory, attempt to retrieve from disk
-	return db.diskdb.Get(nil, db.secureKey(hash[:]))
-}
-
-// secureKey returns the database key for the preimage of key, as an ephemeral
-// buffer. The caller must not hold onto the return value because it will become
-// invalid on the next call.
-func (db *Database) secureKey(key []byte) []byte {
-	buf := append(db.seckeybuf[:0], SecureKeyPrefix...)
-	buf = append(buf, key...)
-	return buf
 }
 
 // Nodes retrieves the hashes of all the nodes cached within the memory database.

@@ -148,11 +148,7 @@ func testGetBlockHeaders(t *testing.T, protocol int) {
 		{
 			&getBlockHeadersData{Origin: hashOrNumber{Number: pm.blockchain.CurrentBlock().NumberU64() - 4}, Skip: 3, Amount: 3},
 			[]common.Hash{
-				func() common.Hash {
-					fmt.Println("111", pm.blockchain.CurrentBlock().NumberU64(), pm.blockchain.CurrentBlock().NumberU64())
-					fmt.Println("2", pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 4))
-					return pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 4).Hash()
-				}(),
+				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64() - 4).Hash(),
 				pm.blockchain.GetBlockByNumber(pm.blockchain.CurrentBlock().NumberU64()).Hash(),
 			},
 		}, {

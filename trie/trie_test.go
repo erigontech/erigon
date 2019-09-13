@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -56,7 +57,7 @@ func TestEmptyTrie(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("we don't support different key length")
 	trie := newEmpty()
 
 	updateString(trie, "doe", "reindeer")
@@ -81,7 +82,9 @@ func TestInsert(t *testing.T) {
 }
 
 func TestGet(t *testing.T) {
+	t.Skip("different length of key is not supported")
 	trie := newEmpty()
+
 	updateString(trie, "doe", "reindeer")
 	updateString(trie, "dog", "puppy")
 	updateString(trie, "dogglesworth", "cat")
@@ -428,6 +431,7 @@ func deleteString(trie *Trie, k string) {
 }
 
 func TestDeepHash(t *testing.T) {
+	acc := accounts.NewAccount()
 	prefix := "prefix"
 	var testdata = [][]struct {
 		key   string
@@ -439,16 +443,21 @@ func TestDeepHash(t *testing.T) {
 		{{"key1", "value1"}, {"key2", "value2"}, {"\xffek3", "value3"}},
 	}
 	for i, keyVals := range testdata {
+		fmt.Println("Test", i)
 		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
 			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)
 		}
+		trie.PrintTrie()
 		hash1 := trie.Hash()
+
 		prefixTrie := New(common.Hash{})
+		prefixTrie.UpdateAccount([]byte(prefix), &acc)
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
 			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
 		}
+
 		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
 		if !got2 {
 			t.Errorf("Expected DeepHash returning true, got false, testcase %d", i)

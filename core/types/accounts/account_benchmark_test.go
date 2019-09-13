@@ -361,7 +361,7 @@ func BenchmarkDecodingAccount(b *testing.B) {
 				b.StartTimer()
 
 				var decodedAccount Account
-				if err := decodedAccount.Decode(encodedAccount.B); err != nil {
+				if err := decodedAccount.DecodeForStorage(encodedAccount.B); err != nil {
 					b.Fatal("cant decode the account", err, encodedAccount)
 				}
 
@@ -510,7 +510,7 @@ func BenchmarkRLPDecodingAccount(b *testing.B) {
 				b.StartTimer()
 
 				var decodedAccount Account
-				if err := decodedAccount.decodeRLPFromBytes(accBytes); err != nil {
+				if err := decodedAccount.DecodeForHashing(accBytes); err != nil {
 					b.Fatal("cant decode the account", err, test)
 				}
 

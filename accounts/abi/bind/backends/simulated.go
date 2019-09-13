@@ -121,11 +121,13 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 // Commit imports all the pending transactions as a single block and starts a
 // fresh new state.
 func (b *SimulatedBackend) Commit() {
+	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, err := b.blockchain.InsertChain([]*types.Block{b.pendingBlock}); err != nil {
 		panic(err)
 	}
+	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())
 	b.prependDb = b.database
 	b.prependBlock = b.pendingBlock
 	b.emptyPendingBlock()
@@ -376,6 +378,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 		&b.pendingHeader.GasUsed, vm.Config{}); err != nil {
 		return err
 	}
+	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	ctx = b.blockchain.WithContext(ctx, big.NewInt(b.prependBlock.Number().Int64()+1))
 	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
@@ -383,6 +386,7 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 		}
 		block.AddTxWithChain(b.blockchain, tx)
 	})
+	//fmt.Printf("==== End producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	return nil

@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"math/big"
+	"os"
 	"testing"
 
 	"context"
@@ -278,5 +279,83 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 		if so1.originStorage[k] != v {
 			t.Errorf("Origin storage key %x mismatch: have %v, want none.", k, v)
 		}
+	}
+}
+
+func TestDump(t *testing.T) {
+	db := ethdb.NewMemDatabase()
+	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	state := New(tds)
+	tds.StartNewBuffer()
+
+	// generate a few entries
+	obj1 := state.GetOrNewStateObject(toAddr([]byte{0x01}))
+	obj1.AddBalance(big.NewInt(22))
+	obj2 := state.GetOrNewStateObject(toAddr([]byte{0x01, 0x02}))
+	obj2.SetCode(crypto.Keccak256Hash([]byte{3, 3, 3, 3, 3, 3, 3}), []byte{3, 3, 3, 3, 3, 3, 3})
+	obj3 := state.GetOrNewStateObject(toAddr([]byte{0x02}))
+	obj3.SetBalance(big.NewInt(44))
+
+	// write some of them to the trie
+	ctx := context.TODO()
+	err := tds.TrieStateWriter().UpdateAccountData(ctx, obj1.address, &obj1.data, new(accounts.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = tds.TrieStateWriter().UpdateAccountData(ctx, obj2.address, &obj2.data, new(accounts.Account))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = state.FinalizeTx(ctx, tds.TrieStateWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("last root", tds.LastRoot().String())
+	_, err = tds.ComputeTrieRoots()
+	t.Log("last root", tds.LastRoot().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tds.SetBlockNr(1)
+
+	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, _ := os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trie_wrong.txt")
+	tds.t.Print(f)
+
+	// check that dump contains the state objects that are in trie
+	got := string(tds.Dump())
+	want := `{
+    "root": "71edff0130dd2385947095001c73d9e28d862fc286fca2b922ca6f6f3cddfdd2",
+    "accounts": {
+        "0x0000000000000000000000000000000000000001": {
+            "balance": "22",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000002": {
+            "balance": "44",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
+        },
+        "0x0000000000000000000000000000000000000102": {
+            "balance": "0",
+            "nonce": 0,
+            "root": "56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+            "codeHash": "87874902497a5bb968da31a2998d8f22e949d1ef6214bcdedd8bae24cca4b9e3",
+            "code": "03030303030303"
+        }
+    }
+}`
+	if got != want {
+		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
 }

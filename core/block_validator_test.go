@@ -42,7 +42,7 @@ func TestHeaderVerification(t *testing.T) {
 	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	defer chain.Stop()
 
-	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb, 8, nil)
+	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), testdb.MemCopy(), 8, nil)
 
 	headers := make([]*types.Header, len(blocks))
 	for i, block := range blocks {
@@ -76,7 +76,9 @@ func TestHeaderVerification(t *testing.T) {
 			case <-time.After(25 * time.Millisecond):
 			}
 		}
-		chain.InsertChain(blocks[i : i+1])
+		if _, err := chain.InsertChain(blocks[i : i+1]); err != nil {
+			t.Fatalf("test %d: error inserting the block: %v", i, err)
+		}
 	}
 }
 
