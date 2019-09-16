@@ -201,7 +201,6 @@ func (ethash *Ethash) VerifyUncles(chain consensus.ChainReader, block *types.Blo
 	for i := 0; i < 7; i++ {
 		ancestor := chain.GetBlock(parent, number)
 		if ancestor == nil {
-			log.Warn("*** 1", "block", parent.String())
 			break
 		}
 		ancestors[ancestor.Hash()] = ancestor.Header()

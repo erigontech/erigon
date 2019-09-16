@@ -55,21 +55,20 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 
 	// Initialize a fresh chain with only a genesis block
 	blockchain, _ := NewBlockChain(db, nil, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
 	// Create and inject the requested chain
 	if n == 0 {
-		ctx := blockchain.WithContext(context.Background(), big.NewInt(blockchain.CurrentBlock().Number().Int64()+1))
 		return ctx, db, blockchain, nil
 	}
 
 	if full {
 		// Full block-chain requested
-		ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 		blocks := makeBlockChain(ctx, genesis, n, engine, db.MemCopy(), canonicalSeed)
 		_, err := blockchain.InsertChain(blocks)
 		return ctx, db, blockchain, err
 	}
 	// Header-only chain requested
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Header().Number.Int64()+1))
 	headers := makeHeaderChain(ctx, genesis.Header(), n, engine, db.MemCopy(), canonicalSeed)
 	_, err := blockchain.InsertHeaderChain(headers, 1)
 	return ctx, db, blockchain, err

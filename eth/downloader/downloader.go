@@ -315,7 +315,7 @@ func (d *Downloader) Synchronise(id string, head common.Hash, td *big.Int, mode 
 	case errTimeout, errBadPeer, errStallingPeer,
 		errEmptyHeaderSet, errPeersUnavailable, errTooOld,
 		errInvalidAncestor, errInvalidChain:
-		fmt.Println("!!! 6")
+		fmt.Println("!!! 6", err)
 		log.Warn("Synchronisation failed, dropping peer", "peer", id, "err", err)
 		if d.dropPeer == nil {
 			// The dropPeer method is nil when `--copydb` is used for a local copy.
@@ -709,7 +709,7 @@ func (d *Downloader) findAncestor(p *peerConnection, remoteHeader *types.Header)
 				expectNumber := from + int64(i)*int64((skip+1))
 				if number := header.Number.Int64(); number != expectNumber {
 					p.log.Warn("Head headers broke chain ordering", "index", i, "requested", expectNumber, "received", number)
-					fmt.Println("!!! 4")
+					fmt.Println("!!! 4", i, number, expectNumber)
 					return 0, errInvalidChain
 				}
 			}
@@ -923,7 +923,7 @@ func (d *Downloader) fetchHeaders(p *peerConnection, from uint64, pivot uint64) 
 				filled, proced, err := d.fillHeaderSkeleton(from, headers)
 				if err != nil {
 					p.log.Debug("Skeleton chain invalid", "err", err)
-					fmt.Println("!!! 2")
+					fmt.Println("!!! 2", err)
 					return errInvalidChain
 				}
 				headers = filled[proced:]
@@ -1138,7 +1138,7 @@ func (d *Downloader) fetchParts(errCancel error, deliveryCh chan dataPack, deliv
 				// Deliver the received chunk of data and check chain validity
 				accepted, err := deliver(packet)
 				if err == errInvalidChain {
-					fmt.Println("!!! 3")
+					fmt.Println("!!! 3", err)
 					return err
 				}
 				// Unless a peer delivered something completely else than requested (usually
@@ -1394,7 +1394,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 							rollback = append(rollback, chunk[:n]...)
 						}
 						log.Debug("Invalid header encountered", "number", chunk[n].Number, "hash", chunk[n].Hash(), "err", err)
-						fmt.Println("!!! 5")
+						fmt.Println("!!! 5", chunk[n].Number.String(), err)
 						return errInvalidChain
 					}
 					// All verifications passed, store newly found uncertain headers
@@ -1486,6 +1486,7 @@ func (d *Downloader) importBlockResults(results []*fetchResult) error {
 			log.Debug("Downloaded item processing failed on sidechain import", "index", index, "err", err)
 		}
 		log.Error("importBlockResults", "err", err)
+		fmt.Println("!!! 01", index, err)
 		return errInvalidChain
 	}
 	return nil

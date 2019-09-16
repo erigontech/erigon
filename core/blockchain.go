@@ -685,18 +685,15 @@ func (bc *BlockChain) GetBlock(hash common.Hash, number uint64) *types.Block {
 	if block, ok := bc.blockCache.Get(hash); ok {
 		b, ok := block.(*types.Block)
 		if !ok {
-			log.Warn("*** GetBlock 1", "number", number, "ok", ok, "block", block != nil)
 		}
 		return b
 	}
 	block := rawdb.ReadBlock(bc.db, hash, number)
 	if block == nil {
-		log.Warn("*** GetBlock 2", "number", number)
 		return nil
 	}
 	// Cache the found block for next time and return
 	bc.blockCache.Add(block.Hash(), block)
-	log.Warn("*** GetBlock 3", "number", number, "block", block != nil)
 	return block
 }
 
@@ -1008,14 +1005,9 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	tds.SetBlockNr(block.NumberU64())
 
 	ctx := bc.WithContext(context.Background(), block.Number())
-	noHistory, ctx := params.GetNoHistoryByBlock(ctx, block.Number())
-	if !noHistory {
-		if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-			// archive case
-			return NonStatTy, err
-		}
+	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		return NonStatTy, err
 	}
-	//todo: write archive and full sync if statements
 	if bc.enableReceipts {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
@@ -1086,7 +1078,6 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	if len(chain) == 0 {
 		return 0, nil
 	}
-
 	// Do a sanity check that the provided chain is actually ordered and linked
 	for i := 1; i < len(chain); i++ {
 		if chain[i].NumberU64() != chain[i-1].NumberU64()+1 || chain[i].ParentHash() != chain[i-1].Hash() {
@@ -1150,8 +1141,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	)
 	var verifyFrom = len(chain)
 
-	//fixme what kind of sync it is?
-	log.Warn("storing state", "block", chain[0].NumberU64(), "method", "insertChain", "sync", "archive")
 	externTd := big.NewInt(0)
 	if len(chain) > 0 && chain[0].NumberU64() > 0 {
 		d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
@@ -1187,8 +1176,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	var parentNumber = chain[0].NumberU64() - 1
 	// Find correct insertion point for this chain
 
-	//fixme what kind of sync it is?
-	log.Warn("storing state", "block", chain[0].NumberU64(), "method", "insertChain")
 	preBlocks := []*types.Block{}
 	parentHash := chain[0].ParentHash()
 	parent = bc.GetBlock(parentHash, parentNumber)
@@ -1216,15 +1203,11 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	if offset > 0 {
 		chain = append(preBlocks, chain...)
 	}
-
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
 	// Iterate over the blocks and insert when the verifier permits
 	for i, block := range chain {
-		_, ctx = params.GetNoHistoryByBlock(ctx, block.Number())
-		//fmt.Println("xxx 1", block.Number().String(), testNoHistory)
-
 		start := time.Now()
 		k := 0
 		if i >= offset {
@@ -1246,6 +1229,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			err = <-results
 		}
 		if err == nil {
+			_, ctx = params.GetNoHistoryByBlock(ctx, block.Number())
 			err = bc.Validator().ValidateBody(ctx, block)
 		}
 		switch {
@@ -1796,13 +1780,13 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	if currentBlock == nil {
 		if bc.cacheConfig.NoHistory {
 			/*
-			fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, callers %v\n\n",
-				0,
-				currentBlock.Int64(),
-				bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
-				bc.cacheConfig.ArchiveSyncInterval,
-				debug.Callers(10))
-			 */
+				fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, callers %v\n\n",
+					0,
+					currentBlock.Int64(),
+					bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+					bc.cacheConfig.ArchiveSyncInterval,
+					debug.Callers(10))
+			*/
 		}
 
 		if !bc.cacheConfig.NoHistory {
@@ -1819,7 +1803,6 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	var isArchiveInterval bool
 	currentBlockNumber := bc.CurrentBlock().Number().Uint64()
 	if bc.highestKnownBlock > currentBlockNumber {
-		//todo: поверитьб что пишется в bc.highestKnownBlock
 		//todo: проверить почему currentBlock.Uint64() > currentBlockNumber
 		//todo: проверить почему bc.highestKnownBlock <= currentBlockNumber
 
@@ -1836,24 +1819,24 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 		isArchiveInterval = (currentBlock.Uint64() - currentBlockNumber) <= bc.cacheConfig.ArchiveSyncInterval
 		if isArchiveInterval {
 			/*
-			fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, callers %v\n\n",
-				2,
-				currentBlock.Int64(),
-				bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
-				bc.cacheConfig.ArchiveSyncInterval,
-				debug.Callers(10))
-			 */
+				fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, callers %v\n\n",
+					2,
+					currentBlock.Int64(),
+					bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+					bc.cacheConfig.ArchiveSyncInterval,
+					debug.Callers(10))
+			*/
 		}
 	}
 
 	if bc.cacheConfig.NoHistory {
 		/*fmt.Printf("noHistory!!! case %d, askedBlock %v, currentBlockchainBlock %v, highestKnownBlock %v, syncInterval %v, callers %v\n\n",
-			3,
-			currentBlock.Int64(),
-			bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
-			bc.cacheConfig.ArchiveSyncInterval,
-			debug.Callers(10))
-		 */
+		3,
+		currentBlock.Int64(),
+		bc.CurrentBlock().Number().Uint64(), bc.highestKnownBlock,
+		bc.cacheConfig.ArchiveSyncInterval,
+		debug.Callers(10))
+		*/
 	}
 
 	if !(bc.cacheConfig.NoHistory || isArchiveInterval) {

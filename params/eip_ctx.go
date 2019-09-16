@@ -67,7 +67,6 @@ func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (bool, cont
 	if currentBlock == nil {
 		return false, ctx
 	}
-	//todo если getNoHistoryByKey=false, то надо ставить highestWithHistory
 	key := getNoHistoryByBlockKey(currentBlock)
 	v, ok := getNoHistoryByKey(ctx, key)
 	if ok {
@@ -82,7 +81,6 @@ func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (bool, cont
 }
 
 func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (bool, context.Context) {
-	//todo remove debug
 	if key < 0 {
 		panic(fmt.Sprintln(int(key), currentBlock==nil))
 	}
@@ -156,7 +154,11 @@ func getNoHistoryByBlockKey(block *big.Int) configKey {
 }
 
 func GetNoHistory(ctx context.Context) (bool, context.Context) {
-	return GetNoHistoryByBlock(ctx, GetBlockNumber(ctx))
+	number := GetBlockNumber(ctx)
+	if number == nil {
+		fmt.Println("***** NIL BLOCK")
+	}
+	return GetNoHistoryByBlock(ctx, number)
 }
 
 type noHistFunc func(currentBlock *big.Int) bool
