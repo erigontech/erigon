@@ -85,13 +85,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
-	suffix = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(suffix))
-	copy(composite, key)
-	copy(composite[len(key):], suffix)
-	return composite, suffix
-}
 
 func historyBucket(bucket []byte) []byte {
 	hb := make([]byte, len(bucket)+1)
@@ -102,9 +95,10 @@ func historyBucket(bucket []byte) []byte {
 
 // Put puts the given key / value to the queue
 func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
-	composite, suffix := compositeKeySuffix(key, timestamp)
+	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
+	copy(suffixkey[len(suffix):], hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 		if err != nil {
@@ -117,6 +111,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		if err != nil {
 			return err
 		}
+
 		dat, _ := sb.Get(suffixkey)
 		dat = dbutils.ToSuffix(dat).Add(key)
 		return sb.Put(suffixkey, dat)
@@ -196,14 +191,14 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := compositeKeySuffix(key, timestamp)
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
 }
 
 // GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
 // if there are not such (k, v)
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := compositeKeySuffix(key, timestamp)
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		{
@@ -332,7 +327,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	fixedbytes, mask := bytesmask(fixedbits)
-	suffix := encodeTimestamp(timestamp)
+	suffix := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(suffix)
 	keyBuffer := make([]byte, l+len(EndSuffix))
@@ -411,7 +406,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	keyIdx := 0 // What is the current key we are extracting
 	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
-	suffix := encodeTimestamp(timestamp)
+	suffix := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(suffix)
 	keyBuffer := make([]byte, l+len(EndSuffix))
@@ -551,7 +546,7 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 
 // Deletes all keys with specified suffix from all the buckets
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
-	suffix := encodeTimestamp(timestamp)
+	suffix := dbutils.EncodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(dbutils.SuffixBucket)
 		if sb == nil {

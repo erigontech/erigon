@@ -997,6 +997,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 		rawdb.WriteBlock(bc.db, block)
 	} else {
+		// full
 		rawdb.WriteHeader(bc.db, block.Header())
 	}
 
