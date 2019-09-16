@@ -45,7 +45,7 @@ func newTestDB() (*BoltDatabase, func()) {
 	}
 }
 
-var bucketKey = []byte("TestBucket")
+var bucket = []byte("TestBucket")
 var test_values = []string{"a", "1251", "\x00123\x00"}
 
 func TestDB_PutGet(t *testing.T) {
@@ -62,14 +62,14 @@ func testPutGet(db Database, t *testing.T) {
 	t.Parallel()
 
 	for _, k := range test_values {
-		err := db.Put(bucketKey, []byte(k), nil)
+		err := db.Put(bucket, []byte(k), nil)
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
 	}
 
 	for _, k := range test_values {
-		data, err := db.Get(bucketKey, []byte(k))
+		data, err := db.Get(bucket, []byte(k))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -78,20 +78,20 @@ func testPutGet(db Database, t *testing.T) {
 		}
 	}
 
-	_, err := db.Get(bucketKey, []byte("non-exist-key"))
+	_, err := db.Get(bucket, []byte("non-exist-key"))
 	if err == nil {
 		t.Fatalf("expect to return a not found error")
 	}
 
 	for _, v := range test_values {
-		err := db.Put(bucketKey, []byte(v), []byte(v))
+		err := db.Put(bucket, []byte(v), []byte(v))
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
 	}
 
 	for _, v := range test_values {
-		data, err := db.Get(bucketKey, []byte(v))
+		data, err := db.Get(bucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -101,14 +101,14 @@ func testPutGet(db Database, t *testing.T) {
 	}
 
 	for _, v := range test_values {
-		err := db.Put(bucketKey, []byte(v), []byte("?"))
+		err := db.Put(bucket, []byte(v), []byte("?"))
 		if err != nil {
 			t.Fatalf("put override failed: %v", err)
 		}
 	}
 
 	for _, v := range test_values {
-		data, err := db.Get(bucketKey, []byte(v))
+		data, err := db.Get(bucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -118,12 +118,12 @@ func testPutGet(db Database, t *testing.T) {
 	}
 
 	for _, v := range test_values {
-		orig, err := db.Get(bucketKey, []byte(v))
+		orig, err := db.Get(bucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
 		orig[0] = byte(0xff)
-		data, err := db.Get(bucketKey, []byte(v))
+		data, err := db.Get(bucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -133,14 +133,14 @@ func testPutGet(db Database, t *testing.T) {
 	}
 
 	for _, v := range test_values {
-		err := db.Delete(bucketKey, []byte(v))
+		err := db.Delete(bucket, []byte(v))
 		if err != nil {
 			t.Fatalf("delete %q failed: %v", v, err)
 		}
 	}
 
 	for _, v := range test_values {
-		_, err := db.Get(bucketKey, []byte(v))
+		_, err := db.Get(bucket, []byte(v))
 		if err == nil {
 			t.Fatalf("got deleted value %q", v)
 		}
@@ -165,7 +165,7 @@ func testParallelPutGet(db Database, t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Put(bucketKey, []byte(key), []byte("v"+key))
+			err := db.Put(bucket, []byte(key), []byte("v"+key))
 			if err != nil {
 				panic("put failed: " + err.Error())
 			}
@@ -177,7 +177,7 @@ func testParallelPutGet(db Database, t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			data, err := db.Get(bucketKey, []byte(key))
+			data, err := db.Get(bucket, []byte(key))
 			if err != nil {
 				panic("get failed: " + err.Error())
 			}
@@ -192,7 +192,7 @@ func testParallelPutGet(db Database, t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Delete(bucketKey, []byte(key))
+			err := db.Delete(bucket, []byte(key))
 			if err != nil {
 				panic("delete failed: " + err.Error())
 			}
@@ -204,7 +204,7 @@ func testParallelPutGet(db Database, t *testing.T) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_, err := db.Get(bucketKey, []byte(key))
+			_, err := db.Get(bucket, []byte(key))
 			if err == nil {
 				//panic("get succeeded")
 			}

@@ -63,26 +63,26 @@ func GetBlockNumber(ctx context.Context) *big.Int {
 	return nil
 }
 
-func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (bool, context.Context) {
+func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (context.Context, bool) {
 	if currentBlock == nil {
-		return false, ctx
+		return ctx, false
 	}
+
 	key := getNoHistoryByBlockKey(currentBlock)
 	v, ok := getNoHistoryByKey(ctx, key)
 	if ok {
 		if !v {
 			ctx = updateHighestWithHistory(ctx, currentBlock)
 		}
-
-		return v, ctx
+		return ctx, v
 	}
 
 	return withNoHistory(ctx, currentBlock, key)
 }
 
-func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (bool, context.Context) {
+func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (context.Context, bool) {
 	if key < 0 {
-		panic(fmt.Sprintln(int(key), currentBlock==nil))
+		panic(fmt.Sprintln(int(key), currentBlock == nil))
 	}
 
 	v := getNoHistory(ctx, currentBlock)
@@ -91,7 +91,7 @@ func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (b
 		ctx = updateHighestWithHistory(ctx, currentBlock)
 	}
 
-	return v, ctx
+	return ctx, v
 }
 
 func updateHighestWithHistory(ctx context.Context, currentBlock *big.Int) context.Context {
@@ -153,22 +153,14 @@ func getNoHistoryByBlockKey(block *big.Int) configKey {
 	return configKey(block.Uint64() + 1000)
 }
 
-func GetNoHistory(ctx context.Context) (bool, context.Context) {
-	number := GetBlockNumber(ctx)
-	if number == nil {
-		fmt.Println("***** NIL BLOCK")
-	}
-	return GetNoHistoryByBlock(ctx, number)
+func GetNoHistory(ctx context.Context) (context.Context, bool) {
+	return GetNoHistoryByBlock(ctx, GetBlockNumber(ctx))
 }
 
 type noHistFunc func(currentBlock *big.Int) bool
 
 func getIsNoHistory(defaultValue bool, f noHistFunc) noHistFunc {
 	return func(currentBlock *big.Int) bool {
-		if !defaultValue {
-			return true
-		}
-
 		if f == nil {
 			return defaultValue
 		}

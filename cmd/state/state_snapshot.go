@@ -378,7 +378,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 			}
 		}
 	}
-	fmt.Printf("bucket.Storage trie computation took %v\n", time.Since(startTime))
+	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
 func stateSnapshot() error {

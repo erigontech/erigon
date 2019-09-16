@@ -53,7 +53,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
-	enc.NetworkId = c.NetworkId
+	enc.NetworkId = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.NoPruning = c.NoPruning
 	enc.NoHistory = c.NoHistory
@@ -130,7 +130,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Genesis = dec.Genesis
 	}
 	if dec.NetworkId != nil {
-		c.NetworkId = *dec.NetworkId
+		c.NetworkID = *dec.NetworkId
 	}
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode

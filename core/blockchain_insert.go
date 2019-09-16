@@ -17,13 +17,10 @@
 package core
 
 import (
-	//"time"
-
 	"context"
-	//"github.com/ledgerwatch/turbo-geth/common"
+
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	//"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // insertStats tracks and reports on block insertion.

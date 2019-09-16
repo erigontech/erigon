@@ -206,6 +206,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
+			ctx, _ = params.GetNoHistoryByBlock(ctx, b.header.Number)
 			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
@@ -223,7 +224,6 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
-			_, ctx := params.GetNoHistoryByBlock(ctx, b.header.Number)
 			if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}

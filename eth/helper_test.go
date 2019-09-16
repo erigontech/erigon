@@ -59,8 +59,8 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{testBank: {Balance: big.NewInt(1000000)}},
 		}
-		db_gen  = ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
-		genesis = gspec.MustCommit(db_gen)
+		dbGen   = ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+		genesis = gspec.MustCommit(dbGen)
 	)
 	var chain []*types.Block
 
@@ -75,13 +75,13 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	blockchain.EnableReceipts(true)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db_gen, blocks, generator)
+	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
 
 	if _, err := blockchain.InsertChain(chain); err != nil {
 		return nil, nil, err
 	}
 
-	pm, err := NewProtocolManager(gspec.Config, mode, DefaultConfig.NetworkId, evmux, &testTxPool{added: newtx}, engine, blockchain, db, nil)
+	pm, err := NewProtocolManager(gspec.Config, mode, DefaultConfig.NetworkID, evmux, &testTxPool{added: newtx}, engine, blockchain, db, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -230,7 +230,7 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesis common.Hash) {
 	msg := &statusData{
 		ProtocolVersion: uint32(p.version),
-		NetworkId:       DefaultConfig.NetworkId,
+		NetworkId:       DefaultConfig.NetworkID,
 		TD:              td,
 		CurrentBlock:    head,
 		GenesisBlock:    genesis,

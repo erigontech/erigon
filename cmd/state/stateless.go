@@ -171,6 +171,7 @@ func stateless(genLag, consLag int) {
 		tds.Rebuild()
 	}
 	tds.SetResolveReads(false)
+	tds.SetNoHistory(true)
 	interrupt := false
 	var thresholdBlock uint64 = 5000000
 	//prev := make(map[uint64]*state.Stateless)

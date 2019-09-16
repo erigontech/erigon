@@ -279,8 +279,7 @@ func (dl *downloadTester) Rollback(hashes []common.Hash) {
 	}
 }
 
-func (dl *downloadTester) NotifyHeightKnownBlock(_ uint64) {
-}
+func (dl *downloadTester) NotifyHeightKnownBlock(_ uint64) {}
 
 // newPeer registers a new block download source into the downloader.
 func (dl *downloadTester) newPeer(id string, version int, chain *testChain) error {

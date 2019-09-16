@@ -197,7 +197,7 @@ func makeTokenBalances() {
 	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
 	check(err)
 	defer pdb.Close()
-	bucketKey := []byte("sha3")
+	bucket := []byte("sha3")
 	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
@@ -283,7 +283,7 @@ func makeTokenBalances() {
 			var preimage []byte
 			if key != nil {
 				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucketKey)
+					b := tx.Bucket(bucket)
 					if b == nil {
 						return nil
 					}
@@ -418,7 +418,7 @@ func makeTokenAllowances() {
 	pdb, err := bolt.Open("/Volumes/tb41/turbo-geth/sha3preimages", 0600, &bolt.Options{})
 	check(err)
 	defer pdb.Close()
-	bucketKey := []byte("sha3")
+	bucket := []byte("sha3")
 	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
@@ -523,7 +523,7 @@ func makeTokenAllowances() {
 			var preimage []byte
 			if key != nil {
 				err := pdb.View(func(tx *bolt.Tx) error {
-					b := tx.Bucket(bucketKey)
+					b := tx.Bucket(bucket)
 					if b == nil {
 						return nil
 					}

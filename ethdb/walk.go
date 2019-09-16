@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -30,7 +30,7 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 // Generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucketKey, key, value []byte) error) error {
+func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string]struct{})
 	suffixDst := encodeTimestamp(timestampDst + 1)
@@ -82,14 +82,14 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucketKey,
 	//sort.Sort(buckets)
 	for bucketStr, t := range m {
 		//t := m[bucketStr]
-		bucketKey := []byte(bucketStr)
+		bucket := []byte(bucketStr)
 		for keyStr := range t {
 			key := []byte(keyStr)
-			value, err := db.GetAsOf(bucketKey[1:], bucketKey, key, timestampDst+1)
+			value, err := db.GetAsOf(bucket[1:], bucket, key, timestampDst+1)
 			if err != nil {
 				value = nil
 			}
-			if err := df(bucketKey, key, value); err != nil {
+			if err := df(bucket, key, value); err != nil {
 				return err
 			}
 		}

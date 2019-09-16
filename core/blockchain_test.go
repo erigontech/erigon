@@ -17,14 +17,13 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"sync"
 	"testing"
 	"time"
-
-	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -54,7 +53,13 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 	)
 
 	// Initialize a fresh chain with only a genesis block
-	blockchain, _ := NewBlockChain(db, nil, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
 	// Create and inject the requested chain
@@ -543,7 +548,13 @@ func testReorgBadHashes(t *testing.T, full bool) {
 	blockchain.Stop()
 
 	// Create a new BlockChain and check that it rolled back the state.
-	ncm, err := NewBlockChain(blockchain.db, nil, blockchain.chainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	ncm, err := NewBlockChain(blockchain.db, cacheConfig, blockchain.chainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("failed to create new chain manager: %v", err)
 	}
@@ -657,7 +668,13 @@ func TestFastVsFullChains(t *testing.T) {
 	// Import the chain as an archive node for the comparison baseline
 	archiveDb := ethdb.NewMemDatabase()
 	gspec.MustCommit(archiveDb)
-	archive, _ := NewBlockChain(archiveDb, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	archive, _ := NewBlockChain(archiveDb, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	defer archive.Stop()
 
 	if n, err := archive.InsertChain(blocks); err != nil {
@@ -745,7 +762,13 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 	archiveDb := ethdb.NewMemDatabase()
 	gspec.MustCommit(archiveDb)
 
-	archive, _ := NewBlockChain(archiveDb, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	archive, _ := NewBlockChain(archiveDb, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	if n, err := archive.InsertChain(blocks); err != nil {
 		t.Fatalf("failed to process block %d: %v", n, err)
 	}
@@ -832,7 +855,13 @@ func TestChainTxReorgs(t *testing.T) {
 	//  - futureAdd: transaction added after the reorg has already finished
 	var pastAdd, freshAdd, futureAdd *types.Transaction
 
-	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	blockchain.EnableReceipts(true)
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
@@ -926,7 +955,13 @@ func TestLogReorgs(t *testing.T) {
 		signer    = types.NewEIP155Signer(gspec.Config.ChainID)
 	)
 
-	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
@@ -1174,8 +1209,7 @@ func TestEIP155Transition(t *testing.T) {
 
 	// generate an invalid chain id transaction
 	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
-	ctx = config.WithEIPsFlags(context.Background(), big.NewInt(blocks[len(blocks)-1].Number().Int64()+1))
-	ctx = params.WithNoHistory(ctx, blockchain.NoHistory(), blockchain.IsNoHistory)
+	ctx = blockchain.WithContext(context.Background(), big.NewInt(blocks[len(blocks)-1].Number().Int64()+1))
 	blocks, _ = GenerateChain(ctx, config, blocks[len(blocks)-1], ethash.NewFaker(), db.MemCopy(), 4, func(i int, block *BlockGen) {
 		var (
 			tx      *types.Transaction
@@ -1281,14 +1315,19 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 	diskdb := ethdb.NewMemDatabase()
 	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
 
-	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
 	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-	//genesisDb := db.MemCopy()
-	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+	blocks, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 
 	// Generate a bunch of fork blocks, each side forking from the canonical chain
 	forks := make([]*types.Block, len(blocks))
@@ -1304,7 +1343,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		})
 		forks[i] = fork[0]
 		// Move db forward by 1 block
-		GenerateChain(ctx, params.TestChainConfig, parent, engine, db.MemCopy(), 1, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+		GenerateChain(ctx, params.TestChainConfig, parent, engine, db, 1, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
 	}
 	// Import the canonical and fork chain side by side, verifying the current block
 	// and current header consistency
@@ -1332,25 +1371,26 @@ func TestLargeReorgTrieGC(t *testing.T) {
 	// Generate the original common chain segment and the two competing forks
 	engine := ethash.NewFaker()
 
-	db := ethdb.NewMemDatabase()
-	config := params.TestChainConfig
-	genesis := (&Genesis{Config: config}).MustCommit(db)
-
 	diskdb := ethdb.NewMemDatabase()
-	(&Genesis{Config: config}).MustCommit(diskdb)
-	chain, err := NewBlockChain(diskdb, nil, config, engine, vm.Config{}, nil)
+	(&Genesis{Config: params.TestChainConfig}).MustCommit(diskdb)
+	cacheConfig := &CacheConfig{
+		TrieCleanLimit: 256,
+		TrieDirtyLimit: 256,
+		TrieTimeLimit:  5 * time.Minute,
+		NoHistory:      false,
+	}
+	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}
+	ctx := chain.WithContext(context.Background(), big.NewInt(1))
 
-	ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	shared, _ := GenerateChain(ctx, config, genesis, engine, db.MemCopy(), 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+	db := ethdb.NewMemDatabase()
+	genesis := (&Genesis{Config: params.TestChainConfig}).MustCommit(db)
 
-	ctx = chain.WithContext(context.Background(), big.NewInt(shared[len(shared)-1].Number().Int64()+1))
-	original, _ := GenerateChain(ctx, config, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
-
-	ctx = chain.WithContext(context.Background(), big.NewInt(shared[len(shared)-1].Number().Int64()+1))
-	competitor, _ := GenerateChain(ctx, config, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory+1, func(i int, b *BlockGen) {
+	shared, _ := GenerateChain(ctx, params.TestChainConfig, genesis, engine, db, 64, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{1}) })
+	original, _ := GenerateChain(ctx, params.TestChainConfig, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory, func(i int, b *BlockGen) { b.SetCoinbase(common.Address{2}) })
+	competitor, _ := GenerateChain(ctx, params.TestChainConfig, shared[len(shared)-1], engine, db.MemCopy(), 2*triesInMemory+1, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{3})
 		b.OffsetTime(-2)
 	})
