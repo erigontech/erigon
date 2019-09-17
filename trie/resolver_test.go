@@ -12,9 +12,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var testbucket = []byte("test")
+func TestRebuild(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
 
-func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := dbutils.AccountsBucket

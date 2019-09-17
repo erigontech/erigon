@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"io"
 	"math/big"
 	"runtime"
@@ -52,7 +53,7 @@ type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
-	WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error
+	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
 	RemoveStorage(address common.Address, incarnation uint64) error
 }
 
@@ -75,7 +76,7 @@ func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error
 	return nil
 }
 
-func (nw *NoopWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	return nil
 }
 
@@ -923,6 +924,10 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 
 var prevMemStats runtime.MemStats
 
+type TrieStateWriter struct {
+	tds *TrieDbState
+}
+
 func (tds *TrieDbState) PruneTries(print bool) {
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
@@ -941,10 +946,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	if print {
 		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
-}
-
-type TrieStateWriter struct {
-	tds *TrieDbState
 }
 
 type DbStateWriter struct {
@@ -987,7 +988,7 @@ func accountsEqual(a1, a2 *accounts.Account) bool {
 	return true
 }
 
-func (tsw *TrieStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
+func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
@@ -1015,7 +1016,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
-	if dsw.tds.noHistory {
+	_, noHistory := params.GetNoHistory(ctx)
+	if dsw.tds.noHistory || noHistory {
 		return nil
 	}
 	// Don't write historical record if the account did not change
@@ -1051,7 +1053,8 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
-	if dsw.tds.noHistory {
+	_, noHistory := params.GetNoHistory(ctx)
+	if dsw.tds.noHistory || noHistory {
 		return nil
 	}
 	var originalData []byte
@@ -1080,7 +1083,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) e
 	return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
-func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return err
@@ -1106,7 +1109,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(address common.Address, incarnat
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
 	}
@@ -1133,7 +1136,8 @@ func (dsw *DbStateWriter) WriteAccountStorage(address common.Address, incarnatio
 	if err != nil {
 		return err
 	}
-	if dsw.tds.noHistory {
+	_, noHistory := params.GetNoHistory(ctx)
+	if dsw.tds.noHistory || noHistory {
 		return nil
 	}
 	o := bytes.TrimLeft(original[:], "\x00")

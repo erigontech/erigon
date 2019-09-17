@@ -85,14 +85,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
-	suffix = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(suffix))
-	copy(composite, key)
-	copy(composite[len(key):], suffix)
-	return composite, suffix
-}
-
 func historyBucket(bucket []byte) []byte {
 	hb := make([]byte, len(bucket)+1)
 	hb[0] = byte('h')
@@ -122,6 +114,14 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		return sb.Put(suffixkey, dat)
 	})
 	return err
+}
+
+func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
+	suffix = encodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(suffix))
+	copy(composite, key)
+	copy(composite[len(key):], suffix)
+	return composite, suffix
 }
 
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
@@ -232,6 +232,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				return nil
 			}
 		}
+
 		return ErrKeyNotFound
 	})
 	return dat, err

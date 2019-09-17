@@ -18,13 +18,11 @@ package state
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 

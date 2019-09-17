@@ -142,7 +142,8 @@ func (b *SimulatedBackend) Rollback() {
 }
 
 func (b *SimulatedBackend) emptyPendingBlock() {
-	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(int, *core.BlockGen) {})
+	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(int, *core.BlockGen) {})
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
@@ -378,7 +379,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 		return err
 	}
 	//fmt.Printf("==== Start producing block %d\n", (b.prependBlock.NumberU64() + 1))
-	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	ctx = b.blockchain.WithContext(ctx, big.NewInt(b.prependBlock.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}
@@ -462,7 +464,8 @@ func (b *SimulatedBackend) SubscribeFilterLogs(ctx context.Context, query ethere
 func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	blocks, _ := core.GenerateChain(b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
+	ctx := b.blockchain.WithContext(context.Background(), big.NewInt(b.prependBlock.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, b.config, b.prependBlock, ethash.NewFaker(), b.prependDb.MemCopy(), 1, func(number int, block *core.BlockGen) {
 		for _, tx := range b.pendingBlock.Transactions() {
 			block.AddTxWithChain(b.blockchain, tx)
 		}

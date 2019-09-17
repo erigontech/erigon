@@ -1,6 +1,7 @@
 package pruner
 
 import (
+	"context"
 	"fmt"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -51,7 +52,8 @@ func TestOne(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
 		var (
 			tx     *types.Transaction
 			genErr error

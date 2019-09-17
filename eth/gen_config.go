@@ -23,6 +23,8 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NetworkId               uint64
 		SyncMode                downloader.SyncMode
 		NoPruning               bool
+		NoHistory               bool
+		ArchiveSyncInterval     int
 		LightServ               int `toml:",omitempty"`
 		LightPeers              int `toml:",omitempty"`
 		OnlyAnnounce            bool
@@ -51,9 +53,11 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
-	enc.NetworkId = c.NetworkId
+	enc.NetworkId = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.NoPruning = c.NoPruning
+	enc.NoHistory = c.NoHistory
+	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
 	enc.LightServ = c.LightServ
 	enc.LightPeers = c.LightPeers
 	enc.OnlyAnnounce = c.OnlyAnnounce
@@ -90,6 +94,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NetworkId               *uint64
 		SyncMode                *downloader.SyncMode
 		NoPruning               *bool
+		NoHistory               *bool
+		ArchiveSyncInterval     *int
 		LightServ               *int `toml:",omitempty"`
 		LightPeers              *int `toml:",omitempty"`
 		OnlyAnnounce            *bool
@@ -124,13 +130,19 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		c.Genesis = dec.Genesis
 	}
 	if dec.NetworkId != nil {
-		c.NetworkId = *dec.NetworkId
+		c.NetworkID = *dec.NetworkId
 	}
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode
 	}
 	if dec.NoPruning != nil {
 		c.NoPruning = *dec.NoPruning
+	}
+	if dec.NoHistory != nil {
+		c.NoHistory = *dec.NoHistory
+	}
+	if dec.ArchiveSyncInterval != nil {
+		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval
 	}
 	if dec.LightServ != nil {
 		c.LightServ = *dec.LightServ
