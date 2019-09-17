@@ -61,9 +61,9 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 	)
 	var chain []*types.Block
 	{
-		db_gen := ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
-		genesis := gspec.MustCommit(db_gen)
-		chain, _ = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), db_gen, blocks, generator)
+		dbGen := ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+		genesis := gspec.MustCommit(dbGen)
+		chain, _ = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
 	}
 	// Fresh database
 	db := ethdb.NewMemDatabase()

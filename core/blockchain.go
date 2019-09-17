@@ -1104,7 +1104,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		lastCanon     *types.Block
 		coalescedLogs []*types.Log
 	)
-	var verifyFrom int = len(chain)
+	verifyFrom := len(chain)
 	if !bc.noHistory {
 		externTd := big.NewInt(0)
 		if len(chain) > 0 && chain[0].NumberU64() > 0 {
@@ -1146,8 +1146,8 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 		parentHash := chain[0].ParentHash()
 		parent = bc.GetBlock(parentHash, parentNumber)
 		if parent == nil {
-			log.Error("Chain segment could not be inserted, missing parent", "hash", parentHash)
-			return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserted, missing parent %x", parentHash)
+			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
+			return 0, events, coalescedLogs, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
 		canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
 		for canonicalHash != parentHash {
@@ -1157,7 +1157,7 @@ func (bc *BlockChain) insertChain(chain types.Blocks, verifySeals bool) (int, []
 			parentHash = parent.ParentHash()
 			parent = bc.GetBlock(parentHash, parentNumber)
 			if parent == nil {
-				log.Error("Chain segment could not be inserted, missing parent", "hash", parentHash)
+				log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
 				return 0, events, coalescedLogs, fmt.Errorf("Chain segment could not be inserter, missing parent %x", parentHash)
 			}
 			canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
