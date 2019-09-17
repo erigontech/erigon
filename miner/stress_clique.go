@@ -193,7 +193,7 @@ func makeSealer(genesis *core.Genesis) (*node.Node, error) {
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
 		return eth.New(ctx, &eth.Config{
 			Genesis:         genesis,
-			NetworkId:       genesis.Config.ChainID.Uint64(),
+			NetworkID:       genesis.Config.ChainID.Uint64(),
 			SyncMode:        downloader.FullSync,
 			DatabaseCache:   256,
 			DatabaseHandles: 256,

@@ -90,7 +90,7 @@ var errorToString = map[int]string{
 	ErrDecode:                  "Invalid message",
 	ErrInvalidMsgCode:          "Invalid message code",
 	ErrProtocolVersionMismatch: "Protocol version mismatch",
-	ErrNetworkIdMismatch:       "NetworkId mismatch",
+	ErrNetworkIdMismatch:       "NetworkID mismatch",
 	ErrGenesisBlockMismatch:    "Genesis block mismatch",
 	ErrNoStatusMsg:             "No status message",
 	ErrExtraStatusMsg:          "Extra status message",
@@ -114,7 +114,7 @@ type txPool interface {
 // statusData is the network packet for the status message.
 type statusData struct {
 	ProtocolVersion uint32
-	NetworkId       uint64
+	NetworkID       uint64
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash

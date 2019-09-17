@@ -20,7 +20,7 @@ var _ = (*configMarshaling)(nil)
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkId               uint64
+		NetworkID               uint64
 		SyncMode                downloader.SyncMode
 		NoPruning               bool
 		LightServ               int `toml:",omitempty"`
@@ -51,7 +51,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	}
 	var enc Config
 	enc.Genesis = c.Genesis
-	enc.NetworkId = c.NetworkId
+	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.NoPruning = c.NoPruning
 	enc.LightServ = c.LightServ
@@ -87,7 +87,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
 		Genesis                 *core.Genesis `toml:",omitempty"`
-		NetworkId               *uint64
+		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
 		NoPruning               *bool
 		LightServ               *int `toml:",omitempty"`
@@ -123,8 +123,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Genesis != nil {
 		c.Genesis = dec.Genesis
 	}
-	if dec.NetworkId != nil {
-		c.NetworkId = *dec.NetworkId
+	if dec.NetworkID != nil {
+		c.NetworkID = *dec.NetworkID
 	}
 	if dec.SyncMode != nil {
 		c.SyncMode = *dec.SyncMode
