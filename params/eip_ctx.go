@@ -2,7 +2,6 @@ package params
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 )
 
@@ -68,7 +67,7 @@ func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (context.Co
 		return ctx, false
 	}
 
-	key := getNoHistoryByBlockKey(currentBlock)
+	key := getNoHistoryByBlock(currentBlock)
 	v, ok := getNoHistoryByKey(ctx, key)
 	if ok {
 		if !v {
@@ -81,10 +80,6 @@ func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (context.Co
 }
 
 func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (context.Context, bool) {
-	if key < 0 {
-		panic(fmt.Sprintln(int(key), currentBlock == nil))
-	}
-
 	v := getNoHistory(ctx, currentBlock)
 	ctx = context.WithValue(ctx, key, v)
 	if !v {
@@ -95,13 +90,13 @@ func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (c
 }
 
 func updateHighestWithHistory(ctx context.Context, currentBlock *big.Int) context.Context {
-	highestWithHistory := getWithHistoryHighestByKey(ctx)
+	highestWithHistory := getWithHistoryHighest(ctx)
 	var currentIsLower bool
 	if highestWithHistory != nil {
 		currentIsLower = currentBlock.Cmp(highestWithHistory) < 0
 	}
 	if !currentIsLower {
-		ctx = setWithHistoryHighestByKey(ctx, currentBlock)
+		ctx = setWithHistoryHighestByBlock(ctx, currentBlock)
 	}
 	return ctx
 }
@@ -117,7 +112,7 @@ func getNoHistory(ctx context.Context, currentBlock *big.Int) bool {
 	return false
 }
 
-func getWithHistoryHighestByKey(ctx context.Context) *big.Int {
+func getWithHistoryHighest(ctx context.Context) *big.Int {
 	v := ctx.Value(WithHistoryHighest)
 	if v == nil {
 		return nil
@@ -128,7 +123,7 @@ func getWithHistoryHighestByKey(ctx context.Context) *big.Int {
 	return nil
 }
 
-func setWithHistoryHighestByKey(ctx context.Context, block *big.Int) context.Context {
+func setWithHistoryHighestByBlock(ctx context.Context, block *big.Int) context.Context {
 	return context.WithValue(ctx, WithHistoryHighest, block)
 }
 
@@ -146,7 +141,7 @@ func getNoHistoryByKey(ctx context.Context, key configKey) (bool, bool) {
 	return false, false
 }
 
-func getNoHistoryByBlockKey(block *big.Int) configKey {
+func getNoHistoryByBlock(block *big.Int) configKey {
 	if block == nil {
 		return configKey(-1)
 	}

@@ -140,10 +140,11 @@ type BlockChain struct {
 	validator Validator // block and state validator interface
 	vmConfig  vm.Config
 
-	badBlocks         *lru.Cache // Bad block cache
-	highestKnownBlock *uint64
-	enableReceipts    bool // Whether receipts need to be written to the database
-	resolveReads      bool
+	badBlocks           *lru.Cache // Bad block cache
+	highestKnownBlock   uint64
+	highestKnownBlockMu sync.Mutex
+	enableReceipts      bool // Whether receipts need to be written to the database
+	resolveReads        bool
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -171,20 +172,19 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	cdb := db.NewBatch()
 
 	bc := &BlockChain{
-		chainConfig:       chainConfig,
-		cacheConfig:       cacheConfig,
-		db:                cdb,
-		triegc:            prque.New(nil),
-		quit:              make(chan struct{}),
-		bodyCache:         bodyCache,
-		bodyRLPCache:      bodyRLPCache,
-		receiptsCache:     receiptsCache,
-		blockCache:        blockCache,
-		futureBlocks:      futureBlocks,
-		engine:            engine,
-		vmConfig:          vmConfig,
-		highestKnownBlock: new(uint64),
-		badBlocks:         badBlocks,
+		chainConfig:   chainConfig,
+		cacheConfig:   cacheConfig,
+		db:            cdb,
+		triegc:        prque.New(nil),
+		quit:          make(chan struct{}),
+		bodyCache:     bodyCache,
+		bodyRLPCache:  bodyRLPCache,
+		receiptsCache: receiptsCache,
+		blockCache:    blockCache,
+		futureBlocks:  futureBlocks,
+		engine:        engine,
+		vmConfig:      vmConfig,
+		badBlocks:     badBlocks,
 	}
 	bc.SetValidator(NewBlockValidator(chainConfig, bc, engine))
 	bc.SetProcessor(NewStateProcessor(chainConfig, bc, engine))
@@ -1789,7 +1789,7 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 
 	var isArchiveInterval bool
 	currentBlockNumber := bc.CurrentBlock().Number().Uint64()
-	highestKnownBlock := atomic.LoadUint64(bc.highestKnownBlock)
+	highestKnownBlock := bc.getHeightKnownBlock()
 	if highestKnownBlock > currentBlockNumber {
 		isArchiveInterval = (currentBlock.Uint64() - highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
 	} else {
@@ -1800,9 +1800,17 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 }
 
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
-	if atomic.LoadUint64(bc.highestKnownBlock) < h {
-		atomic.StoreUint64(bc.highestKnownBlock, h)
+	bc.highestKnownBlockMu.Lock()
+	if bc.highestKnownBlock < h {
+		bc.highestKnownBlock = h
 	}
+	bc.highestKnownBlockMu.Unlock()
+}
+
+func (bc *BlockChain) getHeightKnownBlock() uint64 {
+	bc.highestKnownBlockMu.Lock()
+	defer bc.highestKnownBlockMu.Unlock()
+	return bc.highestKnownBlock
 }
 
 func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {

@@ -1419,9 +1419,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				origin += uint64(limit)
 			}
 			// Update the highest block number we know if a higher one is found.
-			if d.GetSyncStatsChainHeight() < origin {
-				d.SetSyncStatsChainHeight(origin - 1)
-			}
+			d.setGreaterSyncStatsChainHeight(origin-1, origin)
 
 			// Signal the content downloaders of the availablility of new tasks
 			for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
@@ -1603,8 +1601,17 @@ func (d *Downloader) requestTTL() time.Duration {
 func (d *Downloader) SetSyncStatsChainHeight(h uint64) {
 	d.syncStatsLock.Lock()
 	d.syncStatsChainHeight = h
+	d.blockchain.NotifyHeightKnownBlock(h)
 	d.syncStatsLock.Unlock()
-	d.notifyBlockchain(h)
+}
+
+func (d *Downloader) setGreaterSyncStatsChainHeight(h, old uint64) {
+	d.syncStatsLock.Lock()
+	if d.syncStatsChainHeight < old {
+		d.syncStatsChainHeight = h
+		d.blockchain.NotifyHeightKnownBlock(h)
+	}
+	d.syncStatsLock.Unlock()
 }
 
 func (d *Downloader) GetSyncStatsChainHeight() uint64 {
@@ -1612,8 +1619,4 @@ func (d *Downloader) GetSyncStatsChainHeight() uint64 {
 	h := d.syncStatsChainHeight
 	d.syncStatsLock.RUnlock()
 	return h
-}
-
-func (d *Downloader) notifyBlockchain(h uint64) {
-	d.blockchain.NotifyHeightKnownBlock(h)
 }
