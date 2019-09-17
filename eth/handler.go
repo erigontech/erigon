@@ -761,7 +761,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 	case GetStorageRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStorageRangesMsg
+		var request getStorageRangesOrNodes
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -772,62 +772,57 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		response.ID = request.ID
 		response.Entries = make([][]storageRange, numReq)
 
-		missingData := false
-
-		for j, responseSize := 0, 0; j < numReq; j++ {
-			req := request.Requests[j]
-
-			n := len(req.Prefixes)
-			response.Entries[j] = make([]storageRange, n)
-			for i := 0; i < n; i++ {
-				response.Entries[j][i].Status = NoData
-			}
-
-			var addr common.Address
-			if len(req.Account) == common.AddressLength {
-				addr.SetBytes(req.Account)
-			} else if len(req.Account) == common.HashLength {
-				var preimageErr error
-				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-				if preimageErr == core.ErrNotFound {
-					missingData = true
-					break
-				} else if preimageErr != nil {
-					return preimageErr
-				}
-			} else {
-				return errResp(ErrDecode, "not an account address or its hash")
-			}
-
-			tds, err := pm.blockchain.FindStateWithStorageRoot(addr, req.StorageRoot)
-			if err == core.ErrNotFound {
-				missingData = true
-				break
-			} else if err != nil {
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			if err != nil {
 				return err
 			}
 
-			for i := 0; i < n && responseSize < softResponseLimit; i++ {
-				var leaves []storageLeaf
-				allTraversed, err := tds.WalkStorageRange(addr, req.Prefixes[i], MaxLeavesPerPrefix,
-					func(key common.Hash, value big.Int) {
-						leaves = append(leaves, storageLeaf{key, value})
-					},
-				)
-				if err != nil {
-					return err
+			for j, responseSize := 0, 0; j < numReq; j++ {
+				req := request.Requests[j]
+
+				n := len(req.Prefixes)
+				response.Entries[j] = make([]storageRange, n)
+				for i := 0; i < n; i++ {
+					response.Entries[j][i].Status = NoData
 				}
-				if allTraversed {
-					response.Entries[j][i].Status = OK
-					response.Entries[j][i].Leaves = leaves
-					responseSize += len(leaves)
+
+				var addr common.Address
+				if len(req.Account) == common.AddressLength {
+					addr.SetBytes(req.Account)
+				} else if len(req.Account) == common.HashLength {
+					var preimageErr error
+					addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+					if preimageErr == core.ErrNotFound {
+						break
+					} else if preimageErr != nil {
+						return preimageErr
+					}
 				} else {
-					response.Entries[j][i].Status = TooManyLeaves
+					return errResp(ErrDecode, "not an account address or its hash")
+				}
+
+				for i := 0; i < n && responseSize < softResponseLimit; i++ {
+					var leaves []storageLeaf
+					allTraversed, err := tds.WalkStorageRange(addr, req.Prefixes[i], MaxLeavesPerPrefix,
+						func(key common.Hash, value big.Int) {
+							leaves = append(leaves, storageLeaf{key, value})
+						},
+					)
+					if err != nil {
+						return err
+					}
+					if allTraversed {
+						response.Entries[j][i].Status = OK
+						response.Entries[j][i].Leaves = leaves
+						responseSize += len(leaves)
+					} else {
+						response.Entries[j][i].Status = TooManyLeaves
+					}
 				}
 			}
-		}
-
-		if missingData {
+		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
 		}
 
@@ -884,7 +879,21 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStorageNodesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStorageRangesOrNodes
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		numReq := len(request.Requests)
+
+		var response storageNodesMsg
+		response.ID = request.ID
+		response.Nodes = make([][][]byte, numReq)
+
+		// TODO [yperbasis] implement
+
+		return p2p.Send(p.rw, StorageNodesCode, response)
 
 	case StorageNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")

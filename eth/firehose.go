@@ -79,15 +79,15 @@ type stateRangesMsg struct {
 	AvailableBlocks []common.Hash
 }
 
-type storageRangeReq struct {
-	Account     []byte // account address or hash thereof
-	StorageRoot common.Hash
-	Prefixes    []trie.Keybytes
+type storageReqForOneAccount struct {
+	Account  []byte // account address or hash thereof
+	Prefixes []trie.Keybytes
 }
 
-type getStorageRangesMsg struct {
+type getStorageRangesOrNodes struct {
 	ID       uint64
-	Requests []storageRangeReq
+	Block    common.Hash
+	Requests []storageReqForOneAccount
 }
 
 type storageLeaf struct {
@@ -109,6 +109,12 @@ type storageRangesMsg struct {
 type stateNodesMsg struct {
 	ID              uint64
 	Nodes           [][]byte
+	AvailableBlocks []common.Hash
+}
+
+type storageNodesMsg struct {
+	ID              uint64
+	Nodes           [][][]byte
 	AvailableBlocks []common.Hash
 }
 
