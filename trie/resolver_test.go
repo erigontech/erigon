@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	//"fmt"
@@ -9,11 +8,9 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var testbucket = []byte("test")
-
+/*
 func testRebuild(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
@@ -55,6 +52,7 @@ func testRebuild(t *testing.T) {
 		_ = t1.Rebuild(db, 0)
 	}
 }
+*/
 
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
