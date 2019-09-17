@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -53,14 +52,14 @@ func TestOne(t *testing.T) {
 		signer = types.HomesteadSigner{}
 	)
 
-	nubBlocks:=10
+	numBlocks :=10
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, nubBlocks, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		var (
 			tx     *types.Transaction
 			genErr error
@@ -93,90 +92,212 @@ func TestOne(t *testing.T) {
 	}
 
 	fmt.Println("=============================================================================================")
+	//accHisCountInDB:=0
+	//accCountInDB:=0
+	//err = db.DB().View(func(tx *bolt.Tx) error {
+	//	return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+	//
+	//		var nameCopy = make([]byte, len(name))
+	//		copy(nameCopy, name)
+	//
+	//
+	//		return b.ForEach(func(k, _ []byte) error {
+	//			var keyCopy = make([]byte, len(k)+len(name))
+	//			copy(keyCopy, nameCopy)
+	//			copy(keyCopy[len(name):], k)
+	//			fmt.Println(" - ", string(keyCopy))
+	//			fmt.Println(" -- ", keyCopy)
+	//
+	//			if bytes.HasPrefix(name, dbutils.AccountsHistoryBucket) {
+	//				accHisCountInDB++
+	//			}
+	//
+	//			if bytes.HasPrefix(name, dbutils.AccountsBucket) {
+	//				accCountInDB++
+	//			}
+	//
+	//			return nil
+	//		})
+	//	})
+	//})
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+	//
+	//accHisCountOverSuffix:=0
+	//
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
+	//t.Log("accCountInDB", accCountInDB)
+	//t.Log("accHisCountInDB", accHisCountInDB)
+	//t.Log("accHisCountOverSuffix", accHisCountOverSuffix)
 
-	err = db.DB().View(func(tx *bolt.Tx) error {
-		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			var nameCopy = make([]byte, len(name))
-			copy(nameCopy, name)
-			return b.ForEach(func(k, _ []byte) error {
-				var keyCopy = make([]byte, len(k)+len(name))
-				copy(keyCopy, nameCopy)
-				copy(keyCopy[len(name):], k)
-				fmt.Println(" - ", string(keyCopy))
-				fmt.Println(" -- ", keyCopy)
+	fmt.Println("======================STAT BEFORE PRUNE ==================================")
+	spew.Dump(getStat(db))
+	fmt.Println("========================================================")
 
-				return nil
-			})
-		})
-	})
-	if err != nil {
-		t.Fatal(err)
+
+	fmt.Println("======================PRUNE START==================================")
+
+	err = Prune(db, 0, uint64(numBlocks))
+	if err!=nil {
+		t.Log("Prune", err)
 	}
+	fmt.Println("======================PRUNE END==================================")
 
-	err=db.Walk(dbutils.SuffixBucket,[]byte{}, 0, func(k, v []byte) (b bool, e error) {
+
+	//accHisCountInDB=0
+	//accCountInDB=0
+	//err = db.DB().View(func(tx *bolt.Tx) error {
+	//	return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+	//
+	//		var nameCopy = make([]byte, len(name))
+	//		copy(nameCopy, name)
+	//
+	//
+	//		return b.ForEach(func(k, _ []byte) error {
+	//			var keyCopy = make([]byte, len(k)+len(name))
+	//			copy(keyCopy, nameCopy)
+	//			copy(keyCopy[len(name):], k)
+	//			fmt.Println(" - ", string(keyCopy))
+	//			fmt.Println(" -- ", keyCopy)
+	//
+	//			if bytes.HasPrefix(name, dbutils.AccountsHistoryBucket) {
+	//				fmt.Println("name", name, keyCopy)
+	//				accHisCountInDB++
+	//			}
+	//
+	//			if bytes.HasPrefix(name, dbutils.AccountsBucket) {
+	//				accCountInDB++
+	//			}
+	//
+	//
+	//			return nil
+	//		})
+	//	})
+	//})
+	//if err != nil {
+	//	t.Fatal(err)
+	//}
+
+	//
+	//accHisCountOverSuffix=0
+	//err=db.Walk(dbutils.SuffixBucket,[]byte{}, 0, func(key, v []byte) (b bool, e error) {
+	//	fmt.Println("---------------------------------------------")
+	//	ts, _:=dbutils.DecodeTimestamp(key)
+	//	fmt.Println("k", key, "DecodeTimestamp",  ts)
+	//
+	//	fmt.Println("AccountsHistoryBucket", bytes.HasSuffix(key, dbutils.AccountsHistoryBucket))
+	//	fmt.Println("StorageHistoryBucket", bytes.HasSuffix(key, dbutils.StorageHistoryBucket))
+	//
+	//	fmt.Println("v", v)
+	//	d:=dbutils.Suffix(v)
+	//	fmt.Println("count", d.KeyCount())
+	//	d.Walk(func(k []byte) error {
+	//		fmt.Println("-- ", common.Bytes2Hex(k))
+	//		compKey,_:=dbutils.CompositeKeySuffix(k, ts)
+	//		//fmt.Println("compKey",compKey)
+	//		b, err:=db.Get(dbutils.AccountsHistoryBucket, compKey)
+	//		if len(b)==0 {
+	//			//fmt.Println("empty account", ts, k)
+	//			return nil
+	//		}
+	//		if err!=nil {
+	//			fmt.Println(err)
+	//		} else {
+	//			acc:=&accounts.Account{}
+	//			//fmt.Println(b)
+	//			errInn:=acc.DecodeForStorage(b)
+	//			if errInn!=nil {
+	//				fmt.Println(errInn)
+	//			} else {
+	//				accHisCountOverSuffix++
+	//				fmt.Println("Account found", ts)
+	//				//spew.Dump(acc)
+	//			}
+	//		}
+	//
+	//		return nil
+	//	})
+	//	return true, nil
+	//})
+	//if err!=nil {
+	//	t.Fatal(err)
+	//}
+
+
+	fmt.Println("======================STAT BEFORE PRUNE ==================================")
+	spew.Dump(getStat(db))
+	fmt.Println("========================================================")
+
+}
+
+func generateChain() {
+
+}
+
+type stateStats struct {
+	NotFoundAccountsInHistory uint64
+	ErrAccountsInHistory uint64
+	ErrDecodedAccountsInHistory uint64
+	NumOfChangesInAccountsHistory uint64
+	AccountSuffixRecordsByTimestamp map[uint64]uint32
+	StorageSuffixRecordsByTimestamp map[uint64]uint32
+}
+
+func getStat(db *ethdb.BoltDatabase) (stateStats, error)  {
+	stat:=stateStats{
+		AccountSuffixRecordsByTimestamp:make(map[uint64]uint32,0),
+		StorageSuffixRecordsByTimestamp:make(map[uint64]uint32,0),
+
+	}
+	err:=db.Walk(dbutils.SuffixBucket,[]byte{}, 0, func(key, v []byte) (b bool, e error) {
 		fmt.Println("---------------------------------------------")
-		ts, _:=dbutils.DecodeTimestamp(k)
-		fmt.Println("k", k, "ts",  ts)
+		timestamp, _:=dbutils.DecodeTimestamp(key)
 
-		fmt.Println("AccountsHistoryBucket", bytes.HasSuffix(k, dbutils.AccountsHistoryBucket))
-		fmt.Println("StorageHistoryBucket", bytes.HasSuffix(k, dbutils.StorageHistoryBucket))
+		changedAccounts :=dbutils.Suffix(v)
+		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
+			if _,ok:=stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
+				panic("core/pruner/pruner_test.go:256")
+			}
+			stat.AccountSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+		}
+		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
+			if _,ok:=stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
+				panic("core/pruner/pruner_test.go:261")
+			}
+			stat.StorageSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+		}
 
-		fmt.Println("v", v)
-		d:=dbutils.Suffix(v)
-		d.Walk(func(k []byte) error {
-			fmt.Println("-- ", common.Bytes2Hex(k))
-			compKey,_:=dbutils.CompositeKeySuffix(k, ts)
+		err:= changedAccounts.Walk(func(k []byte) error {
+			compKey,_:=dbutils.CompositeKeySuffix(k, timestamp)
 			b, err:=db.Get(dbutils.AccountsHistoryBucket, compKey)
+			if len(b)==0 {
+				stat.NotFoundAccountsInHistory++
+				return nil
+			}
 			if err!=nil {
-				fmt.Println(err)
+				stat.ErrAccountsInHistory++
 			} else {
 				acc:=&accounts.Account{}
-				fmt.Println(b)
 				errInn:=acc.DecodeForStorage(b)
 				if errInn!=nil {
-					fmt.Println(errInn)
+					stat.ErrDecodedAccountsInHistory++
 				} else {
-					spew.Dump(acc)
+					stat.NumOfChangesInAccountsHistory++
 				}
 			}
-
 			return nil
 		})
+		if err!=nil {
+			return false, err
+		}
 		return true, nil
 	})
-	if err!=nil {
-		t.Fatal(err)
+
+	if err != nil {
+		return stateStats{}, err
 	}
-}
-
-
-func decodeTimestamp(suffix []byte) (uint64, []byte) {
-	bytecount := int(suffix[0] >> 5)
-	timestamp := uint64(suffix[0] & 0x1f)
-	for i := 1; i < bytecount; i++ {
-		timestamp = (timestamp << 8) | uint64(suffix[i])
-	}
-	return timestamp, suffix[bytecount:]
-}
-
-
-// If highZero is true, the most significant bits of every byte is left zero
-func encodeTimestamp(timestamp uint64) []byte {
-	var suffix []byte
-	var limit uint64
-	limit = 32
-	for bytecount := 1; bytecount <= 8; bytecount++ {
-		if timestamp < limit {
-			suffix = make([]byte, bytecount)
-			b := timestamp
-			for i := bytecount - 1; i > 0; i-- {
-				suffix[i] = byte(b & 0xff)
-				b >>= 8
-			}
-			suffix[0] = byte(b) | (byte(bytecount) << 5) // 3 most significant bits of the first byte are bytecount
-			break
-		}
-		limit <<= 8
-	}
-	return suffix
+	return stat, nil
 }
