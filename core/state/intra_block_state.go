@@ -777,7 +777,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			}
 			stateObject.deleted = true
 		} else {
-			if err := stateObject.updateTrie(stateWriter); err != nil {
+			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
 
@@ -815,7 +815,7 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 				}
 			}
 
-			if err := stateObject.updateTrie(stateWriter); err != nil {
+			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
 

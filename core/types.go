@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -28,7 +29,7 @@ import (
 //
 type Validator interface {
 	// ValidateBody validates the given block's content.
-	ValidateBody(block *types.Block) error
+	ValidateBody(ctx context.Context, block *types.Block) error
 
 	// ValidateState validates the given statedb and optionally the receipts and
 	// gas used.

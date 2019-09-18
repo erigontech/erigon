@@ -195,6 +195,8 @@ type BlockChain interface {
 
 	// InsertReceiptChain inserts a batch of receipts into the local chain.
 	InsertReceiptChain(types.Blocks, []types.Receipts) (int, error)
+
+	NotifyHeightKnownBlock(h uint64)
 }
 
 // New creates a new downloader to fetch hashes and blocks from remote peers.
@@ -423,12 +425,14 @@ func (d *Downloader) syncWithPeer(p *peerConnection, hash common.Hash, td *big.I
 	if err != nil {
 		return err
 	}
+
+	syncStatsChainHeight := d.GetSyncStatsChainHeight()
 	d.syncStatsLock.Lock()
-	if d.syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
+	if syncStatsChainHeight <= origin || d.syncStatsChainOrigin > origin {
 		d.syncStatsChainOrigin = origin
 	}
-	d.syncStatsChainHeight = height
 	d.syncStatsLock.Unlock()
+	d.SetSyncStatsChainHeight(height)
 
 	// Ensure our origin point is below any fast sync pivot point
 	pivot := uint64(0)
@@ -1415,11 +1419,7 @@ func (d *Downloader) processHeaders(origin uint64, pivot uint64, td *big.Int) er
 				origin += uint64(limit)
 			}
 			// Update the highest block number we know if a higher one is found.
-			d.syncStatsLock.Lock()
-			if d.syncStatsChainHeight < origin {
-				d.syncStatsChainHeight = origin - 1
-			}
-			d.syncStatsLock.Unlock()
+			d.setGreaterSyncStatsChainHeight(origin-1, origin)
 
 			// Signal the content downloaders of the availablility of new tasks
 			for _, ch := range []chan bool{d.bodyWakeCh, d.receiptWakeCh} {
@@ -1596,4 +1596,27 @@ func (d *Downloader) requestTTL() time.Duration {
 		ttl = ttlLimit
 	}
 	return ttl
+}
+
+func (d *Downloader) SetSyncStatsChainHeight(h uint64) {
+	d.syncStatsLock.Lock()
+	d.syncStatsChainHeight = h
+	d.blockchain.NotifyHeightKnownBlock(h)
+	d.syncStatsLock.Unlock()
+}
+
+func (d *Downloader) setGreaterSyncStatsChainHeight(h, old uint64) {
+	d.syncStatsLock.Lock()
+	if d.syncStatsChainHeight < old {
+		d.syncStatsChainHeight = h
+		d.blockchain.NotifyHeightKnownBlock(h)
+	}
+	d.syncStatsLock.Unlock()
+}
+
+func (d *Downloader) GetSyncStatsChainHeight() uint64 {
+	d.syncStatsLock.RLock()
+	h := d.syncStatsChainHeight
+	d.syncStatsLock.RUnlock()
+	return h
 }

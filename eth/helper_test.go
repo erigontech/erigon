@@ -20,6 +20,7 @@
 package eth
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"log"
@@ -58,13 +59,10 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 			Config: params.TestChainConfig,
 			Alloc:  core.GenesisAlloc{testBank: {Balance: big.NewInt(1000000)}},
 		}
+		dbGen   = ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
+		genesis = gspec.MustCommit(dbGen)
 	)
 	var chain []*types.Block
-	{
-		dbGen := ethdb.NewMemDatabase() // This database is only used to generate the chain, then discarded
-		genesis := gspec.MustCommit(dbGen)
-		chain, _ = core.GenerateChain(gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
-	}
 	// Fresh database
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
@@ -74,6 +72,10 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		return nil, nil, err
 	}
 	blockchain.EnableReceipts(true)
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
+	chain, _ = core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), dbGen, blocks, generator)
+
 	if _, err := blockchain.InsertChain(chain); err != nil {
 		return nil, nil, err
 	}

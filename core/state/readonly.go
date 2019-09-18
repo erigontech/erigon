@@ -19,11 +19,10 @@ package state
 import (
 	"bytes"
 	"context"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/petar/GoLLRB/llrb"
@@ -193,7 +192,7 @@ func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
 	return nil
 }
 
-func (dbs *DbState) WriteAccountStorage(address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	t, ok := dbs.storage[address]
 	if !ok {
 		t = llrb.New()

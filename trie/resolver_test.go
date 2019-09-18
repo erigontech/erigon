@@ -1,7 +1,10 @@
 package trie
 
 import (
+	"bytes"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	//"fmt"
 	"testing"
@@ -10,8 +13,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
-/*
-func testRebuild(t *testing.T) {
+func TestRebuild(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := dbutils.AccountsBucket
@@ -52,7 +56,6 @@ func testRebuild(t *testing.T) {
 		_ = t1.Rebuild(db, 0)
 	}
 }
-*/
 
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
