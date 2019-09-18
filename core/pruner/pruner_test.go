@@ -2,8 +2,12 @@ package pruner
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -14,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/tests/contracts"
 	"math/big"
 	"reflect"
 	"testing"
@@ -240,4 +245,165 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 		return stateStats{}, err
 	}
 	return stat, nil
+}
+
+func TestStoragePruning(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db       = ethdb.NewMemDatabase()
+		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+		address  = crypto.PubkeyToAddress(key.PublicKey)
+		address1 = crypto.PubkeyToAddress(key1.PublicKey)
+		address2 = crypto.PubkeyToAddress(key2.PublicKey)
+		funds    = big.NewInt(1000000000)
+		gspec    = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				EIP2027Block:        big.NewInt(4),
+				ConstantinopleBlock: big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address:  {Balance: funds},
+				address1: {Balance: funds},
+				address2: {Balance: funds},
+			},
+		}
+		genesis   = gspec.MustCommit(db)
+		genesisDb = db.MemCopy()
+	)
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts1 := bind.NewKeyedTransactor(key1)
+	transactOpts2 := bind.NewKeyedTransactor(key2)
+
+	var contractAddress common.Address
+	var eipContract *contracts.Eip2027
+
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+		var (
+			tx  *types.Transaction
+			err error
+		)
+
+		switch i {
+		case 0:
+			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
+			assertNil(t, err)
+			block.AddTx(tx)
+
+		case 1:
+			tx, err = eipContract.Create(transactOpts1, big.NewInt(1))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Create(transactOpts2, big.NewInt(2))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Create(transactOpts, big.NewInt(3))
+			assertNil(t, err)
+			block.AddTx(tx)
+		case 3:
+			tx, err = eipContract.Update(transactOpts1, big.NewInt(0))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts2, big.NewInt(0))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts, big.NewInt(0))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+		case 4:
+			tx, err = eipContract.Update(transactOpts1, big.NewInt(7))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts2, big.NewInt(7))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts, big.NewInt(7))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+		case 5:
+			tx, err = eipContract.Update(transactOpts1, big.NewInt(5))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts2, big.NewInt(5))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Update(transactOpts, big.NewInt(5))
+			assertNil(t, err)
+			block.AddTx(tx)
+
+		case 6:
+			tx, err = eipContract.Remove(transactOpts1)
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Remove(transactOpts2)
+			assertNil(t, err)
+			block.AddTx(tx)
+
+			tx, err = eipContract.Remove(transactOpts)
+			assertNil(t, err)
+			block.AddTx(tx)
+
+		}
+
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		contractBackend.Commit()
+	})
+
+	for i := range blocks {
+		_, err = blockchain.InsertChain(types.Blocks{blocks[i]})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	_ = contractAddress
+	spew.Dump(getStat(db))
+
+	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		fmt.Println("k", k, "v", v)
+		return true, nil
+	})
+}
+
+func assertNil(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sendOrFail(t *testing.T, contractBackend *backends.SimulatedBackend, ctx context.Context, tx *types.Transaction) {
+	t.Helper()
+	err := contractBackend.SendTransaction(ctx, tx)
+	if err != nil {
+		t.Fatal(err)
+	}
 }
