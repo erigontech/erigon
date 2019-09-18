@@ -827,7 +827,8 @@ func TestFirehoseStorageNodes(t *testing.T) {
 	pathRlp[0] = 0x20
 	copy(pathRlp[1:], zerothHash)
 	leafNode[0] = pathRlp
-	valRlp, err := rlp.EncodeToBytes(42)
+	valRlp, err := rlp.EncodeToBytes(uint(42))
+	assert.NoError(t, err)
 	leafNode[1] = valRlp
 	nodeRlp, err := rlp.EncodeToBytes(leafNode)
 	assert.NoError(t, err)
