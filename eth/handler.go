@@ -698,6 +698,18 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	return nil
 }
 
+func (pm *ProtocolManager) extractAddress(addressOrHash []byte) (common.Address, error) {
+	var addr common.Address
+	if len(addressOrHash) == common.AddressLength {
+		addr.SetBytes(addressOrHash)
+		return addr, nil
+	} else if len(addressOrHash) == common.HashLength {
+		return pm.blockchain.GetAddressFromItsHash(common.BytesToHash(addressOrHash))
+	} else {
+		return addr, errResp(ErrDecode, "not an account address or its hash")
+	}
+}
+
 func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	msg, readErr := p.rw.ReadMsg()
 	if readErr != nil {
@@ -788,19 +800,11 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					response.Entries[j][i].Status = NoData
 				}
 
-				var addr common.Address
-				if len(req.Account) == common.AddressLength {
-					addr.SetBytes(req.Account)
-				} else if len(req.Account) == common.HashLength {
-					var preimageErr error
-					addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-					if preimageErr == core.ErrNotFound {
-						break
-					} else if preimageErr != nil {
-						return preimageErr
-					}
-				} else {
-					return errResp(ErrDecode, "not an account address or its hash")
+				addr, err := pm.extractAddress(req.Account)
+				if err == core.ErrNotFound {
+					continue
+				} else if err != nil {
+					return err
 				}
 
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
@@ -891,7 +895,48 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		response.ID = request.ID
 		response.Nodes = make([][][]byte, numReq)
 
-		// TODO [yperbasis] implement
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			resolver := trie.NewResolver(0, false, block.NumberU64())
+			resolver.SetHistorical(true)
+
+			for j, responseSize := 0, 0; j < numReq; j++ {
+				req := request.Requests[j]
+
+				n := len(req.Prefixes)
+				response.Nodes[j] = make([][]byte, n)
+
+				addr, err := pm.extractAddress(req.Account)
+				if err == core.ErrNotFound {
+					continue
+				} else if err != nil {
+					return err
+				}
+
+				var resRequests []*trie.ResolveRequest
+				tr := trie.New(common.Hash{})
+
+				for i := 0; i < n; i++ {
+					prefix := req.Prefixes[i]
+					rr := tr.NewResolveRequest(addr.Bytes(), prefix.ToHex(), prefix.Nibbles(), nil)
+					rr.RequiresRLP = true
+					resolver.AddRequest(rr)
+					resRequests = append(resRequests, rr)
+				}
+
+				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+					return err2
+				}
+
+				for i := 0; i < n && responseSize < softResponseLimit; i++ {
+					node := resRequests[i].NodeRLP
+					response.Nodes[j][i] = node
+					responseSize += len(node)
+				}
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
 
 		return p2p.Send(p.rw, StorageNodesCode, response)
 
@@ -925,20 +970,11 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
 
-			var addr common.Address
-			if len(req.Account) == common.AddressLength {
-				addr.SetBytes(req.Account)
-			} else if len(req.Account) == common.HashLength {
-				var preimageErr error
-				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-				if preimageErr == core.ErrNotFound {
-					code = append(code, []byte{})
-					break
-				} else if preimageErr != nil {
-					return preimageErr
-				}
-			} else {
-				return errResp(ErrDecode, "not an account address or its hash")
+			addr, err := pm.extractAddress(req.Account)
+			if err == core.ErrNotFound {
+				break
+			} else if err != nil {
+				return err
 			}
 
 			// Retrieve requested byte code, stopping if enough was found

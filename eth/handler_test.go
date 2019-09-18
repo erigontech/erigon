@@ -827,13 +827,16 @@ func TestFirehoseStorageNodes(t *testing.T) {
 	pathRlp[0] = 0x20
 	copy(pathRlp[1:], zerothHash)
 	leafNode[0] = pathRlp
-	// TODO [yperbasis] value's RLP and use node's RLP
-	_, err := rlp.EncodeToBytes(leafNode)
+	valRlp, err := rlp.EncodeToBytes(42)
+	leafNode[1] = valRlp
+	nodeRlp, err := rlp.EncodeToBytes(leafNode)
 	assert.NoError(t, err)
 
 	var storageReply storageNodesMsg
 	storageReply.ID = 1
 	storageReply.Nodes = make([][][]byte, 1)
+	storageReply.Nodes[0] = make([][]byte, 1)
+	storageReply.Nodes[0][0] = nodeRlp
 
 	err = p2p.ExpectMsg(peer.app, StorageNodesCode, storageReply)
 	if err != nil {
