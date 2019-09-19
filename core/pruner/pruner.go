@@ -1,6 +1,7 @@
 package pruner
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -19,13 +20,19 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 		}
 
 		keysToRemove.Suffix = append(keysToRemove.Suffix, key)
-		changedAccounts := dbutils.Suffix(v)
 
-		err := changedAccounts.Walk(func(addrHash []byte) error {
+		changedKeys := dbutils.Suffix(v)
+
+		err := changedKeys.Walk(func(addrHash []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(addrHash, timestamp)
 			ck := make([]byte, len(compKey))
 			copy(ck, compKey)
-			keysToRemove.Account = append(keysToRemove.Account, ck)
+			if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
+				keysToRemove.Account = append(keysToRemove.Account, ck)
+			}
+			if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
+				keysToRemove.Storage = append(keysToRemove.Storage, ck)
+			}
 			return nil
 		})
 		if err != nil {
@@ -41,6 +48,12 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 		err := db.Delete(dbutils.AccountsHistoryBucket, keysToRemove.Account[i])
 		if err != nil {
 			fmt.Println("Unable to remove ", common.Bytes2Hex(keysToRemove.Account[i]))
+		}
+	}
+	for i := range keysToRemove.Storage {
+		err := db.Delete(dbutils.StorageHistoryBucket, keysToRemove.Storage[i])
+		if err != nil {
+			fmt.Println("Unable to remove ", common.Bytes2Hex(keysToRemove.Storage[i]))
 		}
 	}
 	for i := range keysToRemove.Suffix {

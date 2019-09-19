@@ -391,6 +391,20 @@ func TestStoragePruning(t *testing.T) {
 		fmt.Println("k", k, "v", v)
 		return true, nil
 	})
+
+	err = Prune(db, 0, 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println("=================================================================")
+
+	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		fmt.Println("k", k, "v", v)
+		return true, nil
+	})
+
+	spew.Dump(getStat(db))
+
 }
 
 func assertNil(t *testing.T, err error) {
