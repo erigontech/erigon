@@ -30,8 +30,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -917,8 +919,12 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				tr := trie.New(common.Hash{})
 
 				for i := 0; i < n; i++ {
-					prefix := req.Prefixes[i]
-					rr := tr.NewResolveRequest(addr.Bytes(), prefix.ToHex(), prefix.Nibbles(), nil)
+					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+					addrHash := crypto.Keccak256(addr.Bytes())
+					copy(contractPrefix, addrHash)
+					// TODO [Boris] support incarnations
+					storagePrefix := req.Prefixes[i]
+					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
 					rr.RequiresRLP = true
 					resolver.AddRequest(rr)
 					resRequests = append(resRequests, rr)

@@ -21,8 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"io"
 	"math/big"
 	"runtime"
@@ -30,9 +28,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -98,7 +98,7 @@ type Buffer struct {
 func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) addressHashWithIncarnation {
 	var res addressHashWithIncarnation
 	copy(res[:common.HashLength], addrHash[:])
-	buf := make([]byte, 8)
+	buf := make([]byte, IncarnationLength)
 	binary.BigEndian.PutUint64(buf, incarnation)
 	copy(res[common.HashLength:], buf[:])
 	return res
@@ -314,7 +314,8 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
-// TODO: Support incarnations
+// TODO: [Boris] Support incarnations
+// TODO: [Andrew] pass address hash directly
 func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
