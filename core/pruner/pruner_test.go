@@ -2,9 +2,7 @@ package pruner
 
 import (
 	"bytes"
-	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
@@ -207,29 +205,32 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 			stat.StorageSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
 		}
 
-		err := changedAccounts.Walk(func(k []byte) error {
-			compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
-			b, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
-			if len(b) == 0 {
-				stat.NotFoundAccountsInHistory++
-				return nil
-			}
-			if err != nil {
-				stat.ErrAccountsInHistory++
-			} else {
-				acc := &accounts.Account{}
-				errInn := acc.DecodeForStorage(b)
-				if errInn != nil {
-					stat.ErrDecodedAccountsInHistory++
-				} else {
-					stat.NumOfChangesInAccountsHistory++
+		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
+			err := changedAccounts.Walk(func(k []byte) error {
+				compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
+				b, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
+				if len(b) == 0 {
+					stat.NotFoundAccountsInHistory++
+					return nil
 				}
+				if err != nil {
+					stat.ErrAccountsInHistory++
+				} else {
+					acc := &accounts.Account{}
+					errInn := acc.DecodeForStorage(b)
+					if errInn != nil {
+						stat.ErrDecodedAccountsInHistory++
+					} else {
+						stat.NumOfChangesInAccountsHistory++
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				return false, err
 			}
-			return nil
-		})
-		if err != nil {
-			return false, err
 		}
+
 		return true, nil
 	})
 
@@ -290,10 +291,9 @@ func TestStoragePruning(t *testing.T) {
 	transactOpts1 := bind.NewKeyedTransactor(key1)
 	transactOpts2 := bind.NewKeyedTransactor(key2)
 
-	var contractAddress common.Address
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 7, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx  *types.Transaction
 			err error
@@ -301,7 +301,7 @@ func TestStoragePruning(t *testing.T) {
 
 		switch i {
 		case 0:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
+			_, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
 			assertNil(t, err)
 			block.AddTx(tx)
 
@@ -317,7 +317,7 @@ func TestStoragePruning(t *testing.T) {
 			tx, err = eipContract.Create(transactOpts, big.NewInt(3))
 			assertNil(t, err)
 			block.AddTx(tx)
-		case 3:
+		case 2:
 			tx, err = eipContract.Update(transactOpts1, big.NewInt(0))
 			assertNil(t, err)
 			block.AddTx(tx)
@@ -330,7 +330,7 @@ func TestStoragePruning(t *testing.T) {
 			assertNil(t, err)
 			block.AddTx(tx)
 
-		case 4:
+		case 3:
 			tx, err = eipContract.Update(transactOpts1, big.NewInt(7))
 			assertNil(t, err)
 			block.AddTx(tx)
@@ -343,7 +343,7 @@ func TestStoragePruning(t *testing.T) {
 			assertNil(t, err)
 			block.AddTx(tx)
 
-		case 5:
+		case 4:
 			tx, err = eipContract.Update(transactOpts1, big.NewInt(5))
 			assertNil(t, err)
 			block.AddTx(tx)
@@ -356,7 +356,7 @@ func TestStoragePruning(t *testing.T) {
 			assertNil(t, err)
 			block.AddTx(tx)
 
-		case 6:
+		case 5:
 			tx, err = eipContract.Remove(transactOpts1)
 			assertNil(t, err)
 			block.AddTx(tx)
@@ -384,39 +384,47 @@ func TestStoragePruning(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_ = contractAddress
-	spew.Dump(getStat(db))
 
-	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		fmt.Println("k", k, "v", v)
-		return true, nil
-	})
+	res, err := getStat(db)
+	assertNil(t, err)
+
+	expected := stateStats{
+		NotFoundAccountsInHistory:     5,
+		ErrAccountsInHistory:          0,
+		ErrDecodedAccountsInHistory:   0,
+		NumOfChangesInAccountsHistory: 26,
+		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
+			0: 3,
+			1: 3,
+			2: 5,
+			3: 5,
+			4: 5,
+			5: 5,
+			6: 5,
+		},
+		StorageSuffixRecordsByTimestamp: map[uint64]uint32{
+			1: 1,
+			2: 3,
+			3: 3,
+			4: 3,
+			5: 3,
+			6: 3,
+		},
+		AccountsInState: 5,
+	}
+	if !reflect.DeepEqual(expected, res) {
+		spew.Dump(getStat(db))
+		t.Fatal("not equals")
+	}
 
 	err = Prune(db, 0, 6)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Println("=================================================================")
-
-	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		fmt.Println("k", k, "v", v)
-		return true, nil
-	})
-
-	spew.Dump(getStat(db))
-
 }
 
 func assertNil(t *testing.T, err error) {
 	t.Helper()
-	if err != nil {
-		t.Fatal(err)
-	}
-}
-
-func sendOrFail(t *testing.T, contractBackend *backends.SimulatedBackend, ctx context.Context, tx *types.Transaction) {
-	t.Helper()
-	err := contractBackend.SendTransaction(ctx, tx)
 	if err != nil {
 		t.Fatal(err)
 	}
