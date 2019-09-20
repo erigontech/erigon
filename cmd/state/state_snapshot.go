@@ -368,7 +368,7 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 			addrHash := crypto.Keccak256(address.Bytes())
 			copy(contractPrefix, addrHash)
-			// TODO [Boris] support incarnations
+			// TODO Issue 99 [Boris] support incarnations
 			streq := st.NewResolveRequest(contractPrefix, key, 0, root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)

@@ -806,6 +806,7 @@ func TestFirehoseStorageRanges(t *testing.T) {
 }
 
 func TestFirehoseStorageNodes(t *testing.T) {
+	// TODO [Andrew] test with 2 storage nodes
 	pm, peer, addr := setUpStorageContractForFirehose(t)
 	defer peer.close()
 

@@ -114,7 +114,7 @@ type stateNodesMsg struct {
 
 type storageNodesMsg struct {
 	ID              uint64
-	Nodes           [][][]byte
+	Nodes           [][][]byte // indexing matches getStorageRangesOrNodes request: [#account/contract][#prefix][RLP]
 	AvailableBlocks []common.Hash
 }
 
