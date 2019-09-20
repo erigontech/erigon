@@ -315,12 +315,7 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
 // TODO: [Boris] Support incarnations
-// TODO: [Andrew] pass address hash directly
-func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return false, err
-	}
+func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
@@ -332,7 +327,7 @@ func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Key
 
 	i := 0
 
-	err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			var val big.Int
 			if err := rlp.DecodeBytes(value, &val); err != nil {

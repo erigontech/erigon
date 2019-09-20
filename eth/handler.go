@@ -700,15 +700,16 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	return nil
 }
 
-func (pm *ProtocolManager) extractAddress(addressOrHash []byte) (common.Address, error) {
-	var addr common.Address
-	if len(addressOrHash) == common.AddressLength {
-		addr.SetBytes(addressOrHash)
-		return addr, nil
-	} else if len(addressOrHash) == common.HashLength {
-		return pm.blockchain.GetAddressFromItsHash(common.BytesToHash(addressOrHash))
+func (pm *ProtocolManager) extractAddressHash(addressOrHash []byte) (common.Hash, error) {
+	var addrHash common.Hash
+	if len(addressOrHash) == common.HashLength {
+		addrHash.SetBytes(addressOrHash)
+		return addrHash, nil
+	} else if len(addressOrHash) == common.AddressLength {
+		addrHash = crypto.Keccak256Hash(addressOrHash)
+		return addrHash, nil
 	} else {
-		return addr, errResp(ErrDecode, "not an account address or its hash")
+		return addrHash, errResp(ErrDecode, "not an account address or its hash")
 	}
 }
 
@@ -802,16 +803,14 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					response.Entries[j][i].Status = NoData
 				}
 
-				addr, err := pm.extractAddress(req.Account)
-				if err == core.ErrNotFound {
-					continue
-				} else if err != nil {
+				addrHash, err := pm.extractAddressHash(req.Account)
+				if err != nil {
 					return err
 				}
 
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
 					var leaves []storageLeaf
-					allTraversed, err := tds.WalkStorageRange(addr, req.Prefixes[i], MaxLeavesPerPrefix,
+					allTraversed, err := tds.WalkStorageRange(addrHash, req.Prefixes[i], MaxLeavesPerPrefix,
 						func(key common.Hash, value big.Int) {
 							leaves = append(leaves, storageLeaf{key, value})
 						},
@@ -908,10 +907,8 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				n := len(req.Prefixes)
 				response.Nodes[j] = make([][]byte, n)
 
-				addr, err := pm.extractAddress(req.Account)
-				if err == core.ErrNotFound {
-					continue
-				} else if err != nil {
+				addrHash, err := pm.extractAddressHash(req.Account)
+				if err != nil {
 					return err
 				}
 
@@ -920,8 +917,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 				for i := 0; i < n; i++ {
 					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
-					addrHash := crypto.Keccak256(addr.Bytes())
-					copy(contractPrefix, addrHash)
+					copy(contractPrefix, addrHash.Bytes())
 					// TODO [Boris] support incarnations
 					storagePrefix := req.Prefixes[i]
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
@@ -976,11 +972,20 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
 
-			addr, err := pm.extractAddress(req.Account)
-			if err == core.ErrNotFound {
-				break
-			} else if err != nil {
-				return err
+			var addr common.Address
+			if len(req.Account) == common.AddressLength {
+				addr.SetBytes(req.Account)
+			} else if len(req.Account) == common.HashLength {
+				var preimageErr error
+				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
+				if preimageErr == core.ErrNotFound {
+					code = append(code, []byte{})
+					break
+				} else if preimageErr != nil {
+					return preimageErr
+				}
+			} else {
+				return errResp(ErrDecode, "not an account address or its hash")
 			}
 
 			// Retrieve requested byte code, stopping if enough was found
