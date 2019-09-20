@@ -3,14 +3,15 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -364,7 +365,11 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 			st := trie.New(root)
 			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
-			streq := st.NewResolveRequest(address[:], key, 0, root[:])
+			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+			addrHash := crypto.Keccak256(address.Bytes())
+			copy(contractPrefix, addrHash)
+			// TODO Issue 99 [Boris] support incarnations
+			streq := st.NewResolveRequest(contractPrefix, key, 0, root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {

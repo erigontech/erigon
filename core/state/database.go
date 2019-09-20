@@ -21,8 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"io"
 	"math/big"
 	"runtime"
@@ -30,9 +28,11 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -98,7 +98,7 @@ type Buffer struct {
 func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) addressHashWithIncarnation {
 	var res addressHashWithIncarnation
 	copy(res[:common.HashLength], addrHash[:])
-	buf := make([]byte, 8)
+	buf := make([]byte, IncarnationLength)
 	binary.BigEndian.PutUint64(buf, incarnation)
 	copy(res[common.HashLength:], buf[:])
 	return res
@@ -314,12 +314,8 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
-// TODO: Support incarnations
-func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return false, err
-	}
+// TODO: Issue 99 [Boris] Support incarnations
+func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
@@ -331,7 +327,7 @@ func (tds *TrieDbState) WalkStorageRange(address common.Address, prefix trie.Key
 
 	i := 0
 
-	err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
+	err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			var val big.Int
 			if err := rlp.DecodeBytes(value, &val); err != nil {

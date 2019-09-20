@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -42,11 +43,13 @@ var (
 	loglevel = flag.Int("loglevel", 2, "verbosity of logs")
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	flag.Parse()
 
 	log.PrintOrigins(true)
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*loglevel), log.StreamHandler(colorable.NewColorableStderr(), log.TerminalFormat(true))))
+
+	os.Exit(m.Run())
 }
 
 // testService implements the node.Service interface and provides protocols

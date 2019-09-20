@@ -437,37 +437,6 @@ func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.IntraBlo
 	return state.New(tds), tds, nil
 }
 
-// FindStateWithStorageRoot attempts to find a recent state where a given account has a certain storage root.
-func (bc *BlockChain) FindStateWithStorageRoot(address common.Address, storageRoot common.Hash) (*state.TrieDbState, error) {
-	blockNbr := bc.CurrentBlock().NumberU64()
-	for i := 0; i < blockCacheLimit; i++ {
-		block := bc.GetBlockByNumber(blockNbr)
-		if block == nil {
-			return nil, ErrNotFound
-		}
-		_, tds, err := bc.StateAt(block.Root(), block.NumberU64())
-		if err != nil {
-			return nil, err
-		}
-
-		tds.SetHistorical(i > 0)
-		account, err := tds.ReadAccountData(address)
-		if err != nil {
-			return nil, err
-		}
-
-		if account.Root == storageRoot {
-			return tds, nil
-		}
-
-		if blockNbr == 0 {
-			break
-		}
-		blockNbr--
-	}
-	return nil, ErrNotFound
-}
-
 // GetAddressFromItsHash returns the preimage of a given address hash.
 func (bc *BlockChain) GetAddressFromItsHash(hash common.Hash) (common.Address, error) {
 	var addr common.Address

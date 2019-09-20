@@ -21,12 +21,13 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"runtime"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -261,7 +262,8 @@ func (rds *RepairDbState) UpdateAccountData(_ context.Context, address common.Ad
 		}
 		sort.Sort(hashes)
 		for _, keyHash := range hashes {
-			if need, req := storageTrie.NeedResolution(address[:], keyHash[:]); need {
+			addrHash := crypto.Keccak256(address.Bytes())
+			if need, req := storageTrie.NeedResolution(addrHash, keyHash[:]); need {
 				if resolver == nil {
 					resolver = trie.NewResolver(0, false, rds.blockNr)
 				}

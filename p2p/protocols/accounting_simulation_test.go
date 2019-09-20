@@ -52,10 +52,11 @@ var (
 	rawlog   = flag.Bool("rawlog", false, "remove terminal formatting from logs")
 )
 
-func init() {
+func TestMain(m *testing.M) {
 	flag.Parse()
 	log.PrintOrigins(true)
 	log.Root().SetHandler(log.LvlFilterHandler(log.Lvl(*loglevel), log.StreamHandler(colorable.NewColorableStderr(), log.TerminalFormat(!*rawlog))))
+	os.Exit(m.Run())
 }
 
 //TestAccountingSimulation runs a p2p/simulations simulation

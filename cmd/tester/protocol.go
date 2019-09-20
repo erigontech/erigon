@@ -14,7 +14,7 @@ import (
 
 type statusData struct {
 	ProtocolVersion uint32
-	NetworkId       uint64
+	NetworkID       uint64
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash
@@ -51,7 +51,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
 		ProtocolVersion: tp.protocolVersion,
-		NetworkId:       tp.networkId,
+		NetworkID:       tp.networkId,
 		TD:              tp.blockFeeder.TotalDifficulty(),
 		CurrentBlock:    tp.blockFeeder.LastBlock().Hash(),
 		GenesisBlock:    tp.genesisBlockHash,
@@ -76,19 +76,19 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 	var statusResp statusData
 	if err := msg.Decode(&statusResp); err != nil {
 		fmt.Printf("Failed to decode msg %v: %v\n", msg, err)
-		return fmt.Errorf("Failed to decode msg %v: %v\n", msg, err)
+		return fmt.Errorf("failed to decode msg %v: %v", msg, err)
 	}
 	if statusResp.GenesisBlock != tp.genesisBlockHash {
 		fmt.Printf("Mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
-		return fmt.Errorf("Mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
+		return fmt.Errorf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 	}
-	if statusResp.NetworkId != tp.networkId {
-		fmt.Printf("Mismatched network id %d (!= %d)", statusResp.NetworkId, tp.networkId)
-		return fmt.Errorf("Mismatched network id %d (!= %d)", statusResp.NetworkId, tp.networkId)
+	if statusResp.NetworkID != tp.networkId {
+		fmt.Printf("Mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
+		return fmt.Errorf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 	}
 	if statusResp.ProtocolVersion != tp.protocolVersion {
-		fmt.Printf("Mismached protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
-		return fmt.Errorf("Mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
+		fmt.Printf("Mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
+		return fmt.Errorf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 	}
 	fmt.Printf("eth handshake complete, block hash: %x, block difficulty: %s\n", statusResp.CurrentBlock, statusResp.TD)
 	//lastBlockNumber := int(tp.blockFeeder.LastBlock().NumberU64())

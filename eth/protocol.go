@@ -114,7 +114,7 @@ type txPool interface {
 // statusData is the network packet for the status message.
 type statusData struct {
 	ProtocolVersion uint32
-	NetworkId       uint64
+	NetworkID       uint64
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash

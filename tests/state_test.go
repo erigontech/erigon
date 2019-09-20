@@ -23,12 +23,15 @@ import (
 	"flag"
 	"fmt"
 	"math/big"
+	"os"
 	"reflect"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 )
+
+var testVMConfig = vm.Config{}
 
 func TestState(t *testing.T) {
 	t.Parallel()
@@ -78,13 +81,12 @@ func TestState(t *testing.T) {
 const traceErrorLimit = 400000
 
 // The VM config for state tests that accepts --vm.* command line arguments.
-var testVMConfig = func() vm.Config {
-	vmconfig := vm.Config{}
-	flag.StringVar(&vmconfig.EVMInterpreter, utils.EVMInterpreterFlag.Name, utils.EVMInterpreterFlag.Value, utils.EVMInterpreterFlag.Usage)
-	flag.StringVar(&vmconfig.EWASMInterpreter, utils.EWASMInterpreterFlag.Name, utils.EWASMInterpreterFlag.Value, utils.EWASMInterpreterFlag.Usage)
+func TestMain(m *testing.M) {
+	flag.StringVar(&testVMConfig.EVMInterpreter, utils.EVMInterpreterFlag.Name, utils.EVMInterpreterFlag.Value, utils.EVMInterpreterFlag.Usage)
+	flag.StringVar(&testVMConfig.EWASMInterpreter, utils.EWASMInterpreterFlag.Name, utils.EWASMInterpreterFlag.Value, utils.EWASMInterpreterFlag.Usage)
 	flag.Parse()
-	return vmconfig
-}()
+	os.Exit(m.Run())
+}
 
 func withTrace(t *testing.T, gasLimit uint64, test func(vm.Config) error) {
 	err := test(testVMConfig)

@@ -744,7 +744,7 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	}
 }
 
-func TestFirehoseStorageRanges(t *testing.T) {
+func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer, common.Address) {
 	// this smart contract sets its 0th storage to 42
 	// see tests/contracts/storage.sol
 	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b506083806100236000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c806360fe47b114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b60005556fea265627a7a72305820c6d2a85ef1ffd7a88a51c6087851886ab108ffe628b0b80e4d95d923559e8d9564736f6c634300050a0032")
@@ -774,39 +774,20 @@ func TestFirehoseStorageRanges(t *testing.T) {
 
 	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
 	peer, _ := newFirehoseTestPeer("peer", pm)
+
+	return pm, peer, addr
+}
+
+func TestFirehoseStorageRanges(t *testing.T) {
+	pm, peer, addr := setUpStorageContractForFirehose(t)
 	defer peer.close()
 
-	var accountReq getStateRangesOrNodes
-	accountReq.ID = 0
-	accountReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
-	accountKey := crypto.Keccak256(addr.Bytes())
-	accountReq.Prefixes = []trie.Keybytes{
-		{Data: accountKey, Odd: false, Terminating: false},
-	}
-
-	assert.NoError(t, p2p.Send(peer.app, GetStateRangesCode, accountReq))
-
-	msg, err := peer.app.ReadMsg()
-	assert.NoError(t, err)
-	content, err := ioutil.ReadAll(msg.Payload)
-	assert.NoError(t, err)
-	var accountReply stateRangesMsg
-	assert.NoError(t, rlp.DecodeBytes(content, &accountReply))
-
-	assert.Equal(t, uint64(0), accountReply.ID)
-	assert.Equal(t, 1, len(accountReply.Entries))
-	assert.Equal(t, OK, accountReply.Entries[0].Status)
-	assert.Equal(t, 1, len(accountReply.Entries[0].Leaves))
-	assert.Equal(t, common.BytesToHash(accountKey), accountReply.Entries[0].Leaves[0].Key)
-
-	storageRoot := accountReply.Entries[0].Leaves[0].Val.Root
-	assert.NotEqual(t, trie.EmptyRoot, storageRoot)
-
-	var storageReq getStorageRangesMsg
+	var storageReq getStorageRangesOrNodes
 	storageReq.ID = 1
+	storageReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
 	emptyPrefix := trie.Keybytes{Data: []byte{}, Odd: false, Terminating: false}
-	storageReq.Requests = []storageRangeReq{
-		{Account: addr.Bytes(), StorageRoot: storageRoot, Prefixes: []trie.Keybytes{emptyPrefix}},
+	storageReq.Requests = []storageReqForOneAccount{
+		{Account: addr.Bytes(), Prefixes: []trie.Keybytes{emptyPrefix}},
 	}
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
@@ -818,9 +799,50 @@ func TestFirehoseStorageRanges(t *testing.T) {
 		{Status: OK, Leaves: []storageLeaf{{Key: zerothHash, Val: *(big.NewInt(42))}}},
 	}}
 
-	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
+	err := p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
 	if err != nil {
 		t.Errorf("unexpected StorageRanges response: %v", err)
+	}
+}
+
+func TestFirehoseStorageNodes(t *testing.T) {
+	// TODO [Andrew] test with 2 storage nodes
+	pm, peer, addr := setUpStorageContractForFirehose(t)
+	defer peer.close()
+
+	var storageReq getStorageRangesOrNodes
+	storageReq.ID = 1
+	storageReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
+	emptyPrefix := trie.Keybytes{Data: []byte{}, Odd: false, Terminating: false}
+	storageReq.Requests = []storageReqForOneAccount{
+		{Account: addr.Bytes(), Prefixes: []trie.Keybytes{emptyPrefix}},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStorageNodesCode, storageReq))
+
+	zerothHash := crypto.Keccak256(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
+
+	// https://github.com/ethereum/wiki/wiki/Patricia-Tree
+	leafNode := make([][]byte, 2)
+	pathRlp := make([]byte, common.HashLength+1)
+	pathRlp[0] = 0x20
+	copy(pathRlp[1:], zerothHash)
+	leafNode[0] = pathRlp
+	valRlp, err := rlp.EncodeToBytes(uint(42))
+	assert.NoError(t, err)
+	leafNode[1] = valRlp
+	nodeRlp, err := rlp.EncodeToBytes(leafNode)
+	assert.NoError(t, err)
+
+	var storageReply storageNodesMsg
+	storageReply.ID = 1
+	storageReply.Nodes = make([][][]byte, 1)
+	storageReply.Nodes[0] = make([][]byte, 1)
+	storageReply.Nodes[0][0] = nodeRlp
+
+	err = p2p.ExpectMsg(peer.app, StorageNodesCode, storageReply)
+	if err != nil {
+		t.Errorf("unexpected StorageNodes response: %v", err)
 	}
 }
 
@@ -862,7 +884,7 @@ func TestFirehoseStateNodes(t *testing.T) {
 	addr3Node := make([][]byte, 2)
 	prefix3rlp := make([]byte, common.HashLength)
 	copy(prefix3rlp, addrHash[3].Bytes())
-	prefix3rlp[0] = 0x20
+	prefix3rlp[0] = 0x20 // we don't need the first 2 nibbles of the hash in the encoded path
 	addr3Node[0] = prefix3rlp
 	addr3Node[1] = account3rlp
 	node3rlp, err := rlp.EncodeToBytes(addr3Node)
@@ -871,7 +893,7 @@ func TestFirehoseStateNodes(t *testing.T) {
 	addr4Node := make([][]byte, 2)
 	prefix4rlp := make([]byte, common.HashLength)
 	copy(prefix4rlp, addrHash[4].Bytes())
-	prefix4rlp[0] = 0x20
+	prefix4rlp[0] = 0x20 // we don't need the first 2 nibbles of the hash in the encoded path
 	addr4Node[0] = prefix4rlp
 	addr4Node[1] = account4rlp
 	node4rlp, err := rlp.EncodeToBytes(addr4Node)

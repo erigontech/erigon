@@ -63,7 +63,6 @@ func newTestProtocolManager(mode downloader.SyncMode, blocks int, generator func
 		genesis = gspec.MustCommit(dbGen)
 	)
 	var chain []*types.Block
-
 	// Fresh database
 	db := ethdb.NewMemDatabase()
 	// Regenerate genesis block in the fresh database
@@ -230,7 +229,7 @@ func newFirehoseTestPeer(name string, pm *ProtocolManager) (*testFirehosePeer, <
 func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesis common.Hash) {
 	msg := &statusData{
 		ProtocolVersion: uint32(p.version),
-		NetworkId:       DefaultConfig.NetworkID,
+		NetworkID:       DefaultConfig.NetworkID,
 		TD:              td,
 		CurrentBlock:    head,
 		GenesisBlock:    genesis,

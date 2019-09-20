@@ -2,14 +2,15 @@ package trie
 
 import (
 	"bytes"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	//"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func TestRebuild(t *testing.T) {
