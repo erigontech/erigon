@@ -745,12 +745,27 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 }
 
 func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer, common.Address) {
-	// this smart contract sets its 0th storage to 42
-	// see tests/contracts/storage.sol
-	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b506083806100236000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c806360fe47b114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b60005556fea265627a7a72305820c6d2a85ef1ffd7a88a51c6087851886ab108ffe628b0b80e4d95d923559e8d9564736f6c634300050a0032")
+	// This smart contract initially sets its 0th storage to 42
+	// and then, when called, updates the 0th storage to the input provided.
+	code := common.FromHex("602a60005560068060106000396000f3600035600055")
+	// https://github.com/CoinCulture/evm-tools
+	// 0      PUSH1  => 2a	// 0x2a = 42
+	// 2      PUSH1  => 00
+	// 4      SSTORE		// storage[0] = 42
+	// 5      PUSH1  => 06	// deploy begin
+	// 7      DUP1
+	// 8      PUSH1  => 10
+	// 10     PUSH1  => 00
+	// 12     CODECOPY
+	// 13     PUSH1  => 00
+	// 15     RETURN		// deploy end
+	// 16     PUSH1  => 00	// contract code
+	// 18     CALLDATALOAD
+	// 19     PUSH1  => 00
+	// 21     SSTORE		// storage[0] = input[0]
 
-	// call set(21)
-	set21 := common.FromHex("0x60fe47b10000000000000000000000000000000000000000000000000000000000000015")
+	// 32-byte left-padded 21 (=0x15)
+	input := common.FromHex("0000000000000000000000000000000000000000000000000000000000000015")
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
@@ -759,14 +774,14 @@ func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFireh
 		switch i {
 		case 0:
 			nonce := block.TxNonce(testBank)
-			// storage is initialized to 42
+			// storage[0] is initialized to 42
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
-			// storage is set to 21
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, set21), signer, testBankKey)
+			// storage[0] is set to 21
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -781,6 +796,8 @@ func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFireh
 func TestFirehoseStorageRanges(t *testing.T) {
 	pm, peer, addr := setUpStorageContractForFirehose(t)
 	defer peer.close()
+
+	// Block 1
 
 	var storageReq getStorageRangesOrNodes
 	storageReq.ID = 1
@@ -803,6 +820,21 @@ func TestFirehoseStorageRanges(t *testing.T) {
 	if err != nil {
 		t.Errorf("unexpected StorageRanges response: %v", err)
 	}
+
+	// Block 2
+	storageReq.ID = 2
+	storageReq.Block = pm.blockchain.GetBlockByNumber(2).Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
+	storageReply.ID = 2
+	storageReply.Entries[0][0].Leaves[0].Val.SetUint64(21)
+
+	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
+	if err != nil {
+		t.Errorf("unexpected StorageRanges response: %v", err)
+	}
+
+	// TODO [Andrew] test contract w/o any storage
 }
 
 func TestFirehoseStorageNodes(t *testing.T) {
