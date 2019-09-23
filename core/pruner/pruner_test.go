@@ -185,8 +185,8 @@ type stateStats struct {
 
 func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 	stat := stateStats{
-		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32, 0),
-		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32, 0),
+		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
+		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
 	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)

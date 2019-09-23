@@ -3,8 +3,8 @@ package dbutils
 // If highZero is true, the most significant bits of every byte is left zero
 func EncodeTimestamp(timestamp uint64) []byte {
 	var suffix []byte
-	var limit uint64
-	limit = 32
+	var limit uint64 = 32
+
 	for bytecount := 1; bytecount <= 8; bytecount++ {
 		if timestamp < limit {
 			suffix = make([]byte, bytecount)
