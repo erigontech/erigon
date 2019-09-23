@@ -118,14 +118,6 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 	return err
 }
 
-func compositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
-	suffix = encodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(suffix))
-	copy(composite, key)
-	copy(composite[len(key):], suffix)
-	return composite, suffix
-}
-
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	var savedTx *bolt.Tx
 	err := db.db.Update(func(tx *bolt.Tx) error {

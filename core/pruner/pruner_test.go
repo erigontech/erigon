@@ -1,8 +1,8 @@
 package pruner
 
 import (
-	"context"
 	"bytes"
+	"context"
 	"crypto/ecdsa"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
