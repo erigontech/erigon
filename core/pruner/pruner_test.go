@@ -295,84 +295,84 @@ func TestStoragePruning(t *testing.T) {
 
 	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
-			tx  *types.Transaction
-			err error
+			tx       *types.Transaction
+			innerErr error
 		)
 
 		switch i {
 		case 0:
-			_, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-			assertNil(t, err)
+			_, tx, eipContract, innerErr = contracts.DeployEip2027(transactOpts, contractBackend)
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
 		case 1:
-			tx, err = eipContract.Create(transactOpts1, big.NewInt(1))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Create(transactOpts1, big.NewInt(1))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Create(transactOpts2, big.NewInt(2))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Create(transactOpts2, big.NewInt(2))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Create(transactOpts, big.NewInt(3))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Create(transactOpts, big.NewInt(3))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 		case 2:
-			tx, err = eipContract.Update(transactOpts1, big.NewInt(0))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(0))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts2, big.NewInt(0))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(0))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts, big.NewInt(0))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(0))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
 		case 3:
-			tx, err = eipContract.Update(transactOpts1, big.NewInt(7))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(7))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts2, big.NewInt(7))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(7))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts, big.NewInt(7))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(7))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
 		case 4:
-			tx, err = eipContract.Update(transactOpts1, big.NewInt(5))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts1, big.NewInt(5))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts2, big.NewInt(5))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts2, big.NewInt(5))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Update(transactOpts, big.NewInt(5))
-			assertNil(t, err)
+			tx, innerErr = eipContract.Update(transactOpts, big.NewInt(5))
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
 		case 5:
-			tx, err = eipContract.Remove(transactOpts1)
-			assertNil(t, err)
+			tx, innerErr = eipContract.Remove(transactOpts1)
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Remove(transactOpts2)
-			assertNil(t, err)
+			tx, innerErr = eipContract.Remove(transactOpts2)
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
-			tx, err = eipContract.Remove(transactOpts)
-			assertNil(t, err)
+			tx, innerErr = eipContract.Remove(transactOpts)
+			assertNil(t, innerErr)
 			block.AddTx(tx)
 
 		}
 
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal(innerErr)
 		}
 
 		contractBackend.Commit()

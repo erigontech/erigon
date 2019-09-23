@@ -137,8 +137,7 @@ type BlockChain struct {
 	validator Validator // block and state validator interface
 	vmConfig  vm.Config
 
-	badBlocks      *lru.Cache              // Bad block cache
-	shouldPreserve func(*types.Block) bool // Function used to determine whether should preserve the given block.
+	badBlocks      *lru.Cache // Bad block cache
 	noHistory      bool
 	enableReceipts bool // Whether receipts need to be written to the database
 	resolveReads   bool
