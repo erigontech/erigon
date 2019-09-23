@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
-	//"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -12,9 +11,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-var testbucket = []byte("test")
 
-func testRebuild(t *testing.T) {
+func TestRebuild(t *testing.T) {
+	t.Skip()
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := dbutils.AccountsBucket

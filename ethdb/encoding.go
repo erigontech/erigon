@@ -1,6 +1,6 @@
 package ethdb
 
-func encodingLen8to7(b []byte) int {
+func encodingLen8to7(b []byte) int { //nolint
 	return (len(b)*8 + 6) / 7
 }
 
