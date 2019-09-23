@@ -85,7 +85,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-
 func historyBucket(bucket []byte) []byte {
 	hb := make([]byte, len(bucket)+1)
 	hb[0] = byte('h')

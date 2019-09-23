@@ -1,7 +1,5 @@
 package ethdb
 
-import ()
-
 func encodingLen8to7(b []byte) int {
 	return (len(b)*8 + 6) / 7
 }
@@ -74,4 +72,3 @@ func decode7to8(b []byte) []byte {
 	}
 	return out
 }
-
