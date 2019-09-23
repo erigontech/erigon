@@ -126,7 +126,7 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	err = Prune(db, 0, uint64(numBlocks)-1)
 	if err != nil {
-		t.Log("Prune", err)
+		t.Fatal(err)
 	}
 
 	res, err = getStat(db)
@@ -151,7 +151,7 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	err = Prune(db, uint64(numBlocks)-1, uint64(numBlocks))
 	if err != nil {
-		t.Log("Prune", err)
+		t.Fatal(err)
 	}
 	res, err = getStat(db)
 	if err != nil {
@@ -194,13 +194,13 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 		changedAccounts := dbutils.Suffix(v)
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
-				panic("core/pruner/pruner_test.go:256")
+				panic("multiple account suffix records")
 			}
 			stat.AccountSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
 		}
 		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
 			if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
-				panic("core/pruner/pruner_test.go:261")
+				panic("multiple storage suffix records")
 			}
 			stat.StorageSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
 		}
@@ -417,10 +417,12 @@ func TestStoragePruning(t *testing.T) {
 		t.Fatal("not equals")
 	}
 
-	err = Prune(db, 0, 6)
+	err = Prune(db, 0, 5)
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	spew.Dump(getStat(db))
 }
 
 func assertNil(t *testing.T, err error) {

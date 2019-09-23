@@ -2,10 +2,11 @@ package pruner
 
 import (
 	"bytes"
-	"fmt"
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error {
@@ -43,26 +44,42 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 	if err != nil {
 		return err
 	}
+	err = batchDelete(db.DB(), keysToRemove)
+	if err != nil {
+		return err
+	}
 
-	for i := range keysToRemove.Account {
-		err := db.Delete(dbutils.AccountsHistoryBucket, keysToRemove.Account[i])
-		if err != nil {
-			fmt.Println("Unable to remove ", common.Bytes2Hex(keysToRemove.Account[i]))
-		}
-	}
-	for i := range keysToRemove.Storage {
-		err := db.Delete(dbutils.StorageHistoryBucket, keysToRemove.Storage[i])
-		if err != nil {
-			fmt.Println("Unable to remove ", common.Bytes2Hex(keysToRemove.Storage[i]))
-		}
-	}
-	for i := range keysToRemove.Suffix {
-		err := db.Delete(dbutils.SuffixBucket, keysToRemove.Suffix[i])
-		if err != nil {
-			fmt.Println("Unable to remove ", common.Bytes2Hex(keysToRemove.Suffix[i]))
-		}
-	}
 	return nil
+}
+
+func batchDelete(db *bolt.DB, keys *keysToRemove) error {
+	return db.Update(func(tx *bolt.Tx) error {
+		accountHistoryBucket := tx.Bucket(dbutils.AccountsHistoryBucket)
+		for i := range keys.Account {
+			err := accountHistoryBucket.Delete(keys.Account[i])
+			if err != nil {
+				log.Warn("Unable to remove ", "addr", common.Bytes2Hex(keys.Account[i]))
+				return err
+			}
+		}
+		storageHistoryBucket := tx.Bucket(dbutils.StorageHistoryBucket)
+		for i := range keys.Storage {
+			err := storageHistoryBucket.Delete(keys.Storage[i])
+			if err != nil {
+				log.Warn("Unable to remove storage key", "storage", common.Bytes2Hex(keys.Account[i]))
+				return err
+			}
+		}
+		suffixBucket := tx.Bucket(dbutils.SuffixBucket)
+		for i := range keys.Suffix {
+			err := suffixBucket.Delete(keys.Suffix[i])
+			if err != nil {
+				log.Warn("Unable to remove suffix", "suffix", common.Bytes2Hex(keys.Account[i]))
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func newKeysToRemove() *keysToRemove {
