@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"math/big"
 	"reflect"
 	"testing"
@@ -123,8 +124,9 @@ func TestSetupGenesis(t *testing.T) {
 
 				bc, _ := NewBlockChain(db, nil, oldcustomg.Config, ethash.NewFullFaker(), vm.Config{}, nil)
 				defer bc.Stop()
+				ctx := bc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
-				blocks, _ := GenerateChain(oldcustomg.Config, genesis, ethash.NewFaker(), db.MemCopy(), 4, nil)
+				blocks, _ := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db.MemCopy(), 4, nil)
 				bc.InsertChain(blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.

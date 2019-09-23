@@ -2,18 +2,19 @@ package trie
 
 import (
 	"bytes"
+
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-
 func TestRebuild(t *testing.T) {
-	t.Skip()
+	t.Skip("should be restored. skipped for turbo-geth")
+
 	db := ethdb.NewMemDatabase()
 	defer db.Close()
 	bucket := dbutils.AccountsBucket

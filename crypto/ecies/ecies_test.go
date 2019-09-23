@@ -38,6 +38,7 @@ import (
 	"flag"
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -45,10 +46,11 @@ import (
 
 var dumpEnc bool
 
-func init() {
+func TestMain(m *testing.M) {
 	flDump := flag.Bool("dump", false, "write encrypted test message to file")
 	flag.Parse()
 	dumpEnc = *flDump
+	os.Exit(m.Run())
 }
 
 // Ensure the KDF generates appropriately sized keys.

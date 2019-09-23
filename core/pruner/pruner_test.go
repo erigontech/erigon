@@ -1,6 +1,7 @@
 package pruner
 
 import (
+	"context"
 	"bytes"
 	"crypto/ecdsa"
 	"github.com/davecgh/go-spew/spew"
@@ -62,7 +63,8 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
 		var (
 			tx     *types.Transaction
 			genErr error
@@ -293,7 +295,8 @@ func TestStoragePruning(t *testing.T) {
 
 	var eipContract *contracts.Eip2027
 
-	blocks, _ := core.GenerateChain(gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
 		var (
 			tx       *types.Transaction
 			innerErr error

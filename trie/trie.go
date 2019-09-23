@@ -223,7 +223,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 
 type ResolveRequest struct {
 	t             *Trie  // trie to act upon
-	contract      []byte // contract address or nil, if the trie is the main trie
+	contract      []byte // contract address hash + incarnation (32+8 bytes) or nil, if the trie is the main trie
 	resolveHex    []byte // Key for which the resolution is requested
 	resolvePos    int    // Position in the key for which resolution is requested
 	extResolvePos int
@@ -232,6 +232,8 @@ type ResolveRequest struct {
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
+// NewResolveRequest creates a new ResolveRequest.
+// contract must be either address hash + incarnation (32+8 bytes) or nil
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
 	return &ResolveRequest{t: t, contract: contract, resolveHex: hex, resolvePos: pos, resolveHash: hashNode(resolveHash)}
 }
@@ -243,13 +245,8 @@ func (rr *ResolveRequest) String() string {
 // NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
-
-//bool
-//incarnation
-//addrHash+key
-
-// 1 key
-// composite key addrHash+key
+// contract, if not empty, must be equal to the address hash
+// key must be in the KEYBYTES encoding
 func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
 	var nd = t.root
 	hex := keybytesToHex(concat(contract, key...))
@@ -299,6 +296,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			if contract == nil {
 				return true, t.NewResolveRequest(nil, hex, pos, common.CopyBytes(n))
 			}
+			// 8 is IncarnationLength
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)

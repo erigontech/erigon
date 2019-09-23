@@ -18,7 +18,9 @@ package clique
 
 import (
 	"bytes"
+	"context"
 	"crypto/ecdsa"
+	"math/big"
 	"sort"
 	"testing"
 
@@ -413,8 +415,15 @@ func TestClique(t *testing.T) {
 		engine := New(config.Clique, db)
 		engine.fakeDiff = true
 
+		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil)
+		if err != nil {
+			t.Errorf("test %d: failed to create test chain: %v", i, err)
+			continue
+		}
+
 		genesisBlock, _, _, _ := genesis.ToBlock(db)
-		blocks, _ := core.GenerateChain(&config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
+		ctx := chain.WithContext(context.Background(), big.NewInt(genesisBlock.Number().Int64()+1))
+		blocks, _ := core.GenerateChain(ctx, &config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block
 			gen.SetCoinbase(accounts.address(tt.votes[j].voted))
 			if tt.votes[j].auth {
@@ -450,11 +459,6 @@ func TestClique(t *testing.T) {
 			batches[len(batches)-1] = append(batches[len(batches)-1], block)
 		}
 		// Pass all the headers through clique and ensure tallying succeeds
-		chain, err := core.NewBlockChain(db, nil, &config, engine, vm.Config{}, nil)
-		if err != nil {
-			t.Errorf("test %d: failed to create test chain: %v", i, err)
-			continue
-		}
 		failed := false
 		for j := 0; j < len(batches)-1; j++ {
 			if k, err := chain.InsertChain(batches[j]); err != nil {

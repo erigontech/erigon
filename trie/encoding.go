@@ -25,7 +25,8 @@ import (
 // Trie keys are dealt with in three distinct encodings:
 //
 // KEYBYTES encoding contains the actual key and nothing else. This encoding is the
-// input to most API functions.
+// input to most API functions. It is a packed encoding of hex sequences
+// with 2 nibbles per byte.
 //
 // HEX encoding contains one byte for each nibble of the key and an optional trailing
 // 'terminator' byte of value 0x10 which indicates whether or not the node at the key

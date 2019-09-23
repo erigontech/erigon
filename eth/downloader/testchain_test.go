@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
@@ -128,7 +129,7 @@ func (tc *testChain) generate(n int, seed byte, parent *types.Block, heavy bool)
 	tc.cpyLock.Lock()
 	defer tc.cpyLock.Unlock()
 
-	blocks, receipts := core.GenerateChain(params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
+	blocks, receipts := core.GenerateChain(context.Background(), params.TestChainConfig, parent, ethash.NewFaker(), tc.db, n, func(i int, block *core.BlockGen) {
 		block.SetCoinbase(common.Address{seed})
 		// If a heavy chain is requested, delay blocks to raise difficulty
 		if heavy {

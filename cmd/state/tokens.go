@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"

@@ -30,8 +30,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -698,6 +700,19 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 	return nil
 }
 
+func (pm *ProtocolManager) extractAddressHash(addressOrHash []byte) (common.Hash, error) {
+	var addrHash common.Hash
+	if len(addressOrHash) == common.HashLength {
+		addrHash.SetBytes(addressOrHash)
+		return addrHash, nil
+	} else if len(addressOrHash) == common.AddressLength {
+		addrHash = crypto.Keccak256Hash(addressOrHash)
+		return addrHash, nil
+	} else {
+		return addrHash, errResp(ErrDecode, "not an account address or its hash")
+	}
+}
+
 func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	msg, readErr := p.rw.ReadMsg()
 	if readErr != nil {
@@ -761,7 +776,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 	case GetStorageRangesCode:
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-		var request getStorageRangesMsg
+		var request getStorageRangesOrNodes
 		if err := msgStream.Decode(&request); err != nil {
 			return errResp(ErrDecode, "msg %v: %v", msg, err)
 		}
@@ -772,62 +787,47 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		response.ID = request.ID
 		response.Entries = make([][]storageRange, numReq)
 
-		missingData := false
-
-		for j, responseSize := 0, 0; j < numReq; j++ {
-			req := request.Requests[j]
-
-			n := len(req.Prefixes)
-			response.Entries[j] = make([]storageRange, n)
-			for i := 0; i < n; i++ {
-				response.Entries[j][i].Status = NoData
-			}
-
-			var addr common.Address
-			if len(req.Account) == common.AddressLength {
-				addr.SetBytes(req.Account)
-			} else if len(req.Account) == common.HashLength {
-				var preimageErr error
-				addr, preimageErr = pm.blockchain.GetAddressFromItsHash(common.BytesToHash(req.Account))
-				if preimageErr == core.ErrNotFound {
-					missingData = true
-					break
-				} else if preimageErr != nil {
-					return preimageErr
-				}
-			} else {
-				return errResp(ErrDecode, "not an account address or its hash")
-			}
-
-			tds, err := pm.blockchain.FindStateWithStorageRoot(addr, req.StorageRoot)
-			if err == core.ErrNotFound {
-				missingData = true
-				break
-			} else if err != nil {
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			_, tds, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			if err != nil {
 				return err
 			}
 
-			for i := 0; i < n && responseSize < softResponseLimit; i++ {
-				var leaves []storageLeaf
-				allTraversed, err := tds.WalkStorageRange(addr, req.Prefixes[i], MaxLeavesPerPrefix,
-					func(key common.Hash, value big.Int) {
-						leaves = append(leaves, storageLeaf{key, value})
-					},
-				)
+			for j, responseSize := 0, 0; j < numReq; j++ {
+				req := request.Requests[j]
+
+				n := len(req.Prefixes)
+				response.Entries[j] = make([]storageRange, n)
+				for i := 0; i < n; i++ {
+					response.Entries[j][i].Status = NoData
+				}
+
+				addrHash, err := pm.extractAddressHash(req.Account)
 				if err != nil {
 					return err
 				}
-				if allTraversed {
-					response.Entries[j][i].Status = OK
-					response.Entries[j][i].Leaves = leaves
-					responseSize += len(leaves)
-				} else {
-					response.Entries[j][i].Status = TooManyLeaves
+
+				for i := 0; i < n && responseSize < softResponseLimit; i++ {
+					var leaves []storageLeaf
+					allTraversed, err := tds.WalkStorageRange(addrHash, req.Prefixes[i], MaxLeavesPerPrefix,
+						func(key common.Hash, value big.Int) {
+							leaves = append(leaves, storageLeaf{key, value})
+						},
+					)
+					if err != nil {
+						return err
+					}
+					if allTraversed {
+						response.Entries[j][i].Status = OK
+						response.Entries[j][i].Leaves = leaves
+						responseSize += len(leaves)
+					} else {
+						response.Entries[j][i].Status = TooManyLeaves
+					}
 				}
 			}
-		}
-
-		if missingData {
+		} else {
 			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
 		}
 
@@ -884,7 +884,63 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 		return errResp(ErrNotImplemented, "Not implemented yet")
 
 	case GetStorageNodesCode:
-		return errResp(ErrNotImplemented, "Not implemented yet")
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var request getStorageRangesOrNodes
+		if err := msgStream.Decode(&request); err != nil {
+			return errResp(ErrDecode, "msg %v: %v", msg, err)
+		}
+
+		numReq := len(request.Requests)
+
+		var response storageNodesMsg
+		response.ID = request.ID
+		response.Nodes = make([][][]byte, numReq)
+
+		block := pm.blockchain.GetBlockByHash(request.Block)
+		if block != nil {
+			resolver := trie.NewResolver(0, false, block.NumberU64())
+			resolver.SetHistorical(true)
+
+			for j, responseSize := 0, 0; j < numReq; j++ {
+				req := request.Requests[j]
+
+				n := len(req.Prefixes)
+				response.Nodes[j] = make([][]byte, n)
+
+				addrHash, err := pm.extractAddressHash(req.Account)
+				if err != nil {
+					return err
+				}
+
+				var resRequests []*trie.ResolveRequest
+				tr := trie.New(common.Hash{})
+
+				for i := 0; i < n; i++ {
+					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+					copy(contractPrefix, addrHash.Bytes())
+					// TODO Issue99 [Boris] support incarnations
+					storagePrefix := req.Prefixes[i]
+					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
+					rr.RequiresRLP = true
+					resolver.AddRequest(rr)
+					resRequests = append(resRequests, rr)
+				}
+
+				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+					return err2
+				}
+
+				for i := 0; i < n && responseSize < softResponseLimit; i++ {
+					node := resRequests[i].NodeRLP
+					response.Nodes[j][i] = node
+					responseSize += len(node)
+				}
+			}
+		} else {
+			response.AvailableBlocks = pm.blockchain.AvailableBlocks()
+		}
+
+		return p2p.Send(p.rw, StorageNodesCode, response)
 
 	case StorageNodesCode:
 		return errResp(ErrNotImplemented, "Not implemented yet")

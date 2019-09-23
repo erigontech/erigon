@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -83,13 +84,14 @@ func NewBlockValidator(config *params.ChainConfig, blockchain *BlockChain, engin
 // ValidateBody validates the given block's uncles and verifies the block
 // header's transaction and uncle roots. The headers are assumed to be already
 // validated at this point.
-func (v *BlockValidator) ValidateBody(block *types.Block) error {
+func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) error {
 	// Check whether the block's known, and if not, that it's linkable
 	//if v.bc.HasBlockAndState(block.Hash(), block.NumberU64()) {
 	//	return ErrKnownBlock
 	//}
 	// Check whether the block is linkable
-	if !v.bc.noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
+	_, noHistory := params.GetNoHistoryByBlock(ctx, block.Number())
+	if !noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
 		return consensus.ErrUnknownAncestor
 	}
 	// Header validity is known at this point, check the uncles and transactions
@@ -103,7 +105,7 @@ func (v *BlockValidator) ValidateBody(block *types.Block) error {
 	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
 		return fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
 	}
-	if v.bc.noHistory {
+	if noHistory {
 		return nil
 	}
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {
