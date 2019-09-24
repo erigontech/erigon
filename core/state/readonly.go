@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -67,6 +68,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
+	binary.BigEndian.PutUint64(s[common.HashLength:], 0xffffffffffffffff)
 	copy(s[common.HashLength+IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
