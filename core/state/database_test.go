@@ -333,7 +333,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			},
 			Alloc: core.GenesisAlloc{
 				address:      {Balance: funds},
-				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{common.Hash{}: common.HexToHash("0x42")}},
+				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
 			},
 		}
 		genesis   = gspec.MustCommit(db)
