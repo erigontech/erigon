@@ -624,13 +624,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	}
 	newobj = newObject(sdb, addr, account, original)
 	newobj.created = true
-	// Figure out the latest incarnation of this account
-	incarnation, err := sdb.stateReader.NextIncarnation(addr)
-	// TODO [Alexey] Remove panic
-	if err != nil {
-		panic(err)
-	}
-	newobj.setIncarnation(incarnation)
 	newobj.setNonce(0) // sets the object to dirty
 	if prev == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
@@ -672,6 +665,13 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
 	}
+	// Figure out the latest incarnation of this account
+	incarnation, err := sdb.stateReader.NextIncarnation(addr)
+	// TODO [Alexey] Remove panic
+	if err != nil {
+		panic(err)
+	}
+	newObj.setIncarnation(incarnation)
 }
 
 // Copy creates a deep, independent copy of the state.
