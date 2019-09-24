@@ -330,6 +330,7 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], 0xffffffffffffffff)
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8
