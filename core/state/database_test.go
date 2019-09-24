@@ -142,7 +142,7 @@ func TestCreate2Revive(t *testing.T) {
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	var it **ReviveDeployEventIterator
+	var it *contracts.ReviveDeployEventIterator
 	it, err = revive.FilterDeployEvent(nil)
 	if err != nil {
 		t.Fatal(err)
