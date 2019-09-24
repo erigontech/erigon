@@ -20,9 +20,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"os"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -651,7 +652,10 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 	delete(s.timeToCodeHash, oldest-1)
 }
 
-func (s *Stateless) RemoveStorage(address common.Address, incarnation uint64) error {
-	//todo
+func (s *Stateless) NextIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+func (s *Stateless) RemoveStorage(address common.Address) error {
 	return nil
 }
