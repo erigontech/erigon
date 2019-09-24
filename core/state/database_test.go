@@ -142,7 +142,8 @@ func TestCreate2Revive(t *testing.T) {
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	it, err := revive.FilterDeployEvent(nil)
+	var it **ReviveDeployEventIterator
+	it, err = revive.FilterDeployEvent(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +164,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
@@ -172,7 +173,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
