@@ -107,7 +107,7 @@ func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) add
 	var res addressHashWithIncarnation
 	copy(res[:common.HashLength], addrHash[:])
 	buf := make([]byte, IncarnationLength)
-	binary.BigEndian.PutUint64(buf, incarnation)
+	binary.BigEndian.PutUint64(buf, incarnation^0xffffffffffffffff)
 	copy(res[common.HashLength:], buf[:])
 	return res
 }
@@ -122,7 +122,7 @@ func (a *addressHashWithIncarnation) Hash() common.Hash {
 }
 
 func (a *addressHashWithIncarnation) Incarnation() uint64 {
-	return binary.BigEndian.Uint64(a[common.HashLength : common.HashLength+IncarnationLength])
+	return 0xffffffffffffffff ^ binary.BigEndian.Uint64(a[common.HashLength:common.HashLength+IncarnationLength])
 }
 
 // Prepares buffer for work or clears previous data
@@ -984,7 +984,7 @@ func (tds *TrieDbState) NextIncarnation(address common.Address) (uint64, error) 
 		err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
-			return true, nil
+			return false, nil
 		})
 		if err != nil {
 			return 0, err
@@ -996,14 +996,14 @@ func (tds *TrieDbState) NextIncarnation(address common.Address) (uint64, error) 
 		err = tds.db.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
 			copy(incarnationBytes[:], k[common.HashLength:])
 			found = true
-			return true, nil
+			return false, nil
 		})
 		if err != nil {
 			return 0, err
 		}
 	}
 	if found {
-		return binary.BigEndian.Uint64(incarnationBytes[:]) + 1, nil
+		return (0xffffffffffffffff ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
 	return 0, nil
 }

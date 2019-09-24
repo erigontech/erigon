@@ -307,7 +307,7 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			// 8 is IncarnationLength
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
-			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation)
+			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation^0xffffffffffffffff)
 			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
 
 		default:
