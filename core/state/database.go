@@ -83,7 +83,11 @@ func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Addr
 	return nil
 }
 
-func (nw *NoopWriter) RemoveStorage(address common.Address, incarnation uint64) error {
+func (nw *NoopWriter) NextIncarnation(address common.Address) (uint64, error) {
+	return 0, nil
+}
+
+func (nw *NoopWriter) RemoveStorage(address common.Address) error {
 	return nil
 }
 
