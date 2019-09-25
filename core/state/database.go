@@ -48,8 +48,6 @@ type StateReader interface {
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
 	ReadAccountCode(codeHash common.Hash) ([]byte, error)
 	ReadAccountCodeSize(codeHash common.Hash) (int, error)
-	// Determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
-	NextIncarnation(address common.Address) (uint64, error)
 }
 
 type StateWriter interface {
@@ -57,7 +55,7 @@ type StateWriter interface {
 	UpdateAccountCode(codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
-	RemoveStorage(address common.Address) error
+	CreateContract(address common.Address) error
 }
 
 type NoopWriter struct {
@@ -83,11 +81,7 @@ func (nw *NoopWriter) WriteAccountStorage(_ context.Context, address common.Addr
 	return nil
 }
 
-func (nw *NoopWriter) NextIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
-}
-
-func (nw *NoopWriter) RemoveStorage(address common.Address) error {
+func (nw *NoopWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
@@ -100,7 +94,7 @@ type Buffer struct {
 	accountReads   map[common.Hash]struct{}
 	deleted        map[common.Address]struct{}
 	deletedHashes  map[common.Hash]struct{}
-	removeStorage  map[common.Address]struct{}
+	created        map[common.Address]struct{}
 }
 
 func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) addressHashWithIncarnation {
@@ -132,7 +126,7 @@ func (b *Buffer) initialise() {
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
 	b.accountReads = make(map[common.Hash]struct{})
 	b.deleted = make(map[common.Address]struct{})
-	b.removeStorage = make(map[common.Address]struct{})
+	b.created = make(map[common.Address]struct{})
 }
 
 // Replaces account pointer with pointers to the copies
@@ -177,8 +171,8 @@ func (b *Buffer) merge(other *Buffer) {
 	for address := range other.deleted {
 		b.deleted[address] = struct{}{}
 	}
-	for address := range other.removeStorage {
-		b.removeStorage[address] = struct{}{}
+	for address := range other.created {
+		b.created[address] = struct{}{}
 	}
 }
 
@@ -573,10 +567,25 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
-		for address := range b.removeStorage {
+		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
+		// that might be remaining in the trie and figure out the next incarnations
+		for address := range b.created {
 			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
+			}
+			var incarnation uint64
+			incarnation, err = tds.nextIncarnation(address)
+			if err != nil {
+				return nil, err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				account.SetIncarnation(incarnation)
+				account.Root = trie.EmptyRoot
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				account.SetIncarnation(incarnation)
+				account.Root = trie.EmptyRoot
 			}
 			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
 		}
@@ -971,7 +980,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 	return codeSize, nil
 }
 
-func (tds *TrieDbState) NextIncarnation(address common.Address) (uint64, error) {
+// nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
+func (tds *TrieDbState) nextIncarnation(address common.Address) (uint64, error) {
 	addrHash, err := tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return 0, err
@@ -1219,7 +1229,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	} else {
 		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
 	}
-	//fmt.Printf("WriteAccountStorage (db) %x %x: %x, buffer %d\n", addrHash, seckey, value, len(dsw.tds.buffers))
+	//fmt.Printf("WriteAccountStorage (db) %x %d %x: %x\n", address, incarnation, key, value)
 	if err != nil {
 		return err
 	}
@@ -1237,11 +1247,11 @@ func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
 	return tds.pg.ExtractProofs(trace)
 }
 
-func (tsw *TrieStateWriter) RemoveStorage(address common.Address) error {
-	tsw.tds.currentBuffer.removeStorage[address] = struct{}{}
+func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
+	tsw.tds.currentBuffer.created[address] = struct{}{}
 	return nil
 }
 
-func (dsw *DbStateWriter) RemoveStorage(address common.Address) error {
+func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	return nil
 }

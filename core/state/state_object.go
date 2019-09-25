@@ -89,7 +89,7 @@ type stateObject struct {
 	dirtyCode bool // true if the code was updated
 	suicided  bool
 	deleted   bool // true if account was deleted during the lifetime of this object
-	created   bool // true if account was created during the lifetime of this object
+	created   bool // true if this object represents a newly created contract
 }
 
 // empty returns whether the account is considered empty.

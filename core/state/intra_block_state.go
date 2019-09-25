@@ -623,7 +623,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
-	newobj.created = true
 	newobj.setNonce(0) // sets the object to dirty
 	if prev == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
@@ -665,13 +664,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
 	}
-	// Figure out the latest incarnation of this account
-	incarnation, err := sdb.stateReader.NextIncarnation(addr)
-	// TODO [Alexey] Remove panic
-	if err != nil {
-		panic(err)
-	}
-	newObj.setIncarnation(incarnation)
+	newObj.created = true
 }
 
 // Copy creates a deep, independent copy of the state.
@@ -784,13 +777,13 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			}
 			stateObject.deleted = true
 		} else {
-			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
-				return err
-			}
 			if stateObject.created {
-				if err := stateWriter.RemoveStorage(addr); err != nil {
+				if err := stateWriter.CreateContract(addr); err != nil {
 					return err
 				}
+			}
+			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
+				return err
 			}
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
@@ -827,7 +820,7 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 			}
 
 			if stateObject.created {
-				if err := stateWriter.RemoveStorage(addr); err != nil {
+				if err := stateWriter.CreateContract(addr); err != nil {
 					return err
 				}
 			}

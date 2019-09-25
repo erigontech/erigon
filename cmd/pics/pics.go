@@ -200,7 +200,7 @@ func prefixGroups4() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
 	}
 	visual.StartGraph(f)
 	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)

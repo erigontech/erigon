@@ -333,7 +333,8 @@ func TestCreateOnExistingStorage(t *testing.T) {
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
-				address:      {Balance: funds},
+				address: {Balance: funds},
+				// Pre-existing storage item in an account without code
 				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
 			},
 		}
@@ -354,12 +355,9 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	transactOpts.GasLimit = 1000000
 
 	var contractAddress common.Address
-	// There are 4 blocks
-	// In the first block, we deploy the "factory" contract Revive, which can create children contracts via CREATE2 opcode
-	// In the second block, we create the first child contract
-	// In the third block, we cause the first child contract to selfdestruct
-	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
-	// i.e. without any storage items that "inherited" from the first child contract by mistake
+	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
+	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
+	// We expect the pre-existing storage items to be removed by the deployment
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction

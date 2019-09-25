@@ -652,10 +652,6 @@ func (s *Stateless) Prune(oldest uint64, trace bool) {
 	delete(s.timeToCodeHash, oldest-1)
 }
 
-func (s *Stateless) NextIncarnation(address common.Address) (uint64, error) {
-	return 0, nil
-}
-
-func (s *Stateless) RemoveStorage(address common.Address) error {
+func (s *Stateless) CreateContract(address common.Address) error {
 	return nil
 }
