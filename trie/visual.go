@@ -31,7 +31,7 @@ import (
 // Visual creates visualisation of trie with highlighting
 // cutTerminals specify how many digits to cut from the terminal short node keys for a more convinient display
 func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool, cutTerminals int,
-	codeMap map[common.Hash][]byte, codeCompressed bool, valCompressed bool) {
+	codeMap map[common.Hash][]byte, codeCompressed bool, valCompressed bool, valHex bool) {
 	var highlightsHex = make([][]byte, 0, len(highlights))
 	for _, h := range highlights {
 		highlightsHex = append(highlightsHex, h)
@@ -42,7 +42,7 @@ func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fon
 		leaves = make(map[string]struct{})
 	}
 	hashes := make(map[string]struct{})
-	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes, cutTerminals, codeMap, codeCompressed, valCompressed)
+	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes, cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 	/*
 	   	fmt.Fprintf(w, "{rank = same;")
 	   	for leaf := range leaves {
@@ -104,7 +104,7 @@ func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
 
 func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string,
 	leaves map[string]struct{}, hashes map[string]struct{}, cutTerminals int, codeMap map[common.Hash][]byte,
-	codeCompressed bool, valCompressed bool) {
+	codeCompressed bool, valCompressed bool, valHex bool) {
 	switch n := nd.(type) {
 	case nil:
 	case *shortNode:
@@ -119,7 +119,12 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 		if v, ok := n.Val.(valueNode); ok {
 			if leaves != nil {
 				leaves[string(hex)] = struct{}{}
-				var valStr = fmt.Sprintf("%x", []byte(v))
+				var valStr string
+				if valHex {
+					valStr = fmt.Sprintf("%x", []byte(v))
+				} else {
+					valStr = string(v)
+				}
 				if valCompressed && len(valStr) > 10 {
 					valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
 				}
@@ -155,7 +160,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 					}
 				}
 				visualNode(a.storage, accountHex[:len(accountHex)-1], newHighlights, w, indexColors, fontColors, leaves, hashes,
-					cutTerminals, codeMap, codeCompressed, valCompressed)
+					cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 				fmt.Fprintf(w,
 					`e_%x -> n_%x;
 	`, accountHex, accountHex[:len(accountHex)-1])
@@ -173,7 +178,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 				}
 			}
 			visualNode(n.Val, concat(hex, n.Key...), newHighlights, w, indexColors, fontColors, leaves, hashes,
-				cutTerminals, codeMap, codeCompressed, valCompressed)
+				cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
@@ -226,9 +231,9 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
     n_%x:h%d -> n_%x;
 `, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
 		visualNode(n.child1, concat(hex, i1), highlights1, w, indexColors, fontColors, leaves, hashes,
-			cutTerminals, codeMap, codeCompressed, valCompressed)
+			cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 		visualNode(n.child2, concat(hex, i2), highlights2, w, indexColors, fontColors, leaves, hashes,
-			cutTerminals, codeMap, codeCompressed, valCompressed)
+			cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 	case *fullNode:
 		fmt.Fprintf(w,
 			`
@@ -283,7 +288,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 				}
 			}
 			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves, hashes,
-				cutTerminals, codeMap, codeCompressed, valCompressed)
+				cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
 		}
 	case hashNode:
 		hashes[string(hex)] = struct{}{}

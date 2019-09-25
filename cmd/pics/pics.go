@@ -203,7 +203,7 @@ func prefixGroups4() {
 		hightlights = append(hightlights, []byte(key))
 	}
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -225,6 +225,7 @@ func prefixGroups5() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -232,11 +233,12 @@ func prefixGroups5() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
+	tr.Fold(folds[:8])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -258,6 +260,7 @@ func prefixGroups6() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -265,12 +268,13 @@ func prefixGroups6() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
-	tr.Fold(hightlights[8:16])
+	tr.Fold(folds[:8])
+	tr.Fold(folds[8:16])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -292,6 +296,7 @@ func prefixGroups7() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -299,14 +304,15 @@ func prefixGroups7() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
-	tr.Fold(hightlights[8:16])
-	tr.Fold(hightlights[16:24])
-	tr.Fold(hightlights[24:])
+	tr.Fold(folds[:8])
+	tr.Fold(folds[8:16])
+	tr.Fold(folds[16:24])
+	tr.Fold(folds[24:])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -328,6 +334,7 @@ func prefixGroups8() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds [][]byte
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -335,19 +342,16 @@ func prefixGroups8() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
-	}
-	var folds [][]byte
-	for i, h := range hightlights {
+		hightlights = append(hightlights, []byte(key))
 		switch i {
 		case 3, 8, 22, 23:
 		default:
-			folds = append(folds, h)
+			folds = append(folds, hexKey)
 		}
 	}
 	tr.Fold(folds)
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false)
+	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)

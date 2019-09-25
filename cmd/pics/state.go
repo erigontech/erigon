@@ -52,7 +52,7 @@ func statePicture(tds *state.TrieDbState, t *trie.Trie, number int, keyCompressi
 	}
 	visual.StartGraph(f)
 	trie.Visual(t, highlights, f, indexColors, fontColors, true,
-		keyCompression, codeMap, codeCompressed, valCompressed)
+		keyCompression, codeMap, codeCompressed, valCompressed, true)
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		return nil, err
