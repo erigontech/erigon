@@ -51,8 +51,17 @@ func statePicture(tds *state.TrieDbState, t *trie.Trie, number int, keyCompressi
 		fontColors = visual.QuadFontColors
 	}
 	visual.StartGraph(f)
-	trie.Visual(t, highlights, f, indexColors, fontColors, true,
-		keyCompression, codeMap, codeCompressed, valCompressed, true)
+	trie.Visual(t, f, &trie.VisualOpts{
+		Highlights:     highlights,
+		IndexColors:    indexColors,
+		FontColors:     fontColors,
+		Values:         true,
+		CutTerminals:   keyCompression,
+		CodeMap:        codeMap,
+		CodeCompressed: codeCompressed,
+		ValCompressed:  valCompressed,
+		ValHex:         true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		return nil, err

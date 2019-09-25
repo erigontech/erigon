@@ -203,7 +203,13 @@ func prefixGroups4() {
 		hightlights = append(hightlights, []byte(key))
 	}
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -238,7 +244,13 @@ func prefixGroups5() {
 	}
 	tr.Fold(folds[:8])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -274,7 +286,13 @@ func prefixGroups6() {
 	tr.Fold(folds[:8])
 	tr.Fold(folds[8:16])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -312,7 +330,13 @@ func prefixGroups7() {
 	tr.Fold(folds[16:24])
 	tr.Fold(folds[24:])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -351,7 +375,13 @@ func prefixGroups8() {
 	}
 	tr.Fold(folds)
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true, 0, nil, false, false, false)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)

@@ -28,35 +28,44 @@ import (
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
+// VisualOpts contains various configuration options fo the Visual function
+// It has been introduced as a replacement for too many arguments with options
+type VisualOpts struct {
+	Highlights     [][]byte               // Collection of keys, in the HEX encoding, that need to be highlighted with digits
+	IndexColors    []string               // Array of colors for representing digits as colored boxes
+	FontColors     []string               // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
+	Values         bool                   // Whether to display value nodes (as box with rounded corners)
+	CutTerminals   int                    // Specifies how many digits to cut from the terminal short node keys for a more convinient display
+	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
+	CodeCompressed bool                   // Whether to turn the code from a large rectange to a small square for a more convinient display
+	ValCompressed  bool                   // Whether long values (over 10 characters) are shortened using ... in the middle
+	ValHex         bool                   // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
+	SameLevel      bool                   // Whether the leaves (and hashes) need to be on the same horizontal level
+}
+
 // Visual creates visualisation of trie with highlighting
-// cutTerminals specify how many digits to cut from the terminal short node keys for a more convinient display
-func Visual(t *Trie, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string, values bool, cutTerminals int,
-	codeMap map[common.Hash][]byte, codeCompressed bool, valCompressed bool, valHex bool) {
-	var highlightsHex = make([][]byte, 0, len(highlights))
-	for _, h := range highlights {
-		highlightsHex = append(highlightsHex, h)
-		//highlightsHex = append(highlightsHex, keybytesToHex(h))
-	}
+// cutTerminals
+func Visual(t *Trie, w io.Writer, opts *VisualOpts) {
 	var leaves map[string]struct{}
-	if values {
+	if opts.Values {
 		leaves = make(map[string]struct{})
 	}
 	hashes := make(map[string]struct{})
-	visualNode(t.root, []byte{}, highlightsHex, w, indexColors, fontColors, leaves, hashes, cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
-	/*
-	   	fmt.Fprintf(w, "{rank = same;")
-	   	for leaf := range leaves {
-	   		fmt.Fprintf(w, "n_%x;", leaf)
-	   	}
-	   	fmt.Fprintf(w, `};
+	visualNode(t.root, []byte{}, w, opts.Highlights, opts, leaves, hashes)
+	if opts.SameLevel {
+		fmt.Fprintf(w, "{rank = same;")
+		for leaf := range leaves {
+			fmt.Fprintf(w, "n_%x;", leaf)
+		}
+		fmt.Fprintf(w, `};
 	   `)
-	   			fmt.Fprintf(w, "{rank = same;")
-	   			for hash := range hashes {
-	   				fmt.Fprintf(w, "n_%x;", hash)
-	   			}
-	   			fmt.Fprintf(w, `};
+		fmt.Fprintf(w, "{rank = same;")
+		for hash := range hashes {
+			fmt.Fprintf(w, "n_%x;", hash)
+		}
+		fmt.Fprintf(w, `};
 	   		`)
-	*/
+	}
 }
 
 func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
@@ -102,9 +111,8 @@ func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
 	`)
 }
 
-func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColors []string, fontColors []string,
-	leaves map[string]struct{}, hashes map[string]struct{}, cutTerminals int, codeMap map[common.Hash][]byte,
-	codeCompressed bool, valCompressed bool, valHex bool) {
+func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *VisualOpts,
+	leaves map[string]struct{}, hashes map[string]struct{}) {
 	switch n := nd.(type) {
 	case nil:
 	case *shortNode:
@@ -115,17 +123,17 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 				pLenMax = pLen
 			}
 		}
-		visual.Vertical(w, n.Key, pLenMax, fmt.Sprintf("n_%x", hex), indexColors, fontColors, cutTerminals)
+		visual.Vertical(w, n.Key, pLenMax, fmt.Sprintf("n_%x", hex), opts.IndexColors, opts.FontColors, opts.CutTerminals)
 		if v, ok := n.Val.(valueNode); ok {
 			if leaves != nil {
 				leaves[string(hex)] = struct{}{}
 				var valStr string
-				if valHex {
+				if opts.ValHex {
 					valStr = fmt.Sprintf("%x", []byte(v))
 				} else {
 					valStr = string(v)
 				}
-				if valCompressed && len(valStr) > 10 {
+				if opts.ValCompressed && len(valStr) > 10 {
 					valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
 				}
 				visual.Circle(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), valStr, false)
@@ -141,9 +149,9 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 				`n_%x -> e_%x;
 `, hex, accountHex)
 			if !a.IsEmptyCodeHash() {
-				codeHex := keybytesToHex(codeMap[a.CodeHash])
+				codeHex := keybytesToHex(opts.CodeMap[a.CodeHash])
 				codeHex = codeHex[:len(codeHex)-1]
-				visualCode(w, accountHex, codeHex, codeCompressed)
+				visualCode(w, accountHex, codeHex, opts.CodeCompressed)
 				fmt.Fprintf(w,
 					`e_%x -> c_%x;
 				`, accountHex, accountHex)
@@ -159,8 +167,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 						newHighlights = append(newHighlights, h[len(nKey):])
 					}
 				}
-				visualNode(a.storage, accountHex[:len(accountHex)-1], newHighlights, w, indexColors, fontColors, leaves, hashes,
-					cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
+				visualNode(a.storage, accountHex[:len(accountHex)-1], w, newHighlights, opts, leaves, hashes)
 				fmt.Fprintf(w,
 					`e_%x -> n_%x;
 	`, accountHex, accountHex[:len(accountHex)-1])
@@ -177,8 +184,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 					newHighlights = append(newHighlights, h[len(n.Key):])
 				}
 			}
-			visualNode(n.Val, concat(hex, n.Key...), newHighlights, w, indexColors, fontColors, leaves, hashes,
-				cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
+			visualNode(n.Val, concat(hex, n.Key...), w, newHighlights, opts, leaves, hashes)
 		}
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
@@ -204,23 +210,23 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 			fmt.Fprintf(w,
 				` 
 			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
-`, indexColors[i1], i1, fontColors[i1], indices[i1])
+`, opts.IndexColors[i1], i1, opts.FontColors[i1], indices[i1])
 		} else {
 			fmt.Fprintf(w,
 				` 
 			<td bgcolor="%s" port="h%d"></td>
-`, indexColors[i1], i1)
+`, opts.IndexColors[i1], i1)
 		}
 		if hOn2 {
 			fmt.Fprintf(w,
 				` 
 			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
-`, indexColors[i2], i2, fontColors[i2], indices[i2])
+`, opts.IndexColors[i2], i2, opts.FontColors[i2], indices[i2])
 		} else {
 			fmt.Fprintf(w,
 				` 
 			<td bgcolor="%s" port="h%d"></td>
-`, indexColors[i2], i2)
+`, opts.IndexColors[i2], i2)
 		}
 		fmt.Fprintf(w,
 			`
@@ -230,10 +236,8 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
     n_%x:h%d -> n_%x;
     n_%x:h%d -> n_%x;
 `, hex, i1, concat(hex, i1), hex, i2, concat(hex, i2))
-		visualNode(n.child1, concat(hex, i1), highlights1, w, indexColors, fontColors, leaves, hashes,
-			cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
-		visualNode(n.child2, concat(hex, i2), highlights2, w, indexColors, fontColors, leaves, hashes,
-			cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
+		visualNode(n.child1, concat(hex, i1), w, highlights1, opts, leaves, hashes)
+		visualNode(n.child2, concat(hex, i2), w, highlights2, opts, leaves, hashes)
 	case *fullNode:
 		fmt.Fprintf(w,
 			`
@@ -255,12 +259,12 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 				fmt.Fprintf(w,
 					`
 			<td bgcolor="%s" port="h%d"><font color="%s">%s</font></td>
-`, indexColors[i], i, fontColors[i], indices[i])
+`, opts.IndexColors[i], i, opts.FontColors[i], indices[i])
 			} else {
 				fmt.Fprintf(w,
 					`
 			<td bgcolor="%s" port="h%d"></td>
-`, indexColors[i], i)
+`, opts.IndexColors[i], i)
 			}
 		}
 		fmt.Fprintf(w,
@@ -287,8 +291,7 @@ func visualNode(nd node, hex []byte, highlights [][]byte, w io.Writer, indexColo
 					newHighlights = append(newHighlights, h[1:])
 				}
 			}
-			visualNode(child, concat(hex, byte(i)), newHighlights, w, indexColors, fontColors, leaves, hashes,
-				cutTerminals, codeMap, codeCompressed, valCompressed, valHex)
+			visualNode(child, concat(hex, byte(i)), w, newHighlights, opts, leaves, hashes)
 		}
 	case hashNode:
 		hashes[string(hex)] = struct{}{}
