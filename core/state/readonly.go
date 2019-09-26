@@ -218,5 +218,6 @@ func (dbs *DbState) WriteAccountStorage(_ context.Context, address common.Addres
 }
 
 func (dbs *DbState) CreateContract(address common.Address) error {
+	delete(dbs.storage, address)
 	return nil
 }
