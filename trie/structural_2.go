@@ -93,8 +93,6 @@ func step2(
 			} else {
 				e.extension(curr[remainderStart : remainderStart+remainderLen])
 			}
-		} else {
-			// Always BRANCH or BRANCHHASH opcode?
 		}
 	} else {
 		if hashOnly(curr[:maxLen]) {
