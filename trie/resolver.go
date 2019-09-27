@@ -50,7 +50,6 @@ type TrieResolver struct {
 	curr       bytes.Buffer
 	succ       bytes.Buffer
 	groups     []uint32
-	prefix     []byte
 	a          accounts.Account
 }
 
@@ -179,7 +178,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
+		tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -217,7 +216,6 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.hb.Reset()
 		tr.groups = nil
-		tr.prefix = nil
 		tr.keyIdx = keyIdx
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
@@ -244,7 +242,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.prefix, tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.prefix, tr.groups)
+			tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		}
 		// Remember the current key and value
 		if tr.accounts {

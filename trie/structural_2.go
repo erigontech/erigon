@@ -27,7 +27,9 @@ import (
 	"golang.org/x/crypto/sha3"
 )
 
-// Experimental code for separating data and structural information (variant 2)
+// Experimental code for separating data and structural information
+// Each function corresponds to an opcode
+// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type emitter2 interface {
 	leaf(length int)
 	leafHash(length int)
@@ -35,16 +37,29 @@ type emitter2 interface {
 	extensionHash(key []byte)
 	branch(set uint32)
 	branchHash(set uint32)
-	hash()
+	hash(number int)
 }
 
+// step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
+// `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
+// compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
+// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
+// `recursive` parameter is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf.
+// Recursive invocation is used to emit opcodes for non-leaf nodes.
+// `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
+// makes decisions about the local structure, i.e. the presense of the prefix groups.
+// `e` parameter is the emitter, an object that receives opcode messages.
+// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
+// Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
+// then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
+// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 func step2(
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
 	e emitter2,
-	prefix []byte, groups []uint32,
-) (newPrefix []byte, newGroups []uint32) {
+	groups []uint32,
+) []uint32 {
 	if !recursive && len(prec) == 0 {
 		prec = nil
 	}
@@ -64,9 +79,6 @@ func step2(
 		groups = append(groups, 0)
 	}
 	groups[maxLen] |= (uint32(1) << extraDigit)
-	for maxLen > len(prefix) {
-		prefix = append(prefix, curr[len(prefix)])
-	}
 	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
 	remainderStart := maxLen
 	if len(succ) > 0 || prec != nil {
@@ -81,6 +93,8 @@ func step2(
 			} else {
 				e.extension(curr[remainderStart : remainderStart+remainderLen])
 			}
+		} else {
+			// Always BRANCH or BRANCHHASH opcode?
 		}
 	} else {
 		if hashOnly(curr[:maxLen]) {
@@ -91,7 +105,7 @@ func step2(
 	}
 	// Check for the optional part
 	if precLen <= succLen && len(succ) > 0 {
-		return prefix, groups
+		return groups
 	}
 	// Close the immediately encompassing prefix group, if needed
 	if len(succ) > 0 || prec != nil {
@@ -104,7 +118,7 @@ func step2(
 	groups = groups[:maxLen]
 	// Check the end of recursion
 	if precLen == 0 {
-		return prefix, groups
+		return groups
 	}
 	// Identify preceeding key for the recursive invocation
 	newCurr := curr[:precLen]
@@ -113,18 +127,14 @@ func step2(
 		groups = groups[:len(groups)-1]
 	}
 	if len(groups) >= 1 {
-		prefix = prefix[:len(groups)-1]
-		newPrec = prefix
-	} else {
-		prefix = prefix[:0]
+		newPrec = curr[:len(groups)-1]
 	}
 
 	// Recursion
-	newPrefix, newGroups = step2(hashOnly, true, newPrec, newCurr, succ, e, prefix, groups)
-	return newPrefix, newGroups
+	return step2(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
-// HashBuilder2 impements the interface `emitter` and opcodes that the structural information of the trie
+// HashBuilder2 impements the interface `emitter2` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder2 struct {
@@ -132,8 +142,8 @@ type HashBuilder2 struct {
 	hashStack []byte       // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
 	nodeStack []node       // Stack of nodes
 	value     *bytebufferpool.ByteBuffer
-	sha       keccakState
-	leafFunc  func(b []byte) (node, error)
+	sha       keccakState                  // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
+	leafFunc  func(b []byte) (node, error) // Function to be called on the leafs to construct valueNode or accoutNode
 }
 
 // NewHashBuilder2 creates a new HashBuilder2
@@ -449,7 +459,7 @@ func (hb *HashBuilder2) branchHash(set uint32) {
 	}
 }
 
-func (hb *HashBuilder2) hash() {
+func (hb *HashBuilder2) hash(number int) {
 	panic("not implemented")
 }
 
