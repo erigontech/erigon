@@ -158,12 +158,16 @@ as well as for the composition of chunks. This structural information can be a s
 6. `BRANCHHASH set-of-digits`
 7. `HASH number-of-hashes`
 
-The description of semantics would require the introduction of two stacks, which always have the same length. One
+The description of semantics will require the introduction of two stacks, which always have the same length. One
 of the stacks (we call it "hash stack") contains hashes produced by opcodes. Another stack (we call it "node stack")
 contains leaf nodes, branch nodes, or extension nodes of the trie being built.
 In some cases, where the presence of a node is not required, the corresponding entry in the node stack is empty, or `nil`.
+As well as the stack, the description requires introduction of two input sequences (or "tapes"). First tape contains
+key-value pairs, each pair can be viewed as two opaque binary strings or arbitrary length, usually with the requirement
+that the whole sequence is sorted by the lexicographic order of the keys, and all the keys are distinct.
+The second tape contains hashes, each 32 byte long.
 
-`LEAF` opcode consumes the next key-value pair, creates a new leaf node and pushes it onto the node stack. It also
+`LEAF` opcode consumes the next key-value pair from the tape, creates a new leaf node and pushes it onto the node stack. It also
 pushes the hash of that node onto the hash stack. The operand
 `length-of-key` specifies how many digits of the key become part of the leaf node. For example, for the leaf `11`
 in our example, it will be 6 digits, and for the leaf `12`, it will be 4 digits. Special case of `length-of-key`
@@ -196,9 +200,8 @@ item is the one popped off the stack last (after the one corresponding to the lo
 branch node, it only creates its 32-byte hash. It places hash of the node onto the hash stack, and `nil` onto
 the node stack.
 
-`HASH` opcode takes specified number of hashes from the input sequence of hashes (now we can have
-two sequences, one with key-value pairs, and another - with hashes), and places them on the hash stack.
-It also places the same number of `nil` entries onto the node stack.
+`HASH` opcode takes specified number of hashes from the input sequence (tape) of hashes, and places them on
+the hash stack. It also places the same number of `nil` entries onto the node stack.
 
 This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
 ```
@@ -407,3 +410,32 @@ otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `Reso
 Transaction processing
 ----------------------
 ![processing](processing.png)
+
+### Extension of the structure to support contracts with contract storage
+When it is required to construct tries containing accounts as well as contract storage, and contract code, the
+set of opcodes making up the structural information need to be extended by four more. Apart from that a new input
+sequence (tape) is added, containing the bytecodes of contracts.
+
+8. `CODE`
+9. `CODEHASH`
+10. `CONTRACTLEAF`
+11. `CONTRACTLEAFHASH`
+12. `EMPTYROOT`
+
+`CODE` opcode consumes the next item in the bytecode sequence, creates a code node and pushes it onto the node stack.
+It also pushes the hash of the byte code onto the hash stack.
+
+`CODEHASH` opcode consumes the next hash from the hash sequence, pushes it onto the hash stack, and pushes `nil` into the
+node stack.
+
+`CONTRACTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key-value tape. Then it pops two things
+from the node stack (and also from the hash stack). One thing has to be code node, another - root node of the storage
+for that contract. Storage root can be empty (that would introduced by `EMPTYROOT` opcode). Out of all this information,
+an account leaf node is constructed and pushed onto the node stack. Its hash is pushed onto the hash stack.
+
+`CONTRACTLEAFHASH` opcode's difference from `CONTRACTLEAF` is that it does not push the leaf node onto the node stack,
+pushing `nil` instead. The hash of would-be account leaf node is pushed onto the hash stack.
+
+`EMPTYROOT` is a way of placing a special value signifying an empty node onto the node stack. It also pushes the
+corresponding hash onto the hash stack. This opcode is itroduced because there is no way of achieving its semantics
+by means of other opcodes.

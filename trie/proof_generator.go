@@ -26,7 +26,58 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ugorji/go/codec"
 )
+
+// Tape represents the sequence of values that is getting serialised using CBOR into a byte buffer
+type Tape struct {
+	buffer  bytes.Buffer
+	handle  codec.CborHandle
+	encoder *codec.Encoder
+}
+
+func (t *Tape) init() {
+	t.encoder = codec.NewEncoder(&t.buffer, &t.handle)
+}
+
+// BlockWitnessBuilder accumulates data that can later be turned into a serialised
+// version of the block witness
+// All buffers are streams of CBOR-encoded items (not a CBOR array, but individual items back-to-back)
+// `Keys` are binary strings
+// `Values` are either binary strings or arrays of structures
+// {nonce - integer, balance - integer, optionally [root hash - binary string, code hash - binary string]}
+// `Hashes` are binary strings, all of size 32
+// `Codes` are binary strings
+// `Structure` are integers (for opcodes themselves), potentiall followed by binary strings (key for EXTENSION) or
+// integers (bitmaps for BRANCH or length of LEAF or number of hashes for HASH)
+type BlockWitnessBuilder struct {
+	Keys      Tape // Sequence of keys that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
+	Values    Tape // Sequence of values that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
+	Hashes    Tape // Sequence of hashes that are consumed by the HASH opcode
+	Codes     Tape // Sequence of contract codes that are consumed by the CODE opcode
+	Structure Tape // Sequence of opcodes and operands that define the structure of the witness
+}
+
+// NewBlockWitnessBuilder creates an initialised block witness builder ready for use
+func NewBlockWitnessBuilder() *BlockWitnessBuilder {
+	var bwb BlockWitnessBuilder
+	bwb.Keys.init()
+	bwb.Values.init()
+	bwb.Hashes.init()
+	bwb.Codes.init()
+	bwb.Structure.init()
+	return &bwb
+}
+
+func (bwb *BlockWitnessBuilder) keyValue(key, value []byte) error {
+	if err := bwb.Keys.encoder.Encode(key); err != nil {
+		return err
+	}
+	if err := bwb.Values.encoder.Encode(value); err != nil {
+		return err
+	}
+	return nil
+}
 
 type BlockProof struct {
 	Contracts  []common.Address
