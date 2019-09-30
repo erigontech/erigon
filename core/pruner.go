@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-const NumOfPrunedBlocks = 5000
+const NumOfPrunedBlocks = 10
 
 type BlockChainer interface {
 	CurrentBlock() *types.Block
@@ -47,30 +47,35 @@ func (p *BasicPruner) Start() error {
 	if !ok {
 		return errors.New("it's not ethdb.BoltDatabase")
 	}
+	if p.config.BlocksToPrune == 0 || p.config.PruneTimeout.Seconds() < 1 {
+		return errors.New("incorrect config")
+	}
 	p.Lock()
 	p.LastPrunedBlockNum = p.ReadLastPrunedBlockNum()
 	p.Unlock()
 	p.wg.Add(1)
 	go p.pruningLoop(db)
+	log.Info("Pruner started")
+
 	return nil
 }
 func (p *BasicPruner) pruningLoop(db *ethdb.BoltDatabase) {
-	prunerRun := time.NewTicker(time.Second * 2)
+	prunerRun := time.NewTicker(p.config.PruneTimeout)
 	saveLastPrunedBlockNum := time.NewTicker(time.Minute * 5)
 	defer prunerRun.Stop()
 	defer saveLastPrunedBlockNum.Stop()
+	defer p.wg.Done()
 	for {
 		select {
 		case <-p.stop:
 			p.Lock()
 			p.WriteLastPrunedBlockNum(p.LastPrunedBlockNum)
 			p.Unlock()
-			log.Error("Pruning stopped")
-			p.wg.Done()
+			log.Info("Pruning stopped")
 			return
 		case <-saveLastPrunedBlockNum.C:
 			p.Lock()
-			log.Error("Save last pruned block num", "num", p.LastPrunedBlockNum.Uint64())
+			log.Info("Save last pruned block num", "num", p.LastPrunedBlockNum.Uint64())
 			p.WriteLastPrunedBlockNum(p.LastPrunedBlockNum)
 			p.Unlock()
 		case <-prunerRun.C:
@@ -79,9 +84,9 @@ func (p *BasicPruner) pruningLoop(db *ethdb.BoltDatabase) {
 				continue
 			}
 			p.RLock()
-			numOfBlocks := calculateNumOfPrunedBlocks(cb.Number().Uint64(), p.LastPrunedBlockNum.Uint64(), p.config.BlocksBeforePruning, NumOfPrunedBlocks)
+			numOfBlocks := calculateNumOfPrunedBlocks(cb.Number().Uint64(), p.LastPrunedBlockNum.Uint64(), p.config.BlocksBeforePruning, p.config.BlocksToPrune)
 			p.RUnlock()
-			log.Error("Run pruning", "numOfBlocks", numOfBlocks)
+			log.Debug("Run pruning", "numOfBlocks", numOfBlocks)
 			if numOfBlocks == 0 {
 				continue
 			}
@@ -89,11 +94,10 @@ func (p *BasicPruner) pruningLoop(db *ethdb.BoltDatabase) {
 			from := p.LastPrunedBlockNum.Uint64()
 			to := p.LastPrunedBlockNum.Uint64() + numOfBlocks
 			p.RUnlock()
-			log.Error("Pruning", "from", from, "to", to)
+			log.Debug("Pruning history", "from", from, "to", to)
 			err := Prune(db, from, to)
 			if err != nil {
 				log.Error("Pruning error", "err", err)
-				p.wg.Done()
 				return
 			}
 			p.Lock()
@@ -115,10 +119,9 @@ func calculateNumOfPrunedBlocks(curentBlock, lastPrunedBlock uint64, blocksBefor
 	}
 }
 func (p *BasicPruner) Stop() {
-	log.Error("Stop pruning")
 	p.stop <- struct{}{}
 	p.wg.Wait()
-	log.Error("Pruning stopped")
+	log.Info("Pruning stopped")
 }
 
 func (p *BasicPruner) ReadLastPrunedBlockNum() *big.Int {
@@ -180,30 +183,30 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 }
 
 func batchDelete(db *bolt.DB, keys *keysToRemove) error {
-	log.Error("Pruning: ", "accounts", len(keys.Account), "storage", len(keys.Storage), "suffix", len(keys.Suffix))
+	log.Debug("Removed: ", "accounts", len(keys.Account), "storage", len(keys.Storage), "suffix", len(keys.Suffix))
 	return db.Update(func(tx *bolt.Tx) error {
 		accountHistoryBucket := tx.Bucket(dbutils.AccountsHistoryBucket)
 		for i := range keys.Account {
 			err := accountHistoryBucket.Delete(keys.Account[i])
 			if err != nil {
-				log.Warn("Unable to remove ", "addr", common.Bytes2Hex(keys.Account[i]))
-				return err
+				log.Warn("Unable to remove ", "addr", common.Bytes2Hex(keys.Account[i]), "err", err)
+				continue
 			}
 		}
 		storageHistoryBucket := tx.Bucket(dbutils.StorageHistoryBucket)
 		for i := range keys.Storage {
 			err := storageHistoryBucket.Delete(keys.Storage[i])
 			if err != nil {
-				log.Warn("Unable to remove storage key", "storage", common.Bytes2Hex(keys.Account[i]))
-				return err
+				log.Warn("Unable to remove storage key", "storage", common.Bytes2Hex(keys.Account[i]), "err", err)
+				continue
 			}
 		}
 		suffixBucket := tx.Bucket(dbutils.SuffixBucket)
 		for i := range keys.Suffix {
 			err := suffixBucket.Delete(keys.Suffix[i])
 			if err != nil {
-				log.Warn("Unable to remove suffix", "suffix", common.Bytes2Hex(keys.Account[i]))
-				return err
+				log.Warn("Unable to remove suffix", "suffix", common.Bytes2Hex(keys.Account[i]), "err", err)
+				continue
 			}
 		}
 		return nil

@@ -81,6 +81,8 @@ type CacheConfig struct {
 	TrieTimeLimit  time.Duration // Time limit after which to flush the current in-memory trie to disk
 
 	BlocksBeforePruning uint64
+	BlocksToPrune       uint64
+	PruneTimeout        time.Duration
 	ArchiveSyncInterval uint64
 	NoHistory           bool
 }
@@ -220,12 +222,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 	// Take ownership of this particular state
 	go bc.update()
-	fmt.Println("------------------------------------")
-	log.Error("cacheConfig", "Disabled", cacheConfig.Disabled, "BlocksBeforePruning", cacheConfig.BlocksBeforePruning)
 	if !cacheConfig.Disabled {
 		bc.pruner = NewBasicPruner(db, bc, bc.cacheConfig)
 		err := bc.pruner.Start()
-		log.Error("Pruner started")
 		if err != nil {
 			log.Error("Pruner error", "err", err)
 		}

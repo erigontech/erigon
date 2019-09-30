@@ -89,6 +89,8 @@ type Config struct {
 	NoHistory           bool
 	ArchiveSyncInterval int
 	BlocksBeforePruning uint64
+	BlocksToPrune       uint64
+	PruningTimeout      time.Duration
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`

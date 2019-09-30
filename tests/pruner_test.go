@@ -438,7 +438,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	pruner := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1})
+	pruner := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})
 	err = pruner.Start()
 	assertNil(t, err)
 

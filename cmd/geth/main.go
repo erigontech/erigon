@@ -93,6 +93,8 @@ var (
 		utils.ExitWhenSyncedFlag,
 		utils.GCModeFlag,
 		utils.GCModeLimitFlag,
+		utils.GCModeBlockToPruneFlag,
+		utils.GCModeTickTimeout,
 		utils.LightServFlag,
 		utils.LightPeersFlag,
 		utils.LightKDFFlag,

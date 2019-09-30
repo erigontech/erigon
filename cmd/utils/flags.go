@@ -196,9 +196,19 @@ var (
 		Value: "full",
 	}
 	GCModeLimitFlag = cli.Uint64Flag{
-		Name:  "gcmode.limit",
+		Name:  "gcmode.stop_limit",
 		Usage: `Blockchain garbage collection mode limit("full")"`,
 		Value: 1024,
+	}
+	GCModeBlockToPruneFlag = cli.Uint64Flag{
+		Name:  "gcmode.processing_limit",
+		Usage: `Block to prune per tick"`,
+		Value: 20,
+	}
+	GCModeTickTimeout = cli.DurationFlag{
+		Name:  "gcmode.tick",
+		Usage: `Block to prune per tick"`,
+		Value: time.Second * 2,
 	}
 	LightServFlag = cli.IntFlag{
 		Name:  "lightserv",
@@ -1308,6 +1318,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 	cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
 	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
+	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
+	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
 
 	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
