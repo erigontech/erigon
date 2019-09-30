@@ -1,5 +1,8 @@
 package ethdb
 
+// Maximum length (in bytes of encoded timestamp)
+const MaxTimestapLength = 8
+
 // Transforms b into encoding where only
 // 7 bits of each byte are used to encode the bits of b
 // The most significant bit is left empty, for other purposes

@@ -28,10 +28,10 @@ var (
 )
 
 // SelfdestructABI is the input ABI used to generate the binding from.
-const SelfdestructABI = "[{\"constant\":false,\"inputs\":[],\"name\":\"destruct\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"payable\":true,\"stateMutability\":\"payable\",\"type\":\"fallback\"}]"
+const SelfdestructABI = "[{\"constant\":false,\"inputs\":[],\"name\":\"destruct\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"constant\":false,\"inputs\":[],\"name\":\"change\",\"outputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"payable\":false,\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"payable\":true,\"stateMutability\":\"payable\",\"type\":\"fallback\"}]"
 
 // SelfdestructBin is the compiled bytecode used for deploying new contracts.
-const SelfdestructBin = `6080604052348015600f57600080fd5b506001600081905560029081905560039055607d8061002f6000396000f3fe608060405260043610603e5763ffffffff7c01000000000000000000000000000000000000000000000000000000006000350416632b68b9c681146040575b005b348015604b57600080fd5b50603e30fffea165627a7a7230582072489606b22a62751b13dc55ba3d4fd4ae080ccb15ecfd194d46d984a214f7d50029`
+const SelfdestructBin = `608060405234801561001057600080fd5b50600160008190556002908190556003905560ba806100306000396000f3fe60806040526004361060485763ffffffff7c01000000000000000000000000000000000000000000000000000000006000350416632b68b9c68114604a5780632ee79ded14605c575b005b348015605557600080fd5b506048606e565b348015606757600080fd5b5060486071565b30ff5b60008054600190810190915580548101815560028054909101905556fea165627a7a72305820544eed06fb7377be59b35562fd04c71baca9298d9932822f780df2c35ac724910029`
 
 // DeploySelfdestruct deploys a new Ethereum contract, binding an instance of Selfdestruct to it.
 func DeploySelfdestruct(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Selfdestruct, error) {
@@ -186,6 +186,27 @@ func (_Selfdestruct *SelfdestructTransactorRaw) Transfer(opts *bind.TransactOpts
 // Transact invokes the (paid) contract method with params as input values.
 func (_Selfdestruct *SelfdestructTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (*types.Transaction, error) {
 	return _Selfdestruct.Contract.contract.Transact(opts, method, params...)
+}
+
+// Change is a paid mutator transaction binding the contract method 0x2ee79ded.
+//
+// Solidity: function change() returns()
+func (_Selfdestruct *SelfdestructTransactor) Change(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Selfdestruct.contract.Transact(opts, "change")
+}
+
+// Change is a paid mutator transaction binding the contract method 0x2ee79ded.
+//
+// Solidity: function change() returns()
+func (_Selfdestruct *SelfdestructSession) Change() (*types.Transaction, error) {
+	return _Selfdestruct.Contract.Change(&_Selfdestruct.TransactOpts)
+}
+
+// Change is a paid mutator transaction binding the contract method 0x2ee79ded.
+//
+// Solidity: function change() returns()
+func (_Selfdestruct *SelfdestructTransactorSession) Change() (*types.Transaction, error) {
+	return _Selfdestruct.Contract.Change(&_Selfdestruct.TransactOpts)
 }
 
 // Destruct is a paid mutator transaction binding the contract method 0x2b68b9c6.

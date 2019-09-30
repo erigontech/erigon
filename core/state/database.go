@@ -587,6 +587,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 				account.SetIncarnation(incarnation)
 				account.Root = trie.EmptyRoot
 			}
+			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
 		}
 		for addrHash, account := range b.accountUpdates {
@@ -989,7 +991,9 @@ func (tds *TrieDbState) nextIncarnation(address common.Address) (uint64, error) 
 	var found bool
 	var incarnationBytes [IncarnationLength]byte
 	if tds.historical {
-		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength+8)
+		// We reserve ethdb.MaxTimestapLength (8) at the end of the key to accomodate any possible timestamp
+		// (timestamp's encoding may have variable length)
+		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength+ethdb.MaxTimestapLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
 		err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {

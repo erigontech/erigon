@@ -240,7 +240,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var selfDestruct *contracts.Selfdestruct
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 2, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -251,6 +251,12 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			}
 			block.AddTx(tx)
 		case 1:
+			tx, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		case 2:
 			tx, err = selfDestruct.Destruct(transactOpts)
 			if err != nil {
 				t.Fatal(err)
@@ -264,7 +270,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
-	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 3, func(i int, block *core.BlockGen) {
+	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
@@ -296,23 +302,23 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
-	// BLOCK 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	// BLOCKS 2 + 3
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1], blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
 	st, _, _ = blockchain.State()
 	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 2", contractAddress.String())
+		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
 
 	// REORG of block 2, and new (empty) BLOCK 2 and BLOCK 3
-	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
 	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 3", contractAddress.String())
+		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
 	}
 }
 func TestCreateOnExistingStorage(t *testing.T) {

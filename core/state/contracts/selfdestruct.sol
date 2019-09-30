@@ -15,6 +15,12 @@ contract Selfdestruct {
         z = 3;
     }
 
+    function change() external {
+        x += 1;
+        y += 1;
+        z += 1;
+    }
+
     function () external payable {}
 
     /* Self-destructs */
