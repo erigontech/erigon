@@ -195,6 +195,11 @@ var (
 		Usage: `Blockchain garbage collection mode ("full", "archive")`,
 		Value: "full",
 	}
+	GCModeLimitFlag = cli.Uint64Flag{
+		Name:  "gcmode.limit",
+		Usage: `Blockchain garbage collection mode limit("full")"`,
+		Value: 1024,
+	}
 	LightServFlag = cli.IntFlag{
 		Name:  "lightserv",
 		Usage: "Maximum percentage of time allowed for serving LES requests (0-90)",
@@ -1302,6 +1307,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
 	}
 	cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
 
 	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)

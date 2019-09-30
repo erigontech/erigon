@@ -80,6 +80,7 @@ type CacheConfig struct {
 	TrieDirtyLimit int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit  time.Duration // Time limit after which to flush the current in-memory trie to disk
 
+	BlocksBeforePruning uint64
 	ArchiveSyncInterval uint64
 	NoHistory           bool
 }
@@ -145,6 +146,7 @@ type BlockChain struct {
 	highestKnownBlockMu sync.Mutex
 	enableReceipts      bool // Whether receipts need to be written to the database
 	resolveReads        bool
+	pruner              Pruner
 }
 
 // NewBlockChain returns a fully initialised block chain using information
@@ -153,10 +155,11 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
-			TrieCleanLimit: 256,
-			TrieDirtyLimit: 256,
-			TrieTimeLimit:  5 * time.Minute,
-			NoHistory:      true,
+			BlocksBeforePruning: 1024,
+			TrieCleanLimit:      256,
+			TrieDirtyLimit:      256,
+			TrieTimeLimit:       5 * time.Minute,
+			NoHistory:           true,
 		}
 	}
 	if cacheConfig.ArchiveSyncInterval == 0 {
@@ -217,6 +220,16 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 	// Take ownership of this particular state
 	go bc.update()
+	fmt.Println("------------------------------------")
+	log.Error("cacheConfig", "Disabled", cacheConfig.Disabled, "BlocksBeforePruning", cacheConfig.BlocksBeforePruning)
+	if !cacheConfig.Disabled {
+		bc.pruner = NewBasicPruner(db, bc, bc.cacheConfig)
+		err := bc.pruner.Start()
+		log.Error("Pruner started")
+		if err != nil {
+			log.Error("Pruner error", "err", err)
+		}
+	}
 	return bc, nil
 }
 
@@ -749,8 +762,8 @@ func (bc *BlockChain) Stop() {
 	bc.scope.Close()
 	close(bc.quit)
 	atomic.StoreInt32(&bc.procInterrupt, 1)
-
 	bc.wg.Wait()
+	bc.pruner.Stop()
 	log.Info("Blockchain manager stopped")
 }
 
@@ -1758,7 +1771,7 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 
 	var isArchiveInterval bool
 	currentBlockNumber := bc.CurrentBlock().Number().Uint64()
-	highestKnownBlock := bc.getHeightKnownBlock()
+	highestKnownBlock := bc.GetHeightKnownBlock()
 	if highestKnownBlock > currentBlockNumber {
 		isArchiveInterval = (currentBlock.Uint64() - highestKnownBlock) <= bc.cacheConfig.ArchiveSyncInterval
 	} else {
@@ -1776,7 +1789,7 @@ func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
 	bc.highestKnownBlockMu.Unlock()
 }
 
-func (bc *BlockChain) getHeightKnownBlock() uint64 {
+func (bc *BlockChain) GetHeightKnownBlock() uint64 {
 	bc.highestKnownBlockMu.Lock()
 	defer bc.highestKnownBlockMu.Unlock()
 	return bc.highestKnownBlock
@@ -1786,4 +1799,9 @@ func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) contex
 	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
 	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
 	return ctx
+}
+
+type Pruner interface {
+	Start() error
+	Stop()
 }

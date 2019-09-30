@@ -88,6 +88,7 @@ type Config struct {
 	NoPruning           bool
 	NoHistory           bool
 	ArchiveSyncInterval int
+	BlocksBeforePruning uint64
 
 	// Whitelist of required block number -> hash values to accept
 	Whitelist map[uint64]common.Hash `toml:"-"`
