@@ -1,8 +1,10 @@
 package trie
 
 import (
-	"fmt"
+	"bytes"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func TestKeyValue(t *testing.T) {
@@ -10,6 +12,10 @@ func TestKeyValue(t *testing.T) {
 	if err := bwb.keyValue([]byte("key"), []byte("value")); err != nil {
 		t.Errorf("Could not set key-value: %v", err)
 	}
-	fmt.Printf("key buffer: %x\n", bwb.Keys.buffer.Bytes())
-	fmt.Printf("value buffer: %x\n", bwb.Values.buffer.Bytes())
+	if !bytes.Equal(common.FromHex("0x436b6579"), bwb.Keys.buffer.Bytes()) {
+		t.Errorf("Expected 0x436b6579 in keys tape, got: %x", bwb.Keys.buffer.Bytes())
+	}
+	if !bytes.Equal(common.FromHex("0x4576616c7565"), bwb.Values.buffer.Bytes()) {
+		t.Errorf("Expected 0x4576616c7565 in values tape, got: %x", bwb.Values.buffer.Bytes())
+	}
 }

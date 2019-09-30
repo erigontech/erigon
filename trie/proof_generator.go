@@ -31,11 +31,12 @@ import (
 
 // Tape represents the sequence of values that is getting serialised using CBOR into a byte buffer
 type Tape struct {
-	buffer  bytes.Buffer
-	handle  codec.CborHandle
-	encoder *codec.Encoder
+	buffer  bytes.Buffer     // Byte buffer where the CBOR-encoded values end up being written
+	handle  codec.CborHandle // Object used to control the behavior of CBOR encoding
+	encoder *codec.Encoder   // Values are supplied to this object (via its Encode function)
 }
 
+// init allocates a new encoder, binding it to the buffer and the handle
 func (t *Tape) init() {
 	t.encoder = codec.NewEncoder(&t.buffer, &t.handle)
 }
@@ -48,7 +49,7 @@ func (t *Tape) init() {
 // {nonce - integer, balance - integer, optionally [root hash - binary string, code hash - binary string]}
 // `Hashes` are binary strings, all of size 32
 // `Codes` are binary strings
-// `Structure` are integers (for opcodes themselves), potentiall followed by binary strings (key for EXTENSION) or
+// `Structure` are integers (for opcodes themselves), potentially followed by binary strings (key for EXTENSION) or
 // integers (bitmaps for BRANCH or length of LEAF or number of hashes for HASH)
 type BlockWitnessBuilder struct {
 	Keys      Tape // Sequence of keys that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
@@ -57,6 +58,23 @@ type BlockWitnessBuilder struct {
 	Codes     Tape // Sequence of contract codes that are consumed by the CODE opcode
 	Structure Tape // Sequence of opcodes and operands that define the structure of the witness
 }
+
+type Instruction uint8
+
+const (
+	OpLeaf Instruction = iota
+	OpLeafHash
+	OpExtension
+	OpExtensionHash
+	OpBranch
+	OpBranchHash
+	OpHash
+	OpCode
+	OpCodeHash
+	OpContractLeaf
+	OpContractLeafHash
+	OpEmptyRoot
+)
 
 // NewBlockWitnessBuilder creates an initialised block witness builder ready for use
 func NewBlockWitnessBuilder() *BlockWitnessBuilder {
@@ -69,11 +87,23 @@ func NewBlockWitnessBuilder() *BlockWitnessBuilder {
 	return &bwb
 }
 
+// keyValue supplies the next key-value pair for the leaf tape
 func (bwb *BlockWitnessBuilder) keyValue(key, value []byte) error {
 	if err := bwb.Keys.encoder.Encode(key); err != nil {
 		return err
 	}
 	if err := bwb.Values.encoder.Encode(value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) leaf(length int) error {
+	o := OpLeaf
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
 		return err
 	}
 	return nil
