@@ -991,9 +991,9 @@ func (tds *TrieDbState) nextIncarnation(address common.Address) (uint64, error) 
 	var found bool
 	var incarnationBytes [IncarnationLength]byte
 	if tds.historical {
-		// We reserve ethdb.MaxTimestapLength (8) at the end of the key to accomodate any possible timestamp
+		// We reserve ethdb.MaxTimestampLength (8) at the end of the key to accomodate any possible timestamp
 		// (timestamp's encoding may have variable length)
-		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength+ethdb.MaxTimestapLength)
+		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
 		err = tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {

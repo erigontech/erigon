@@ -201,7 +201,6 @@ func TestCreate2Revive(t *testing.T) {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
 }
-
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -240,6 +239,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	var selfDestruct *contracts.Selfdestruct
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 3, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
@@ -266,7 +266,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	// Create a longer chain (with higher total difficulty) that reverts the self-destruction of the contract
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
@@ -312,7 +312,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
 
-	// REORG of block 2, and new (empty) BLOCK 2 and BLOCK 3
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
 		t.Fatal(err)
 	}
