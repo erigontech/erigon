@@ -142,7 +142,7 @@ func loadShort(br *bufio.Reader) (*shortNode, error) {
 	if err != nil {
 		return nil, err
 	}
-	n.Key = hexToCompact(keyHex)
+	n.Key = keyHex
 	n.Val, err = loadNode(br)
 	if err != nil {
 		return nil, err
@@ -231,10 +231,10 @@ func (n *duoNode) print(w io.Writer) {
 }
 
 func (n *shortNode) fstring(ind string) string {
-	return fmt.Sprintf("{%x: %v} ", compactToHex(n.Key), n.Val.fstring(ind+"  "))
+	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
 }
 func (n *shortNode) print(w io.Writer) {
-	fmt.Fprintf(w, "s(%x:", compactToHex(n.Key))
+	fmt.Fprintf(w, "s(%x:", n.Key)
 	n.Val.print(w)
 	fmt.Fprintf(w, ")")
 }
@@ -293,7 +293,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "%s)\n", ind)
 	case *shortNode:
 		fmt.Fprintf(w, "short %x(", n.hash())
-		keyHex := compactToHex(n.Key)
+		keyHex := n.Key
 		hexV := make([]byte, len(keyHex))
 		for i := 0; i < len(hexV); i++ {
 			hexV[i] = []byte(indices[keyHex[i]])[0]
@@ -379,7 +379,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "short(")
 		if n, ok := n2.(*shortNode); ok {
 			if bytes.Equal(n1.Key, n.Key) {
-				keyHex := compactToHex(n1.Key)
+				keyHex := n1.Key
 				hexV := make([]byte, len(keyHex))
 				for i := 0; i < len(hexV); i++ {
 					hexV[i] = []byte(indices[keyHex[i]])[0]
@@ -388,7 +388,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 				printDiff(n1.Val, n.Val, w, "  "+ind, key+string(hexV))
 				fmt.Fprintf(w, "\n")
 			} else {
-				fmt.Fprintf(w, "%x:(/%x)", compactToHex(n1.Key), compactToHex(n.Key))
+				fmt.Fprintf(w, "%x:(/%x)", n1.Key, n.Key)
 				fmt.Fprintf(w, "\n:LEFT\n")
 				printDiffSide(n1, w, ind, key)
 				fmt.Fprintf(w, "\nRIGHT\n")

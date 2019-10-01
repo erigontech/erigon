@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -663,8 +663,8 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
-		newObj.setIncarnation(prev.data.GetIncarnation() + 1)
 	}
+	newObj.created = true
 }
 
 // Copy creates a deep, independent copy of the state.
@@ -777,10 +777,14 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			}
 			stateObject.deleted = true
 		} else {
+			if stateObject.created {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
-
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
 			}
@@ -815,6 +819,11 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 				}
 			}
 
+			if stateObject.created {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
+			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}

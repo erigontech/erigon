@@ -6,7 +6,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -15,6 +14,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -872,11 +873,16 @@ func testDifficulty() {
 func testBlockHashes() {
 	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
-	hash := rawdb.ReadCanonicalHash(ethDb, 823144)
-	fmt.Printf("Canonical hash: %x\n", hash)
-	header := rawdb.ReadHeader(ethDb, hash, 823144)
-	fmt.Printf("Header.TxHash: %x\n", header.TxHash)
-	fmt.Printf("Header.UncleHash: %x\n", header.UncleHash)
+	for i := uint64(1000000); i < uint64(1751612); i++ {
+		hash := rawdb.ReadCanonicalHash(ethDb, i)
+		header := rawdb.ReadHeader(ethDb, hash, i)
+		if header.Root == common.BytesToHash(common.FromHex("0x18186d0c469558437ade9b424ca9176b56fa0a8ca465eaf0f468294b37b693f8")) {
+			fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
+			fmt.Printf("Header.Root: %x\n", header.Root)
+			fmt.Printf("Header.TxHash: %x\n", header.TxHash)
+			fmt.Printf("Header.UncleHash: %x\n", header.UncleHash)
+		}
+	}
 }
 
 func printTxHashes() {
@@ -994,7 +1000,7 @@ func preimage() {
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(dbutils.PreimagePrefix, common.FromHex("0x578e9478d8a7287fd7720ca220095ee48ec0fd16a4279772a2d323927b00e30f"))
+	p, err := ethDb.Get(dbutils.PreimagePrefix, common.FromHex("0x4f7adcf420b4a9af04b6c7c9e171d34a38e4f66b3d2bac0678a36fdac77dd207"))
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1230,7 +1236,9 @@ func main() {
 	//if *reset != -1 {
 	//	testReset(uint64(*reset))
 	//}
-	//testBlockHashes()
+	if *action == "testBlockHashes" {
+		testBlockHashes()
+	}
 	//printBuckets(db)
 	//printTxHashes()
 	//relayoutKeys()

@@ -247,14 +247,15 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 	case *shortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
-		if len(n.Key) == 1 && n.Key[0] < 128 {
-			buffer[pos] = n.Key[0]
+		compactKey := hexToCompact(n.Key)
+		if len(compactKey) == 1 && compactKey[0] < 128 {
+			buffer[pos] = compactKey[0]
 			pos++
 		} else {
-			buffer[pos] = byte(128 + len(n.Key))
+			buffer[pos] = byte(128 + len(compactKey))
 			pos++
-			copy(buffer[pos:], n.Key)
-			pos += len(n.Key)
+			copy(buffer[pos:], compactKey)
+			pos += len(compactKey)
 		}
 		// Encode value
 		if vn, ok := n.Val.(valueNode); ok {

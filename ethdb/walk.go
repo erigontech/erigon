@@ -52,20 +52,6 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			for ki := 0; ki < keycount; ki++ {
 				l := int(v[i])
 				i++
-				/*
-					k := v[i:i+l]
-					var sk []byte
-					if len(k) == 52 {
-						sk = k[20:]
-					} else {
-						sk = k
-					}
-					preimage, _ := db.Get([]byte("secure-key-"), sk)
-					fmt.Printf("timestamp: %d, key: %x, preimage: %x\n", timestamp, k, preimage)
-					if timestamp == 1828654 || timestamp == 2727676 {
-						fmt.Printf("key at block %d, bucket %s: %x\n", timestamp, bucket, v[i:i+l])
-					}
-				*/
 				t[string(common.CopyBytes(v[i:i+l]))] = struct{}{}
 				i += l
 			}
@@ -74,12 +60,6 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	}); err != nil {
 		return err
 	}
-	//suffixDst := encodeTimestamp(timestampDst)
-	//buckets := sort.StringSlice{}
-	//for bucketStr := range m {
-	//	buckets = append(buckets, bucketStr)
-	//}
-	//sort.Sort(buckets)
 	for bucketStr, t := range m {
 		//t := m[bucketStr]
 		bucket := []byte(bucketStr)

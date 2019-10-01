@@ -417,6 +417,10 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, incarnatio
 	return nil
 }
 
+func (rds *RepairDbState) CreateContract(address common.Address) error {
+	return nil
+}
+
 func (rds *RepairDbState) PruneTries() {
 	// TODO Reintroduce pruning if necessary
 	var m runtime.MemStats
