@@ -849,6 +849,9 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 	if !save {
 		return nil
 	}
+	if p, _ := tds.db.Get(dbutils.PreimagePrefix, hash); p != nil {
+		return nil
+	}
 	return tds.db.Put(dbutils.PreimagePrefix, hash, preimage)
 }
 
