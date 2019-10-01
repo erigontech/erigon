@@ -101,7 +101,7 @@ func newAddressHashWithIncarnation(addrHash common.Hash, incarnation uint64) add
 	var res addressHashWithIncarnation
 	copy(res[:common.HashLength], addrHash[:])
 	buf := make([]byte, IncarnationLength)
-	binary.BigEndian.PutUint64(buf, incarnation^0xffffffffffffffff)
+	binary.BigEndian.PutUint64(buf, incarnation^^uint64(0))
 	copy(res[common.HashLength:], buf[:])
 	return res
 }
@@ -116,7 +116,7 @@ func (a *addressHashWithIncarnation) Hash() common.Hash {
 }
 
 func (a *addressHashWithIncarnation) Incarnation() uint64 {
-	return 0xffffffffffffffff ^ binary.BigEndian.Uint64(a[common.HashLength:common.HashLength+IncarnationLength])
+	return ^uint64(0) ^ binary.BigEndian.Uint64(a[common.HashLength:common.HashLength+IncarnationLength])
 }
 
 // Prepares buffer for work or clears previous data
@@ -324,7 +324,7 @@ func (tds *TrieDbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, 
 func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], 0xffffffffffffffff)
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(0))
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8
@@ -1018,7 +1018,7 @@ func (tds *TrieDbState) nextIncarnation(address common.Address) (uint64, error) 
 		}
 	}
 	if found {
-		return (0xffffffffffffffff ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
 	return 0, nil
 }
