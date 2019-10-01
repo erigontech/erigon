@@ -919,7 +919,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				for i := 0; i < n; i++ {
 					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
-					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], 0xffffffffffffffff)
+					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
 					// TODO Issue99 [Boris] support incarnations
 					storagePrefix := req.Prefixes[i]
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
