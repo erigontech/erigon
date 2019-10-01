@@ -157,11 +157,12 @@ type BlockChain struct {
 func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *params.ChainConfig, engine consensus.Engine, vmConfig vm.Config, shouldPreserve func(block *types.Block) bool) (*BlockChain, error) {
 	if cacheConfig == nil {
 		cacheConfig = &CacheConfig{
+			Disabled:            true,
 			BlocksBeforePruning: 1024,
 			TrieCleanLimit:      256,
 			TrieDirtyLimit:      256,
 			TrieTimeLimit:       5 * time.Minute,
-			NoHistory:           true,
+			NoHistory:           false,
 		}
 	}
 	if cacheConfig.ArchiveSyncInterval == 0 {
@@ -223,10 +224,17 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	// Take ownership of this particular state
 	go bc.update()
 	if !cacheConfig.Disabled {
-		bc.pruner = NewBasicPruner(db, bc, bc.cacheConfig)
-		err := bc.pruner.Start()
-		if err != nil {
-			log.Error("Pruner error", "err", err)
+		var innerErr error
+		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)
+		if innerErr != nil {
+			log.Error("Pruner init error", "err", err)
+			return nil, innerErr
+		}
+
+		innerErr = bc.pruner.Start()
+		if innerErr != nil {
+			log.Error("Pruner start error", "err", err)
+			return nil, innerErr
 		}
 	}
 	return bc, nil
@@ -762,7 +770,9 @@ func (bc *BlockChain) Stop() {
 	close(bc.quit)
 	atomic.StoreInt32(&bc.procInterrupt, 1)
 	bc.wg.Wait()
-	bc.pruner.Stop()
+	if bc.pruner != nil {
+		bc.pruner.Stop()
+	}
 	log.Info("Blockchain manager stopped")
 }
 

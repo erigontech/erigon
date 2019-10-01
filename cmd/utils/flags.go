@@ -207,7 +207,7 @@ var (
 	}
 	GCModeTickTimeout = cli.DurationFlag{
 		Name:  "gcmode.tick",
-		Usage: `Block to prune per tick"`,
+		Usage: `Time of tick"`,
 		Value: time.Second * 2,
 	}
 	LightServFlag = cli.IntFlag{

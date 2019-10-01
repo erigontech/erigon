@@ -438,7 +438,8 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	pruner := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})
+	pruner, err := core.NewBasicPruner(db, blockchain, &core.CacheConfig{BlocksBeforePruning: 1, BlocksToPrune: 10, PruneTimeout: time.Second})
+	assertNil(t, err)
 	err = pruner.Start()
 	assertNil(t, err)
 
@@ -520,7 +521,7 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
-		changedAccounts := dbutils.Suffix(v)
+		changedAccounts := dbutils.ToSuffix(v)
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple account suffix records")
