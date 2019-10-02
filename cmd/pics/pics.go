@@ -13,7 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
-var account = flag.String("pic", "", "specifies picture to regenerate")
+var pic = flag.String("pic", "", "specifies picture to regenerate")
 
 // Generate set of keys for the visualisation
 func generatePrefixGroups() []string {
@@ -44,7 +44,7 @@ func prefixGroups1() {
 	visual.StartGraph(f)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -72,7 +72,7 @@ func prefixGroups2() {
 	visual.StartGraph(f)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -157,7 +157,7 @@ q_%x->q_%x;
 		}
 		// Display the key
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
-		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i))
+		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
@@ -200,10 +200,16 @@ func prefixGroups4() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
 	}
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -225,6 +231,7 @@ func prefixGroups5() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -232,11 +239,18 @@ func prefixGroups5() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
+	tr.Fold(folds[:8])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -258,6 +272,7 @@ func prefixGroups6() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -265,12 +280,19 @@ func prefixGroups6() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
-	tr.Fold(hightlights[8:16])
+	tr.Fold(folds[:8])
+	tr.Fold(folds[8:16])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -292,6 +314,7 @@ func prefixGroups7() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds = make([][]byte, 0, len(keys))
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -299,14 +322,21 @@ func prefixGroups7() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
+		hightlights = append(hightlights, []byte(key))
+		folds = append(folds, hexKey)
 	}
-	tr.Fold(hightlights[:8])
-	tr.Fold(hightlights[8:16])
-	tr.Fold(hightlights[16:24])
-	tr.Fold(hightlights[24:])
+	tr.Fold(folds[:8])
+	tr.Fold(folds[8:16])
+	tr.Fold(folds[16:24])
+	tr.Fold(folds[24:])
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -328,6 +358,7 @@ func prefixGroups8() {
 	sort.Strings(keys)
 	tr := trie.New(common.Hash{})
 	var hightlights = make([][]byte, 0, len(keys))
+	var folds [][]byte
 	for i, key := range keys {
 		hexKey := make([]byte, len(key)/2)
 		for j := 0; j < len(hexKey); j++ {
@@ -335,19 +366,22 @@ func prefixGroups8() {
 		}
 		vs := fmt.Sprintf("%d", i)
 		tr.Update(hexKey, []byte(vs), 0)
-		hightlights = append(hightlights, hexKey)
-	}
-	var folds [][]byte
-	for i, h := range hightlights {
+		hightlights = append(hightlights, []byte(key))
 		switch i {
 		case 3, 8, 22, 23:
 		default:
-			folds = append(folds, h)
+			folds = append(folds, hexKey)
 		}
 	}
 	tr.Fold(folds)
 	visual.StartGraph(f)
-	trie.Visual(tr, hightlights, f, visual.QuadIndexColors, visual.QuadFontColors, true)
+	trie.Visual(tr, f, &trie.VisualOpts{
+		Highlights:  hightlights,
+		IndexColors: visual.QuadIndexColors,
+		FontColors:  visual.QuadFontColors,
+		Values:      true,
+		SameLevel:   true,
+	})
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		panic(err)
@@ -360,7 +394,7 @@ func prefixGroups8() {
 
 func main() {
 	flag.Parse()
-	switch *account {
+	switch *pic {
 	case "prefix_groups_1":
 		prefixGroups1()
 	case "prefix_groups_2":
@@ -377,5 +411,9 @@ func main() {
 		prefixGroups7()
 	case "prefix_groups_8":
 		prefixGroups8()
+	case "initial_state_1":
+		if err := initialState1(); err != nil {
+			fmt.Printf("%v\n", err)
+		}
 	}
 }

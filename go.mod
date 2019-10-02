@@ -57,6 +57,7 @@ require (
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
 	github.com/rs/xhandler v0.0.0-20160618193221-ed27b6fd6521 // indirect
 	github.com/stretchr/testify v0.0.0-20170809224252-890a5c3458b4
+	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.21.0
 	github.com/valyala/bytebufferpool v1.0.0
 	github.com/wcharczuk/go-chart v2.0.1+incompatible

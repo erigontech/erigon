@@ -255,12 +255,16 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		if err != nil {
+			log.Error("Creation aborted", "error", err)
 			return nil, err
 		}
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
+			log.Error("Rebuiling aborted", "error", err)
+			bc.trieDbState = nil
 			return nil, err
 		}
+		log.Info("Creation complete.")
 	}
 	return bc.trieDbState, nil
 }
@@ -1100,6 +1104,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
 func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, []interface{}, []*types.Log, error) {
+	log.Info("Inserting chain", "start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64())
 	// If the chain is terminating, don't even bother starting u
 	if atomic.LoadInt32(&bc.procInterrupt) == 1 {
 		return 0, nil, nil, nil
@@ -1274,15 +1279,16 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			parentRoot = parent.Root()
 		}
 		if parent != nil && root != parentRoot {
-			log.Info("Rewinding", "to block", readBlockNr)
+			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
 			if _, err = bc.db.Commit(); err != nil {
-				log.Error("Could not commit chainDb before rewinding", err)
+				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
+				log.Error("Could not rewind", "error", err)
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
@@ -1300,7 +1306,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				return 0, events, coalescedLogs, err
 			}
 			if _, err = bc.db.Commit(); err != nil {
-				log.Error("Could not commit chainDb after rewinding", err)
+				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err

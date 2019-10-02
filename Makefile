@@ -48,7 +48,7 @@ pics:
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
 all:
-	build/env.sh go run build/ci.go install
+	build/env.sh go run build/ci.go install -procs=1
 
 android:
 	build/env.sh go run build/ci.go aar --local

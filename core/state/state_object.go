@@ -1,4 +1,4 @@
-// Copyright 2014 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -86,10 +86,10 @@ type stateObject struct {
 	// Cache flags.
 	// When an object is marked suicided it will be delete from the trie
 	// during the "update" phase of the state transition.
-	dirtyCode         bool // true if the code was updated
-	suicided          bool
-	deleted           bool
-	removeStorageTrie bool
+	dirtyCode bool // true if the code was updated
+	suicided  bool
+	deleted   bool // true if account was deleted during the lifetime of this object
+	created   bool // true if this object represents a newly created contract
 }
 
 // empty returns whether the account is considered empty.
@@ -159,7 +159,7 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
-	if so.removeStorageTrie {
+	if so.created {
 		return common.Hash{}
 	}
 	// If we have the original value cached, return that
@@ -206,13 +206,6 @@ func (so *stateObject) setState(key, value common.Hash) {
 
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) error {
-	if so.removeStorageTrie {
-		so.originStorage = make(Storage)
-		so.data.Root = trie.EmptyRoot
-		if err := stateWriter.RemoveStorage(so.address, so.data.GetIncarnation()); err != nil {
-			return err
-		}
-	}
 	for key, value := range so.dirtyStorage {
 		key := key
 		value := value
@@ -266,7 +259,6 @@ func (so *stateObject) setBalance(amount *big.Int) {
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
-	so.removeStorageTrie = true
 }
 
 // Return the gas back to the origin. Used by the Virtual machine or Closures

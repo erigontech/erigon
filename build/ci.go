@@ -56,6 +56,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/internal/build"
@@ -185,11 +186,13 @@ func main() {
 
 func doInstall(cmdline []string) {
 	var (
-		arch = flag.String("arch", "", "Architecture to cross build for")
-		cc   = flag.String("cc", "", "C compiler to cross build with")
+		arch     = flag.String("arch", "", "Architecture to cross build for")
+		cc       = flag.String("cc", "", "C compiler to cross build with")
+		procsVal = flag.Int("procs", runtime.NumCPU(), "compile in number of threads")
 	)
 	flag.CommandLine.Parse(cmdline)
 	env := build.Env()
+	procs := *procsVal
 
 	// Check Go version. People regularly open issues about compilation
 	// failure with outdated Go. This should save them the trouble.
@@ -213,10 +216,39 @@ func doInstall(cmdline []string) {
 	packages = build.ExpandPackagesNoVendor(packages)
 
 	if *arch == "" || *arch == runtime.GOARCH {
-		goinstall := goTool("install", buildFlags(env)...)
-		goinstall.Args = append(goinstall.Args, "-v")
-		goinstall.Args = append(goinstall.Args, packages...)
-		build.MustRun(goinstall)
+		packCh := make(chan string, 2*procs)
+		wg := sync.WaitGroup{}
+		wg.Add(procs)
+
+		for i := 0; i < procs; i++ {
+			go func() {
+				for pack := range packCh {
+					goinstall := goTool("install", buildFlags(env)...)
+					goinstall.Args = append(goinstall.Args, "-v")
+					goinstall.Args = append(goinstall.Args, pack)
+					build.MustRun(goinstall)
+				}
+				wg.Done()
+			}()
+		}
+
+		for _, pack := range packages {
+			dir := strings.TrimPrefix(pack, "github.com/ledgerwatch/turbo-geth/")
+			pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
+			if err != nil {
+				continue
+			}
+
+			for name := range pkgs {
+				if name == "main" {
+					packCh <- pack
+					break
+				}
+			}
+		}
+
+		close(packCh)
+		wg.Wait()
 		return
 	}
 	// If we are cross compiling to ARMv5 ARMv6 or ARMv7, clean any previous builds

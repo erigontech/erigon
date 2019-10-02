@@ -1,5 +1,8 @@
 package ethdb
 
+// Maximum length (in bytes of encoded timestamp)
+const MaxTimestampLength = 8
+
 func encodingLen8to7(b []byte) int { //nolint
 	return (len(b)*8 + 6) / 7
 }

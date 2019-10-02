@@ -338,15 +338,15 @@ func stateless_chart_key_values(filename string, right []int, chartFileName stri
 	defer file.Close()
 	reader := csv.NewReader(bufio.NewReader(file))
 	var blocks []float64
-	var vals [18][]float64
+	var vals [22][]float64
 	count := 0
-	for records, _ := reader.Read(); records != nil; records, _ = reader.Read() {
+	for records, _ := reader.Read(); len(records) == 16; records, _ = reader.Read() {
 		count++
 		if count < start {
 			continue
 		}
 		blocks = append(blocks, parseFloat64(records[0])/1000000.0)
-		for i := 0; i < 18; i++ {
+		for i := 0; i < 22; i++ {
 			cProofs := 4.0*parseFloat64(records[2]) + 32.0*parseFloat64(records[3]) + parseFloat64(records[11]) + parseFloat64(records[12])
 			proofs := 4.0*parseFloat64(records[7]) + 32.0*parseFloat64(records[8]) + parseFloat64(records[14]) + parseFloat64(records[15])
 			switch i {
@@ -360,34 +360,47 @@ func stateless_chart_key_values(filename string, right []int, chartFileName stri
 				vals[i] = append(vals[i], proofs)
 			case 17:
 				vals[i] = append(vals[i], cProofs+proofs+parseFloat64(records[13]))
+			case 18:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[2])+4.0*parseFloat64(records[7]))
+			case 19:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[2])+4.0*parseFloat64(records[7])+
+					parseFloat64(records[3])+parseFloat64(records[4])+parseFloat64(records[10])+parseFloat64(records[11]))
+			case 20:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[2])+4.0*parseFloat64(records[7])+
+					parseFloat64(records[4])+parseFloat64(records[5])+parseFloat64(records[10])+parseFloat64(records[11])+
+					32.0*parseFloat64(records[3])+32.0*parseFloat64(records[8]))
+			case 21:
+				vals[i] = append(vals[i], 4.0*parseFloat64(records[2])+4.0*parseFloat64(records[7])+
+					parseFloat64(records[4])+parseFloat64(records[5])+parseFloat64(records[10])+parseFloat64(records[11])+
+					32.0*parseFloat64(records[3])+32.0*parseFloat64(records[8])+parseFloat64(records[13]))
 			default:
 				vals[i] = append(vals[i], parseFloat64(records[i+1]))
 			}
 		}
 	}
-	var windowSums [18]float64
+	var windowSums [22]float64
 	var window int = 1024
-	var movingAvgs [18][]float64
-	for i := 0; i < 18; i++ {
+	var movingAvgs [22][]float64
+	for i := 0; i < 22; i++ {
 		movingAvgs[i] = make([]float64, len(blocks)-(window-1))
 	}
 	for j := 0; j < len(blocks); j++ {
-		for i := 0; i < 18; i++ {
+		for i := 0; i < 22; i++ {
 			windowSums[i] += vals[i][j]
 		}
 		if j >= window {
-			for i := 0; i < 18; i++ {
+			for i := 0; i < 22; i++ {
 				windowSums[i] -= vals[i][j-window]
 			}
 		}
 		if j >= window-1 {
-			for i := 0; i < 18; i++ {
+			for i := 0; i < 22; i++ {
 				movingAvgs[i][j-window+1] = windowSums[i] / float64(window)
 			}
 		}
 	}
 	movingBlock := blocks[window-1:]
-	seriesNames := [18]string{
+	seriesNames := [22]string{
 		"Number of contracts",
 		"Contract masks",
 		"Contract hashes",
@@ -406,6 +419,10 @@ func stateless_chart_key_values(filename string, right []int, chartFileName stri
 		"Block proofs (contracts only)",
 		"Block proofs (without contracts)",
 		"Block proofs (total)",
+		"Structure (total)",
+		"Leaves (total)",
+		"Hashes (total)",
+		"Code (total)",
 	}
 	var currentColor int = startColor
 	var series []chart.Series
@@ -414,7 +431,9 @@ func stateless_chart_key_values(filename string, right []int, chartFileName stri
 			Name: seriesNames[r],
 			Style: chart.Style{
 				Show:        true,
+				StrokeWidth: 0.0,
 				StrokeColor: chartColors[currentColor],
+				FillColor:   chartColors[currentColor],
 				//FillColor:   chartColors[currentColor].WithAlpha(100),
 			},
 			XValues: movingBlock,

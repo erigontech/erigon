@@ -175,6 +175,8 @@ func (st *StateTransition) preCheck() error {
 			log.Error("Nonce too high", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
 			return ErrNonceTooHigh
 		} else if nonce > st.msg.Nonce() {
+			fmt.Printf("Nonce too low from 0x%x state nonce %d, tx nonce %d\n", st.msg.From(), nonce, st.msg.Nonce())
+			log.Error("Nonce too low", "from", fmt.Sprintf("0x%x", st.msg.From()), "state nonce", nonce, "tx nonce", st.msg.Nonce())
 			return ErrNonceTooLow
 		}
 	}
