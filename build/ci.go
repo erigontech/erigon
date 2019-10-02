@@ -56,6 +56,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/internal/build"
@@ -213,12 +214,32 @@ func doInstall(cmdline []string) {
 	packages = build.ExpandPackagesNoVendor(packages)
 
 	if *arch == "" || *arch == runtime.GOARCH {
+		wg := sync.WaitGroup{}
+		wg.Add(len(packages))
+
 		for _, pack := range packages {
-			goinstall := goTool("install", buildFlags(env)...)
-			goinstall.Args = append(goinstall.Args, "-v")
-			goinstall.Args = append(goinstall.Args, pack)
-			build.MustRun(goinstall)
+			go func(pack string) {
+				defer wg.Done()
+
+				dir := strings.TrimPrefix(pack, "github.com/ledgerwatch/turbo-geth/")
+				pkgs, err := parser.ParseDir(token.NewFileSet(), dir, nil, parser.PackageClauseOnly)
+				if err != nil {
+					return
+				}
+
+				for name := range pkgs {
+					if name == "main" {
+						goinstall := goTool("install", buildFlags(env)...)
+						goinstall.Args = append(goinstall.Args, "-v")
+						goinstall.Args = append(goinstall.Args, pack)
+						build.MustRun(goinstall)
+						return
+					}
+				}
+			}(pack)
 		}
+
+		wg.Wait()
 		return
 	}
 	// If we are cross compiling to ARMv5 ARMv6 or ARMv7, clean any previous builds
