@@ -338,7 +338,7 @@ func doTest(cmdline []string) {
 	if len(flag.CommandLine.Args()) > 0 {
 		packages = flag.CommandLine.Args()
 	}
-	//packages = build.ExpandPackagesNoVendor(packages)
+	packages = build.ExpandPackagesNoVendor(packages)
 
 	// Run the actual tests.
 	// Test a single package at a time. CI builders are slow
