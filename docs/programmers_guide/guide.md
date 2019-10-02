@@ -407,10 +407,6 @@ that sorted list - one "LTE" (Less Than or Equal to the currently processed key)
 currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
 otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `ResolveSet` in [trie/structural.go](../../trie/structural.go)
 
-Transaction processing
-----------------------
-![processing](processing.png)
-
 ### Extension of the structure to support contracts with contract storage
 When it is required to construct tries containing accounts as well as contract storage, and contract code, the
 set of opcodes making up the structural information need to be extended by four more. Apart from that a new input
@@ -439,3 +435,40 @@ pushing `nil` instead. The hash of would-be account leaf node is pushed onto the
 `EMPTYROOT` is a way of placing a special value signifying an empty node onto the node stack. It also pushes the
 corresponding hash onto the hash stack. This opcode is itroduced because there is no way of achieving its semantics
 by means of other opcodes.
+
+Transaction processing
+----------------------
+The main function of Ethereum software is to continiously process blocks and generate some information as the result of this processing.
+The diagram below shows schematically the main types of information being processed and generated.
+![processing](processing_blocks.png)
+For an ordinary (non mining) node,
+block headers and block bodies are coming from the outside, via the peer-to-peer network. While processing those, the node maintains
+the view of the current state of the Ethereum (bright yellow box), as well as generates the timestamped history of the changes in the state
+(this is optional). History of the state is shown as a series of dull yellow boxes. Some transactions also produce log messages, and those
+are included into transaction receipts. Receipts are also optionally persisted and are shown as green stacks of sheets. Turbo-geth's
+default mode of operation does not persist the receipts, but recalculates them on demand. It looks up the state at the point just before
+the transaction in question (for which we would like a receipt), re-executes transaction, and re-generates the receipt. This can only
+work if the history of state is available for the period of time including the transaction.
+To turn on the recording of the receipts instead of relying of the re-generation (access to the recorded receipts is normally faster,
+but the recorded receipt take a lot of disk space), one needs to invoke `EnableReceipts(true)` on the object of the type
+`core.Blockchain`.
+To turn off the recording of the history of state, one needs pass the corresponding field `NoHistory` as `true` in the `cacheConfig`
+parameter when creating a new instance of `core.Blockchain` by invoking `NewBlockchain`.
+![processing](processing.png)
+
+Database
+--------
+### Preimages
+To keep the Patricia-Merkle trie of Ethereum state balanced, all the keys (either addresses of Ethereum accounts and contracts,
+or storage positions within contract storage) are converted into their respective hashes using `Keccak256` hash function.
+Since that function is preimage resistant, it is impossible to obtain the original key from the its hash.
+During some operations that involve iteration over the Ethereum state, only hashes of the keys are available, but users
+are expecting the keys themselves. Examples:
+
+ * `GetModifiedAccounts` computing the list of account addresses that had any changes within the given range of blocks
+ * `StorageRangeAt` computing the list of non-empty storage positions in the given contract at the given block number
+
+To convert the hashes of keys back into the original keys (also known as preimages), a specially dedicated bucket is kept
+in the database. Keys in this bucket are the hashes, and the values are the preimages. The name of this bucket is
+contained in the constant `dbutils.PreimagePrefix`. Preimage bucket is being updated in the function `savePreimage`
+of the type `TrieDbState` in `core/state/database.go`.

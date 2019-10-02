@@ -111,7 +111,7 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	}
 	t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*PutItem)
-		value, err := db.Get([]byte("secure-key-"), item.key)
+		value, err := db.Get(dbutils.PreimagePrefix, item.key)
 		if err != nil {
 			extErr = fmt.Errorf("Could not get preimage for key %x", item.key)
 			return false
