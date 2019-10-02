@@ -1,4 +1,4 @@
-// Copyright 2015 The go-ethereum Authors
+// Copyright 2019 The go-ethereum Authors
 // This file is part of the go-ethereum library.
 //
 // The go-ethereum library is free software: you can redistribute it and/or modify
@@ -20,6 +20,7 @@ import (
 	//"os"
 	//"encoding/json"
 	//"bytes"
+
 	"fmt"
 
 	"context"
@@ -164,6 +165,17 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, uint64, error) {
+	/*
+		// This code is useful when debugging a certain transaction. If uncommented, together with the code
+		// at the end of this function, after the execution of transaction with given hash, the file
+		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
+		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
+		var h common.Hash = tx.Hash()
+		if bytes.Equal(h[:], common.FromHex("0x340acfd967a744646ebdcfa2cab9b457a1d42224598d33051047ededdd24caa1")) {
+			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			cfg.Debug = true
+		}
+	*/
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, 0, err
@@ -176,6 +188,28 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	vmenv := vm.NewEVM(context, statedb, config, cfg)
 	// Apply the transaction to the current state (included in the env)
 	_, gas, failed, err := ApplyMessage(vmenv, msg, gp)
+	/*
+		// This code is useful when debugging a certain transaction. If uncommented, together with the code
+		// at the end of this function, after the execution of transaction with given hash, the file
+		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
+		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
+		if cfg.Tracer != nil {
+			w, err := os.Create("structlogs.txt")
+			if err != nil {
+				panic(err)
+			}
+			encoder := json.NewEncoder(w)
+			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
+			if err := encoder.Encode(logs); err != nil {
+				panic(err)
+			}
+			if err := w.Close(); err != nil {
+				panic(err)
+			}
+			cfg.Debug = false
+			cfg.Tracer = nil
+		}
+	*/
 	if err != nil {
 		return nil, 0, err
 	}
@@ -198,6 +232,5 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	// Set the receipt logs and create a bloom for filtering
 	receipt.Logs = statedb.GetLogs(tx.Hash())
 	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-
 	return receipt, gas, err
 }

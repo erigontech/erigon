@@ -2,6 +2,7 @@ package dbutils
 
 import (
 	"encoding/binary"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
@@ -85,7 +86,7 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 
 	//todo pool
 	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, incarnation)
+	binary.BigEndian.PutUint64(buf, incarnation^^uint64(0))
 	prefix = append(prefix, buf...)
 	return prefix
 }
