@@ -33,7 +33,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -329,13 +328,10 @@ func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keyby
 
 	err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
-			var val big.Int
-			if err := rlp.DecodeBytes(value, &val); err != nil {
-				return false, err
-			}
+			val := new(big.Int).SetBytes(value)
 
 			if i < maxItems {
-				walker(common.BytesToHash(key), val)
+				walker(common.BytesToHash(key), *val)
 			}
 			i++
 			return i <= maxItems, nil
