@@ -103,7 +103,7 @@ func newTester(t *testing.T, confOverride func(*eth.Config)) *tester {
 		Ethash: ethash.Config{
 			PowMode: ethash.ModeTest,
 		},
-		NoPruning:true,
+		NoPruning: true,
 	}
 	spew.Dump(ethConf)
 	if confOverride != nil {
