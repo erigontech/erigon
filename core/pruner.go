@@ -14,6 +14,8 @@ import (
 	"time"
 )
 
+const DeleteLimit  = 70000
+
 type BlockChainer interface {
 	CurrentBlock() *types.Block
 }
@@ -142,10 +144,10 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 		err := changedKeys.Walk(func(cKey []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
 			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
-				keysToRemove.Account = append(keysToRemove.Account, compKey)
+				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
 			}
 			if bytes.HasSuffix(cKey, dbutils.StorageHistoryBucket) {
-				keysToRemove.Storage = append(keysToRemove.Storage, compKey)
+				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
 			}
 			return nil
 		})
@@ -166,46 +168,106 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 }
 
 func batchDelete(db *bolt.DB, keys *keysToRemove) error {
-	log.Debug("Removed: ", "accounts", len(keys.Account), "storage", len(keys.Storage), "suffix", len(keys.Suffix))
-	return db.Batch(func(tx *bolt.Tx) error {
-		accountHistoryBucket := tx.Bucket(dbutils.AccountsHistoryBucket)
-		for i := range keys.Account {
-			err := accountHistoryBucket.Delete(keys.Account[i])
-			if err != nil {
-				log.Warn("Unable to remove ", "addr", common.Bytes2Hex(keys.Account[i]), "err", err)
-				continue
+	log.Debug("Removed: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.Suffix))
+	iterator:=LimitIterator(keys, DeleteLimit)
+	for iterator.HasMore() {
+		iterator.ResetLimit()
+		err:=db.Batch(func(tx *bolt.Tx) error {
+			for {
+				key, bucketKey, ok:=iterator.GetNext()
+				if !ok {
+					return nil
+				}
+				b:=tx.Bucket(bucketKey)
+				err:=b.Delete(key)
+				if err != nil {
+					log.Warn("Unable to remove","bucket", bucketKey, "addr", common.Bytes2Hex(key), "err", err)
+					continue
+				}
 			}
+		})
+		if err!=nil {
+			return err
 		}
-		storageHistoryBucket := tx.Bucket(dbutils.StorageHistoryBucket)
-		for i := range keys.Storage {
-			err := storageHistoryBucket.Delete(keys.Storage[i])
-			if err != nil {
-				log.Warn("Unable to remove storage key", "storage", common.Bytes2Hex(keys.Account[i]), "err", err)
-				continue
-			}
-		}
-		suffixBucket := tx.Bucket(dbutils.SuffixBucket)
-		for i := range keys.Suffix {
-			err := suffixBucket.Delete(keys.Suffix[i])
-			if err != nil {
-				log.Warn("Unable to remove suffix", "suffix", common.Bytes2Hex(keys.Account[i]), "err", err)
-				continue
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
-		Account: make([][]byte, 0),
-		Storage: make([][]byte, 0),
-		Suffix:  make([][]byte, 0),
+		AccountHistoryKeys: make([][]byte, 0),
+		StorageHistoryKeys: make([][]byte, 0),
+		Suffix:             make([][]byte, 0),
 	}
 }
 
 type keysToRemove struct {
-	Account [][]byte
-	Storage [][]byte
-	Suffix  [][]byte
+	AccountHistoryKeys [][]byte
+	StorageHistoryKeys [][]byte
+	Suffix             [][]byte
+}
+
+func LimitIterator(k *keysToRemove, limit int) *limitIterator  {
+	return &limitIterator{
+		k:k,
+		limit:limit,
+	}
+}
+
+type limitIterator struct {
+	k *keysToRemove
+	counter uint64
+	currentBucket []byte
+	currentNum	int
+	limit	int
+}
+
+func (i *limitIterator) GetNext() ([]byte, []byte, bool)   {
+	if i.limit<=i.currentNum {
+		return nil, nil, false
+	}
+	i.updateBucket()
+	if i.HasMore()==false {
+		return nil, nil, false
+	}
+	defer func() {
+		i.currentNum++
+		i.counter++
+	}()
+	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) {
+		return i.k.AccountHistoryKeys[i.currentNum], dbutils.AccountsHistoryBucket, true
+	}
+	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
+		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
+	}
+	if bytes.Equal(i.currentBucket, dbutils.SuffixBucket) {
+		return i.k.Suffix[i.currentNum], dbutils.SuffixBucket, true
+	}
+	return nil, nil,false
+}
+
+func (i *limitIterator) ResetLimit() {
+	i.counter=0
+}
+
+func (i *limitIterator) HasMore() bool {
+	if bytes.Equal(i.currentBucket, dbutils.SuffixBucket) && len(i.k.Suffix)==i.currentNum {
+		return false
+	}
+	return true
+}
+
+func (i *limitIterator) updateBucket() {
+	if i.currentBucket == nil {
+		i.currentBucket = dbutils.AccountsHistoryBucket
+	}
+	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) && len(i.k.AccountHistoryKeys)==i.currentNum {
+		i.currentBucket=dbutils.StorageHistoryBucket
+		i.currentNum=0
+	}
+
+	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys)==i.currentNum {
+		i.currentBucket=dbutils.SuffixBucket
+		i.currentNum=0
+	}
 }
