@@ -186,8 +186,8 @@ func main() {
 
 func doInstall(cmdline []string) {
 	var (
-		arch  = flag.String("arch", "", "Architecture to cross build for")
-		cc    = flag.String("cc", "", "C compiler to cross build with")
+		arch     = flag.String("arch", "", "Architecture to cross build for")
+		cc       = flag.String("cc", "", "C compiler to cross build with")
 		procsVal = flag.Int("procs", runtime.NumCPU(), "compile in number of threads")
 	)
 	flag.CommandLine.Parse(cmdline)
