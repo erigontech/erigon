@@ -201,7 +201,8 @@ branch node, it only creates its 32-byte hash. It places hash of the node onto t
 the node stack.
 
 `HASH` opcode takes specified number of hashes from the input sequence (tape) of hashes, and places them on
-the hash stack. It also places the same number of `nil` entries onto the node stack.
+the hash stack. It also places the same number of `nil` entries onto the node stack. The first item consumed ends up
+the deepest on the stack, the last item consumed ends up on the top of the stack.
 
 This is the structural information for the chunk containing leafs from `0` to `7` (inclusive):
 ```

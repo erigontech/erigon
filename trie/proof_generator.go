@@ -59,20 +59,42 @@ type BlockWitnessBuilder struct {
 	Structure Tape // Sequence of opcodes and operands that define the structure of the witness
 }
 
+// Instruction is "enum" type for defining the opcodes of the stack machine that reconstructs the structure of tries from Structure tape
 type Instruction uint8
 
 const (
+	// OpLeaf consumes key from key tape, value from value tape, creates leaf node and pushes it onto the node stack, its hash onto the hash stack
 	OpLeaf Instruction = iota
+	// OpLeafHash consumes key from key tape, value from value tape, computes hash of would-be leaf node and pushes it onto the hash stack
 	OpLeafHash
+	// OpExtension pops a node from the node stack, constructs extension node from it and its operand's key, and pushes this extension node onto
+	// the node stack, its hash onto the hash stack
 	OpExtension
+	// OpExtensionHash pops a hash from the hash stack, computes the hash of would-be extension node from it and its operand's key,
+	// and pushes this hash onto the hash stack
 	OpExtensionHash
+	// OpBranch has operand, which is a bitset representing digits in the branch node. Pops the children nodes from the node stack (the number of
+	// children is equal to the number of bits in the bitset), constructs branch node and pushes it onto the node stack, its hash onto the hash stack
 	OpBranch
+	// OpBranchHash has operand, which is a bitset representing digits in the branch node. Pops the children hashes from the hash stack (the number of
+	// children hashes is equal to the number of bits in the bitset), computes the hash of would-be branch node and pushes that hash onto the hash stack
 	OpBranchHash
+	// OpHash consumes given (in the operant) number of hash from the hash tape, and pushes them onto the stack. The first item consumed ends up
+	// the deepest on the stack, the last item consumed ends up on the top of the stack.
 	OpHash
+	// OpCode consumes bytecode item from the code tape, construct code node and pushes it onto the node stack, its hash onto the hash stack.
 	OpCode
+	// OpCodeHash consumes bytecode item from the code tape, computes its hash, and pushes it onto the hash stack.
 	OpCodeHash
+	// OpContractLeaf consumes key from key tape, value from value tape, also pops two items from the node stack - code node, and node containing
+	// the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it onto the node stack,
+	// its hash onto the hash stack.
 	OpContractLeaf
+	// OpContractLeafHash consumes key from key tape, value from value tape, also pops two items from the hash stack - code hash, and the hash
+	// of contract storage. It computes the hash of would-be account node and pushes it onto the hash stack.
 	OpContractLeafHash
+	// OpEmptyRoot pushes special value onto the node stack (and corresponding hash onto the hash stack). That special value signifies
+	// an empty trie
 	OpEmptyRoot
 )
 
@@ -88,11 +110,25 @@ func NewBlockWitnessBuilder() *BlockWitnessBuilder {
 }
 
 // keyValue supplies the next key-value pair for the leaf tape
-func (bwb *BlockWitnessBuilder) keyValue(key, value []byte) error {
+func (bwb *BlockWitnessBuilder) supplyKeyValue(key, value []byte) error {
 	if err := bwb.Keys.encoder.Encode(key); err != nil {
 		return err
 	}
 	if err := bwb.Values.encoder.Encode(value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) supplyCode(code []byte) error {
+	if err := bwb.Codes.encoder.Encode(code); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) supplyHash(hash common.Hash) error {
+	if err := bwb.Hashes.encoder.Encode(hash[:]); err != nil {
 		return err
 	}
 	return nil
@@ -104,6 +140,118 @@ func (bwb *BlockWitnessBuilder) leaf(length int) error {
 		return err
 	}
 	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) leafHash(length int) error {
+	o := OpLeafHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) extension(key []byte) error {
+	o := OpExtension
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(key); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) extensionHash(key []byte) error {
+	o := OpExtensionHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(key); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) branch(set uint32) error {
+	o := OpBranch
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&set); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) branchHash(set uint32) error {
+	o := OpBranchHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&set); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) hash(number int) error {
+	o := OpHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&number); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) code() error {
+	o := OpCode
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) codeHash() error {
+	o := OpCodeHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) contractLeaf(length int) error {
+	o := OpContractLeaf
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) contractLeafHash(length int) error {
+	o := OpContractLeafHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) emptyRoot() error {
+	o := OpEmptyRoot
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
 		return err
 	}
 	return nil
