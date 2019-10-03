@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/csv"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"math"
 	"math/big"
 	"os"
@@ -13,6 +12,8 @@ import (
 	"sort"
 	"syscall"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -26,6 +27,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
+
+// NOTE: This file is not the part of the Turbo-Geth binary. It i s part of the experimental utility, state
+// to perform data analysis related to the state growth, state rent, and statelesss clients
 
 type TokenTracer struct {
 	tokens    map[common.Address]struct{}
@@ -198,7 +202,6 @@ func makeTokenBalances() {
 	check(err)
 	defer pdb.Close()
 	bucket := []byte("sha3")
-	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
 	tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
@@ -279,7 +282,7 @@ func makeTokenBalances() {
 		}
 		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
-			key, err = ethDb.Get(pBucket, k[20:])
+			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var preimage []byte
 			if key != nil {
 				err := pdb.View(func(tx *bolt.Tx) error {
@@ -419,7 +422,6 @@ func makeTokenAllowances() {
 	check(err)
 	defer pdb.Close()
 	bucket := []byte("sha3")
-	pBucket := []byte("secure-key-")
 
 	var tokens []common.Address
 	tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
@@ -518,7 +520,7 @@ func makeTokenAllowances() {
 		}
 		err = ethDb.Walk(dbutils.StorageBucket, token[:], 160, func(k, v []byte) (bool, error) {
 			var key []byte
-			key, err = ethDb.Get(pBucket, k[20:])
+			key, err = ethDb.Get(dbutils.PreimagePrefix, k[20:])
 			var index2 common.Hash
 			var preimage []byte
 			if key != nil {
