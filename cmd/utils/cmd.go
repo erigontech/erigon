@@ -302,7 +302,7 @@ func ExportPreimages(db *ethdb.BoltDatabase, fn string) error {
 	}
 	// Iterate over the preimages and export them
 	/*
-		it := db.NewIteratorWithPrefix([]byte("secure-key-"))
+		it := db.NewIteratorWithPrefix(dbutils.PreimagePrefix)
 		for it.Next() {
 			if err := rlp.Encode(writer, it.Value()); err != nil {
 				return err

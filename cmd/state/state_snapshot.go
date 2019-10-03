@@ -20,6 +20,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
+// NOTE: This file is not the part of the Turbo-Geth binary. It i s part of the experimental utility, state
+// to perform data analysis related to the state growth, state rent, and statelesss clients
+
 func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	diskDb, err := bolt.Open(fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum), 0600, &bolt.Options{})
 	check(err)
@@ -258,7 +261,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		sb := tx.Bucket(dbutils.StorageBucket)
-		preimage := tx.Bucket([]byte("secure-key-"))
+		preimage := tx.Bucket(dbutils.PreimagePrefix)
 		count := 0
 		err = diskDb.View(func(txDisk *bolt.Tx) error {
 			bDisk := txDisk.Bucket(dbutils.AccountsBucket)
