@@ -21,10 +21,9 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
-
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -86,13 +85,17 @@ const (
 	OpHash
 	// OpCode consumes bytecode item from the code tape, construct code node and pushes it onto the node stack, its hash onto the hash stack.
 	OpCode
-	// OpCodeHash consumes bytecode item from the code tape, computes its hash, and pushes it onto the hash stack.
-	OpCodeHash
-	// OpContractLeaf consumes key from key tape, value from value tape, also pops two items from the node stack - code node, and node containing
-	// the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it onto the node stack,
-	// its hash onto the hash stack.
+	// OpAccountLeaf consumes key from the key tape, and two values from the value tape, one for nonce, another for balance. It constructs
+	// an account node (without any storage and code) and pushes it onto the node stack, its hash onto the hash stack.
+	OpAccountLeaf
+	// OpAccountLeafHash consumes key from the key tape, and two values from the value tape, one for nonce, another for balance.
+	// It computes the hash of would-be account node (without any storage and code) and pushes it onto the hash stack.
+	OpAccountLeafHash
+	// OpContractLeaf consumes key from key tape, nonce and balance from the value tape, also pops two items from the node stack - code node,
+	// and node containing the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it
+	// onto the node stack, its hash onto the hash stack.
 	OpContractLeaf
-	// OpContractLeafHash consumes key from key tape, value from value tape, also pops two items from the hash stack - code hash, and the hash
+	// OpContractLeafHash consumes key from key tape, nonce and balance from the value tape, also pops two items from the hash stack - code hash, and the hash
 	// of contract storage. It computes the hash of would-be account node and pushes it onto the hash stack.
 	OpContractLeafHash
 	// OpEmptyRoot pushes special value onto the node stack (and corresponding hash onto the hash stack). That special value signifies
@@ -121,6 +124,21 @@ func (bwb *BlockWitnessBuilder) supplyKey(key []byte) error {
 
 func (bwb *BlockWitnessBuilder) supplyValue(value []byte) error {
 	if err := bwb.Values.encoder.Encode(value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) supplyNumber(value uint64) error {
+	if err := bwb.Values.encoder.Encode(&value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) supplyBigInt(value *big.Int) error {
+	var v = value.Bytes()
+	if err := bwb.Values.encoder.Encode(v); err != nil {
 		return err
 	}
 	return nil
@@ -225,9 +243,23 @@ func (bwb *BlockWitnessBuilder) code() error {
 	return nil
 }
 
-func (bwb *BlockWitnessBuilder) codeHash() error {
-	o := OpCodeHash
+func (bwb *BlockWitnessBuilder) accountLeaf(length int) error {
+	o := OpAccountLeaf
 	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) accountLeafHash(length int) error {
+	o := OpAccountLeafHash
+	if err := bwb.Structure.encoder.Encode(&o); err != nil {
+		return err
+	}
+	if err := bwb.Structure.encoder.Encode(&length); err != nil {
 		return err
 	}
 	return nil
@@ -265,13 +297,16 @@ func (bwb *BlockWitnessBuilder) emptyRoot() error {
 
 // MakeBlockWitness constructs block witness from the given trie and the
 // list of keys that need to be accessible in such witness
-func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet) error {
+func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet, codeFromHash func(codeHash common.Hash) []byte) error {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
-	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true)
+	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeFromHash)
 }
 
-func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool) error {
+func (bwb *BlockWitnessBuilder) makeBlockWitness(
+	nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool,
+	codeFromHash func(codeHash common.Hash) []byte,
+) error {
 	switch n := nd.(type) {
 	case nil:
 		return nil
@@ -285,10 +320,10 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *Resolv
 			h = h[:len(h)-1]
 		}
 		hexVal := concat(hex, h...)
-		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false); err != nil {
+		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeFromHash); err != nil {
 			return err
 		}
-		switch n.Val.(type) {
+		switch v := n.Val.(type) {
 		case valueNode:
 			// Recursive invocation would have supplied the value
 			if err := bwb.supplyKey(n.Key); err != nil {
@@ -309,12 +344,24 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *Resolv
 				return err
 			}
 			if hashOnly {
-				if err := bwb.contractLeafHash(len(n.Key)); err != nil {
-					return err
+				if v.IsEmptyRoot() && v.IsEmptyCodeHash() {
+					if err := bwb.accountLeafHash(len(n.Key)); err != nil {
+						return err
+					}
+				} else {
+					if err := bwb.contractLeafHash(len(n.Key)); err != nil {
+						return err
+					}
 				}
 			} else {
-				if err := bwb.contractLeaf(len(n.Key)); err != nil {
-					return err
+				if v.IsEmptyRoot() && v.IsEmptyCodeHash() {
+					if err := bwb.accountLeaf(len(n.Key)); err != nil {
+						return err
+					}
+				} else {
+					if err := bwb.contractLeaf(len(n.Key)); err != nil {
+						return err
+					}
 				}
 			}
 		default:
@@ -330,7 +377,8 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *Resolv
 		}
 		return nil
 	case *duoNode:
-		if rs.HashOnly(hex) {
+		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		if hashOnly {
 			var hn common.Hash
 			hr.hash(n, force, hn[:])
 			if err := bwb.supplyHash(hn); err != nil {
@@ -345,12 +393,20 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *Resolv
 		hex2 := make([]byte, len(hex)+1)
 		copy(hex2, hex)
 		hex2[len(hex)] = i2
-		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false); err != nil {
+		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false, codeFromHash); err != nil {
 			return err
 		}
-		return bwb.makeBlockWitness(n.child2, hex2, rs, hr, false)
+		if err := bwb.makeBlockWitness(n.child2, hex2, rs, hr, false, codeFromHash); err != nil {
+			return err
+		}
+		if hashOnly {
+			return bwb.branchHash(n.mask)
+		} else {
+			return bwb.branch(n.mask)
+		}
 	case *fullNode:
-		if rs.HashOnly(hex) {
+		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		if hashOnly {
 			var hn common.Hash
 			hr.hash(n, len(hex) == 0, hn[:])
 			if err := bwb.supplyHash(hn); err != nil {
@@ -358,27 +414,50 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *Resolv
 			}
 			return bwb.hash(1)
 		}
+		var set uint32
 		for i, child := range n.Children {
 			if child != nil {
-				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false); err != nil {
+				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false, codeFromHash); err != nil {
+					return err
+				}
+				set |= (uint32(1) << uint(i))
+			}
+		}
+		if hashOnly {
+			return bwb.branchHash(set)
+		} else {
+			return bwb.branch(set)
+		}
+	case *accountNode:
+		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
+			if hashOnly {
+				if err := bwb.supplyHash(n.Root); err != nil {
+					return err
+				}
+				if err := bwb.supplyHash(n.CodeHash); err != nil {
+					return err
+				}
+				if err := bwb.hash(2); err != nil {
+					return err
+				}
+			} else {
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeFromHash); err != nil {
+					return err
+				}
+				code := codeFromHash(n.CodeHash)
+				if err := bwb.supplyCode(code); err != nil {
+					return err
+				}
+				if err := bwb.code(); err != nil {
 					return err
 				}
 			}
 		}
-		return nil
-	case *accountNode:
-		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
-		if n.storage != nil && !hashOnly {
-			if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true); err != nil {
-				return err
-			}
+		if err := bwb.supplyNumber(n.Nonce); err != nil {
+			return err
 		}
-		// TODO: Supply code and issue loading instruction
-		encodingLength := n.Account.EncodingLengthForHashing()
-		buffer := pool.GetBuffer(encodingLength)
-		defer pool.PutBuffer(buffer)
-		n.Account.EncodeForHashing(buffer.B)
-		if err := bwb.supplyValue(buffer.B); err != nil {
+		if err := bwb.supplyBigInt(&n.Balance); err != nil {
 			return err
 		}
 		return nil

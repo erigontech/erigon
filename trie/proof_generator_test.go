@@ -122,13 +122,22 @@ func TestOpCode(t *testing.T) {
 	}
 }
 
-func TestOpCodeHash(t *testing.T) {
+func TestOpAccountLeaf(t *testing.T) {
 	bwb := NewBlockWitnessBuilder()
-	if err := bwb.codeHash(); err != nil {
-		t.Errorf("Could not call codeHash: %v", err)
+	if err := bwb.accountLeaf(56); err != nil {
+		t.Errorf("Could not call acccountLeaf: %v", err)
 	}
-	if !bytes.Equal(common.FromHex("0x08"), bwb.Structure.buffer.Bytes()) {
-		t.Errorf("Expected 0x08 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+	if !bytes.Equal(common.FromHex("0x081838"), bwb.Structure.buffer.Bytes()) {
+		t.Errorf("Expected 0x081838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+	}
+}
+func TestOpAccountLeafHash(t *testing.T) {
+	bwb := NewBlockWitnessBuilder()
+	if err := bwb.accountLeafHash(56); err != nil {
+		t.Errorf("Could not call accountLeafHash: %v", err)
+	}
+	if !bytes.Equal(common.FromHex("0x091838"), bwb.Structure.buffer.Bytes()) {
+		t.Errorf("Expected 0x091838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
 	}
 }
 
@@ -137,8 +146,8 @@ func TestOpContractLeaf(t *testing.T) {
 	if err := bwb.contractLeaf(56); err != nil {
 		t.Errorf("Could not call contractLeaf: %v", err)
 	}
-	if !bytes.Equal(common.FromHex("0x091838"), bwb.Structure.buffer.Bytes()) {
-		t.Errorf("Expected 0x001838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+	if !bytes.Equal(common.FromHex("0x0a1838"), bwb.Structure.buffer.Bytes()) {
+		t.Errorf("Expected 0x0a1838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
 	}
 }
 func TestOpContractLeafHash(t *testing.T) {
@@ -146,8 +155,8 @@ func TestOpContractLeafHash(t *testing.T) {
 	if err := bwb.contractLeafHash(56); err != nil {
 		t.Errorf("Could not call contractLeafHash: %v", err)
 	}
-	if !bytes.Equal(common.FromHex("0x0a1838"), bwb.Structure.buffer.Bytes()) {
-		t.Errorf("Expected 0x011838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+	if !bytes.Equal(common.FromHex("0x0b1838"), bwb.Structure.buffer.Bytes()) {
+		t.Errorf("Expected 0x0b1838 in structure tape, got: %x", bwb.Structure.buffer.Bytes())
 	}
 }
 
@@ -156,7 +165,7 @@ func TestOpEmptyRoot(t *testing.T) {
 	if err := bwb.emptyRoot(); err != nil {
 		t.Errorf("Could not call emptyRoot: %v", err)
 	}
-	if !bytes.Equal(common.FromHex("0x0b"), bwb.Structure.buffer.Bytes()) {
+	if !bytes.Equal(common.FromHex("0x0c"), bwb.Structure.buffer.Bytes()) {
 		t.Errorf("Expected 0x0b in structure tape, got: %x", bwb.Structure.buffer.Bytes())
 	}
 }
