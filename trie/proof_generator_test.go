@@ -9,11 +9,14 @@ import (
 
 func TestSupplyKeyValue(t *testing.T) {
 	bwb := NewBlockWitnessBuilder()
-	if err := bwb.supplyKeyValue([]byte("key"), []byte("value")); err != nil {
-		t.Errorf("Could not supply key and value: %v", err)
+	if err := bwb.supplyKey([]byte("key")); err != nil {
+		t.Errorf("Could not supply key: %v", err)
 	}
 	if !bytes.Equal(common.FromHex("0x436b6579"), bwb.Keys.buffer.Bytes()) {
 		t.Errorf("Expected 0x436b6579 in keys tape, got: %x", bwb.Keys.buffer.Bytes())
+	}
+	if err := bwb.supplyValue([]byte("value")); err != nil {
+		t.Errorf("Could not supply value: %v", err)
 	}
 	if !bytes.Equal(common.FromHex("0x4576616c7565"), bwb.Values.buffer.Bytes()) {
 		t.Errorf("Expected 0x4576616c7565 in values tape, got: %x", bwb.Values.buffer.Bytes())

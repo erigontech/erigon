@@ -24,6 +24,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common/pool"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ugorji/go/codec"
@@ -109,11 +111,15 @@ func NewBlockWitnessBuilder() *BlockWitnessBuilder {
 	return &bwb
 }
 
-// keyValue supplies the next key-value pair for the leaf tape
-func (bwb *BlockWitnessBuilder) supplyKeyValue(key, value []byte) error {
+// keyValue supplies the next key for the key tape
+func (bwb *BlockWitnessBuilder) supplyKey(key []byte) error {
 	if err := bwb.Keys.encoder.Encode(key); err != nil {
 		return err
 	}
+	return nil
+}
+
+func (bwb *BlockWitnessBuilder) supplyValue(value []byte) error {
 	if err := bwb.Values.encoder.Encode(value); err != nil {
 		return err
 	}
@@ -255,6 +261,130 @@ func (bwb *BlockWitnessBuilder) emptyRoot() error {
 		return err
 	}
 	return nil
+}
+
+// MakeBlockWitness constructs block witness from the given trie and the
+// list of keys that need to be accessible in such witness
+func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet) error {
+	hr := newHasher(false)
+	defer returnHasherToPool(hr)
+	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true)
+}
+
+func (bwb *BlockWitnessBuilder) makeBlockWitness(nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool) error {
+	switch n := nd.(type) {
+	case nil:
+		return nil
+	case valueNode:
+		return bwb.supplyValue(n)
+	case *shortNode:
+		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		h := n.Key
+		// Remove terminator
+		if h[len(h)-1] == 16 {
+			h = h[:len(h)-1]
+		}
+		hexVal := concat(hex, h...)
+		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false); err != nil {
+			return err
+		}
+		switch n.Val.(type) {
+		case valueNode:
+			// Recursive invocation would have supplied the value
+			if err := bwb.supplyKey(n.Key); err != nil {
+				return err
+			}
+			if hashOnly {
+				if err := bwb.leafHash(len(n.Key)); err != nil {
+					return err
+				}
+			} else {
+				if err := bwb.leaf(len(n.Key)); err != nil {
+					return err
+				}
+			}
+		case *accountNode:
+			// Recursive invocation would have supplied the value
+			if err := bwb.supplyKey(n.Key); err != nil {
+				return err
+			}
+			if hashOnly {
+				if err := bwb.contractLeafHash(len(n.Key)); err != nil {
+					return err
+				}
+			} else {
+				if err := bwb.contractLeaf(len(n.Key)); err != nil {
+					return err
+				}
+			}
+		default:
+			if hashOnly {
+				if err := bwb.extensionHash(n.Key); err != nil {
+					return err
+				}
+			} else {
+				if err := bwb.extension(n.Key); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case *duoNode:
+		if rs.HashOnly(hex) {
+			var hn common.Hash
+			hr.hash(n, force, hn[:])
+			if err := bwb.supplyHash(hn); err != nil {
+				return err
+			}
+			return bwb.hash(1)
+		}
+		i1, i2 := n.childrenIdx()
+		hex1 := make([]byte, len(hex)+1)
+		copy(hex1, hex)
+		hex1[len(hex)] = i1
+		hex2 := make([]byte, len(hex)+1)
+		copy(hex2, hex)
+		hex2[len(hex)] = i2
+		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false); err != nil {
+			return err
+		}
+		return bwb.makeBlockWitness(n.child2, hex2, rs, hr, false)
+	case *fullNode:
+		if rs.HashOnly(hex) {
+			var hn common.Hash
+			hr.hash(n, len(hex) == 0, hn[:])
+			if err := bwb.supplyHash(hn); err != nil {
+				return err
+			}
+			return bwb.hash(1)
+		}
+		for i, child := range n.Children {
+			if child != nil {
+				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	case *accountNode:
+		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		if n.storage != nil && !hashOnly {
+			if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true); err != nil {
+				return err
+			}
+		}
+		// TODO: Supply code and issue loading instruction
+		encodingLength := n.Account.EncodingLengthForHashing()
+		buffer := pool.GetBuffer(encodingLength)
+		defer pool.PutBuffer(buffer)
+		n.Account.EncodeForHashing(buffer.B)
+		if err := bwb.supplyValue(buffer.B); err != nil {
+			return err
+		}
+		return nil
+	default:
+		panic(fmt.Sprintf("%T", nd))
+	}
 }
 
 type BlockProof struct {
