@@ -21,6 +21,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"math/big"
 	"sort"
 	"strings"
@@ -42,11 +43,19 @@ func (t *Tape) init() {
 	t.encoder = codec.NewEncoder(&t.buffer, &t.handle)
 }
 
+const (
+	KeysTape      = "keys"
+	ValuesTape    = "values"
+	HashesTape    = "hashes"
+	CodesTape     = "codes"
+	StructureTape = "structure"
+)
+
 // BlockWitnessBuilder accumulates data that can later be turned into a serialised
 // version of the block witness
 // All buffers are streams of CBOR-encoded items (not a CBOR array, but individual items back-to-back)
 // `Keys` are binary strings
-// `Values` are either binary strings or arrays of structures
+// `Values` are either binary strings or integers (nonce) or big integers (balance)
 // {nonce - integer, balance - integer, optionally [root hash - binary string, code hash - binary string]}
 // `Hashes` are binary strings, all of size 32
 // `Codes` are binary strings
@@ -136,6 +145,7 @@ func (bwb *BlockWitnessBuilder) supplyNumber(value uint64) error {
 	return nil
 }
 
+// TODO [Alexey] utilise CBOR tag to make this value as bit integer rather than just a string of bytes
 func (bwb *BlockWitnessBuilder) supplyBigInt(value *big.Int) error {
 	var v = value.Bytes()
 	if err := bwb.Values.encoder.Encode(v); err != nil {
@@ -401,9 +411,8 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		}
 		if hashOnly {
 			return bwb.branchHash(n.mask)
-		} else {
-			return bwb.branch(n.mask)
 		}
+		return bwb.branch(n.mask)
 	case *fullNode:
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
@@ -425,9 +434,8 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		}
 		if hashOnly {
 			return bwb.branchHash(set)
-		} else {
-			return bwb.branch(set)
 		}
+		return bwb.branch(set)
 	case *accountNode:
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
@@ -464,6 +472,69 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 	default:
 		panic(fmt.Sprintf("%T", nd))
 	}
+}
+
+// WriteTo creates serialised representation of the block witness
+// and writes it into the given writer
+func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
+	// Calculate the lengths of all the tapes and write them as an array
+	var lens = map[string]int{
+		KeysTape:      bwb.Keys.buffer.Len(),
+		ValuesTape:    bwb.Values.buffer.Len(),
+		HashesTape:    bwb.Hashes.buffer.Len(),
+		CodesTape:     bwb.Codes.buffer.Len(),
+		StructureTape: bwb.Structure.buffer.Len(),
+	}
+	var handle codec.CborHandle
+	handle.EncodeOptions.Canonical = true
+	encoder := codec.NewEncoder(w, &handle)
+	if err := encoder.Encode(&lens); err != nil {
+		return err
+	}
+	if _, err := bwb.Keys.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Values.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Hashes.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Codes.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Structure.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	return nil
+}
+
+// BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
+func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
+	var lens map[string]int
+	var handle codec.CborHandle
+	decoder := codec.NewDecoderBytes(bw, &handle)
+	if err := decoder.Decode(&lens); err != nil {
+		return nil, nil, err
+	}
+	/*
+		startOffset := decoder.NumBytesRead()
+		endOffset := startOffset + lens[KeysTape]
+		keysB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[ValuesTape]
+		valuesB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[HashesTape]
+		hashesB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[CodesTape]
+		codesB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[StructureTape]
+		structureB := bw[startOffset:endOffset]
+	*/
+	return nil, nil, nil
 }
 
 type BlockProof struct {

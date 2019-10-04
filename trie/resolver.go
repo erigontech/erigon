@@ -45,6 +45,7 @@ type TrieResolver struct {
 	historical bool
 	blockNr    uint64
 	hb         *HashBuilder2
+	leafType   LeafType // leaf type for the next invocation of step2
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       bytes.Buffer
@@ -178,7 +179,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups = step2(tr.leafType, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -242,7 +243,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups = step2(tr.leafType, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		}
 		// Remember the current key and value
 		if tr.accounts {
@@ -254,7 +255,13 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			buf := pool.GetBuffer(encodeLen)
 
 			tr.a.EncodeForHashing(buf.B)
-			tr.hb.setKeyValue(skip, k, buf)
+			tr.hb.supplyKey(skip, k)
+			tr.hb.supplyValue(buf)
+			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
+				tr.leafType = AccountLeaf
+			} else {
+				tr.leafType = ContractLeaf
+			}
 		} else {
 			var vv *bytebufferpool.ByteBuffer
 			if len(v) > 1 || v[0] >= 128 {
@@ -265,7 +272,9 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				vv = pool.GetBuffer(1)
 				vv.B[0] = v[0]
 			}
-			tr.hb.setKeyValue(skip, k, vv)
+			tr.hb.supplyKey(skip, k)
+			tr.hb.supplyValue(vv)
+			tr.leafType = ValueLeaf
 		}
 	}
 	return true, nil

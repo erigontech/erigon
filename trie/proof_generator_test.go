@@ -166,6 +166,43 @@ func TestOpEmptyRoot(t *testing.T) {
 		t.Errorf("Could not call emptyRoot: %v", err)
 	}
 	if !bytes.Equal(common.FromHex("0x0c"), bwb.Structure.buffer.Bytes()) {
-		t.Errorf("Expected 0x0b in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+		t.Errorf("Expected 0x0c in structure tape, got: %x", bwb.Structure.buffer.Bytes())
+	}
+}
+
+func TestMakeBlockWitness(t *testing.T) {
+	tr := New(common.Hash{})
+	tr.Update([]byte("ABCD0001"), []byte("val1"), 0)
+	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
+	bwb := NewBlockWitnessBuilder()
+	rs := NewResolveSet(2)
+	if err := bwb.MakeBlockWitness(tr, rs, func(codeHash common.Hash) []byte { return nil }); err != nil {
+		t.Errorf("Could not make block witness: %v", err)
+	}
+	expected := common.FromHex("0x0601024704010402040304")
+	if !bytes.Equal(expected, bwb.Structure.buffer.Bytes()) {
+		t.Errorf("Expected %x in structure tape, got: %x", expected, bwb.Structure.buffer.Bytes())
+	}
+}
+
+func TestSerialiseBlockWitness(t *testing.T) {
+	tr := New(common.Hash{})
+	tr.Update([]byte("ABCD0001"), []byte("val1"), 0)
+	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
+	bwb := NewBlockWitnessBuilder()
+	rs := NewResolveSet(2)
+	if err := bwb.MakeBlockWitness(tr, rs, func(codeHash common.Hash) []byte { return nil }); err != nil {
+		t.Errorf("Could not make block witness: %v", err)
+	}
+	var b bytes.Buffer
+	if err := bwb.WriteTo(&b); err != nil {
+		t.Errorf("Could not make block witness: %v", err)
+	}
+	expected := common.FromHex("0xa565636f64657300666861736865731822646b65797300697374727563747572650b6676616c75657300582023181a62d35fe01562158be610f84e047f99f5e74d896da21682d925964ece3a0601024704010402040304")
+	if !bytes.Equal(expected, b.Bytes()) {
+		t.Errorf("Expected %x, got: %x", expected, b.Bytes())
+	}
+	if _, _, err := BlockWitnessToTrie(b.Bytes()); err != nil {
+		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
 }

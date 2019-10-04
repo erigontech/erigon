@@ -33,12 +33,24 @@ import (
 type emitter2 interface {
 	leaf(length int)
 	leafHash(length int)
+	accountLeaf(length int)
+	accountLeafHash(length int)
+	contractLeaf(length int)
+	contractLeafHash(length int)
 	extension(key []byte)
 	extensionHash(key []byte)
 	branch(set uint32)
 	branchHash(set uint32)
 	hash(number int)
 }
+
+type LeafType int
+
+const (
+	ValueLeaf LeafType = iota
+	AccountLeaf
+	ContractLeaf
+)
 
 // step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
@@ -54,6 +66,7 @@ type emitter2 interface {
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 func step2(
+	leafType LeafType,
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
@@ -96,9 +109,23 @@ func step2(
 		}
 	} else {
 		if hashOnly(curr[:maxLen]) {
-			e.leafHash(remainderLen)
+			switch leafType {
+			case ValueLeaf:
+				e.leafHash(remainderLen)
+			case AccountLeaf:
+				e.accountLeafHash(remainderLen)
+			case ContractLeaf:
+				e.contractLeafHash(remainderLen)
+			}
 		} else {
-			e.leaf(remainderLen)
+			switch leafType {
+			case ValueLeaf:
+				e.leaf(remainderLen)
+			case AccountLeaf:
+				e.accountLeaf(remainderLen)
+			case ContractLeaf:
+				e.contractLeaf(remainderLen)
+			}
 		}
 	}
 	// Check for the optional part
@@ -129,7 +156,7 @@ func step2(
 	}
 
 	// Recursion
-	return step2(hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return step2(leafType, hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 // HashBuilder2 impements the interface `emitter2` and opcodes that the structural information of the trie
@@ -162,7 +189,7 @@ func (hb *HashBuilder2) Reset() {
 }
 
 // key is original key (not transformed into hex or compacted)
-func (hb *HashBuilder2) setKeyValue(skip int, key []byte, value *bytebufferpool.ByteBuffer) {
+func (hb *HashBuilder2) supplyKey(skip int, key []byte) {
 	// Transform key into hex representation
 	hb.hexKey.Reset()
 	i := 0
@@ -177,6 +204,9 @@ func (hb *HashBuilder2) setKeyValue(skip int, key []byte, value *bytebufferpool.
 		i++
 	}
 	hb.hexKey.WriteByte(16)
+}
+
+func (hb *HashBuilder2) supplyValue(value *bytebufferpool.ByteBuffer) {
 	pool.PutBuffer(hb.value)
 	hb.value = value
 }
@@ -196,6 +226,230 @@ func (hb *HashBuilder2) leaf(length int) {
 
 func (hb *HashBuilder2) leafHash(length int) {
 	//fmt.Printf("LEAFHASH %d\n", length)
+	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	// Compute the total length of binary representation
+	var keyPrefix [1]byte
+	var valPrefix [4]byte
+	var lenPrefix [4]byte
+	var kp, vp, kl, vl int
+	// Write key
+	var compactLen int
+	var ni int
+	var compact0 byte
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	if hasTerm(key) {
+		compactLen = (len(key)-1)/2 + 1
+		if len(key)&1 == 0 {
+			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		} else {
+			compact0 = 32
+		}
+	} else {
+		compactLen = len(key)/2 + 1
+		if len(key)&1 == 1 {
+			compact0 = 16 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		}
+	}
+	if compactLen > 1 {
+		keyPrefix[0] = byte(128 + compactLen)
+		kp = 1
+		kl = compactLen
+	} else {
+		kl = 1
+	}
+	val := hb.value.B
+	if len(val) > 1 || val[0] >= 128 {
+		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
+		vl = len(val)
+	} else {
+		vl = 1
+	}
+	totalLen := kp + kl + vp + vl
+	pt := generateStructLen(lenPrefix[:], totalLen)
+	if pt+totalLen < 32 {
+		// Embedded node
+		pos := 0
+		copy(hash[pos:], lenPrefix[:pt])
+		pos += pt
+		copy(hash[pos:], keyPrefix[:kp])
+		pos += kp
+		hash[pos] = compact0
+		pos++
+		for i := 1; i < compactLen; i++ {
+			hash[pos] = key[ni]*16 + key[ni+1]
+			pos++
+			ni += 2
+		}
+		copy(hash[pos:], valPrefix[:vp])
+		pos += vp
+		copy(hash[pos:], val)
+	} else {
+		hb.sha.Reset()
+		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+			panic(err)
+		}
+		var b [1]byte
+		b[0] = compact0
+		if _, err := hb.sha.Write(b[:]); err != nil {
+			panic(err)
+		}
+		for i := 1; i < compactLen; i++ {
+			b[0] = key[ni]*16 + key[ni+1]
+			if _, err := hb.sha.Write(b[:]); err != nil {
+				panic(err)
+			}
+			ni += 2
+		}
+		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(val); err != nil {
+			panic(err)
+		}
+		hash[0] = byte(128 + 32)
+		if _, err := hb.sha.Read(hash[1:]); err != nil {
+			panic(err)
+		}
+	}
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	if len(hb.hashStack) > 33*len(hb.nodeStack) {
+		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+}
+
+func (hb *HashBuilder2) accountLeaf(length int) {
+	//fmt.Printf("ACCOUNTLEAF %d\n", length)
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	val, err := hb.leafFunc(hb.value.B)
+	if err != nil {
+		panic(err)
+	}
+	s := &shortNode{Key: common.CopyBytes(key), Val: val}
+	hb.nodeStack = append(hb.nodeStack, s)
+	hb.accountLeafHash(length)
+}
+
+func (hb *HashBuilder2) accountLeafHash(length int) {
+	//fmt.Printf("ACCOUNTLEAFHASH %d\n", length)
+	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	// Compute the total length of binary representation
+	var keyPrefix [1]byte
+	var valPrefix [4]byte
+	var lenPrefix [4]byte
+	var kp, vp, kl, vl int
+	// Write key
+	var compactLen int
+	var ni int
+	var compact0 byte
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	if hasTerm(key) {
+		compactLen = (len(key)-1)/2 + 1
+		if len(key)&1 == 0 {
+			compact0 = 48 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		} else {
+			compact0 = 32
+		}
+	} else {
+		compactLen = len(key)/2 + 1
+		if len(key)&1 == 1 {
+			compact0 = 16 + key[0] // Odd (1<<4) + first nibble
+			ni = 1
+		}
+	}
+	if compactLen > 1 {
+		keyPrefix[0] = byte(128 + compactLen)
+		kp = 1
+		kl = compactLen
+	} else {
+		kl = 1
+	}
+	val := hb.value.B
+	if len(val) > 1 || val[0] >= 128 {
+		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
+		vl = len(val)
+	} else {
+		vl = 1
+	}
+	totalLen := kp + kl + vp + vl
+	pt := generateStructLen(lenPrefix[:], totalLen)
+	if pt+totalLen < 32 {
+		// Embedded node
+		pos := 0
+		copy(hash[pos:], lenPrefix[:pt])
+		pos += pt
+		copy(hash[pos:], keyPrefix[:kp])
+		pos += kp
+		hash[pos] = compact0
+		pos++
+		for i := 1; i < compactLen; i++ {
+			hash[pos] = key[ni]*16 + key[ni+1]
+			pos++
+			ni += 2
+		}
+		copy(hash[pos:], valPrefix[:vp])
+		pos += vp
+		copy(hash[pos:], val)
+	} else {
+		hb.sha.Reset()
+		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+			panic(err)
+		}
+		var b [1]byte
+		b[0] = compact0
+		if _, err := hb.sha.Write(b[:]); err != nil {
+			panic(err)
+		}
+		for i := 1; i < compactLen; i++ {
+			b[0] = key[ni]*16 + key[ni+1]
+			if _, err := hb.sha.Write(b[:]); err != nil {
+				panic(err)
+			}
+			ni += 2
+		}
+		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
+			panic(err)
+		}
+		if _, err := hb.sha.Write(val); err != nil {
+			panic(err)
+		}
+		hash[0] = byte(128 + 32)
+		if _, err := hb.sha.Read(hash[1:]); err != nil {
+			panic(err)
+		}
+	}
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	if len(hb.hashStack) > 33*len(hb.nodeStack) {
+		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+}
+
+func (hb *HashBuilder2) contractLeaf(length int) {
+	//fmt.Printf("CONTRACTLEAF %d\n", length)
+	hex := hb.hexKey.Bytes()
+	key := hex[len(hex)-length:]
+	val, err := hb.leafFunc(hb.value.B)
+	if err != nil {
+		panic(err)
+	}
+	s := &shortNode{Key: common.CopyBytes(key), Val: val}
+	hb.nodeStack = append(hb.nodeStack, s)
+	hb.contractLeafHash(length)
+}
+
+func (hb *HashBuilder2) contractLeafHash(length int) {
+	//fmt.Printf("CONTRACTLEAFHASH %d\n", length)
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte

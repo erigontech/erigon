@@ -73,12 +73,13 @@ func TestV2HashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			groups = step2(ValueLeaf, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
+		hb.supplyKey(0, []byte(key))
 		if i%2 == 0 {
-			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueLong})
+			hb.supplyValue(&bytebufferpool.ByteBuffer{B: valueLong})
 		} else {
-			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueShort})
+			hb.supplyValue(&bytebufferpool.ByteBuffer{B: valueShort})
 		}
 	}
 	prec.Reset()
@@ -86,7 +87,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	step2(ValueLeaf, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -136,16 +137,17 @@ func TestV2Resolution(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			groups = step2(ValueLeaf, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
-		hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: value})
+		hb.supplyKey(0, []byte(key))
+		hb.supplyValue(&bytebufferpool.ByteBuffer{B: value})
 	}
 	prec.Reset()
 	prec.Write(curr.Bytes())
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	step2(ValueLeaf, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	tr1 := New(common.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
