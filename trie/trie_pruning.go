@@ -21,14 +21,12 @@ package trie
 import (
 	"sort"
 	"strings"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 type TriePruning struct {
-	accountTimestamps      map[string]uint64
-	accountTimestampsMutex sync.RWMutex
+	accountTimestamps map[string]uint64
 
 	// Maps timestamp (uint64) to set of prefixes of nodees (string)
 	accounts map[uint64]map[string]struct{}
@@ -122,7 +120,6 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
 
-	tp.accountTimestampsMutex.Lock()
 	if m, ok := tp.accountTimestamps[hexS]; ok {
 		prevTimestamp = m
 		exists = true
@@ -133,7 +130,6 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	if !del {
 		tp.accountTimestamps[hexS] = tp.blockNr
 	}
-	tp.accountTimestampsMutex.Unlock()
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 	return nil
