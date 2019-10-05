@@ -1252,6 +1252,9 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		return
 	}
 	var hn common.Hash
+	if nd == nil {
+		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
+	}
 	h.hash(nd, len(hex) == 0, hn[:])
 	hnode := hashNode(hn[:])
 	switch p := parent.(type) {
