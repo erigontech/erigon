@@ -880,22 +880,24 @@ func TestFirehoseStorageNodes(t *testing.T) {
 
 	leafNode := make([][]byte, 2)
 	leafNode[0] = path0Compact
-	valRlp, err := rlp.EncodeToBytes(uint(0x2a))
+	val0Rlp, err := rlp.EncodeToBytes(uint(0x2a))
 	assert.NoError(t, err)
-	leafNode[1] = valRlp
+	leafNode[1] = val0Rlp
 	node0Rlp, err := rlp.EncodeToBytes(leafNode)
 	assert.NoError(t, err)
 
 	leafNode[0] = path1Compact
-	valRlp, err = rlp.EncodeToBytes(uint(0x01c9))
+	val1Rlp, err := rlp.EncodeToBytes(uint(0x01c9))
 	assert.NoError(t, err)
-	leafNode[1] = valRlp
+	leafNode[1] = val1Rlp
 	node1Rlp, err := rlp.EncodeToBytes(leafNode)
 	assert.NoError(t, err)
 
 	branchNode := make([][]byte, 17)
-	branchNode[0x2] = node0Rlp
-	branchNode[0xb] = node1Rlp
+	assert.True(t, len(node0Rlp) >= 32)
+	branchNode[0x2] = crypto.Keccak256(node0Rlp)
+	assert.True(t, len(node1Rlp) >= 32)
+	branchNode[0xb] = crypto.Keccak256(node1Rlp)
 	branchRlp, err := rlp.EncodeToBytes(branchNode)
 	assert.NoError(t, err)
 
