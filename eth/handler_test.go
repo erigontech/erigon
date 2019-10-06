@@ -768,8 +768,7 @@ func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFireh
 	// 25     PUSH1  => 00
 	// 27     SSTORE         // storage[0] = input[0]
 
-	// 32-byte padded 0x15
-	input := common.FromHex("0000000000000000000000000000000000000000000000000000000000000015")
+	input := common.HexToHash("15").Bytes()
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
@@ -813,8 +812,8 @@ func TestFirehoseStorageRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
 
-	hashOf0 := crypto.Keccak256Hash(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
-	hashOf1 := crypto.Keccak256Hash(common.FromHex("0000000000000000000000000000000000000000000000000000000000000001"))
+	hashOf0 := crypto.Keccak256Hash(common.HexToHash("00").Bytes())
+	hashOf1 := crypto.Keccak256Hash(common.HexToHash("01").Bytes())
 
 	var storageReply storageRangesMsg
 	storageReply.ID = 1
@@ -862,8 +861,8 @@ func TestFirehoseStorageNodes(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageNodesCode, storageReq))
 
-	hashOf0 := crypto.Keccak256(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
-	hashOf1 := crypto.Keccak256(common.FromHex("0000000000000000000000000000000000000000000000000000000000000001"))
+	hashOf0 := crypto.Keccak256(common.HexToHash("00").Bytes())
+	hashOf1 := crypto.Keccak256(common.HexToHash("01").Bytes())
 	assert.Equal(t, hashOf0[0], uint8(0x29))
 	assert.Equal(t, hashOf1[0], uint8(0xb1))
 
