@@ -21,11 +21,11 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"sync"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/bolt"
@@ -365,12 +365,16 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			if hK != nil && fixedbits > 0 && (hK[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
 				hK = nil
 			}
+
+			// historical key points to an old block
 			if hK != nil && bytes.Compare(hK[l:], suffix) < 0 {
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], suffix)
+				// update historical key/value to the desired block
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
 				continue
 			}
+
 			var cmp int
 			if k == nil {
 				if hK == nil {
