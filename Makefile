@@ -63,8 +63,7 @@ ios:
 test: all
 	build/env.sh go run build/ci.go test
 
-lint: ## Run linters.
-	build/env.sh go run build/ci.go lint
+lint: lintci
 
 lintci:
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
