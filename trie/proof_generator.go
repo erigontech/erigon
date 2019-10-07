@@ -31,15 +31,15 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-// Tape represents the sequence of values that is getting serialised using CBOR into a byte buffer
-type Tape struct {
+// TapeBuilder stores the sequence of values that is getting serialised using CBOR into a byte buffer
+type TapeBuilder struct {
 	buffer  bytes.Buffer     // Byte buffer where the CBOR-encoded values end up being written
 	handle  codec.CborHandle // Object used to control the behavior of CBOR encoding
 	encoder *codec.Encoder   // Values are supplied to this object (via its Encode function)
 }
 
 // init allocates a new encoder, binding it to the buffer and the handle
-func (t *Tape) init() {
+func (t *TapeBuilder) init() {
 	t.encoder = codec.NewEncoder(&t.buffer, &t.handle)
 }
 
@@ -62,11 +62,11 @@ const (
 // `Structure` are integers (for opcodes themselves), potentially followed by binary strings (key for EXTENSION) or
 // integers (bitmaps for BRANCH or length of LEAF or number of hashes for HASH)
 type BlockWitnessBuilder struct {
-	Keys      Tape // Sequence of keys that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
-	Values    Tape // Sequence of values that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
-	Hashes    Tape // Sequence of hashes that are consumed by the HASH opcode
-	Codes     Tape // Sequence of contract codes that are consumed by the CODE opcode
-	Structure Tape // Sequence of opcodes and operands that define the structure of the witness
+	Keys      TapeBuilder // Sequence of keys that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
+	Values    TapeBuilder // Sequence of values that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
+	Hashes    TapeBuilder // Sequence of hashes that are consumed by the HASH opcode
+	Codes     TapeBuilder // Sequence of contract codes that are consumed by the CODE opcode
+	Structure TapeBuilder // Sequence of opcodes and operands that define the structure of the witness
 }
 
 // Instruction is "enum" type for defining the opcodes of the stack machine that reconstructs the structure of tries from Structure tape
@@ -104,8 +104,8 @@ const (
 	// and node containing the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it
 	// onto the node stack, its hash onto the hash stack.
 	OpContractLeaf
-	// OpContractLeafHash consumes key from key tape, nonce and balance from the value tape, also pops two items from the hash stack - code hash, and the hash
-	// of contract storage. It computes the hash of would-be account node and pushes it onto the hash stack.
+	// OpContractLeafHash consumes key from key tape, nonce and balance from the value tape, also pops two items from the hash stack -
+	// code hash, and the hash of contract storage. It computes the hash of would-be account node and pushes it onto the hash stack.
 	OpContractLeafHash
 	// OpEmptyRoot pushes special value onto the node stack (and corresponding hash onto the hash stack). That special value signifies
 	// an empty trie

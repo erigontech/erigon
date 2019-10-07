@@ -25,8 +25,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/valyala/bytebufferpool"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -57,8 +55,12 @@ func TestV2HashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
-	var prec, curr, succ bytes.Buffer
+	hb := NewHashBuilder2()
+	var prec, succ bytes.Buffer
+	var curr OneBytesTape
+	var valueTape OneBytesTape
+	hb.SetKeyTape(&curr)
+	hb.SetValueTape(&valueTape)
 	var groups []uint32
 	for i, key := range keys {
 		prec.Reset()
@@ -75,11 +77,11 @@ func TestV2HashBuilding(t *testing.T) {
 		if curr.Len() > 0 {
 			groups = step2(ValueLeaf, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
-		hb.supplyKey(0, []byte(key))
+		valueTape.Buffer.Reset()
 		if i%2 == 0 {
-			hb.supplyValue(&bytebufferpool.ByteBuffer{B: valueLong})
+			valueTape.Buffer.Write(valueLong)
 		} else {
-			hb.supplyValue(&bytebufferpool.ByteBuffer{B: valueShort})
+			valueTape.Buffer.Write(valueShort)
 		}
 	}
 	prec.Reset()
@@ -121,8 +123,12 @@ func TestV2Resolution(t *testing.T) {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
-	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
-	var prec, curr, succ bytes.Buffer
+	hb := NewHashBuilder2()
+	var prec, succ bytes.Buffer
+	var curr OneBytesTape
+	var valueTape OneBytesTape
+	hb.SetKeyTape(&curr)
+	hb.SetValueTape(&valueTape)
 	var groups []uint32
 	for _, key := range keys {
 		prec.Reset()
@@ -139,8 +145,8 @@ func TestV2Resolution(t *testing.T) {
 		if curr.Len() > 0 {
 			groups = step2(ValueLeaf, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
-		hb.supplyKey(0, []byte(key))
-		hb.supplyValue(&bytebufferpool.ByteBuffer{B: value})
+		valueTape.Buffer.Reset()
+		valueTape.Buffer.Write(value)
 	}
 	prec.Reset()
 	prec.Write(curr.Bytes())
