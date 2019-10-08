@@ -44,7 +44,7 @@ type TrieResolver struct {
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	historical bool
 	blockNr    uint64
-	hb         *HashBuilder2
+	hb         *HashBuilder
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       bytes.Buffer
@@ -75,7 +75,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder2(leafFunc),
+		hb:         NewHashBuilder(leafFunc),
 	}
 	return &tr
 }

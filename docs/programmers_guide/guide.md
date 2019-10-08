@@ -257,7 +257,7 @@ HASH 1
 BRANCH 0123
 ```
 
-These opcodes are implemented by the type `HashBuilder2` (implements the interface `structInfoReceiver`) in [trie/structural_2.go](../../trie/structural_2.go)
+These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`) in [trie/structural_2.go](../../trie/structural_2.go)
 
 ### Multiproofs
 
