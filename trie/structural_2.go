@@ -40,7 +40,7 @@ type structInfoReceiver interface {
 	hash(number int)
 }
 
-// step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
+// genStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
@@ -53,7 +53,7 @@ type structInfoReceiver interface {
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-func step2(
+func genStructStep(
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
@@ -129,7 +129,7 @@ func step2(
 	}
 
 	// Recursion
-	return step2(hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return genStructStep(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 // HashBuilder2 implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
