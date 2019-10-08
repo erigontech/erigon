@@ -30,7 +30,7 @@ import (
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type emitter2 interface {
+type structInfoReceiver interface {
 	leaf(length int)
 	leafHash(length int)
 	extension(key []byte)
@@ -48,7 +48,7 @@ type emitter2 interface {
 // Recursive invocation is used to emit opcodes for non-leaf nodes.
 // `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
-// `e` parameter is the emitter, an object that receives opcode messages.
+// `e` parameter is a `structInfoReceiver`, an object that receives opcode messages.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
@@ -118,7 +118,7 @@ func step2(
 	if precLen == 0 {
 		return groups
 	}
-	// Identify preceeding key for the recursive invocation
+	// Identify preceding key for the recursive invocation
 	newCurr := curr[:precLen]
 	var newPrec []byte
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
@@ -132,7 +132,7 @@ func step2(
 	return step2(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
-// HashBuilder2 impements the interface `emitter2` and opcodes that the structural information of the trie
+// HashBuilder2 implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder2 struct {
