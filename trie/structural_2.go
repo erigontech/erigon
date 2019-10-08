@@ -57,7 +57,7 @@ func step2(
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
-	e emitter2,
+	e structInfoReceiver,
 	groups []uint32,
 ) []uint32 {
 	if !recursive && len(prec) == 0 {
