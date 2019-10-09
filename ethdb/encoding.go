@@ -75,8 +75,7 @@ func decode7to8(b []byte) []byte {
 // If highZero is true, the most significant bits of every byte is left zero
 func encodeTimestamp(timestamp uint64) []byte {
 	var suffix []byte
-	var limit uint64
-	limit = 32
+	var limit uint64 = 32
 	for bytecount := 1; bytecount <= 8; bytecount++ {
 		if timestamp < limit {
 			suffix = make([]byte, bytecount)
