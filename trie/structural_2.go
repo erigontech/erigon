@@ -386,15 +386,13 @@ func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 	hb.acc.StorageSize = 0
 	hb.acc.HasStorageSize = false
 	if fieldSet&uint32(1) != 0 {
-		nonce, err := hb.nonceTape.Next()
-		if err != nil {
+		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
 		}
-		hb.acc.Nonce = nonce
 	}
 	if fieldSet&uint32(2) != 0 {
-		balance, err := hb.balanceTape.Next()
-		if err != nil {
+		var balance *big.Int
+		if balance, err = hb.balanceTape.Next(); err != nil {
 			return err
 		}
 		hb.acc.Balance.Set(balance)
@@ -417,15 +415,10 @@ func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 		popped++
 	}
 	if fieldSet&uint32(16) != 0 {
-		storageSize, err := hb.sSizeTape.Next()
-		if err != nil {
+		if hb.acc.StorageSize, err = hb.sSizeTape.Next(); err != nil {
 			return err
 		}
-		if storageSize > 0 {
-			hb.acc.StorageSize = storageSize
-			hb.acc.HasStorageSize = true
-		}
-		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
+		hb.acc.HasStorageSize = hb.acc.StorageSize > 0
 	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
@@ -455,15 +448,13 @@ func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 	hb.acc.StorageSize = 0
 	hb.acc.HasStorageSize = false
 	if fieldSet&uint32(1) != 0 {
-		nonce, err := hb.nonceTape.Next()
-		if err != nil {
+		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
 		}
-		hb.acc.Nonce = nonce
 	}
 	if fieldSet&uint32(2) != 0 {
-		balance, err := hb.balanceTape.Next()
-		if err != nil {
+		var balance *big.Int
+		if balance, err = hb.balanceTape.Next(); err != nil {
 			return err
 		}
 		hb.acc.Balance.Set(balance)
@@ -478,15 +469,10 @@ func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 		popped++
 	}
 	if fieldSet&uint32(16) != 0 {
-		storageSize, err := hb.sSizeTape.Next()
-		if err != nil {
+		if hb.acc.StorageSize, err = hb.sSizeTape.Next(); err != nil {
 			return err
 		}
-		if storageSize > 0 {
-			hb.acc.StorageSize = storageSize
-			hb.acc.HasStorageSize = true
-		}
-		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
+		hb.acc.HasStorageSize = hb.acc.StorageSize > 0
 	}
 	return hb.accountLeafHashWithKey(key, popped)
 }
