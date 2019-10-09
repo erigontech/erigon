@@ -93,7 +93,9 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(0, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	if _, err := step2(0, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -161,7 +163,9 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(0, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	if _, err := step2(0, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
 	tr1 := New(common.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
