@@ -21,10 +21,11 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
 	"sync"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/turbo-geth/log"
 
@@ -83,13 +84,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 		return b.Put(key, value)
 	})
 	return err
-}
-
-func historyBucket(bucket []byte) []byte {
-	hb := make([]byte, len(bucket)+1)
-	hb[0] = byte('h')
-	copy(hb[1:], bucket)
-	return hb
 }
 
 // Put puts the given key / value to the queue
