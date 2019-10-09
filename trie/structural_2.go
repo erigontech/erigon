@@ -34,10 +34,8 @@ import (
 type emitter2 interface {
 	leaf(length int) error
 	leafHash(length int) error
-	accountLeaf(length int) error
-	accountLeafHash(length int) error
-	contractLeaf(length int) error
-	contractLeafHash(length int) error
+	accountLeaf(length int, fieldset uint32) error
+	accountLeafHash(length int, fieldset uint32) error
 	extension(key []byte)
 	extensionHash(key []byte)
 	branch(set uint32)
@@ -45,21 +43,9 @@ type emitter2 interface {
 	hash(number int) error
 }
 
-// LeafType is the enum type for passing one of the three types of leaves into the step2
-// function
-type LeafType int
-
-const (
-	// ValueLeaf signifies that the leaves will be generic byte strings (for contract storage). step2 function will emit leaf and leafHash opcodes
-	ValueLeaf LeafType = iota
-	// AccountLeaf signifies that the leaves will be accounts (non-contracts). step2 function will emit accountLeaf and accountLeafHash opcodes
-	AccountLeaf
-	// ContractLeaf signifies that the leaves will be contracts (with code and storage). step2 function will emit contractLeaf
-	// and contractLeafHash opcodes
-	ContractLeaf
-)
-
 // step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
+// `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
+// an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
@@ -73,7 +59,7 @@ const (
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 func step2(
-	leafType LeafType,
+	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
@@ -116,22 +102,16 @@ func step2(
 		}
 	} else {
 		if hashOnly(curr[:maxLen]) {
-			switch leafType {
-			case ValueLeaf:
+			if fieldSet == 0 {
 				e.leafHash(remainderLen)
-			case AccountLeaf:
-				e.accountLeafHash(remainderLen)
-			case ContractLeaf:
-				e.contractLeafHash(remainderLen)
+			} else {
+				e.accountLeafHash(remainderLen, fieldSet)
 			}
 		} else {
-			switch leafType {
-			case ValueLeaf:
+			if fieldSet == 0 {
 				e.leaf(remainderLen)
-			case AccountLeaf:
-				e.accountLeaf(remainderLen)
-			case ContractLeaf:
-				e.contractLeaf(remainderLen)
+			} else {
+				e.accountLeaf(remainderLen, fieldSet)
 			}
 		}
 	}
@@ -163,7 +143,7 @@ func step2(
 	}
 
 	// Recursion
-	return step2(leafType, hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return step2(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 // BytesTape is an abstraction for an input tape that allows reading binary strings ([]byte) sequentially
@@ -200,8 +180,9 @@ type HashTape interface {
 type HashBuilder2 struct {
 	keyTape     BytesTape  // the source of key sequence
 	valueTape   BytesTape  // the source of values (for values that are not accounts or contracts)
-	nonceTape   Uint64Tape // the source of nonces for accounts and contracts
-	balanceTape BigIntTape // the source of balances for accounts and contracts
+	nonceTape   Uint64Tape // the source of nonces for accounts and contracts (field 0)
+	balanceTape BigIntTape // the source of balances for accounts and contracts (field 1)
+	sSizeTape   Uint64Tape // the source of storage sizes for contracts (field 4)
 	hashTape    HashTape   // the source of hashes
 
 	hashStack []byte           // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
@@ -217,7 +198,7 @@ func NewHashBuilder2() *HashBuilder2 {
 	}
 }
 
-// SetKeyTape sets the key tape to be used by this builder (opcodes leaf, leafHash, accountLeaf, accountLeafHash, contractLeaf, contractLeafHash)
+// SetKeyTape sets the key tape to be used by this builder (opcodes leaf, leafHash, accountLeaf, accountLeafHash)
 func (hb *HashBuilder2) SetKeyTape(keyTape BytesTape) {
 	hb.keyTape = keyTape
 }
@@ -227,12 +208,12 @@ func (hb *HashBuilder2) SetValueTape(valueTape BytesTape) {
 	hb.valueTape = valueTape
 }
 
-// SetNonceTape sets the nonce tape to be used by this builder (opcodes accountLeaf, accountLeafHash, contractLeaf, contractLeafHash)
+// SetNonceTape sets the nonce tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
 func (hb *HashBuilder2) SetNonceTape(nonceTape Uint64Tape) {
 	hb.nonceTape = nonceTape
 }
 
-// SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash, contractLeaf, contractLeafHash)
+// SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
 func (hb *HashBuilder2) SetBalanceTape(balanceTape BigIntTape) {
 	hb.balanceTape = balanceTape
 }
@@ -240,6 +221,11 @@ func (hb *HashBuilder2) SetBalanceTape(balanceTape BigIntTape) {
 // SetHashTape sets the hash tape to be used by this builder (opcode hash)
 func (hb *HashBuilder2) SetHashTape(hashTape HashTape) {
 	hb.hashTape = hashTape
+}
+
+// SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
+func (hb *HashBuilder2) SetSSizeTape(sSizeTape Uint64Tape) {
+	hb.sSizeTape = sSizeTape
 }
 
 // Reset makes the HashBuilder2 suitable for reuse
@@ -377,58 +363,118 @@ func (hb *HashBuilder2) leafHash(length int) error {
 
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
-func (hb *HashBuilder2) accountLeaf(length int) error {
+func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 	//fmt.Printf("ACCOUNTLEAF %d\n", length)
 	hex, err := hb.keyTape.Next()
 	if err != nil {
 		return err
 	}
 	key := hex[len(hex)-length:]
-	nonce, err := hb.nonceTape.Next()
-	if err != nil {
-		return err
-	}
-	balance, err := hb.balanceTape.Next()
-	if err != nil {
-		return err
-	}
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
+	hb.acc.Nonce = 0
+	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
+	if fieldSet&uint32(1) != 0 {
+		nonce, err := hb.nonceTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.Nonce = nonce
+	}
+	if fieldSet&uint32(2) != 0 {
+		balance, err := hb.balanceTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.Balance.Set(balance)
+	}
+	popped := 0
+	var root node
+	if fieldSet&uint32(4) != 0 {
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+		if hb.acc.Root != EmptyRoot {
+			// Root is on top of the stack
+			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
+			if root == nil {
+				root = hashNode(common.CopyBytes(hb.acc.Root[:]))
+			}
+		}
+		popped++
+	}
+	if fieldSet&uint32(8) != 0 {
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+		popped++
+	}
+	if fieldSet&uint32(16) != 0 {
+		storageSize, err := hb.sSizeTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.StorageSize = storageSize
+		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
+	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
-	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, nil, true}}
-	hb.nodeStack = append(hb.nodeStack, s)
-	return hb.accountLeafHashWithKey(key)
+	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
+	// this invocation will take care of the popping given number of items from both hash stack and node stack,
+	// pushing resulting hash to the hash stack, and nil to the node stack
+	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
+		return err
+	}
+	// Replace top of the stack
+	hb.nodeStack[len(hb.nodeStack)-1] = s
+	return nil
 }
 
-func (hb *HashBuilder2) accountLeafHash(length int) error {
+func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 	//fmt.Printf("ACCOUNTLEAFHASH %d\n", length)
 	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
-	}
-	nonce, err := hb.nonceTape.Next()
-	if err != nil {
-		return err
-	}
-	balance, err := hb.balanceTape.Next()
 	if err != nil {
 		return err
 	}
 	key := hex[len(hex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
+	hb.acc.Nonce = 0
+	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
-	return hb.accountLeafHashWithKey(key)
+	if fieldSet&uint32(1) != 0 {
+		nonce, err := hb.nonceTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.Nonce = nonce
+	}
+	if fieldSet&uint32(2) != 0 {
+		balance, err := hb.balanceTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.Balance.Set(balance)
+	}
+	popped := 0
+	if fieldSet&uint32(4) != 0 {
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+		popped++
+	}
+	if fieldSet&uint32(8) != 0 {
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+		popped++
+	}
+	if fieldSet&uint32(16) != 0 {
+		storageSize, err := hb.sSizeTape.Next()
+		if err != nil {
+			return err
+		}
+		hb.acc.StorageSize = storageSize
+		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
+	}
+	return hb.accountLeafHashWithKey(key, popped)
 }
 
 // To be called internally
-func (hb *HashBuilder2) accountLeafHashWithKey(key []byte) error {
+func (hb *HashBuilder2) accountLeafHashWithKey(key []byte, popped int) error {
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
@@ -522,75 +568,13 @@ func (hb *HashBuilder2) accountLeafHashWithKey(key []byte) error {
 			return err
 		}
 	}
+	if popped > 0 {
+		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*33]
+		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
+	}
 	hb.hashStack = append(hb.hashStack, hash[:]...)
-	if len(hb.hashStack) > 33*len(hb.nodeStack) {
-		hb.nodeStack = append(hb.nodeStack, nil)
-	}
+	hb.nodeStack = append(hb.nodeStack, nil)
 	return nil
-}
-
-func (hb *HashBuilder2) contractLeaf(length int) error {
-	//fmt.Printf("CONTRACTLEAF %d\n", length)
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
-	}
-	key := hex[len(hex)-length:]
-	nonce, err := hb.nonceTape.Next()
-	if err != nil {
-		return err
-	}
-	balance, err := hb.balanceTape.Next()
-	if err != nil {
-		return err
-	}
-	copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-32:])
-	copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-65:len(hb.hashStack)-33])
-	var root node
-	if hb.acc.Root != EmptyRoot {
-		// Code is on top of the stack
-		root = hb.nodeStack[len(hb.nodeStack)-2]
-		if root == nil {
-			root = hashNode(common.CopyBytes(hb.acc.Root[:]))
-		}
-	}
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
-	var accCopy accounts.Account
-	accCopy.Copy(&hb.acc)
-	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
-	// Pop two items from the stacks
-	hb.hashStack = hb.hashStack[:len(hb.hashStack)-66]
-	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-2]
-	hb.nodeStack = append(hb.nodeStack, s)
-	return hb.accountLeafHashWithKey(key)
-}
-
-func (hb *HashBuilder2) contractLeafHash(length int) error {
-	//fmt.Printf("CONTRACTLEAFHASH %d\n", length)
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
-	}
-	key := hex[len(hex)-length:]
-	nonce, err := hb.nonceTape.Next()
-	if err != nil {
-		return err
-	}
-	balance, err := hb.balanceTape.Next()
-	if err != nil {
-		return err
-	}
-	copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-32:])
-	copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-65:len(hb.hashStack)-33])
-	hb.acc.Nonce = nonce
-	hb.acc.Balance.Set(balance)
-	hb.acc.Initialised = true
-	// Pop two items from the stacks
-	hb.hashStack = hb.hashStack[:len(hb.hashStack)-66]
-	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-2]
-	return hb.accountLeafHashWithKey(key)
 }
 
 func (hb *HashBuilder2) extension(key []byte) {

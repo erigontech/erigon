@@ -419,8 +419,8 @@ sequence (tape) is added, containing the bytecodes of contracts.
 
 8. `CODE`
 9. `CODEHASH`
-10. `CONTRACTLEAF`
-11. `CONTRACTLEAFHASH`
+10. `ACCOUNTLEAF length field-set`
+11. `ACCOUNTLEAFHASH length field-set`
 12. `EMPTYROOT`
 
 `CODE` opcode consumes the next item in the bytecode sequence, creates a code node and pushes it onto the node stack.
@@ -429,12 +429,28 @@ It also pushes the hash of the byte code onto the hash stack.
 `CODEHASH` opcode consumes the next hash from the hash sequence, pushes it onto the hash stack, and pushes `nil` into the
 node stack.
 
-`CONTRACTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key-value tape. Then it pops two things
-from the node stack (and also from the hash stack). One thing has to be code node, another - root node of the storage
-for that contract. Storage root can be empty (that would introduced by `EMPTYROOT` opcode). Out of all this information,
-an account leaf node is constructed and pushed onto the node stack. Its hash is pushed onto the hash stack.
+`ACCOUNTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key tape. The rest of the semantics
+depends on the value of the `field-set`. Field set can be respresented by a bitmask. In that case, bit 0 would
+correspond to field 0, bit 1 (number 2) - to field 1, bit 2 (number 4) - to field 2. Currently, field 0 means
+account nonce, field 1 means account balance, field 2 means contract storage, field 3 means contract code.
 
-`CONTRACTLEAFHASH` opcode's difference from `CONTRACTLEAF` is that it does not push the leaf node onto the node stack,
+ * If field 0 is present in the `field-set`, the opcode consumes one item from the nonce tape (tape 0), otherwise
+it assumes default nonce (zero). This becomes the nonce of the newly created account/contract node.
+ * If field 1 is present in the `field-set`, the opcode consumes one item from the balance tape (tape 1), otherwise
+ it assumes default balance (zero). This becomes the balance of the newly created account/contract node.
+ * If field 2 is present in the `field-set`, the opcode pops a node from the node stack and a hash from the hash stack.
+This node or hash (in this order of preference) becomes the storage of the newly created contract node.
+Storage root can be empty (that would introduced by `EMPTYROOT` opcode).
+* If field 3 is present in the `field-set`, the opcode pops a code node from the node stack and a hash from the hash stack.
+This node or hash (in the order of preference) becomes the code or code hash of the newly created contract node.
+
+Out of all the information collected through the tapes and the stacks (as directed by the `field-set`), an account leaf node
+is constructed and pushed onto the node stack. Its hash is pushed onto the hash stack.
+Field set is introduced to make the specification of what is an account extensible in a backwards compatible way.
+If a new field is added to the account in the future, it can be introduced without a need to re-encode the pre-existing
+structures.
+
+`ACCOUNTLEAFHASH` opcode's difference from `ACCOUNTLEAF` is that it does not push the leaf node onto the node stack,
 pushing `nil` instead. The hash of would-be account leaf node is pushed onto the hash stack.
 
 `EMPTYROOT` is a way of placing a special value signifying an empty node onto the node stack. It also pushes the

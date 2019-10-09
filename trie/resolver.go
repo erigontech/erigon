@@ -90,7 +90,7 @@ type TrieResolver struct {
 	historical bool
 	blockNr    uint64
 	hb         *HashBuilder2
-	leafType   LeafType // leaf type for the next invocation of step2
+	fieldSet   uint32 // fieldSet for the next invocation of step2
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
@@ -115,6 +115,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 	tr.hb.SetNonceTape((*OneNonceTape)(&tr.a.Nonce))
 	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
 	tr.hb.SetHashTape(&tr.hashes)
+	tr.hb.SetSSizeTape((*OneNonceTape)(&tr.a.StorageSize))
 	return &tr
 }
 
@@ -216,12 +217,11 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = step2(tr.leafType, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		//fmt.Printf("Resolved: %x\n%s\n", hbHash, hbRoot.fstring(""))
 
 		if tr.currentReq.RequiresRLP {
 			hasher := newHasher(false)
@@ -281,7 +281,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = step2(tr.leafType, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		}
 		// Remember the current key and value
 		if tr.accounts {
@@ -289,12 +289,17 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, err
 			}
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
-				tr.leafType = AccountLeaf
+				tr.fieldSet = 3
 			} else {
-				tr.leafType = ContractLeaf
+				if tr.a.HasStorageSize {
+					fmt.Printf("tr.a.StorageSize = %d\n", tr.a.StorageSize)
+					tr.fieldSet = 31
+				} else {
+					tr.fieldSet = 15
+				}
 				// Load hashes onto the stack of the hashbuilder
-				tr.hashes.hashes[0] = tr.a.Root     // this will be just beneath the top of the stack
-				tr.hashes.hashes[1] = tr.a.CodeHash // this will end up on top of the stack
+				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
+				tr.hashes.hashes[1] = tr.a.Root     // this will end up on top of the stack
 				tr.hashes.idx = 0                   // Reset the counter
 				// the first item ends up deepest on the stack, the seccond item - on the top
 				if err := tr.hb.hash(2); err != nil {
@@ -307,7 +312,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				tr.value.Buffer.WriteByte(byte(128 + len(v)))
 			}
 			tr.value.Buffer.Write(v)
-			tr.leafType = ValueLeaf
+			tr.fieldSet = 0
 		}
 	}
 	return true, nil
