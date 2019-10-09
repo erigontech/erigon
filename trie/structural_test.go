@@ -57,7 +57,7 @@ func TestV2HashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
+	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
 	var groups []uint32
 	for i, key := range keys {
@@ -73,7 +73,7 @@ func TestV2HashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			groups = genStructStep(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 		if i%2 == 0 {
 			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueLong})
@@ -86,7 +86,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	genStructStep(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -120,7 +120,7 @@ func TestV2Resolution(t *testing.T) {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
-	hb := NewHashBuilder2(func(b []byte) (node, error) { return valueNode(b), nil })
+	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
 	var groups []uint32
 	for _, key := range keys {
@@ -136,7 +136,7 @@ func TestV2Resolution(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			groups = genStructStep(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 		hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: value})
 	}
@@ -145,14 +145,14 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	step2(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	genStructStep(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
 	tr1 := New(common.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
 	}
-	// Check the availibility of the resolved keys
+	// Check the availability of the resolved keys
 	for _, hex := range rs.hexes {
 		key := hexToKeybytes(hex)
 		_, found := tr1.Get(key)

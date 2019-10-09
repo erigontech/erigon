@@ -30,7 +30,7 @@ import (
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type emitter2 interface {
+type structInfoReceiver interface {
 	leaf(length int)
 	leafHash(length int)
 	extension(key []byte)
@@ -40,7 +40,7 @@ type emitter2 interface {
 	hash(number int)
 }
 
-// step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
+// genStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
@@ -48,16 +48,16 @@ type emitter2 interface {
 // Recursive invocation is used to emit opcodes for non-leaf nodes.
 // `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
-// `e` parameter is the emitter, an object that receives opcode messages.
+// `e` parameter is a `structInfoReceiver`, an object that receives opcode messages.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-func step2(
+func genStructStep(
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
-	e emitter2,
+	e structInfoReceiver,
 	groups []uint32,
 ) []uint32 {
 	if !recursive && len(prec) == 0 {
@@ -118,7 +118,7 @@ func step2(
 	if precLen == 0 {
 		return groups
 	}
-	// Identify preceeding key for the recursive invocation
+	// Identify preceding key for the recursive invocation
 	newCurr := curr[:precLen]
 	var newPrec []byte
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
@@ -129,13 +129,13 @@ func step2(
 	}
 
 	// Recursion
-	return step2(hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return genStructStep(hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
-// HashBuilder2 impements the interface `emitter2` and opcodes that the structural information of the trie
+// HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type HashBuilder2 struct {
+type HashBuilder struct {
 	hexKey    bytes.Buffer // Next key-value pair to consume
 	hashStack []byte       // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
 	nodeStack []node       // Stack of nodes
@@ -144,16 +144,16 @@ type HashBuilder2 struct {
 	leafFunc  func(b []byte) (node, error) // Function to be called on the leafs to construct valueNode or accoutNode
 }
 
-// NewHashBuilder2 creates a new HashBuilder2
-func NewHashBuilder2(leafFunc func(b []byte) (node, error)) *HashBuilder2 {
-	return &HashBuilder2{
+// NewHashBuilder creates a new HashBuilder
+func NewHashBuilder(leafFunc func(b []byte) (node, error)) *HashBuilder {
+	return &HashBuilder{
 		sha:      sha3.NewLegacyKeccak256().(keccakState),
 		leafFunc: leafFunc,
 	}
 }
 
-// Reset makes the HashBuilder2 suitable for reuse
-func (hb *HashBuilder2) Reset() {
+// Reset makes the HashBuilder suitable for reuse
+func (hb *HashBuilder) Reset() {
 	hb.hexKey.Reset()
 	hb.hashStack = hb.hashStack[:0]
 	hb.nodeStack = hb.nodeStack[:0]
@@ -162,7 +162,7 @@ func (hb *HashBuilder2) Reset() {
 }
 
 // key is original key (not transformed into hex or compacted)
-func (hb *HashBuilder2) setKeyValue(skip int, key []byte, value *bytebufferpool.ByteBuffer) {
+func (hb *HashBuilder) setKeyValue(skip int, key []byte, value *bytebufferpool.ByteBuffer) {
 	// Transform key into hex representation
 	hb.hexKey.Reset()
 	i := 0
@@ -181,7 +181,7 @@ func (hb *HashBuilder2) setKeyValue(skip int, key []byte, value *bytebufferpool.
 	hb.value = value
 }
 
-func (hb *HashBuilder2) leaf(length int) {
+func (hb *HashBuilder) leaf(length int) {
 	//fmt.Printf("LEAF %d\n", length)
 	hex := hb.hexKey.Bytes()
 	key := hex[len(hex)-length:]
@@ -194,7 +194,7 @@ func (hb *HashBuilder2) leaf(length int) {
 	hb.leafHash(length)
 }
 
-func (hb *HashBuilder2) leafHash(length int) {
+func (hb *HashBuilder) leafHash(length int) {
 	//fmt.Printf("LEAFHASH %d\n", length)
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
@@ -293,7 +293,7 @@ func (hb *HashBuilder2) leafHash(length int) {
 	}
 }
 
-func (hb *HashBuilder2) extension(key []byte) {
+func (hb *HashBuilder) extension(key []byte) {
 	//fmt.Printf("EXTENSION %x\n", key)
 	nd := hb.nodeStack[len(hb.nodeStack)-1]
 	switch n := nd.(type) {
@@ -308,7 +308,7 @@ func (hb *HashBuilder2) extension(key []byte) {
 	hb.extensionHash(key)
 }
 
-func (hb *HashBuilder2) extensionHash(key []byte) {
+func (hb *HashBuilder) extensionHash(key []byte) {
 	//fmt.Printf("EXTENSIONHASH %x\n", key)
 	branchHash := hb.hashStack[len(hb.hashStack)-33:]
 	// Compute the total length of binary representation
@@ -374,7 +374,7 @@ func (hb *HashBuilder2) extensionHash(key []byte) {
 	}
 }
 
-func (hb *HashBuilder2) branch(set uint32) {
+func (hb *HashBuilder) branch(set uint32) {
 	//fmt.Printf("BRANCH %b\n", set)
 	f := &fullNode{}
 	digits := bits.OnesCount32(set)
@@ -398,7 +398,7 @@ func (hb *HashBuilder2) branch(set uint32) {
 
 }
 
-func (hb *HashBuilder2) branchHash(set uint32) {
+func (hb *HashBuilder) branchHash(set uint32) {
 	//fmt.Printf("BRANCHHASH %b\n", set)
 	digits := bits.OnesCount32(set)
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
@@ -457,20 +457,20 @@ func (hb *HashBuilder2) branchHash(set uint32) {
 	}
 }
 
-func (hb *HashBuilder2) hash(number int) {
+func (hb *HashBuilder) hash(number int) {
 	panic("not implemented")
 }
 
-func (hb *HashBuilder2) rootHash() common.Hash {
+func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
 	copy(hash[:], hb.hashStack[1:33])
 	return hash
 }
 
-func (hb *HashBuilder2) root() node {
+func (hb *HashBuilder) root() node {
 	return hb.nodeStack[0]
 }
 
-func (hb *HashBuilder2) hasRoot() bool {
+func (hb *HashBuilder) hasRoot() bool {
 	return len(hb.nodeStack) > 0
 }
