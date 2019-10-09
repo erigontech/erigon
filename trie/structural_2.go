@@ -65,7 +65,7 @@ func step2(
 	prec, curr, succ []byte,
 	e emitter2,
 	groups []uint32,
-) []uint32 {
+) ([]uint32, error) {
 	if !recursive && len(prec) == 0 {
 		prec = nil
 	}
@@ -103,21 +103,29 @@ func step2(
 	} else {
 		if hashOnly(curr[:maxLen]) {
 			if fieldSet == 0 {
-				e.leafHash(remainderLen)
+				if err := e.leafHash(remainderLen); err != nil {
+					return nil, err
+				}
 			} else {
-				e.accountLeafHash(remainderLen, fieldSet)
+				if err := e.accountLeafHash(remainderLen, fieldSet); err != nil {
+					return nil, err
+				}
 			}
 		} else {
 			if fieldSet == 0 {
-				e.leaf(remainderLen)
+				if err := e.leaf(remainderLen); err != nil {
+					return nil, err
+				}
 			} else {
-				e.accountLeaf(remainderLen, fieldSet)
+				if err := e.accountLeaf(remainderLen, fieldSet); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
 	// Check for the optional part
 	if precLen <= succLen && len(succ) > 0 {
-		return groups
+		return groups, nil
 	}
 	// Close the immediately encompassing prefix group, if needed
 	if len(succ) > 0 || prec != nil {
@@ -130,7 +138,7 @@ func step2(
 	groups = groups[:maxLen]
 	// Check the end of recursion
 	if precLen == 0 {
-		return groups
+		return groups, nil
 	}
 	// Identify preceeding key for the recursive invocation
 	newCurr := curr[:precLen]
@@ -375,6 +383,8 @@ func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 	hb.acc.Nonce = 0
 	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
+	hb.acc.StorageSize = 0
+	hb.acc.HasStorageSize = false
 	if fieldSet&uint32(1) != 0 {
 		nonce, err := hb.nonceTape.Next()
 		if err != nil {
@@ -411,7 +421,10 @@ func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 		if err != nil {
 			return err
 		}
-		hb.acc.StorageSize = storageSize
+		if storageSize > 0 {
+			hb.acc.StorageSize = storageSize
+			hb.acc.HasStorageSize = true
+		}
 		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
 	}
 	var accCopy accounts.Account
@@ -439,6 +452,8 @@ func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 	hb.acc.Nonce = 0
 	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
+	hb.acc.StorageSize = 0
+	hb.acc.HasStorageSize = false
 	if fieldSet&uint32(1) != 0 {
 		nonce, err := hb.nonceTape.Next()
 		if err != nil {
@@ -467,7 +482,10 @@ func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 		if err != nil {
 			return err
 		}
-		hb.acc.StorageSize = storageSize
+		if storageSize > 0 {
+			hb.acc.StorageSize = storageSize
+			hb.acc.HasStorageSize = true
+		}
 		fmt.Printf("hb.acc.StorageSize = %d\n", hb.acc.StorageSize)
 	}
 	return hb.accountLeafHashWithKey(key, popped)

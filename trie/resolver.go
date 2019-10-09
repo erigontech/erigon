@@ -217,7 +217,11 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		var err error
+		tr.groups, err = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		if err != nil {
+			return err
+		}
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -281,7 +285,11 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			var err error
+			tr.groups, err = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			if err != nil {
+				return false, err
+			}
 		}
 		// Remember the current key and value
 		if tr.accounts {
@@ -292,7 +300,6 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				tr.fieldSet = 3
 			} else {
 				if tr.a.HasStorageSize {
-					fmt.Printf("tr.a.StorageSize = %d\n", tr.a.StorageSize)
 					tr.fieldSet = 31
 				} else {
 					tr.fieldSet = 15
