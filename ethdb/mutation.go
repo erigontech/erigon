@@ -52,7 +52,7 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := compositeKeySuffix(key, timestamp)
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return m.Get(hBucket, composite)
 }
 
@@ -122,7 +122,7 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 // Assumes that bucket, key, and value won't be modified
 func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
 	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
-	composite, _ := compositeKeySuffix(key, timestamp)
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixM, ok := m.suffixkeys[timestamp]
 	if !ok {
 		suffixM = make(map[string][][]byte)
@@ -270,7 +270,7 @@ func (m *mutation) Delete(bucket, key []byte) error {
 
 // Deletes all keys with specified suffix from all the buckets
 func (m *mutation) DeleteTimestamp(timestamp uint64) error {
-	suffix := encodeTimestamp(timestamp)
+	suffix := dbutils.EncodeTimestamp(timestamp)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
@@ -321,7 +321,7 @@ func (m *mutation) Commit() (uint64, error) {
 			m.puts[string(dbutils.SuffixBucket)] = t
 		}
 		for timestamp, suffixM := range m.suffixkeys {
-			suffix := encodeTimestamp(timestamp)
+			suffix := dbutils.EncodeTimestamp(timestamp)
 			for bucketStr, suffixL := range suffixM {
 				hBucket := []byte(bucketStr)
 				suffixkey := make([]byte, len(suffix)+len(hBucket))

@@ -31,7 +31,7 @@ import (
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type emitter2 interface {
+type structInfoReceiver interface {
 	leaf(length int) error
 	leafHash(length int) error
 	accountLeaf(length int, fieldset uint32) error
@@ -43,7 +43,7 @@ type emitter2 interface {
 	hash(number int) error
 }
 
-// step2 is one step of the algorithm that generates the structural information based on the sequence of keys.
+// genStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
 // an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
@@ -53,17 +53,18 @@ type emitter2 interface {
 // Recursive invocation is used to emit opcodes for non-leaf nodes.
 // `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
-// `e` parameter is the emitter, an object that receives opcode messages.
+// `e` parameter is a `structInfoReceiver`, an object that receives opcode messages.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-func step2(
+
+func genStructStep(
 	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
 	prec, curr, succ []byte,
-	e emitter2,
+	e structInfoReceiver,
 	groups []uint32,
 ) ([]uint32, error) {
 	if !recursive && len(prec) == 0 {
@@ -140,7 +141,7 @@ func step2(
 	if precLen == 0 {
 		return groups, nil
 	}
-	// Identify preceeding key for the recursive invocation
+	// Identify preceding key for the recursive invocation
 	newCurr := curr[:precLen]
 	var newPrec []byte
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
@@ -151,7 +152,7 @@ func step2(
 	}
 
 	// Recursion
-	return step2(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return genStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 // BytesTape is an abstraction for an input tape that allows reading binary strings ([]byte) sequentially
@@ -182,10 +183,10 @@ type HashTape interface {
 	Next() (common.Hash, error)
 }
 
-// HashBuilder2 impements the interface `emitter2` and opcodes that the structural information of the trie
+// HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type HashBuilder2 struct {
+type HashBuilder struct {
 	keyTape     BytesTape  // the source of key sequence
 	valueTape   BytesTape  // the source of values (for values that are not accounts or contracts)
 	nonceTape   Uint64Tape // the source of nonces for accounts and contracts (field 0)
@@ -199,50 +200,50 @@ type HashBuilder2 struct {
 	sha       keccakState      // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
 }
 
-// NewHashBuilder2 creates a new HashBuilder2
-func NewHashBuilder2() *HashBuilder2 {
-	return &HashBuilder2{
+// NewHashBuilder creates a new HashBuilder
+func NewHashBuilder() *HashBuilder {
+	return &HashBuilder{
 		sha: sha3.NewLegacyKeccak256().(keccakState),
 	}
 }
 
 // SetKeyTape sets the key tape to be used by this builder (opcodes leaf, leafHash, accountLeaf, accountLeafHash)
-func (hb *HashBuilder2) SetKeyTape(keyTape BytesTape) {
+func (hb *HashBuilder) SetKeyTape(keyTape BytesTape) {
 	hb.keyTape = keyTape
 }
 
 // SetValueTape sets the value tape to be used by this builder (opcodes leaf and leafHash)
-func (hb *HashBuilder2) SetValueTape(valueTape BytesTape) {
+func (hb *HashBuilder) SetValueTape(valueTape BytesTape) {
 	hb.valueTape = valueTape
 }
 
 // SetNonceTape sets the nonce tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
-func (hb *HashBuilder2) SetNonceTape(nonceTape Uint64Tape) {
+func (hb *HashBuilder) SetNonceTape(nonceTape Uint64Tape) {
 	hb.nonceTape = nonceTape
 }
 
 // SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
-func (hb *HashBuilder2) SetBalanceTape(balanceTape BigIntTape) {
+func (hb *HashBuilder) SetBalanceTape(balanceTape BigIntTape) {
 	hb.balanceTape = balanceTape
 }
 
 // SetHashTape sets the hash tape to be used by this builder (opcode hash)
-func (hb *HashBuilder2) SetHashTape(hashTape HashTape) {
+func (hb *HashBuilder) SetHashTape(hashTape HashTape) {
 	hb.hashTape = hashTape
 }
 
 // SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
-func (hb *HashBuilder2) SetSSizeTape(sSizeTape Uint64Tape) {
+func (hb *HashBuilder) SetSSizeTape(sSizeTape Uint64Tape) {
 	hb.sSizeTape = sSizeTape
 }
 
-// Reset makes the HashBuilder2 suitable for reuse
-func (hb *HashBuilder2) Reset() {
+// Reset makes the HashBuilder suitable for reuse
+func (hb *HashBuilder) Reset() {
 	hb.hashStack = hb.hashStack[:0]
 	hb.nodeStack = hb.nodeStack[:0]
 }
 
-func (hb *HashBuilder2) leaf(length int) error {
+func (hb *HashBuilder) leaf(length int) error {
 	//fmt.Printf("LEAF %d\n", length)
 	hex, err := hb.keyTape.Next()
 	if err != nil {
@@ -259,7 +260,7 @@ func (hb *HashBuilder2) leaf(length int) error {
 }
 
 // To be called internally
-func (hb *HashBuilder2) leafHashWithKeyVal(key, val []byte) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key, val []byte) error {
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
@@ -355,7 +356,7 @@ func (hb *HashBuilder2) leafHashWithKeyVal(key, val []byte) error {
 	return nil
 }
 
-func (hb *HashBuilder2) leafHash(length int) error {
+func (hb *HashBuilder) leafHash(length int) error {
 	//fmt.Printf("LEAFHASH %d\n", length)
 	hex, err := hb.keyTape.Next()
 	if err != nil {
@@ -371,7 +372,7 @@ func (hb *HashBuilder2) leafHash(length int) error {
 
 var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
-func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
+func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	//fmt.Printf("ACCOUNTLEAF %d\n", length)
 	hex, err := hb.keyTape.Next()
 	if err != nil {
@@ -433,7 +434,7 @@ func (hb *HashBuilder2) accountLeaf(length int, fieldSet uint32) error {
 	return nil
 }
 
-func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
+func (hb *HashBuilder) accountLeafHash(length int, fieldSet uint32) error {
 	//fmt.Printf("ACCOUNTLEAFHASH %d\n", length)
 	hex, err := hb.keyTape.Next()
 	if err != nil {
@@ -478,7 +479,7 @@ func (hb *HashBuilder2) accountLeafHash(length int, fieldSet uint32) error {
 }
 
 // To be called internally
-func (hb *HashBuilder2) accountLeafHashWithKey(key []byte, popped int) error {
+func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
@@ -581,7 +582,7 @@ func (hb *HashBuilder2) accountLeafHashWithKey(key []byte, popped int) error {
 	return nil
 }
 
-func (hb *HashBuilder2) extension(key []byte) {
+func (hb *HashBuilder) extension(key []byte) {
 	//fmt.Printf("EXTENSION %x\n", key)
 	nd := hb.nodeStack[len(hb.nodeStack)-1]
 	switch n := nd.(type) {
@@ -596,7 +597,7 @@ func (hb *HashBuilder2) extension(key []byte) {
 	hb.extensionHash(key)
 }
 
-func (hb *HashBuilder2) extensionHash(key []byte) {
+func (hb *HashBuilder) extensionHash(key []byte) {
 	//fmt.Printf("EXTENSIONHASH %x\n", key)
 	branchHash := hb.hashStack[len(hb.hashStack)-33:]
 	// Compute the total length of binary representation
@@ -662,7 +663,7 @@ func (hb *HashBuilder2) extensionHash(key []byte) {
 	}
 }
 
-func (hb *HashBuilder2) branch(set uint32) {
+func (hb *HashBuilder) branch(set uint32) {
 	//fmt.Printf("BRANCH %b\n", set)
 	f := &fullNode{}
 	digits := bits.OnesCount32(set)
@@ -686,7 +687,7 @@ func (hb *HashBuilder2) branch(set uint32) {
 
 }
 
-func (hb *HashBuilder2) branchHash(set uint32) {
+func (hb *HashBuilder) branchHash(set uint32) {
 	//fmt.Printf("BRANCHHASH %b\n", set)
 	digits := bits.OnesCount32(set)
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
@@ -745,7 +746,7 @@ func (hb *HashBuilder2) branchHash(set uint32) {
 	}
 }
 
-func (hb *HashBuilder2) hash(number int) error {
+func (hb *HashBuilder) hash(number int) error {
 	for i := 0; i < number; i++ {
 		hash, err := hb.hashTape.Next()
 		if err != nil {
@@ -758,16 +759,16 @@ func (hb *HashBuilder2) hash(number int) error {
 	return nil
 }
 
-func (hb *HashBuilder2) rootHash() common.Hash {
+func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
 	copy(hash[:], hb.hashStack[1:33])
 	return hash
 }
 
-func (hb *HashBuilder2) root() node {
+func (hb *HashBuilder) root() node {
 	return hb.nodeStack[0]
 }
 
-func (hb *HashBuilder2) hasRoot() bool {
+func (hb *HashBuilder) hasRoot() bool {
 	return len(hb.nodeStack) > 0
 }

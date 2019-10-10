@@ -744,13 +744,32 @@ func TestFirehoseTooManyLeaves(t *testing.T) {
 	}
 }
 
-func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFirehosePeer, common.Address) {
-	// this smart contract sets its 0th storage to 42
-	// see tests/contracts/storage.sol
-	code := common.FromHex("0x6080604052602a600055348015601457600080fd5b506083806100236000396000f3fe6080604052348015600f57600080fd5b506004361060285760003560e01c806360fe47b114602d575b600080fd5b604760048036036020811015604157600080fd5b50356049565b005b60005556fea265627a7a72305820c6d2a85ef1ffd7a88a51c6087851886ab108ffe628b0b80e4d95d923559e8d9564736f6c634300050a0032")
+// 2 storage items starting from different nibbles
+func setUpStorageContractForFirehoseA(t *testing.T) (*ProtocolManager, *testFirehosePeer, common.Address) {
+	// This contract initially sets its 0th storage to 0x2a
+	// and its 1st storage to 0x01c9.
+	// When called, it updates the 0th storage to the input provided.
+	code := common.FromHex("602a6000556101c960015560068060166000396000f3600035600055")
+	// https://github.com/CoinCulture/evm-tools
+	// 0      PUSH1  => 2a
+	// 2      PUSH1  => 00
+	// 4      SSTORE         // storage[0] = 0x2a
+	// 5      PUSH2  => 01c9
+	// 8      PUSH1  => 01
+	// 10     SSTORE         // storage[1] = 0x01c9
+	// 11     PUSH1  => 06   // deploy begin
+	// 13     DUP1
+	// 14     PUSH1  => 16
+	// 16     PUSH1  => 00
+	// 18     CODECOPY
+	// 19     PUSH1  => 00
+	// 21     RETURN         // deploy end
+	// 22     PUSH1  => 00   // contract code
+	// 24     CALLDATALOAD
+	// 25     PUSH1  => 00
+	// 27     SSTORE         // storage[0] = input[0]
 
-	// call set(21)
-	set21 := common.FromHex("0x60fe47b10000000000000000000000000000000000000000000000000000000000000015")
+	input := common.HexToHash("15").Bytes()
 
 	signer := types.HomesteadSigner{}
 	var addr common.Address
@@ -759,14 +778,67 @@ func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFireh
 		switch i {
 		case 0:
 			nonce := block.TxNonce(testBank)
-			// storage is initialized to 42
+			// storage[0] = 0x2a, storage[1] = 0x01c9
 			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 			addr = crypto.CreateAddress(testBank, nonce)
 		case 1:
-			// storage is set to 21
-			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, set21), signer, testBankKey)
+			// storage[0] = 0x15
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, input), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		}
+	}
+
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 2, generator, nil)
+	peer, _ := newFirehoseTestPeer("peer", pm)
+
+	return pm, peer, addr
+}
+
+// 2 storage items starting with the same nibble
+func setUpStorageContractForFirehoseB(t *testing.T) (*ProtocolManager, *testFirehosePeer, common.Address) {
+	// This contract initially sets its 6th storage to 0x2a
+	// and its 8st storage to 0x01c9.
+	// When called, it updates the 8th storage to the input provided.
+	code := common.FromHex("602a6006556101c960085560068060166000396000f3600035600855")
+	// https://github.com/CoinCulture/evm-tools
+	// 0      PUSH1  => 2a
+	// 2      PUSH1  => 06
+	// 4      SSTORE         // storage[6] = 0x2a
+	// 5      PUSH2  => 01c9
+	// 8      PUSH1  => 08
+	// 10     SSTORE        // storage[8] = 0x01c9
+	// 11     PUSH1  => 06  // deploy begin
+	// 13     DUP1
+	// 14     PUSH1  => 16
+	// 16     PUSH1  => 00
+	// 18     CODECOPY
+	// 19     PUSH1  => 00
+	// 21     RETURN        // deploy end
+	// 22     PUSH1  => 00
+	// 24     CALLDATALOAD
+	// 25     PUSH1  => 08
+	// 27     SSTORE        // storage[8] = input[0]
+
+	input := common.HexToHash("15").Bytes()
+
+	signer := types.HomesteadSigner{}
+	var addr common.Address
+
+	generator := func(i int, block *core.BlockGen) {
+		switch i {
+		case 0:
+			nonce := block.TxNonce(testBank)
+			// storage[6] = 0x2a, storage[8] = 0x01c9
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 2e5, nil, code), signer, testBankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+			addr = crypto.CreateAddress(testBank, nonce)
+		case 1:
+			// storage[8] = 0x15
+			tx, err := types.SignTx(types.NewTransaction(block.TxNonce(testBank), addr, new(big.Int), 2e5, nil, input), signer, testBankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
 		}
@@ -779,8 +851,10 @@ func setUpStorageContractForFirehose(t *testing.T) (*ProtocolManager, *testFireh
 }
 
 func TestFirehoseStorageRanges(t *testing.T) {
-	pm, peer, addr := setUpStorageContractForFirehose(t)
+	pm, peer, addr := setUpStorageContractForFirehoseA(t)
 	defer peer.close()
+
+	// Block 1
 
 	var storageReq getStorageRangesOrNodes
 	storageReq.ID = 1
@@ -792,23 +866,49 @@ func TestFirehoseStorageRanges(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
 
+	hashOf0 := crypto.Keccak256Hash(common.HexToHash("00").Bytes())
+	hashOf1 := crypto.Keccak256Hash(common.HexToHash("01").Bytes())
+
 	var storageReply storageRangesMsg
 	storageReply.ID = 1
-	zerothHash := crypto.Keccak256Hash(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
 	storageReply.Entries = [][]storageRange{{
-		{Status: OK, Leaves: []storageLeaf{{Key: zerothHash, Val: *(big.NewInt(42))}}},
+		{Status: OK, Leaves: []storageLeaf{
+			{Key: hashOf0, Val: *(big.NewInt(0x2a))},
+			{Key: hashOf1, Val: *(big.NewInt(0x01c9))},
+		}},
 	}}
 
 	err := p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
 	if err != nil {
+		t.Fatalf("unexpected StorageRanges response: %v", err)
+	}
+
+	// Block 2
+
+	storageReq.ID = 2
+	storageReq.Block = pm.blockchain.GetBlockByNumber(2).Hash()
+
+	assert.NoError(t, p2p.Send(peer.app, GetStorageRangesCode, storageReq))
+	storageReply.ID = 2
+	storageReply.Entries[0][0].Leaves[0].Val.SetUint64(0x15)
+
+	err = p2p.ExpectMsg(peer.app, StorageRangesCode, storageReply)
+	if err != nil {
 		t.Errorf("unexpected StorageRanges response: %v", err)
 	}
+
+	// TODO [Andrew] test contract w/o any storage
 }
 
-func TestFirehoseStorageNodes(t *testing.T) {
-	// TODO [Andrew] test with 2 storage nodes
-	pm, peer, addr := setUpStorageContractForFirehose(t)
+// TestFirehoseStorageNodesA tests a trie with a branch node at the root and 2 leaf nodes.
+func TestFirehoseStorageNodesA(t *testing.T) {
+	pm, peer, addr := setUpStorageContractForFirehoseA(t)
 	defer peer.close()
+
+	hashOf0 := crypto.Keccak256(common.HexToHash("00").Bytes())
+	hashOf1 := crypto.Keccak256(common.HexToHash("01").Bytes())
+	assert.Equal(t, hashOf0[0], byte(0x29))
+	assert.Equal(t, hashOf1[0], byte(0xb1))
 
 	var storageReq getStorageRangesOrNodes
 	storageReq.ID = 1
@@ -820,25 +920,120 @@ func TestFirehoseStorageNodes(t *testing.T) {
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageNodesCode, storageReq))
 
-	zerothHash := crypto.Keccak256(common.FromHex("0000000000000000000000000000000000000000000000000000000000000000"))
-
 	// https://github.com/ethereum/wiki/wiki/Patricia-Tree
+
+	path0Compact := common.CopyBytes(hashOf0)
+	// override the 0st nibble with aux one for compact encoding
+	path0Compact[0] &= 0x0f
+	path0Compact[0] |= 0x30
+
+	path1Compact := common.CopyBytes(hashOf1)
+	path1Compact[0] &= 0x0f
+	path1Compact[0] |= 0x30
+
 	leafNode := make([][]byte, 2)
-	pathRlp := make([]byte, common.HashLength+1)
-	pathRlp[0] = 0x20
-	copy(pathRlp[1:], zerothHash)
-	leafNode[0] = pathRlp
-	valRlp, err := rlp.EncodeToBytes(uint(42))
+	leafNode[0] = path0Compact
+	val0Rlp, err := rlp.EncodeToBytes(uint(0x2a))
 	assert.NoError(t, err)
-	leafNode[1] = valRlp
-	nodeRlp, err := rlp.EncodeToBytes(leafNode)
+	leafNode[1] = val0Rlp
+	node0Rlp, err := rlp.EncodeToBytes(leafNode)
+	assert.NoError(t, err)
+
+	leafNode[0] = path1Compact
+	val1Rlp, err := rlp.EncodeToBytes(uint(0x01c9))
+	assert.NoError(t, err)
+	leafNode[1] = val1Rlp
+	node1Rlp, err := rlp.EncodeToBytes(leafNode)
+	assert.NoError(t, err)
+
+	branchNode := make([][]byte, 17)
+	assert.True(t, len(node0Rlp) >= 32)
+	branchNode[0x2] = crypto.Keccak256(node0Rlp)
+	assert.True(t, len(node1Rlp) >= 32)
+	branchNode[0xb] = crypto.Keccak256(node1Rlp)
+	branchRlp, err := rlp.EncodeToBytes(branchNode)
 	assert.NoError(t, err)
 
 	var storageReply storageNodesMsg
 	storageReply.ID = 1
 	storageReply.Nodes = make([][][]byte, 1)
 	storageReply.Nodes[0] = make([][]byte, 1)
-	storageReply.Nodes[0][0] = nodeRlp
+	storageReply.Nodes[0][0] = branchRlp
+
+	err = p2p.ExpectMsg(peer.app, StorageNodesCode, storageReply)
+	if err != nil {
+		t.Errorf("unexpected StorageNodes response: %v", err)
+	}
+}
+
+// TestFirehoseStorageNodesB tests a trie with an extension node at the root,
+// 1 intermediate branch node, and 2 leaf nodes.
+func TestFirehoseStorageNodesB(t *testing.T) {
+	pm, peer, addr := setUpStorageContractForFirehoseB(t)
+	defer peer.close()
+
+	hashOf6 := crypto.Keccak256(common.HexToHash("06").Bytes())
+	hashOf8 := crypto.Keccak256(common.HexToHash("08").Bytes())
+	assert.Equal(t, hashOf6[0], byte(0xf6))
+	assert.Equal(t, hashOf8[0], byte(0xf3))
+
+	var storageReq getStorageRangesOrNodes
+	storageReq.ID = 1
+	storageReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
+	emptyPrefix := trie.Keybytes{Data: []byte{}, Odd: false, Terminating: false}
+	// nibblePrefix := trie.Keybytes{Data: common.FromHex("f0"), Odd: true, Terminating: false}
+	storageReq.Requests = []storageReqForOneAccount{
+		// TODO [Andrew] also request the intermediate branch node
+		{Account: addr.Bytes(), Prefixes: []trie.Keybytes{emptyPrefix}},
+	}
+
+	assert.NoError(t, p2p.Send(peer.app, GetStorageNodesCode, storageReq))
+
+	// https://github.com/ethereum/wiki/wiki/Patricia-Tree
+
+	path6Compact := common.CopyBytes(hashOf6)
+	// replace the first 2 nibbles with compact encoding stuff
+	path6Compact[0] = 0x20
+
+	path8Compact := common.CopyBytes(hashOf8)
+	path8Compact[0] = 0x20
+
+	leafNode := make([][]byte, 2)
+	leafNode[0] = path6Compact
+	val6Rlp, err := rlp.EncodeToBytes(uint(0x2a))
+	assert.NoError(t, err)
+	leafNode[1] = val6Rlp
+	node6Rlp, err := rlp.EncodeToBytes(leafNode)
+	assert.NoError(t, err)
+
+	leafNode[0] = path8Compact
+	val8Rlp, err := rlp.EncodeToBytes(uint(0x01c9))
+	assert.NoError(t, err)
+	leafNode[1] = val8Rlp
+	node8Rlp, err := rlp.EncodeToBytes(leafNode)
+	assert.NoError(t, err)
+
+	branchNode := make([][]byte, 17)
+	assert.True(t, len(node6Rlp) >= 32)
+	branchNode[6] = crypto.Keccak256(node6Rlp)
+	assert.True(t, len(node8Rlp) >= 32)
+	branchNode[3] = crypto.Keccak256(node8Rlp)
+	branchRlp, err := rlp.EncodeToBytes(branchNode)
+	assert.NoError(t, err)
+
+	extensionNode := make([][]byte, 2)
+	extensionNode[0] = common.FromHex("1f")
+	assert.True(t, len(branchRlp) >= 32)
+	extensionNode[1] = crypto.Keccak256(branchRlp)
+	extensionRlp, err := rlp.EncodeToBytes(extensionNode)
+	assert.NoError(t, err)
+
+	var storageReply storageNodesMsg
+	storageReply.ID = 1
+	storageReply.Nodes = make([][][]byte, 1)
+	storageReply.Nodes[0] = make([][]byte, 1)
+	storageReply.Nodes[0][0] = extensionRlp
+	// storageReply.Nodes[0][1] = branchRlp
 
 	err = p2p.ExpectMsg(peer.app, StorageNodesCode, storageReply)
 	if err != nil {

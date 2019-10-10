@@ -89,7 +89,7 @@ type TrieResolver struct {
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	historical bool
 	blockNr    uint64
-	hb         *HashBuilder2
+	hb         *HashBuilder
 	fieldSet   uint32 // fieldSet for the next invocation of step2
 	rss        []*ResolveSet
 	prec       bytes.Buffer
@@ -108,7 +108,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder2(),
+		hb:         NewHashBuilder(),
 	}
 	tr.hb.SetKeyTape(&tr.curr)
 	tr.hb.SetValueTape(&tr.value)
@@ -218,7 +218,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -286,7 +286,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = step2(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 			if err != nil {
 				return false, err
 			}

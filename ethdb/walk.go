@@ -33,9 +33,9 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string]struct{})
-	suffixDst := encodeTimestamp(timestampDst + 1)
+	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
 	if err := db.Walk(dbutils.SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := decodeTimestamp(k)
+		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
@@ -79,9 +79,9 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 
 func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
 	t := llrb.New()
-	startCode := encodeTimestamp(starttimestamp)
+	startCode := dbutils.EncodeTimestamp(starttimestamp)
 	if err := db.Walk(dbutils.SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := decodeTimestamp(k)
+		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			return true, nil
 		}
@@ -111,7 +111,7 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	}
 	t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
 		item := i.(*PutItem)
-		value, err := db.Get([]byte("secure-key-"), item.key)
+		value, err := db.Get(dbutils.PreimagePrefix, item.key)
 		if err != nil {
 			extErr = fmt.Errorf("Could not get preimage for key %x", item.key)
 			return false

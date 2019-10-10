@@ -47,4 +47,6 @@ var (
 
 	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
 	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
+
+	LastPrunedBlockKey = []byte("LastPrunedBlock")
 )

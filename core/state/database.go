@@ -26,15 +26,13 @@ import (
 	"runtime"
 	"sort"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/params"
-
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -336,13 +334,10 @@ func (tds *TrieDbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keyby
 
 	err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
-			var val big.Int
-			if err := rlp.DecodeBytes(value, &val); err != nil {
-				return false, err
-			}
+			val := new(big.Int).SetBytes(value)
 
 			if i < maxItems {
-				walker(common.BytesToHash(key), val)
+				walker(common.BytesToHash(key), *val)
 			}
 			i++
 			return i <= maxItems, nil
@@ -849,6 +844,8 @@ func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
 	if !save {
 		return nil
 	}
+	// Following check is to minimise the overwriting the same value of preimage
+	// in the database, which would cause extra write churn
 	if p, _ := tds.db.Get(dbutils.PreimagePrefix, hash); p != nil {
 		return nil
 	}

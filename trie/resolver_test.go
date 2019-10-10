@@ -6,7 +6,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 
-	//"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
