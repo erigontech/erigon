@@ -53,7 +53,7 @@ type structInfoReceiver interface {
 // Recursive invocation is used to emit opcodes for non-leaf nodes.
 // `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
-// `e` parameter is a `structInfoReceiver`, an object that receives opcode messages.
+// `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
