@@ -59,7 +59,7 @@ func TestV2HashBuilding(t *testing.T) {
 
 	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
-	var groups []uint32
+	var groups []uint16
 	for i, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -122,7 +122,7 @@ func TestV2Resolution(t *testing.T) {
 
 	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
 	var prec, curr, succ bytes.Buffer
-	var groups []uint32
+	var groups []uint16
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())

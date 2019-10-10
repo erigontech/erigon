@@ -49,7 +49,7 @@ type TrieResolver struct {
 	prec       bytes.Buffer
 	curr       bytes.Buffer
 	succ       bytes.Buffer
-	groups     []uint32
+	groups     []uint16
 	a          accounts.Account
 }
 

@@ -35,8 +35,8 @@ type structInfoReceiver interface {
 	leafHash(length int)
 	extension(key []byte)
 	extensionHash(key []byte)
-	branch(set uint32)
-	branchHash(set uint32)
+	branch(set uint16)
+	branchHash(set uint16)
 	hash(number int)
 }
 
@@ -58,8 +58,8 @@ func genStructStep(
 	recursive bool,
 	prec, curr, succ []byte,
 	e structInfoReceiver,
-	groups []uint32,
-) []uint32 {
+	groups []uint16,
+) []uint16 {
 	if !recursive && len(prec) == 0 {
 		prec = nil
 	}
@@ -78,7 +78,7 @@ func genStructStep(
 	for maxLen >= len(groups) {
 		groups = append(groups, 0)
 	}
-	groups[maxLen] |= (uint32(1) << extraDigit)
+	groups[maxLen] |= (uint16(1) << extraDigit)
 	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
 	remainderStart := maxLen
 	if len(succ) > 0 || prec != nil {
@@ -374,15 +374,15 @@ func (hb *HashBuilder) extensionHash(key []byte) {
 	}
 }
 
-func (hb *HashBuilder) branch(set uint32) {
+func (hb *HashBuilder) branch(set uint16) {
 	//fmt.Printf("BRANCH %b\n", set)
 	f := &fullNode{}
-	digits := bits.OnesCount32(set)
+	digits := bits.OnesCount16(set)
 	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint32(1) << digit) & set) != 0 {
+		if ((uint16(1) << digit) & set) != 0 {
 			if nodes[i] == nil {
 				f.Children[digit] = hashNode(common.CopyBytes(hashes[33*i+1 : 33*i+33]))
 			} else {
@@ -398,15 +398,15 @@ func (hb *HashBuilder) branch(set uint32) {
 
 }
 
-func (hb *HashBuilder) branchHash(set uint32) {
+func (hb *HashBuilder) branchHash(set uint16) {
 	//fmt.Printf("BRANCHHASH %b\n", set)
-	digits := bits.OnesCount32(set)
+	digits := bits.OnesCount16(set)
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
 	// Calculate the size of the resulting RLP
 	totalSize := 17 // These are 17 length prefixes
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
-		if ((uint32(1) << digit) & set) != 0 {
+		if ((uint16(1) << digit) & set) != 0 {
 			if hashes[33*i] == byte(128+32) {
 				totalSize += 32
 			} else {
@@ -427,7 +427,7 @@ func (hb *HashBuilder) branchHash(set uint32) {
 	var b [1]byte
 	b[0] = 128
 	for digit := uint(0); digit < 17; digit++ {
-		if ((uint32(1) << digit) & set) != 0 {
+		if ((uint16(1) << digit) & set) != 0 {
 			if hashes[33*i] == byte(128+32) {
 				if _, err := hb.sha.Write(hashes[33*i : 33*i+33]); err != nil {
 					panic(err)
