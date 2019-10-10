@@ -43,13 +43,13 @@ func (obt *OneBytesTape) Next() ([]byte, error) {
 	return obt.Bytes(), nil
 }
 
-// OneNonceTape implements Uint64Tape and can only contain one nonce at a time
-type OneNonceTape uint64
+// OneUint64Tape implements Uint64Tape and can only contain one number at a time
+type OneUint64Tape uint64
 
 // Next belongs to the Uint64Tape interface, and for this type it always returns
 // the currently set nonce
-func (ont *OneNonceTape) Next() (uint64, error) {
-	return uint64(*ont), nil
+func (out *OneUint64Tape) Next() (uint64, error) {
+	return uint64(*out), nil
 }
 
 // OneBalanceTape implements BigIntTape and can only contain one balance at a time
@@ -112,10 +112,10 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 	}
 	tr.hb.SetKeyTape(&tr.curr)
 	tr.hb.SetValueTape(&tr.value)
-	tr.hb.SetNonceTape((*OneNonceTape)(&tr.a.Nonce))
+	tr.hb.SetNonceTape((*OneUint64Tape)(&tr.a.Nonce))
 	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
 	tr.hb.SetHashTape(&tr.hashes)
-	tr.hb.SetSSizeTape((*OneNonceTape)(&tr.a.StorageSize))
+	tr.hb.SetSSizeTape((*OneUint64Tape)(&tr.a.StorageSize))
 	return &tr
 }
 

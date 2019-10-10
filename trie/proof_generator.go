@@ -44,8 +44,10 @@ func (t *TapeBuilder) init() {
 }
 
 const (
-	KeysTape      = "keys"
-	ValuesTape    = "values"
+	KeyTape       = "keys"
+	ValueTape     = "values"
+	NonceTape     = "nonces"
+	BalanceTape   = "balances"
 	HashesTape    = "hashes"
 	CodesTape     = "codes"
 	StructureTape = "structure"
@@ -62,8 +64,10 @@ const (
 // `Structure` are integers (for opcodes themselves), potentially followed by binary strings (key for EXTENSION) or
 // integers (bitmaps for BRANCH or length of LEAF or number of hashes for HASH)
 type BlockWitnessBuilder struct {
-	Keys      TapeBuilder // Sequence of keys that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
-	Values    TapeBuilder // Sequence of values that are consumed by LEAF, LEAFHASH, CONTRACTLEAF, and CONTRACTLEAFHASH opcodes
+	Keys      TapeBuilder // Sequence of keys that are consumed by LEAF, LEAFHASH, ACCOUNTLEAF, and ACCOUNTLEAFHASH opcodes
+	Values    TapeBuilder // Sequence of values that are consumed by LEAF, and LEAFHASH opcodes
+	Nonces    TapeBuilder // Sequence of nonces that are consumed by ACCOUNTLEAF or ACCOUNTLEAFHASH opcodes
+	Balances  TapeBuilder // Sequence of balances that are consumed by ACCOUNTLEAF or ACCOUNTLEAFHASH opcodes
 	Hashes    TapeBuilder // Sequence of hashes that are consumed by the HASH opcode
 	Codes     TapeBuilder // Sequence of contract codes that are consumed by the CODE opcode
 	Structure TapeBuilder // Sequence of opcodes and operands that define the structure of the witness
@@ -103,12 +107,6 @@ const (
 	// OpContractLeaf consumes key from key tape, nonce and balance from the value tape, also pops two items from the node stack - code node,
 	// and node containing the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it
 	// onto the node stack, its hash onto the hash stack.
-	OpContractLeaf
-	// OpContractLeafHash consumes key from key tape, nonce and balance from the value tape, also pops two items from the hash stack -
-	// code hash, and the hash of contract storage. It computes the hash of would-be account node and pushes it onto the hash stack.
-	OpContractLeafHash
-	// OpEmptyRoot pushes special value onto the node stack (and corresponding hash onto the hash stack). That special value signifies
-	// an empty trie
 	OpEmptyRoot
 )
 
@@ -117,6 +115,8 @@ func NewBlockWitnessBuilder() *BlockWitnessBuilder {
 	var bwb BlockWitnessBuilder
 	bwb.Keys.init()
 	bwb.Values.init()
+	bwb.Nonces.init()
+	bwb.Balances.init()
 	bwb.Hashes.init()
 	bwb.Codes.init()
 	bwb.Structure.init()
@@ -138,17 +138,17 @@ func (bwb *BlockWitnessBuilder) supplyValue(value []byte) error {
 	return nil
 }
 
-func (bwb *BlockWitnessBuilder) supplyNumber(value uint64) error {
-	if err := bwb.Values.encoder.Encode(&value); err != nil {
+func (bwb *BlockWitnessBuilder) supplyNonce(nonce uint64) error {
+	if err := bwb.Nonces.encoder.Encode(&nonce); err != nil {
 		return err
 	}
 	return nil
 }
 
 // TODO [Alexey] utilise CBOR tag to make this value as bit integer rather than just a string of bytes
-func (bwb *BlockWitnessBuilder) supplyBigInt(value *big.Int) error {
-	var v = value.Bytes()
-	if err := bwb.Values.encoder.Encode(v); err != nil {
+func (bwb *BlockWitnessBuilder) supplyBalance(balance *big.Int) error {
+	var v = balance.Bytes()
+	if err := bwb.Balances.encoder.Encode(v); err != nil {
 		return err
 	}
 	return nil
@@ -253,7 +253,7 @@ func (bwb *BlockWitnessBuilder) code() error {
 	return nil
 }
 
-func (bwb *BlockWitnessBuilder) accountLeaf(length int) error {
+func (bwb *BlockWitnessBuilder) accountLeaf(length int, fieldSet uint32) error {
 	o := OpAccountLeaf
 	if err := bwb.Structure.encoder.Encode(&o); err != nil {
 		return err
@@ -261,10 +261,13 @@ func (bwb *BlockWitnessBuilder) accountLeaf(length int) error {
 	if err := bwb.Structure.encoder.Encode(&length); err != nil {
 		return err
 	}
+	if err := bwb.Structure.encoder.Encode(&fieldSet); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (bwb *BlockWitnessBuilder) accountLeafHash(length int) error {
+func (bwb *BlockWitnessBuilder) accountLeafHash(length int, fieldSet uint32) error {
 	o := OpAccountLeafHash
 	if err := bwb.Structure.encoder.Encode(&o); err != nil {
 		return err
@@ -272,26 +275,7 @@ func (bwb *BlockWitnessBuilder) accountLeafHash(length int) error {
 	if err := bwb.Structure.encoder.Encode(&length); err != nil {
 		return err
 	}
-	return nil
-}
-
-func (bwb *BlockWitnessBuilder) contractLeaf(length int) error {
-	o := OpContractLeaf
-	if err := bwb.Structure.encoder.Encode(&o); err != nil {
-		return err
-	}
-	if err := bwb.Structure.encoder.Encode(&length); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (bwb *BlockWitnessBuilder) contractLeafHash(length int) error {
-	o := OpContractLeafHash
-	if err := bwb.Structure.encoder.Encode(&o); err != nil {
-		return err
-	}
-	if err := bwb.Structure.encoder.Encode(&length); err != nil {
+	if err := bwb.Structure.encoder.Encode(&fieldSet); err != nil {
 		return err
 	}
 	return nil
@@ -355,21 +339,21 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			}
 			if hashOnly {
 				if v.IsEmptyRoot() && v.IsEmptyCodeHash() {
-					if err := bwb.accountLeafHash(len(n.Key)); err != nil {
+					if err := bwb.accountLeafHash(len(n.Key), 3); err != nil {
 						return err
 					}
 				} else {
-					if err := bwb.contractLeafHash(len(n.Key)); err != nil {
+					if err := bwb.accountLeafHash(len(n.Key), 15); err != nil {
 						return err
 					}
 				}
 			} else {
 				if v.IsEmptyRoot() && v.IsEmptyCodeHash() {
-					if err := bwb.accountLeaf(len(n.Key)); err != nil {
+					if err := bwb.accountLeaf(len(n.Key), 3); err != nil {
 						return err
 					}
 				} else {
-					if err := bwb.contractLeaf(len(n.Key)); err != nil {
+					if err := bwb.accountLeaf(len(n.Key), 15); err != nil {
 						return err
 					}
 				}
@@ -462,10 +446,10 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 				}
 			}
 		}
-		if err := bwb.supplyNumber(n.Nonce); err != nil {
+		if err := bwb.supplyNonce(n.Nonce); err != nil {
 			return err
 		}
-		if err := bwb.supplyBigInt(&n.Balance); err != nil {
+		if err := bwb.supplyBalance(&n.Balance); err != nil {
 			return err
 		}
 		return nil
@@ -479,8 +463,10 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
 	// Calculate the lengths of all the tapes and write them as an array
 	var lens = map[string]int{
-		KeysTape:      bwb.Keys.buffer.Len(),
-		ValuesTape:    bwb.Values.buffer.Len(),
+		KeyTape:       bwb.Keys.buffer.Len(),
+		ValueTape:     bwb.Values.buffer.Len(),
+		NonceTape:     bwb.Nonces.buffer.Len(),
+		BalanceTape:   bwb.Balances.buffer.Len(),
 		HashesTape:    bwb.Hashes.buffer.Len(),
 		CodesTape:     bwb.Codes.buffer.Len(),
 		StructureTape: bwb.Structure.buffer.Len(),
@@ -495,6 +481,12 @@ func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
 		return err
 	}
 	if _, err := bwb.Values.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Nonces.buffer.WriteTo(w); err != nil {
+		return err
+	}
+	if _, err := bwb.Balances.buffer.WriteTo(w); err != nil {
 		return err
 	}
 	if _, err := bwb.Hashes.buffer.WriteTo(w); err != nil {
@@ -519,11 +511,17 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 	}
 	/*
 		startOffset := decoder.NumBytesRead()
-		endOffset := startOffset + lens[KeysTape]
+		endOffset := startOffset + lens[KeyTape]
 		keysB := bw[startOffset:endOffset]
 		startOffset = endOffset
-		endOffset = startOffset + lens[ValuesTape]
+		endOffset = startOffset + lens[ValueTape]
 		valuesB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[NonceTape]
+		noncesB := bw[startOffset:endOffset]
+		startOffset = endOffset
+		endOffset = startOffset + lens[BalanceTape]
+		balancesB := bw[startOffset:endOffset]
 		startOffset = endOffset
 		endOffset = startOffset + lens[HashesTape]
 		hashesB := bw[startOffset:endOffset]

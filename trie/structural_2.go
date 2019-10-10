@@ -36,10 +36,10 @@ type structInfoReceiver interface {
 	leafHash(length int) error
 	accountLeaf(length int, fieldset uint32) error
 	accountLeafHash(length int, fieldset uint32) error
-	extension(key []byte)
-	extensionHash(key []byte)
-	branch(set uint32)
-	branchHash(set uint32)
+	extension(key []byte) error
+	extensionHash(key []byte) error
+	branch(set uint32) error
+	branchHash(set uint32) error
 	hash(number int) error
 }
 
@@ -582,7 +582,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	return nil
 }
 
-func (hb *HashBuilder) extension(key []byte) {
+func (hb *HashBuilder) extension(key []byte) error {
 	//fmt.Printf("EXTENSION %x\n", key)
 	nd := hb.nodeStack[len(hb.nodeStack)-1]
 	switch n := nd.(type) {
@@ -592,12 +592,12 @@ func (hb *HashBuilder) extension(key []byte) {
 	case *fullNode:
 		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: common.CopyBytes(key), Val: n}
 	default:
-		panic(fmt.Errorf("wrong Val type for an extension: %T", nd))
+		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
-	hb.extensionHash(key)
+	return hb.extensionHash(key)
 }
 
-func (hb *HashBuilder) extensionHash(key []byte) {
+func (hb *HashBuilder) extensionHash(key []byte) error {
 	//fmt.Printf("EXTENSIONHASH %x\n", key)
 	branchHash := hb.hashStack[len(hb.hashStack)-33:]
 	// Compute the total length of binary representation
@@ -634,36 +634,37 @@ func (hb *HashBuilder) extensionHash(key []byte) {
 	pt := generateStructLen(lenPrefix[:], totalLen)
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
-		panic(err)
+		return err
 	}
 	if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
-		panic(err)
+		return err
 	}
 	var b [1]byte
 	b[0] = compact0
 	if _, err := hb.sha.Write(b[:]); err != nil {
-		panic(err)
+		return err
 	}
 	for i := 1; i < compactLen; i++ {
 		b[0] = key[ni]*16 + key[ni+1]
 		if _, err := hb.sha.Write(b[:]); err != nil {
-			panic(err)
+			return err
 		}
 		ni += 2
 	}
 	if _, err := hb.sha.Write(branchHash); err != nil {
-		panic(err)
+		return err
 	}
 	// Replace previous hash with the new one
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-32:]); err != nil {
-		panic(err)
+		return err
 	}
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
-		panic("extensionHash cannot be emitted when a node is on top of the stack")
+		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
+	return nil
 }
 
-func (hb *HashBuilder) branch(set uint32) {
+func (hb *HashBuilder) branch(set uint32) error {
 	//fmt.Printf("BRANCH %b\n", set)
 	f := &fullNode{}
 	digits := bits.OnesCount32(set)
@@ -682,12 +683,14 @@ func (hb *HashBuilder) branch(set uint32) {
 	}
 	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
 	hb.nodeStack[len(hb.nodeStack)-1] = f
-	hb.branchHash(set)
+	if err := hb.branchHash(set); err != nil {
+		return err
+	}
 	copy(f.flags.hash[:], hb.hashStack[len(hb.hashStack)-32:])
-
+	return nil
 }
 
-func (hb *HashBuilder) branchHash(set uint32) {
+func (hb *HashBuilder) branchHash(set uint32) error {
 	//fmt.Printf("BRANCHHASH %b\n", set)
 	digits := bits.OnesCount32(set)
 	hashes := hb.hashStack[len(hb.hashStack)-33*digits:]
@@ -709,7 +712,7 @@ func (hb *HashBuilder) branchHash(set uint32) {
 	var lenPrefix [4]byte
 	pt := generateStructLen(lenPrefix[:], totalSize)
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
-		panic(err)
+		return err
 	}
 	// Output children hashes or embedded RLPs
 	i = 0
@@ -719,31 +722,32 @@ func (hb *HashBuilder) branchHash(set uint32) {
 		if ((uint32(1) << digit) & set) != 0 {
 			if hashes[33*i] == byte(128+32) {
 				if _, err := hb.sha.Write(hashes[33*i : 33*i+33]); err != nil {
-					panic(err)
+					return err
 				}
 			} else {
 				// Embedded node
 				size := int(hashes[33*i]) - 192
 				if _, err := hb.sha.Write(hashes[33*i : 33*i+size+1]); err != nil {
-					panic(err)
+					return err
 				}
 			}
 			i++
 		} else {
 			if _, err := hb.sha.Write(b[:]); err != nil {
-				panic(err)
+				return err
 			}
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-33*digits+33]
 	hb.hashStack[len(hb.hashStack)-33] = 128 + 32
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-32:]); err != nil {
-		panic(err)
+		return err
 	}
 	if 33*len(hb.nodeStack) > len(hb.hashStack) {
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
 		hb.nodeStack[len(hb.nodeStack)-1] = nil
 	}
+	return nil
 }
 
 func (hb *HashBuilder) hash(number int) error {
