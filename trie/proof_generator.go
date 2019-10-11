@@ -104,9 +104,7 @@ const (
 	// OpAccountLeafHash consumes key from the key tape, and two values from the value tape, one for nonce, another for balance.
 	// It computes the hash of would-be account node (without any storage and code) and pushes it onto the hash stack.
 	OpAccountLeafHash
-	// OpContractLeaf consumes key from key tape, nonce and balance from the value tape, also pops two items from the node stack - code node,
-	// and node containing the storage trie of the contract (it can be a special empty root node). It constructs account node and pushes it
-	// onto the node stack, its hash onto the hash stack.
+	// OpEmptyRoot places nil onto the node stack, and empty root hash onto the hash stack.
 	OpEmptyRoot
 )
 
@@ -333,7 +331,6 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 				}
 			}
 		case *accountNode:
-			// Recursive invocation would have supplied the value
 			if err := bwb.supplyKey(n.Key); err != nil {
 				return err
 			}
@@ -424,25 +421,31 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
 			if hashOnly {
-				if err := bwb.supplyHash(n.Root); err != nil {
+				if err := bwb.supplyHash(n.CodeHash); err != nil {
 					return err
 				}
-				if err := bwb.supplyHash(n.CodeHash); err != nil {
+				if err := bwb.supplyHash(n.Root); err != nil {
 					return err
 				}
 				if err := bwb.hash(2); err != nil {
 					return err
 				}
 			} else {
-				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeFromHash); err != nil {
-					return err
-				}
 				code := codeFromHash(n.CodeHash)
 				if err := bwb.supplyCode(code); err != nil {
 					return err
 				}
 				if err := bwb.code(); err != nil {
 					return err
+				}
+				if n.storage == nil {
+					if err := bwb.emptyRoot(); err != nil {
+						return err
+					}
+				} else {
+					if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeFromHash); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -501,6 +504,88 @@ func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
 	return nil
 }
 
+// CborBytesTape implements BytesTape and takes values from CBOR-encoded slice of bytes
+type CborBytesTape struct {
+	decoder *codec.Decoder // Values are decoded by this object
+}
+
+// NewCborBytesTape creates new tape
+func NewCborBytesTape(in []byte) *CborBytesTape {
+	var handle codec.CborHandle // Object used to control the behavior of CBOR decoding
+	return &CborBytesTape{decoder: codec.NewDecoderBytes(in, &handle)}
+}
+
+// Next belongs to the BytesTape interface, and decodes the next byte slice
+func (cbt *CborBytesTape) Next() ([]byte, error) {
+	var b []byte
+	if err := cbt.decoder.Decode(&b); err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+// CborUint64Tape implements Uint64Tape and takes values from CBOR-encoded integers
+type CborUint64Tape struct {
+	decoder *codec.Decoder // Values are decoded by this object
+}
+
+// NewCborUint64Tape creates new tape
+func NewCborUint64Tape(in []byte) *CborUint64Tape {
+	var handle codec.CborHandle // Object used to control the behavior of CBOR decoding
+	return &CborUint64Tape{decoder: codec.NewDecoderBytes(in, &handle)}
+}
+
+// Next belongs to the Uint64Tape interface, and decodes the next integer
+func (cut *CborUint64Tape) Next() (uint64, error) {
+	var u uint64
+	if err := cut.decoder.Decode(&u); err != nil {
+		return 0, err
+	}
+	return u, nil
+}
+
+// CborBigIntTape implements BigIntTape and takes values from CBOR-encoded *big.Int
+type CborBigIntTape struct {
+	decoder *codec.Decoder // Values are decoded by this object
+}
+
+// NewCborBigIntTape creates new tape
+func NewCborBigIntTape(in []byte) *CborBigIntTape {
+	var handle codec.CborHandle // Object used to control the behavior of CBOR decoding
+	return &CborBigIntTape{decoder: codec.NewDecoderBytes(in, &handle)}
+}
+
+// Next belongs to the Uint64Tape interface, and decodes the next big.Int
+func (cut *CborBigIntTape) Next() (*big.Int, error) {
+	var b []byte
+	if err := cut.decoder.Decode(&b); err != nil {
+		return nil, err
+	}
+	return big.NewInt(0).SetBytes(b), nil
+}
+
+// CborHashTape implements BytesTape and takes values from CBOR-encoded hashes common.Hash
+type CborHashTape struct {
+	decoder *codec.Decoder // Values are decoded by this object
+}
+
+// NewCborHashTape creates new tape
+func NewCborHashTape(in []byte) *CborHashTape {
+	var handle codec.CborHandle // Object used to control the behavior of CBOR decoding
+	return &CborHashTape{decoder: codec.NewDecoderBytes(in, &handle)}
+}
+
+// Next belongs to the BytesTape interface, and decodes the next byte slice
+func (cht *CborHashTape) Next() (common.Hash, error) {
+	var hash common.Hash
+	var b []byte
+	if err := cht.decoder.Decode(&b); err != nil {
+		return common.Hash{}, err
+	}
+	copy(hash[:], b)
+	return hash, nil
+}
+
 // BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
 func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 	var lens map[string]int
@@ -509,30 +594,131 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 	if err := decoder.Decode(&lens); err != nil {
 		return nil, nil, err
 	}
-	/*
-		startOffset := decoder.NumBytesRead()
-		endOffset := startOffset + lens[KeyTape]
-		keysB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[ValueTape]
-		valuesB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[NonceTape]
-		noncesB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[BalanceTape]
-		balancesB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[HashesTape]
-		hashesB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[CodesTape]
-		codesB := bw[startOffset:endOffset]
-		startOffset = endOffset
-		endOffset = startOffset + lens[StructureTape]
-		structureB := bw[startOffset:endOffset]
-	*/
-	return nil, nil, nil
+	hb := NewHashBuilder()
+	startOffset := decoder.NumBytesRead()
+	endOffset := startOffset + lens[KeyTape]
+	hb.SetKeyTape(NewCborBytesTape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[ValueTape]
+	hb.SetValueTape(NewCborBytesTape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[NonceTape]
+	hb.SetNonceTape(NewCborUint64Tape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[BalanceTape]
+	hb.SetBalanceTape(NewCborBigIntTape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[HashesTape]
+	hb.SetHashTape(NewCborHashTape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[CodesTape]
+	hb.SetCodeTape(NewCborBytesTape(bw[startOffset:endOffset]))
+	startOffset = endOffset
+	endOffset = startOffset + lens[StructureTape]
+	structureB := bw[startOffset:endOffset]
+	decoder.ResetBytes(structureB)
+	for decoder.NumBytesRead() < len(structureB) {
+		var opcode Instruction
+		if err := decoder.Decode(&opcode); err != nil {
+			return nil, nil, err
+		}
+		switch opcode {
+		case OpLeaf:
+			var length int
+			if err := decoder.Decode(&length); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leaf(length); err != nil {
+				return nil, nil, err
+			}
+		case OpLeafHash:
+			var length int
+			if err := decoder.Decode(&length); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leafHash(length); err != nil {
+				return nil, nil, err
+			}
+		case OpExtension:
+			var key []byte
+			if err := decoder.Decode(&key); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.extension(key); err != nil {
+				return nil, nil, err
+			}
+		case OpExtensionHash:
+			var key []byte
+			if err := decoder.Decode(&key); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.extensionHash(key); err != nil {
+				return nil, nil, err
+			}
+		case OpBranch:
+			var set uint32
+			if err := decoder.Decode(&set); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.branch(set); err != nil {
+				return nil, nil, err
+			}
+		case OpBranchHash:
+			var set uint32
+			if err := decoder.Decode(&set); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.branchHash(set); err != nil {
+				return nil, nil, err
+			}
+		case OpHash:
+			var number int
+			if err := decoder.Decode(&number); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.hash(number); err != nil {
+				return nil, nil, err
+			}
+		case OpCode:
+			if err := hb.code(); err != nil {
+				return nil, nil, err
+			}
+		case OpAccountLeaf:
+			var length int
+			var fieldSet uint32
+			if err := decoder.Decode(&length); err != nil {
+				return nil, nil, err
+			}
+			if err := decoder.Decode(&fieldSet); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeaf(length, fieldSet); err != nil {
+				return nil, nil, err
+			}
+		case OpAccountLeafHash:
+			var length int
+			var fieldSet uint32
+			if err := decoder.Decode(&length); err != nil {
+				return nil, nil, err
+			}
+			if err := decoder.Decode(&fieldSet); err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeafHash(length, fieldSet); err != nil {
+				return nil, nil, err
+			}
+		case OpEmptyRoot:
+			if err := hb.emptyRoot(); err != nil {
+				return nil, nil, err
+			}
+		default:
+			return nil, nil, fmt.Errorf("Unknown opcode: %d", opcode)
+		}
+	}
+	r := hb.root()
+	tr := New(hb.rootHash())
+	tr.root = r
+	return tr, nil, nil
 }
 
 type BlockProof struct {

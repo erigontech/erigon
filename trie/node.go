@@ -54,6 +54,7 @@ type (
 	}
 	hashNode  []byte
 	valueNode []byte
+	codeNode  []byte
 
 	accountNode struct {
 		accounts.Account
@@ -264,6 +265,7 @@ type nodeFlag struct {
 
 func (n hashNode) dirty() bool      { return false }
 func (n valueNode) dirty() bool     { return true }
+func (n codeNode) dirty() bool      { return true }
 func (n *fullNode) dirty() bool     { return n.flags.dirty }
 func (n *duoNode) dirty() bool      { return n.flags.dirty }
 func (n *shortNode) dirty() bool    { return true }
@@ -271,6 +273,7 @@ func (an *accountNode) dirty() bool { return true }
 
 func (n hashNode) hash() []byte      { return n }
 func (n valueNode) hash() []byte     { return nil }
+func (n codeNode) hash() []byte      { return nil }
 func (n *fullNode) hash() []byte     { return n.flags.hash[:] }
 func (n *duoNode) hash() []byte      { return n.flags.hash[:] }
 func (n *shortNode) hash() []byte    { return nil }
@@ -282,4 +285,5 @@ func (n duoNode) String() string      { return n.fstring("") }
 func (n shortNode) String() string    { return n.fstring("") }
 func (n hashNode) String() string     { return n.fstring("") }
 func (n valueNode) String() string    { return n.fstring("") }
+func (n codeNode) String() string     { return n.fstring("") }
 func (an accountNode) String() string { return an.fstring("") }

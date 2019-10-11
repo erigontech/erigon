@@ -253,6 +253,13 @@ func (n valueNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", []byte(n))
 }
 
+func (n codeNode) fstring(ind string) string {
+	return fmt.Sprintf("%x ", []byte(n))
+}
+func (n codeNode) print(w io.Writer) {
+	fmt.Fprintf(w, "c(%x)", []byte(n))
+}
+
 func (an accountNode) fstring(string) string {
 	encodedAccount := pool.GetBuffer(an.EncodingLengthForHashing())
 	an.EncodeForHashing(encodedAccount.B)

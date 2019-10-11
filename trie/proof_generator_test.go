@@ -186,7 +186,11 @@ func TestSerialiseBlockWitness(t *testing.T) {
 	if !bytes.Equal(expected, b.Bytes()) {
 		t.Errorf("Expected %x, got: %x", expected, b.Bytes())
 	}
-	if _, _, err := BlockWitnessToTrie(b.Bytes()); err != nil {
+	tr1, _, err := BlockWitnessToTrie(b.Bytes())
+	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
+	}
+	if tr.Hash() != tr1.Hash() {
+		t.Errorf("Reconstructed block witness has different root hash than source trie")
 	}
 }

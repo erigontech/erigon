@@ -193,6 +193,7 @@ type HashBuilder struct {
 	balanceTape BigIntTape // the source of balances for accounts and contracts (field 1)
 	sSizeTape   Uint64Tape // the source of storage sizes for contracts (field 4)
 	hashTape    HashTape   // the source of hashes
+	codeTape    BytesTape  // the source of bytecodes
 
 	hashStack []byte           // Stack of sub-slices, each 33 bytes each, containing hashes (or RLP encodings, if shorter than 32 bytes)
 	nodeStack []node           // Stack of nodes
@@ -235,6 +236,11 @@ func (hb *HashBuilder) SetHashTape(hashTape HashTape) {
 // SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
 func (hb *HashBuilder) SetSSizeTape(sSizeTape Uint64Tape) {
 	hb.sSizeTape = sSizeTape
+}
+
+// SetCodeTape sets the code tape to be used by this builder (opcode CODE)
+func (hb *HashBuilder) SetCodeTape(codeTape BytesTape) {
+	hb.codeTape = codeTape
 }
 
 // Reset makes the HashBuilder suitable for reuse
@@ -760,6 +766,34 @@ func (hb *HashBuilder) hash(number int) error {
 		hb.hashStack = append(hb.hashStack, hash[:]...)
 		hb.nodeStack = append(hb.nodeStack, nil)
 	}
+	return nil
+}
+
+func (hb *HashBuilder) code() error {
+	code, err := hb.codeTape.Next()
+	if err != nil {
+		return err
+	}
+	hb.nodeStack = append(hb.nodeStack, codeNode(common.CopyBytes(code)))
+	hb.sha.Reset()
+	if _, err := hb.sha.Write(code); err != nil {
+		return err
+	}
+	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	hash[0] = 128 + 32
+	if _, err := hb.sha.Read(hash[1:]); err != nil {
+		return err
+	}
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	return nil
+}
+
+func (hb *HashBuilder) emptyRoot() error {
+	hb.nodeStack = append(hb.nodeStack, nil)
+	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	hash[0] = 128 + 32
+	copy(hash[1:], EmptyRoot[:])
+	hb.hashStack = append(hb.hashStack, hash[:]...)
 	return nil
 }
 
