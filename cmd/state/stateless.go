@@ -124,7 +124,7 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
 	check(err)
@@ -144,7 +144,7 @@ func stateless(genLag, consLag int) {
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	stateDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/state")
+	stateDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth-copy/state")
 	check(err)
 	db := stateDb.DB()
 	blockNum := uint64(*block)
@@ -248,12 +248,14 @@ func stateless(genLag, consLag int) {
 			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
 			return
 		}
-		if _, err := batch.Commit(); err != nil {
-			fmt.Printf("Failed to commit batch: %v\n", err)
-			return
+		if batch.BatchSize() >= 100000 {
+			if _, err := batch.Commit(); err != nil {
+				fmt.Printf("Failed to commit batch: %v\n", err)
+				return
+			}
 		}
 		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
-			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
+			save_snapshot(db, fmt.Sprintf("/Volumes/tb41/turbo-geth-copy/state_%d", blockNum))
 		}
 		if blockNum >= thresholdBlock {
 			blockProof := tds.ExtractProofs(trace)
@@ -316,7 +318,7 @@ func stateless(genLag, consLag int) {
 		preRoot = header.Root
 		blockNum++
 		if blockNum%1000 == 0 {
-			tds.PruneTries(true)
+			tds.PruneTries(false)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
@@ -325,6 +327,10 @@ func stateless(genLag, consLag int) {
 			fmt.Println("interrupted, please wait for cleanup...")
 		default:
 		}
+	}
+	if _, err := batch.Commit(); err != nil {
+		fmt.Printf("Failed to commit batch: %v\n", err)
+		return
 	}
 	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)

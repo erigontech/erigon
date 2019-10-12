@@ -588,6 +588,7 @@ func (cht *CborHashTape) Next() (common.Hash, error) {
 
 // BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
 func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
+	codeMap := make(map[common.Hash][]byte)
 	var lens map[string]int
 	var handle codec.CborHandle
 	decoder := codec.NewDecoderBytes(bw, &handle)
@@ -680,8 +681,10 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 				return nil, nil, err
 			}
 		case OpCode:
-			if err := hb.code(); err != nil {
+			if code, codeHash, err := hb.code(); err != nil {
 				return nil, nil, err
+			} else {
+				codeMap[codeHash] = code
 			}
 		case OpAccountLeaf:
 			var length int
@@ -716,7 +719,7 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 	r := hb.root()
 	tr := New(hb.rootHash())
 	tr.root = r
-	return tr, nil, nil
+	return tr, codeMap, nil
 }
 
 type BlockProof struct {

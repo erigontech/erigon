@@ -769,23 +769,24 @@ func (hb *HashBuilder) hash(number int) error {
 	return nil
 }
 
-func (hb *HashBuilder) code() error {
+func (hb *HashBuilder) code() ([]byte, common.Hash, error) {
 	code, err := hb.codeTape.Next()
 	if err != nil {
-		return err
+		return nil, common.Hash{}, err
 	}
-	hb.nodeStack = append(hb.nodeStack, codeNode(common.CopyBytes(code)))
+	code = common.CopyBytes(code)
+	hb.nodeStack = append(hb.nodeStack, nil)
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(code); err != nil {
-		return err
+		return nil, common.Hash{}, err
 	}
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 128 + 32
 	if _, err := hb.sha.Read(hash[1:]); err != nil {
-		return err
+		return nil, common.Hash{}, err
 	}
 	hb.hashStack = append(hb.hashStack, hash[:]...)
-	return nil
+	return code, common.BytesToHash(hash[1:]), nil
 }
 
 func (hb *HashBuilder) emptyRoot() {
