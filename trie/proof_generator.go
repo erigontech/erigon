@@ -712,7 +712,7 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 				return nil, nil, err
 			}
 		default:
-			return nil, nil, fmt.Errorf("Unknown opcode: %d", opcode)
+			return nil, nil, fmt.Errorf("unknown opcode: %d", opcode)
 		}
 	}
 	r := hb.root()
