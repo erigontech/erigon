@@ -708,9 +708,7 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 				return nil, nil, err
 			}
 		case OpEmptyRoot:
-			if err := hb.emptyRoot(); err != nil {
-				return nil, nil, err
-			}
+			hb.emptyRoot()
 		default:
 			return nil, nil, fmt.Errorf("unknown opcode: %d", opcode)
 		}

@@ -788,13 +788,12 @@ func (hb *HashBuilder) code() error {
 	return nil
 }
 
-func (hb *HashBuilder) emptyRoot() error {
+func (hb *HashBuilder) emptyRoot() {
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 128 + 32
 	copy(hash[1:], EmptyRoot[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
-	return nil
 }
 
 func (hb *HashBuilder) rootHash() common.Hash {
