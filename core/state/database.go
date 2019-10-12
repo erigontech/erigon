@@ -724,14 +724,16 @@ func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
+	fmt.Println("core/state/database.go:766 TrieDbState.UnwindTo.RewindData to", blockNr)
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
-		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
+		fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
 			if len(value) > 0 {
 				var acc accounts.Account
 				if err := acc.DecodeForStorage(value); err != nil {
+					fmt.Println("core/state/database.go:735 err", err)
 					return err
 				}
 				b.accountUpdates[addrHash] = &acc
@@ -758,9 +760,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		}
 		return nil
 	}); err != nil {
+		fmt.Println("core/state/database.go:761 err", err)
 		return err
 	}
+	fmt.Println("core/state/database.go:766 computeTrieRoots")
 	if _, err := tds.computeTrieRoots(false); err != nil {
+		fmt.Println("core/state/database.go:765 err", err)
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {

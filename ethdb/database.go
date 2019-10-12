@@ -21,6 +21,7 @@ package ethdb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
@@ -110,7 +111,20 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 			return err
 		}
 		dat, _ := sb.Get(suffixkey)
-		dat = dbutils.ToSuffix(dat).Add(key)
+		sh, err := dbutils.Decode(dat)
+		if err!=nil {
+			fmt.Println("ethdb/database.go:116 not exists")
+			log.Error("PutS Decode suffix err", "err", err)
+			return err
+		}
+		sh = sh.Add(key,value)
+		dat,err=dbutils.Encode(sh)
+		if err!=nil {
+			fmt.Println("ethdb/database.go:123 not exists")
+			log.Error("PutS Decode suffix err", "err", err)
+			return err
+		}
+
 		return sb.Put(suffixkey, dat)
 	})
 	return err
@@ -216,6 +230,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			if hK != nil && bytes.HasPrefix(hK, key) {
 				dat = make([]byte, len(hV))
 				copy(dat, hV)
+				fmt.Printf("ethdb/database.go:232 GetAsOf found %x in hbucket %x |\n", key, dat)
 				return nil
 			}
 		}
@@ -229,6 +244,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
 				copy(dat, v)
+				fmt.Println("ethdb/database.go:232 GetAsOf found %x in bucket %x  |\n", key, dat )
 				return nil
 			}
 		}
@@ -565,8 +581,11 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts := dbutils.ToSuffix(v)
-			err := changedAccounts.Walk(func(kk []byte) error {
+			changedAccounts, err := dbutils.Decode(v)
+			if err != nil {
+				return err
+			}
+			err = changedAccounts.Walk(func(kk, _ []byte) error {
 				kk = append(kk, suffix...)
 				if err := hb.Delete(kk); err != nil {
 					return err
@@ -655,7 +674,7 @@ func (db *BoltDatabase) NewBatch() Mutation {
 	m := &mutation{
 		db:         db,
 		puts:       make(map[string]*llrb.LLRB),
-		suffixkeys: make(map[uint64]map[string][][]byte),
+		suffixkeys: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return m
 }
