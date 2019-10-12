@@ -681,10 +681,11 @@ func BlockWitnessToTrie(bw []byte) (*Trie, map[common.Hash][]byte, error) {
 				return nil, nil, err
 			}
 		case OpCode:
-			if code, codeHash, err := hb.code(); err != nil {
+			if code, codeHash, err := hb.code(); err == nil {
+				codeMap[codeHash] = code
+			} else {
 				return nil, nil, err
 			}
-			codeMap[codeHash] = code
 		case OpAccountLeaf:
 			var length int
 			var fieldSet uint32
