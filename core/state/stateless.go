@@ -161,7 +161,7 @@ func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address,
 // This implementation registers the deletion of the account in two internal maps
 func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := common.HashData(address[:])
-	if err != err {
+	if err != nil {
 		return err
 	}
 	s.accountUpdates[addrHash] = nil
