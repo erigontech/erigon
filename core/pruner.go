@@ -139,12 +139,12 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 
 		keysToRemove.Suffix = append(keysToRemove.Suffix, key)
 
-		changedKeys,err := dbutils.Decode(v)
+		changedKeys, err := dbutils.Decode(v)
 		if err != nil {
 			return false, err
 		}
 
-		err = changedKeys.Walk(func(cKey,_ []byte) error {
+		err = changedKeys.Walk(func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
 			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
 				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
