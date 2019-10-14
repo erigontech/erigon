@@ -44,8 +44,8 @@ const IncarnationLength = 8
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
 	ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error)
-	ReadAccountCode(codeHash common.Hash) ([]byte, error)
-	ReadAccountCodeSize(codeHash common.Hash) (int, error)
+	ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error)
+	ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error)
 }
 
 type StateWriter interface {
@@ -270,8 +270,20 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
 
+// ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
+	if err := tds.ResolveStateTrie(); err != nil {
+		return nil, err
+	}
+	roots, err := tds.computeTrieRoots(true)
+	tds.clearUpdates()
+	return roots, err
+}
+
+// UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
+// will find necessary data inside the trie.
+func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 	roots, err := tds.computeTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
@@ -440,8 +452,7 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches map[addressHash
 			continue
 		}
 		for _, keyHash := range hashes {
-			tds.pg.AddTouch(dbutils.GenerateCompositeTrieKey(addrHash, keyHash))
-			//tds.t.PopulateBlockProofData(addrHash[:], keyHash[:], tds.pg)
+			tds.pg.AddStorageTouch(dbutils.GenerateCompositeTrieKey(addrHash, keyHash))
 		}
 	}
 	return nil
@@ -504,22 +515,18 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 	for _, addrHash := range accountTouches {
-		if addrHash == (common.Hash{}) {
-			fmt.Printf("Empty hash\n")
-		}
 		a := addrHash
 		tds.pg.AddTouch(a[:])
-		//tds.t.PopulateBlockProofData(nil, addrHash[:], tds.pg)
 	}
 }
 
-func (tds *TrieDbState) ExtractTouches() [][]byte {
+func (tds *TrieDbState) ExtractTouches() ([][]byte, [][]byte) {
 	return tds.pg.ExtractTouches()
 }
 
-// forward is `true` if the function is used to progress the state forward (by adding blocks)
-// forward is `false` if the function is used to rewind the state (for reorgs, for example)
-func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
+// ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
+// (and reads, if `resolveReads` is set).
+func (tds *TrieDbState) ResolveStateTrie() error {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -529,7 +536,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		tds.aggregateBuffer.merge(tds.currentBuffer)
 	}
 	if tds.aggregateBuffer == nil {
-		return nil, nil
+		return nil
 	}
 
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
@@ -538,7 +545,7 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches := tds.buildAccountTouches()
 	if err := tds.resolveAccountTouches(accountTouches); err != nil {
-		return nil, err
+		return err
 	}
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
@@ -546,17 +553,23 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 
 	err := tds.buildDeletedAccountTouches()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := tds.resolveStorageTouches(storageTouches); err != nil {
-		return nil, err
+		return err
 	}
 	if tds.resolveReads {
 		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
-			return nil, err
+			return err
 		}
 	}
+	return nil
+}
+
+// forward is `true` if the function is used to progress the state forward (by adding blocks)
+// forward is `false` if the function is used to rewind the state (for reorgs, for example)
+func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	accountUpdates := tds.aggregateBuffer.accountUpdates
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
@@ -755,6 +768,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
+	if err := tds.ResolveStateTrie(); err != nil {
+		return err
+	}
 	if _, err := tds.computeTrieRoots(false); err != nil {
 		return err
 	}
@@ -936,7 +952,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
-func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) (code []byte, err error) {
+func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
@@ -950,12 +966,19 @@ func (tds *TrieDbState) ReadAccountCode(codeHash common.Hash) (code []byte, err 
 		}
 	}
 	if tds.resolveReads {
+		addrHash, err1 := common.HashData(address[:])
+		if err1 != nil {
+			return nil, err
+		}
+		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
+			tds.currentBuffer.accountReads[addrHash] = struct{}{}
+		}
 		tds.pg.ReadCode(codeHash, code)
 	}
 	return code, err
 }
 
-func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int, err error) {
+func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
 	var code []byte
 	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
 		codeSize, err = cached.(int), nil
@@ -963,20 +986,27 @@ func (tds *TrieDbState) ReadAccountCodeSize(codeHash common.Hash) (codeSize int,
 			if cachedCode, ok := tds.codeCache.Get(codeHash); ok {
 				code, err = cachedCode.([]byte), nil
 			} else {
-				code, err = tds.ReadAccountCode(codeHash)
+				code, err = tds.ReadAccountCode(address, codeHash)
 				if err != nil {
 					return 0, err
 				}
 			}
 		}
 	} else {
-		code, err = tds.ReadAccountCode(codeHash)
+		code, err = tds.ReadAccountCode(address, codeHash)
 		if err != nil {
 			return 0, err
 		}
 		codeSize = len(code)
 	}
 	if tds.resolveReads {
+		addrHash, err1 := common.HashData(address[:])
+		if err1 != nil {
+			return 0, err
+		}
+		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
+			tds.currentBuffer.accountReads[addrHash] = struct{}{}
+		}
 		tds.pg.ReadCode(codeHash, code)
 	}
 	return codeSize, nil
@@ -1096,7 +1126,7 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	}
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
-
+	// TODO [Alexey] Are these lines below still required?
 	addrHashWithInc := newAddressHashWithIncarnation(addrHash, account.GetIncarnation())
 	if _, ok := tsw.tds.currentBuffer.storageUpdates[addrHashWithInc]; !ok && account.GetIncarnation() > 0 {
 		tsw.tds.currentBuffer.storageUpdates[addrHashWithInc] = map[common.Hash][]byte{}
@@ -1178,9 +1208,6 @@ func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte)
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	if dsw.tds.resolveReads {
-		dsw.tds.pg.CreateCode(codeHash, code)
-	}
 	return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
@@ -1247,8 +1274,27 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
 }
 
-func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
-	return tds.pg.ExtractProofs(trace)
+// ExtractWitness produces block witness for the block just been processed, in a serialised form
+func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, error) {
+	bwb := trie.NewBlockWitnessBuilder(trace)
+	rs := trie.NewResolveSet(0)
+	storageRs := trie.NewResolveSet(0)
+	touches, storageTouches := tds.pg.ExtractTouches()
+	for _, touch := range touches {
+		rs.AddKey(touch)
+	}
+	for _, touch := range storageTouches {
+		storageRs.AddKey(touch)
+	}
+	codeMap := tds.pg.ExtractCodeMap()
+	if err := bwb.MakeBlockWitness(tds.t, rs, storageRs, codeMap); err != nil {
+		return nil, err
+	}
+	var b bytes.Buffer
+	if err := bwb.WriteTo(&b); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

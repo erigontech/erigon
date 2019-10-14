@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -27,18 +28,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func statePicture(tds *state.TrieDbState, t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
-	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
-	filename := fmt.Sprintf("state_%d.dot", number)
-	f, err := os.Create(filename)
-	if err != nil {
-		return nil, err
-	}
+func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	codeMap := make(map[common.Hash][]byte)
 	if err := tds.Database().Walk(dbutils.CodeBucket, make([]byte, 32), 0, func(k, v []byte) (bool, error) {
 		codeMap[common.BytesToHash(k)] = common.CopyBytes(v)
 		return true, nil
 	}); err != nil {
+		return nil, err
+	}
+	return codeMap, nil
+}
+
+func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number int, keyCompression int, codeCompressed bool, valCompressed bool,
+	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
+	filename := fmt.Sprintf("state_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
 		return nil, err
 	}
 	indexColors := visual.HexIndexColors
@@ -149,10 +154,14 @@ func initialState1() error {
 		return err
 	}
 	t := tds.Trie()
-	if _, err = statePicture(tds, t, 0, 0, false, false, false, false, nil); err != nil {
+	var codeMap map[common.Hash][]byte
+	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 1, 48, false, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, codeMap, 0, 0, false, false, false, false, nil); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 1, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 
@@ -268,7 +277,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 2, 48, false, false, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 2, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 
@@ -276,7 +288,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 3, 48, false, false, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 3, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 
@@ -284,13 +299,16 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 4, 48, false, false, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 5, 48, true, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, codeMap, 4, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 6, 48, true, true, false, false, nil); err != nil {
+	if _, err = statePicture(t, codeMap, 5, 48, true, false, false, false, nil); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 6, 48, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -298,7 +316,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 7, 48, true, true, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 7, 48, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -306,7 +327,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 8, 54, true, true, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 8, 54, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -314,10 +338,13 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 9, 54, true, true, false, false, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 10, 110, true, true, true, true, nil); err != nil {
+	if _, err = statePicture(t, codeMap, 9, 54, true, true, false, false, nil); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 10, 110, true, true, true, true, nil); err != nil {
 		return err
 	}
 
@@ -325,7 +352,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
 		return err
 	}
-	quadTrie, err := statePicture(tds, t, 11, 110, true, true, true, true, nil)
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	quadTrie, err := statePicture(t, codeMap, 11, 110, true, true, true, true, nil)
 	if err != nil {
 		return err
 	}
@@ -335,28 +365,53 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[7]}); err != nil {
 		return err
 	}
-	if _, err = statePicture(tds, t, 12, 110, true, true, true, true, nil); err != nil {
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if _, err = statePicture(t, codeMap, 12, 110, true, true, true, true, nil); err != nil {
 		return err
 	}
 
 	rs := trie.NewResolveSet(0)
-	touches := tds.ExtractTouches()
+	storageRs := trie.NewResolveSet(0)
+	touches, storageTouches := tds.ExtractTouches()
 	var touchQuads = make([][]byte, len(touches))
 	for _, touch := range touches {
 		touchQuad := trie.KeyToQuad(touch)
 		rs.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
-	blockProof := trie.MakeBlockProof(quadTrie, rs)
-	if _, err = statePicture(tds, blockProof, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
+	for _, touch := range storageTouches {
+		touchQuad := trie.KeyToQuad(touch)
+		storageRs.AddHex(touchQuad)
+		touchQuads = append(touchQuads, touchQuad)
+	}
+	bwb := trie.NewBlockWitnessBuilder(false)
+	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if err = bwb.MakeBlockWitness(quadTrie, rs, storageRs, codeMap); err != nil {
+		return err
+	}
+	var witness bytes.Buffer
+	if err = bwb.WriteTo(&witness); err != nil {
+		return err
+	}
+	var witnessTrie *trie.Trie
+	var witnessCodeMap map[common.Hash][]byte
+	if witnessTrie, witnessCodeMap, err = trie.BlockWitnessToTrie(witness.Bytes(), false); err != nil {
+		return err
+	}
+	if _, err = statePicture(witnessTrie, witnessCodeMap, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
 		return err
 	}
 
-	if err = keyTape(blockProof, 14); err != nil {
+	if err = keyTape(witnessTrie, 14); err != nil {
 		return err
 	}
 
-	if _, err = statePicture(tds, blockProof, 15, 110, true, true, false /*already quad*/, true, nil); err != nil {
+	// Repeat the block witness illustration, but without any highlighted keys
+	if _, err = statePicture(witnessTrie, witnessCodeMap, 15, 110, true, true, false /*already quad*/, true, nil); err != nil {
 		return err
 	}
 

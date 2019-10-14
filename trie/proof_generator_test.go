@@ -8,7 +8,7 @@ import (
 )
 
 func TestSupplyKeyValue(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.supplyKey([]byte("key")); err != nil {
 		t.Errorf("Could not supply key: %v", err)
 	}
@@ -24,7 +24,7 @@ func TestSupplyKeyValue(t *testing.T) {
 }
 
 func TestSupplyHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.supplyHash(common.HexToHash("0x9583498348fc48393abc")); err != nil {
 		t.Errorf("Could not supply hash: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestSupplyHash(t *testing.T) {
 }
 
 func TestSupplyCode(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.supplyCode(common.FromHex("0x9583498348fc48393abc58bc")); err != nil {
 		t.Errorf("Could not supply code: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestSupplyCode(t *testing.T) {
 }
 
 func TestOpLeaf(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.leaf(56); err != nil {
 		t.Errorf("Could not call leaf: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestOpLeaf(t *testing.T) {
 	}
 }
 func TestOpLeafHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.leafHash(56); err != nil {
 		t.Errorf("Could not call leafHash: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestOpLeafHash(t *testing.T) {
 }
 
 func TestOpExtension(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.extension(common.FromHex("0x0f05")); err != nil {
 		t.Errorf("Could not call extension: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestOpExtension(t *testing.T) {
 }
 
 func TestOpExtensionHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.extensionHash(common.FromHex("0x0f05")); err != nil {
 		t.Errorf("Could not call extensionHash: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestOpExtensionHash(t *testing.T) {
 }
 
 func TestOpBranch(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.branch(1 + 4); err != nil {
 		t.Errorf("Could not call branch: %v", err)
 	}
@@ -93,7 +93,7 @@ func TestOpBranch(t *testing.T) {
 }
 
 func TestOpBranchHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.branchHash(1 + 4); err != nil {
 		t.Errorf("Could not call branchHash: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestOpBranchHash(t *testing.T) {
 }
 
 func TestOpHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.hash(3); err != nil {
 		t.Errorf("Could not call hash: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestOpHash(t *testing.T) {
 }
 
 func TestOpCode(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.code(); err != nil {
 		t.Errorf("Could not call code: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestOpCode(t *testing.T) {
 }
 
 func TestOpAccountLeaf(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.accountLeaf(56, 3); err != nil {
 		t.Errorf("Could not call acccountLeaf: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestOpAccountLeaf(t *testing.T) {
 	}
 }
 func TestOpAccountLeafHash(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.accountLeafHash(56, 3); err != nil {
 		t.Errorf("Could not call accountLeafHash: %v", err)
 	}
@@ -144,7 +144,7 @@ func TestOpAccountLeafHash(t *testing.T) {
 }
 
 func TestOpEmptyRoot(t *testing.T) {
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	if err := bwb.emptyRoot(); err != nil {
 		t.Errorf("Could not call emptyRoot: %v", err)
 	}
@@ -158,9 +158,9 @@ func TestMakeBlockWitness(t *testing.T) {
 	tr := New(common.Hash{})
 	tr.Update([]byte("ABCD0001"), []byte("val1"), 0)
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, func(codeHash common.Hash) []byte { return nil }); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	expected := common.FromHex("0x0601024704010402040304")
@@ -173,9 +173,9 @@ func TestSerialiseBlockWitness(t *testing.T) {
 	tr := New(common.Hash{})
 	tr.Update([]byte("ABCD0001"), []byte("val1"), 0)
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
-	bwb := NewBlockWitnessBuilder()
+	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, func(codeHash common.Hash) []byte { return nil }); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	var b bytes.Buffer
@@ -186,7 +186,7 @@ func TestSerialiseBlockWitness(t *testing.T) {
 	if !bytes.Equal(expected, b.Bytes()) {
 		t.Errorf("Expected %x, got: %x", expected, b.Bytes())
 	}
-	tr1, _, err := BlockWitnessToTrie(b.Bytes())
+	tr1, _, err := BlockWitnessToTrie(b.Bytes(), false)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
