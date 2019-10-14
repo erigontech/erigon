@@ -86,19 +86,22 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 }
 
 // Put puts the given key / value to the queue
-func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
+func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
 	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
 	copy(suffixkey[len(suffix):], hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		hb, err := tx.CreateBucketIfNotExists(hBucket, true)
-		if err != nil {
-			return err
+		if !noHistory {
+			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
+			if err != nil {
+				return err
+			}
+			if err = hb.Put(composite, value); err != nil {
+				return err
+			}
 		}
-		if err = hb.Put(composite, value); err != nil {
-			return err
-		}
+
 		sb, err := tx.CreateBucketIfNotExists(dbutils.SuffixBucket, true)
 		if err != nil {
 			return err

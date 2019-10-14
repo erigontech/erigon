@@ -121,7 +121,7 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 }
 
 // Assumes that bucket, key, and value won't be modified
-func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
+func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
 	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixM, ok := m.suffixkeys[timestamp]
@@ -138,6 +138,9 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
 		Value: value,
 	})
 	suffixM[string(hBucket)] = suffixL
+	if noHistory {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var ht *llrb.LLRB

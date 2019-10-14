@@ -34,8 +34,8 @@ func (dt *table) Put(bucket, key []byte, value []byte) error {
 	return dt.db.Put(bucket, append([]byte(dt.prefix), key...), value)
 }
 
-func (dt *table) PutS(hBucket, key, value []byte, timestamp uint64) error {
-	return dt.db.PutS(hBucket, append([]byte(dt.prefix), key...), value, timestamp)
+func (dt *table) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
+	return dt.db.PutS(hBucket, append([]byte(dt.prefix), key...), value, timestamp, noHistory)
 }
 
 func (dt *table) MultiPut(tuples ...[]byte) (uint64, error) {

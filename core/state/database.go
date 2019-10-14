@@ -1120,9 +1120,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		return err
 	}
 	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
-		return nil
-	}
+	noHistory = dsw.tds.noHistory || noHistory
+
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
 		return nil
@@ -1135,7 +1134,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
@@ -1157,9 +1156,8 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		return err
 	}
 	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
-		return nil
-	}
+	noHistory = dsw.tds.noHistory || noHistory
+
 	var originalData []byte
 	if !original.Initialised {
 		// Account has been created and deleted in the same block
@@ -1169,7 +1167,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
 
 func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
@@ -1240,13 +1238,11 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 		return err
 	}
 	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
-		return nil
-	}
+	noHistory = dsw.tds.noHistory || noHistory
 	o := bytes.TrimLeft(original[:], "\x00")
 	oo := make([]byte, len(o))
 	copy(oo, o)
-	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr)
+	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr, noHistory)
 }
 
 func (tds *TrieDbState) ExtractProofs(trace bool) trie.BlockProof {
