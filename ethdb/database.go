@@ -85,13 +85,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-func historyBucket(bucket []byte) []byte {
-	hb := make([]byte, len(bucket)+1)
-	hb[0] = byte('h')
-	copy(hb[1:], bucket)
-	return hb
-}
-
 // Put puts the given key / value to the queue
 func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error {
 	composite, suffix := compositeKeySuffix(key, timestamp)
@@ -111,13 +104,13 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		}
 		dat, _ := sb.Get(suffixkey)
 		sh, err := dbutils.Decode(dat)
-		if err!=nil {
+		if err != nil {
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
 		}
-		sh = sh.Add(key,value)
-		dat,err=dbutils.Encode(sh)
-		if err!=nil {
+		sh = sh.Add(key, value)
+		dat, err = dbutils.Encode(sh)
+		if err != nil {
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
 		}

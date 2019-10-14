@@ -130,11 +130,11 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
 	}
 	suffixL, ok := suffixM[string(hBucket)]
 	if !ok {
-		suffixL = make([]dbutils.Change,0)
+		suffixL = make([]dbutils.Change, 0)
 	}
 	suffixL = append(suffixL, dbutils.Change{
-		Key:key,
-		Value:value,
+		Key:   key,
+		Value: value,
 	})
 	suffixM[string(hBucket)] = suffixL
 	m.mu.Lock()
@@ -284,7 +284,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	}
 	err := m.Walk(dbutils.SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
 		hBucket := k[len(suffix):]
-		changedAccounts,err := dbutils.Decode(v)
+		changedAccounts, err := dbutils.Decode(v)
 		if err != nil {
 			return false, err
 		}
@@ -340,13 +340,13 @@ func (m *mutation) Commit() (uint64, error) {
 				}
 
 				changedAccounts, err := dbutils.Decode(dat)
-				if err!= nil {
+				if err != nil {
 					log.Error("Commit Decode suffix err", "err", err)
 				}
 
 				changedAccounts = changedAccounts.MultiAdd(suffixL)
-				changedRLP,err:=dbutils.Encode(changedAccounts)
-				if err!= nil {
+				changedRLP, err := dbutils.Encode(changedAccounts)
+				if err != nil {
 					log.Error("Commit Decode suffix err", "err", err)
 					return 0, err
 				}
