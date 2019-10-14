@@ -58,7 +58,10 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			}
 
 			err=ca.Walk(func(k, v []byte) error {
-				t[string(k)]=v
+				if _, ok = t[string(k)]; !ok {
+					t[string(k)]=v
+				}
+
 				return nil
 			})
 			if err!=nil {
@@ -72,6 +75,8 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 		return err
 	}
 	for bucketStr, t := range m {
+		fmt.Println("ethdb/walk.go:75 -----------------", bucketStr, "-----------------")
+
 		bucket := []byte(bucketStr)
 		for keyStr, value := range t {
 			key := []byte(keyStr)
