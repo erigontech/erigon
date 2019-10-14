@@ -90,3 +90,11 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	prefix = append(prefix, buf...)
 	return prefix
 }
+
+func CompositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
+	suffix = EncodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(suffix))
+	copy(composite, key)
+	copy(composite[len(key):], suffix)
+	return composite, suffix
+}

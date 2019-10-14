@@ -3,6 +3,10 @@ package ethdb
 // Maximum length (in bytes of encoded timestamp)
 const MaxTimestampLength = 8
 
+func encodingLen8to7(b []byte) int { //nolint
+	return (len(b)*8 + 6) / 7
+}
+
 // Transforms b into encoding where only
 // 7 bits of each byte are used to encode the bits of b
 // The most significant bit is left empty, for other purposes
@@ -71,7 +75,6 @@ func decode7to8(b []byte) []byte {
 	}
 	return out
 }
-
 // If highZero is true, the most significant bits of every byte is left zero
 func encodeTimestamp(timestamp uint64) []byte {
 	var suffix []byte

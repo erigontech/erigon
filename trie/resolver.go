@@ -44,7 +44,7 @@ type TrieResolver struct {
 	currentRs  *ResolveSet     // ResolveSet currently being used
 	historical bool
 	blockNr    uint64
-	hb         *HashBuilder2
+	hb         *HashBuilder
 	rss        []*ResolveSet
 	prec       bytes.Buffer
 	curr       bytes.Buffer
@@ -75,7 +75,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder2(leafFunc),
+		hb:         NewHashBuilder(leafFunc),
 	}
 	return &tr
 }
@@ -178,7 +178,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups = genStructStep(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -242,7 +242,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = step2(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups = genStructStep(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		}
 		// Remember the current key and value
 		if tr.accounts {
