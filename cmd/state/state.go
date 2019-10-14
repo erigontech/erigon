@@ -49,8 +49,8 @@ var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
-var genLag = flag.Int("genlag", 4096, "how many blocks to accumulate block proofs over for generator")
-var consLag = flag.Int("conslag", 256, "how many blocks to accumulate block proofs over for consumer")
+var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata file used as input to analysis")
+var statefile = flag.String("statefile", "state", "path to the file where the state will be periodically written during the analysis")
 
 func check(e error) {
 	if e != nil {
@@ -1724,7 +1724,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*genLag, *consLag)
+		stateless(*chaindata, *statefile)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)

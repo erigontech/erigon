@@ -106,7 +106,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(genLag, consLag int) {
+func stateless(chaindata string, statefile string) {
 	//state.MaxTrieCacheGen = 64*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -118,27 +118,20 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
-	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	slFile, err := os.OpenFile("stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
-	slfFile, err := os.OpenFile(fmt.Sprintf("stateless_%d.csv", consLag), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	check(err)
-	defer slfFile.Close()
-	//wf := bufio.NewWriter(slfFile)
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	stateDb, err := ethdb.NewBoltDatabase("/Volumes/tb41/turbo-geth-copy/state")
+	stateDb, err := ethdb.NewBoltDatabase(statefile)
 	check(err)
 	db := stateDb.DB()
 	blockNum := uint64(*block)
@@ -269,7 +262,7 @@ func stateless(genLag, consLag int) {
 
 		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
-			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
+			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
 		}
 		if batch.BatchSize() >= 100000 {
@@ -279,7 +272,8 @@ func stateless(genLag, consLag int) {
 			}
 		}
 		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
-			save_snapshot(db, fmt.Sprintf("/Volumes/tb41/turbo-geth-copy/state_%d", blockNum))
+			// Snapshots of the state will be written to the same directory as the state file
+			save_snapshot(db, fmt.Sprintf("%s_%d", statefile, blockNum))
 		}
 		preRoot = header.Root
 		blockNum++
