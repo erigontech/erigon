@@ -2,7 +2,6 @@ package ethdb
 
 import (
 	"bytes"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -123,7 +122,6 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 
 // Assumes that bucket, key, and value won't be modified
 func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
-	fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", hBucket, key, value, timestamp)
 	composite, _ := compositeKeySuffix(key, timestamp)
 	suffixM, ok := m.suffixkeys[timestamp]
 	if !ok {
@@ -347,14 +345,9 @@ func (m *mutation) Commit() (uint64, error) {
 				}
 
 				changedAccounts = changedAccounts.MultiAdd(suffixL)
-				changedAccounts.Walk(func(k, v []byte) error {
-					fmt.Printf("%x:%x\n", k,v)
-					return nil
-				})
 				changedRLP,err:=dbutils.Encode(changedAccounts)
 				if err!= nil {
 					log.Error("Commit Decode suffix err", "err", err)
-					fmt.Println("ethdb/mutation.go:356 err", err)
 					return 0, err
 				}
 

@@ -21,7 +21,6 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"os"
 	"path"
@@ -113,14 +112,12 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64) error
 		dat, _ := sb.Get(suffixkey)
 		sh, err := dbutils.Decode(dat)
 		if err!=nil {
-			fmt.Println("ethdb/database.go:116 not exists")
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
 		}
 		sh = sh.Add(key,value)
 		dat,err=dbutils.Encode(sh)
 		if err!=nil {
-			fmt.Println("ethdb/database.go:123 not exists")
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
 		}
@@ -230,7 +227,6 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			if hK != nil && bytes.HasPrefix(hK, key) {
 				dat = make([]byte, len(hV))
 				copy(dat, hV)
-				fmt.Printf("ethdb/database.go:232 GetAsOf found %x in hbucket %x |\n", key, dat)
 				return nil
 			}
 		}
@@ -244,7 +240,6 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
 				copy(dat, v)
-				fmt.Println("ethdb/database.go:232 GetAsOf found %x in bucket %x  |\n", key, dat )
 				return nil
 			}
 		}
