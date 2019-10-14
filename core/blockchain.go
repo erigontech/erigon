@@ -1768,7 +1768,6 @@ func (bc *BlockChain) ChainDb() ethdb.Database {
 }
 
 func (bc *BlockChain) NoHistory() bool {
-	//fmt.Println("core/blockchain.go:1771 noHistory: return ", bc.cacheConfig.NoHistory)
 	return bc.cacheConfig.NoHistory
 }
 
@@ -1780,10 +1779,6 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	if !bc.cacheConfig.NoHistory {
 		return false
 	}
-
-	//if bc.cacheConfig.ArchiveSyncInterval != 0 {
-	//	return false
-	//}
 
 	var isArchiveInterval bool
 	currentBlockNumber := bc.CurrentBlock().Number().Uint64()
