@@ -167,7 +167,7 @@ func stateless(genLag, consLag int) {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 0
+	var thresholdBlock uint64 = 1
 	var witness []byte
 	for !interrupt {
 		trace := false // blockNum == 545080
@@ -235,13 +235,10 @@ func stateless(genLag, consLag int) {
 					tds.PrintTrie(f)
 				}
 				return
-			} else {
-				if err := runBlock(tds, s, chainConfig, bcb, header, block, trace, true); err != nil {
-					fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
-					finalRootFail = true
-				} else {
-					//writeStats(w, blockNum, blockProof)
-				}
+			}
+			if err := runBlock(tds, s, chainConfig, bcb, header, block, trace, true); err != nil {
+				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
+				finalRootFail = true
 			}
 		}
 		roots, err := tds.UpdateStateTrie()

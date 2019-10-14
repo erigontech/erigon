@@ -275,7 +275,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 			defer f.Close()
 			s.t.Print(f)
 		}
-		return fmt.Errorf("Final root: %x, expected: %x", myRoot, expected)
+		return fmt.Errorf("final root: %x, expected: %x", myRoot, expected)
 	}
 	s.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	s.accountUpdates = make(map[common.Hash]*accounts.Account)
