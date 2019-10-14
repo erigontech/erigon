@@ -34,7 +34,6 @@ import (
 // during the execution of block(s)
 type Stateless struct {
 	t              *trie.Trie             // State trie
-	tp             *trie.TriePruning      // Pruning machinery for the state trie
 	codeMap        map[common.Hash][]byte // Lookup index from code hashes to corresponding bytecode
 	blockNr        uint64                 // Current block number
 	storageUpdates map[common.Hash]map[common.Hash][]byte
@@ -76,7 +75,6 @@ func NewStateless(stateRoot common.Hash, witness []byte, blockNr uint64, trace b
 // SetBlockNr changes the block number associated with this
 func (s *Stateless) SetBlockNr(blockNr uint64) {
 	s.blockNr = blockNr
-	//s.tp.SetBlockNr(blockNr)
 }
 
 // ReadAccountData is a part of the StateReader interface

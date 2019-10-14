@@ -209,7 +209,7 @@ func stateless(genLag, consLag int) {
 			return
 		}
 
-		if err := tds.ResolveStateTrie(); err != nil {
+		if err = tds.ResolveStateTrie(); err != nil {
 			fmt.Printf("Failed to resolve state trie: %v\n", err)
 			return
 		}
