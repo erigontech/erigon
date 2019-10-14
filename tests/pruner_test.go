@@ -521,7 +521,11 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
-		changedAccounts := dbutils.ToSuffix(v)
+		changedAccounts, err := dbutils.Decode(v)
+		if err != nil {
+			return false, err
+		}
+
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple account suffix records")
@@ -536,7 +540,7 @@ func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
 		}
 
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
-			err := changedAccounts.Walk(func(k []byte) error {
+			err := changedAccounts.Walk(func(k, _ []byte) error {
 				compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
 				b, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 				if len(b) == 0 {
