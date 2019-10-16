@@ -1259,3 +1259,7 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	return nil
 }
+
+func (tds *TrieDbState) TriePruningDebugDump() string {
+	return tds.tp.DebugDump()
+}
