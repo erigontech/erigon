@@ -90,8 +90,8 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	//	return ErrKnownBlock
 	//}
 	// Check whether the block is linkable
-	_, noHistory := params.GetNoHistoryByBlock(ctx, block.Number())
-	if !noHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
+	_, withHistory := params.GetWithHistoryByBlock(ctx, block.Number())
+	if withHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
 		return consensus.ErrUnknownAncestor
 	}
 	// Header validity is known at this point, check the uncles and transactions
@@ -105,7 +105,7 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	if hash := types.DeriveSha(block.Transactions()); hash != header.TxHash {
 		return fmt.Errorf("transaction root hash mismatch: have %x, want %x", hash, header.TxHash)
 	}
-	if noHistory {
+	if !withHistory {
 		return nil
 	}
 	if !v.bc.HasBlockAndState(block.ParentHash(), block.NumberU64()-1) {

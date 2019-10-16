@@ -206,7 +206,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			if _, err := b.engine.Finalize(config, b.header, statedb, b.txs, b.uncles, b.receipts); err != nil {
 				panic(fmt.Sprintf("could not finalize block: %v", err))
 			}
-			ctx, _ = params.GetNoHistoryByBlock(ctx, b.header.Number)
+			ctx, _ = params.GetWithHistoryByBlock(ctx, b.header.Number)
 			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}

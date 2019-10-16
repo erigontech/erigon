@@ -620,7 +620,7 @@ func execToBlock(block int) {
 	check(err)
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
-	//bc.SetNoHistory(true)
+	//bc.SetWithHistory(false)
 	blocks := types.Blocks{}
 	var lastBlock *types.Block
 	for i := 1; i <= block; i++ {

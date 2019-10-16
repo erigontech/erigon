@@ -86,7 +86,7 @@ type Config struct {
 	NetworkID           uint64 // Network ID to use for selecting peers to connect to
 	SyncMode            downloader.SyncMode
 	NoPruning           bool
-	NoHistory           bool
+	WithHistory         bool
 	ArchiveSyncInterval int
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64

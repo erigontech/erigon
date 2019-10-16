@@ -18,7 +18,7 @@ const (
 	IsPetersburgEnabled
 	IsEWASM
 	BlockNumber
-	NoHistory
+	HistoryEnabled
 	WithHistoryHighest
 )
 
@@ -36,8 +36,8 @@ func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) cont
 	return ctx
 }
 
-func WithNoHistory(ctx context.Context, defaultValue bool, f noHistFunc) context.Context {
-	return context.WithValue(ctx, NoHistory, getIsNoHistory(defaultValue, f))
+func WithHistory(ctx context.Context, defaultValue bool, f withHistFunc) context.Context {
+	return context.WithValue(ctx, HistoryEnabled, getIsWithHistory(defaultValue, f))
 }
 
 func GetForkFlag(ctx context.Context, name configKey) bool {
@@ -62,27 +62,27 @@ func GetBlockNumber(ctx context.Context) *big.Int {
 	return nil
 }
 
-func GetNoHistoryByBlock(ctx context.Context, currentBlock *big.Int) (context.Context, bool) {
+func GetWithHistoryByBlock(ctx context.Context, currentBlock *big.Int) (context.Context, bool) {
 	if currentBlock == nil {
 		return ctx, false
 	}
 
-	key := getNoHistoryByBlock(currentBlock)
-	v, ok := getNoHistoryByKey(ctx, key)
+	key := getWithHistoryByBlock(currentBlock)
+	v, ok := getWithHistoryByKey(ctx, key)
 	if ok {
-		if !v {
+		if v {
 			ctx = updateHighestWithHistory(ctx, currentBlock)
 		}
 		return ctx, v
 	}
 
-	return withNoHistory(ctx, currentBlock, key)
+	return withHistory(ctx, currentBlock, key)
 }
 
-func withNoHistory(ctx context.Context, currentBlock *big.Int, key configKey) (context.Context, bool) {
-	v := getNoHistory(ctx, currentBlock)
+func withHistory(ctx context.Context, currentBlock *big.Int, key configKey) (context.Context, bool) {
+	v := getWithHistory(ctx, currentBlock)
 	ctx = context.WithValue(ctx, key, v)
-	if !v {
+	if v {
 		ctx = updateHighestWithHistory(ctx, currentBlock)
 	}
 
@@ -101,12 +101,12 @@ func updateHighestWithHistory(ctx context.Context, currentBlock *big.Int) contex
 	return ctx
 }
 
-func getNoHistory(ctx context.Context, currentBlock *big.Int) bool {
-	v := ctx.Value(NoHistory)
+func getWithHistory(ctx context.Context, currentBlock *big.Int) bool {
+	v := ctx.Value(HistoryEnabled)
 	if v == nil {
 		return false
 	}
-	if val, ok := v.(noHistFunc); ok {
+	if val, ok := v.(withHistFunc); ok {
 		return val(currentBlock)
 	}
 	return false
@@ -127,7 +127,7 @@ func setWithHistoryHighestByBlock(ctx context.Context, block *big.Int) context.C
 	return context.WithValue(ctx, WithHistoryHighest, block)
 }
 
-func getNoHistoryByKey(ctx context.Context, key configKey) (bool, bool) {
+func getWithHistoryByKey(ctx context.Context, key configKey) (bool, bool) {
 	if key < 0 {
 		return false, false
 	}
@@ -141,20 +141,20 @@ func getNoHistoryByKey(ctx context.Context, key configKey) (bool, bool) {
 	return false, false
 }
 
-func getNoHistoryByBlock(block *big.Int) configKey {
+func getWithHistoryByBlock(block *big.Int) configKey {
 	if block == nil {
 		return configKey(-1)
 	}
 	return configKey(block.Uint64() + 1000)
 }
 
-func GetNoHistory(ctx context.Context) (context.Context, bool) {
-	return GetNoHistoryByBlock(ctx, GetBlockNumber(ctx))
+func GetWithHistory(ctx context.Context) (context.Context, bool) {
+	return GetWithHistoryByBlock(ctx, GetBlockNumber(ctx))
 }
 
-type noHistFunc func(currentBlock *big.Int) bool
+type withHistFunc func(currentBlock *big.Int) bool
 
-func getIsNoHistory(defaultValue bool, f noHistFunc) noHistFunc {
+func getIsWithHistory(defaultValue bool, f withHistFunc) withHistFunc {
 	return func(currentBlock *big.Int) bool {
 		if f == nil {
 			return defaultValue

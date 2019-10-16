@@ -456,7 +456,7 @@ work if the history of the state is available for the period of time including t
 To turn on the recording of the receipts instead of relying on the re-generation (access to the recorded receipts is normally faster,
 but the recorded receipt take a lot of disk space), one needs to invoke `EnableReceipts(true)` on the object of the type
 `core.Blockchain`.
-To turn off the recording of the history of the state, one needs pass the corresponding field `NoHistory` as `true` in the `cacheConfig`
+To turn off the recording of the history of the state, one needs pass the corresponding field `WithHistory` as `false` in the `cacheConfig`
 parameter when creating a new instance of `core.Blockchain` by invoking `NewBlockchain`.
 ![processing](processing.png)
 

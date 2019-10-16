@@ -84,7 +84,7 @@ type CacheConfig struct {
 	BlocksToPrune       uint64
 	PruneTimeout        time.Duration
 	ArchiveSyncInterval uint64
-	NoHistory           bool
+	WithHistory         bool
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -162,7 +162,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 			TrieCleanLimit:      256,
 			TrieDirtyLimit:      256,
 			TrieTimeLimit:       5 * time.Minute,
-			NoHistory:           false,
+			WithHistory:         false,
 		}
 	}
 	if cacheConfig.ArchiveSyncInterval == 0 {
@@ -1223,7 +1223,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			err = <-results
 		}
 		if err == nil {
-			ctx, _ = params.GetNoHistoryByBlock(ctx, block.Number())
+			ctx, _ = params.GetWithHistoryByBlock(ctx, block.Number())
 			err = bc.Validator().ValidateBody(ctx, block)
 		}
 		switch {
@@ -1767,16 +1767,16 @@ func (bc *BlockChain) ChainDb() ethdb.Database {
 	return bc.db
 }
 
-func (bc *BlockChain) NoHistory() bool {
-	return bc.cacheConfig.NoHistory
+func (bc *BlockChain) WithHistory() bool {
+	return bc.cacheConfig.WithHistory
 }
 
-func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
+func (bc *BlockChain) IsWithHistory(currentBlock *big.Int) bool {
 	if currentBlock == nil {
-		return bc.cacheConfig.NoHistory
+		return bc.cacheConfig.WithHistory
 	}
 
-	if !bc.cacheConfig.NoHistory {
+	if bc.cacheConfig.WithHistory {
 		return false
 	}
 
@@ -1793,7 +1793,7 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 		isArchiveInterval = (currentBlock.Uint64() - currentBlockNumber) <= bc.cacheConfig.ArchiveSyncInterval
 	}
 
-	return bc.cacheConfig.NoHistory || isArchiveInterval
+	return bc.cacheConfig.WithHistory || isArchiveInterval
 }
 
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
@@ -1812,7 +1812,7 @@ func (bc *BlockChain) GetHeightKnownBlock() uint64 {
 
 func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
-	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
+	ctx = params.WithHistory(ctx, bc.WithHistory(), bc.IsWithHistory)
 	return ctx
 }
 

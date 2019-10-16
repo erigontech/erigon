@@ -104,7 +104,7 @@ var (
 		utils.CacheTrieFlag,
 		utils.CacheGCFlag,
 		utils.TrieCacheGenFlag,
-		utils.NoHistory,
+		utils.WithHistory,
 		utils.ArchiveSyncInterval,
 		utils.ListenPortFlag,
 		utils.MaxPeersFlag,

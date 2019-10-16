@@ -358,8 +358,8 @@ var (
 		Usage: "Number of trie node generations to keep in memory",
 		Value: int(state.MaxTrieCacheGen),
 	}
-	NoHistory = cli.BoolTFlag{
-		Name:  "no-history",
+	WithHistory = cli.BoolTFlag{
+		Name:  "with-history",
 		Usage: "write the whole state history",
 	}
 	ArchiveSyncInterval = cli.IntFlag{
@@ -1321,7 +1321,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
 
-	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
+	cfg.WithHistory = ctx.GlobalBoolT(WithHistory.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

@@ -57,7 +57,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, params.AllEthashProtocolChanges, engine, vm.Config{}, nil)
@@ -553,7 +553,7 @@ func testReorgBadHashes(t *testing.T, full bool) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	ncm, err := NewBlockChain(blockchain.db, cacheConfig, blockchain.chainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -674,7 +674,7 @@ func TestFastVsFullChains(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	archive, _ := NewBlockChain(archiveDb, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
@@ -769,7 +769,7 @@ func TestLightVsFastVsFullChainHeads(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 	}
 	archive, _ := NewBlockChain(archiveDb, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	if n, err := archive.InsertChain(blocks); err != nil {
@@ -862,7 +862,7 @@ func TestChainTxReorgs(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
@@ -963,7 +963,7 @@ func TestLogReorgs(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
@@ -1324,7 +1324,7 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)
@@ -1383,7 +1383,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 		TrieCleanLimit: 256,
 		TrieDirtyLimit: 256,
 		TrieTimeLimit:  5 * time.Minute,
-		NoHistory:      false,
+		WithHistory:    false,
 		Disabled:       true,
 	}
 	chain, err := NewBlockChain(diskdb, cacheConfig, params.TestChainConfig, engine, vm.Config{}, nil)

@@ -185,7 +185,7 @@ type TrieDbState struct {
 	codeCache       *lru.Cache
 	codeSizeCache   *lru.Cache
 	historical      bool
-	noHistory       bool
+	withHistory     bool
 	resolveReads    bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
@@ -226,8 +226,8 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 	tds.resolveReads = rr
 }
 
-func (tds *TrieDbState) SetNoHistory(nh bool) {
-	tds.noHistory = nh
+func (tds *TrieDbState) SetWithHistory(nh bool) {
+	tds.withHistory = nh
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -1117,8 +1117,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
+	_, withHistory := params.GetWithHistory(ctx)
+	if !dsw.tds.withHistory || !withHistory {
 		return nil
 	}
 	// Don't write historical record if the account did not change
@@ -1154,8 +1154,8 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
+	_, withHistory := params.GetWithHistory(ctx)
+	if !dsw.tds.withHistory || !withHistory {
 		return nil
 	}
 	var originalData []byte
@@ -1237,8 +1237,8 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	if dsw.tds.noHistory || noHistory {
+	_, withHistory := params.GetWithHistory(ctx)
+	if !dsw.tds.withHistory || !withHistory {
 		return nil
 	}
 	o := bytes.TrimLeft(original[:], "\x00")

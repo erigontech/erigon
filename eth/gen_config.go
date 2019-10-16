@@ -23,7 +23,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		NetworkID               uint64
 		SyncMode                downloader.SyncMode
 		NoPruning               bool
-		NoHistory               bool
+		WithHistory             bool
 		ArchiveSyncInterval     int
 		LightServ               int `toml:",omitempty"`
 		LightPeers              int `toml:",omitempty"`
@@ -56,7 +56,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NetworkID = c.NetworkID
 	enc.SyncMode = c.SyncMode
 	enc.NoPruning = c.NoPruning
-	enc.NoHistory = c.NoHistory
+	enc.WithHistory = c.WithHistory
 	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
 	enc.LightServ = c.LightServ
 	enc.LightPeers = c.LightPeers
@@ -94,7 +94,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		NetworkID               *uint64
 		SyncMode                *downloader.SyncMode
 		NoPruning               *bool
-		NoHistory               *bool
+		WithHistory             *bool
 		ArchiveSyncInterval     *int
 		LightServ               *int `toml:",omitempty"`
 		LightPeers              *int `toml:",omitempty"`
@@ -138,8 +138,8 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.NoPruning != nil {
 		c.NoPruning = *dec.NoPruning
 	}
-	if dec.NoHistory != nil {
-		c.NoHistory = *dec.NoHistory
+	if dec.WithHistory != nil {
+		c.WithHistory = *dec.WithHistory
 	}
 	if dec.ArchiveSyncInterval != nil {
 		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval
