@@ -91,7 +91,7 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	//}
 	// Check whether the block is linkable
 	_, withHistory := params.GetWithHistoryByBlock(ctx, block.Number())
-	if withHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
+	if !withHistory && v.bc.GetBlockByHash(block.ParentHash()) == nil {
 		return consensus.ErrUnknownAncestor
 	}
 	// Header validity is known at this point, check the uncles and transactions

@@ -162,7 +162,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 			TrieCleanLimit:      256,
 			TrieDirtyLimit:      256,
 			TrieTimeLimit:       5 * time.Minute,
-			WithHistory:         false,
+			WithHistory:         true,
 		}
 	}
 	if cacheConfig.ArchiveSyncInterval == 0 {
