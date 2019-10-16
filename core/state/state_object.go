@@ -160,7 +160,6 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 	if so.created {
-		so.originStorage[key] = common.Hash{}
 		return common.Hash{}
 	}
 	// If we have the original value cached, return that

@@ -781,8 +781,6 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 				if err := stateWriter.CreateContract(addr); err != nil {
 					return err
 				}
-				// We only need to trigger `CreateContract` once
-				stateObject.created = false
 			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err

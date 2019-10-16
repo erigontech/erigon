@@ -558,34 +558,30 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 	}
 	accountUpdates := tds.aggregateBuffer.accountUpdates
+	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
+	// that might be remaining in the trie and figure out the next incarnations
+	for address := range tds.aggregateBuffer.created {
+		addrHash, err := tds.HashAddress(address, false /*save*/)
+		if err != nil {
+			return nil, err
+		}
+		var incarnation uint64
+		incarnation, err = tds.nextIncarnation(address)
+		if err != nil {
+			return nil, err
+		}
+		if account, ok := accountUpdates[addrHash]; ok && account != nil {
+			account.SetIncarnation(incarnation)
+			account.Root = trie.EmptyRoot
+		}
+		// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+		// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+		tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+	}
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
-		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-		// that might be remaining in the trie and figure out the next incarnations
-		for address := range b.created {
-			addrHash, err := tds.HashAddress(address, false /*save*/)
-			if err != nil {
-				return nil, err
-			}
-			var incarnation uint64
-			incarnation, err = tds.nextIncarnation(address)
-			if err != nil {
-				return nil, err
-			}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
-			}
-			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
-			}
-			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
-		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				tds.t.UpdateAccount(addrHash[:], account)
