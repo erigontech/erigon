@@ -5,13 +5,12 @@ import (
 
 	"testing"
 
-	"github.com/stretchr/testify/assert"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRebuild(t *testing.T) {
@@ -226,11 +225,13 @@ func TestTwoStorageItems(t *testing.T) {
 	branch.Children[0x7] = &leaf1
 	branch.Children[0xf] = &leaf2
 	branch.flags.dirty = true
-	root := shortNode{Key: common.Hex2Bytes("0d"), Val: &branch}
+	root := shortNode{Key: []byte{0xd}, Val: &branch}
 
 	hasher := newHasher(false)
 	defer returnHasherToPool(hasher)
 	rootRlp := hasher.hashChildren(&root, 0)
+
+	// Resolve the root node
 
 	rootHash := common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8")
 	assert.Equal(t, rootHash, crypto.Keccak256Hash(rootRlp))
@@ -244,9 +245,24 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver := NewResolver(0, false, 0)
 	resolver.AddRequest(req)
 
-	// TODO [Andrew] add a request for the branch node
-
 	if err := resolver.ResolveWithDb(db, 0); err != nil {
+		t.Errorf("Resolve error: %v", err)
+	}
+
+	// Resolve the branch node
+
+	branchRlp := hasher.hashChildren(&branch, 0)
+
+	req2 := &ResolveRequest{
+		t:           tr,
+		resolveHex:  []byte{0xd},
+		resolvePos:  1,
+		resolveHash: hashNode(crypto.Keccak256(branchRlp)),
+	}
+	resolver2 := NewResolver(0, false, 0)
+	resolver2.AddRequest(req2)
+
+	if err := resolver2.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Resolve error: %v", err)
 	}
 }
