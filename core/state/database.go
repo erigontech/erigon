@@ -492,6 +492,8 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 	}
 	accountUpdates := tds.aggregateBuffer.accountUpdates
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Address]struct{})
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
@@ -499,6 +501,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for address := range b.created {
+			// Prevent repeated storage clearouts
+			if _, ok := alreadyCreated[address]; ok {
+				continue
+			}
+			alreadyCreated[address] = struct{}{}
 			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
@@ -1192,4 +1199,8 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	return nil
+}
+
+func (tds *TrieDbState) TriePruningDebugDump() string {
+	return tds.tp.DebugDump()
 }
