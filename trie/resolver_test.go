@@ -3,13 +3,14 @@ package trie
 import (
 	"bytes"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestRebuild(t *testing.T) {
@@ -205,21 +206,63 @@ func TestTrieResolver(t *testing.T) {
 func TestTwoStorageItems(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5"), common.Hex2Bytes("02")); err != nil {
+
+	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5")
+	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7")
+	val1 := common.Hex2Bytes("02")
+	val2 := common.Hex2Bytes("03")
+
+	if err := db.Put(dbutils.StorageBucket, key1, val1); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7"), common.Hex2Bytes("03")); err != nil {
+	if err := db.Put(dbutils.StorageBucket, key2, val2); err != nil {
 		t.Error(err)
 	}
+
+	leaf1 := shortNode{Key: keybytesToHex(key1[1:]), Val: valueNode(val1)}
+	leaf2 := shortNode{Key: keybytesToHex(key2[1:]), Val: valueNode(val2)}
+	var branch fullNode
+	branch.Children[0x7] = &leaf1
+	branch.Children[0xf] = &leaf2
+	branch.flags.dirty = true
+	root := shortNode{Key: []byte{0xd}, Val: &branch}
+
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+	rootRlp := hasher.hashChildren(&root, 0)
+
+	// Resolve the root node
+
+	rootHash := common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8")
+	assert.Equal(t, rootHash, crypto.Keccak256Hash(rootRlp))
+
 	req := &ResolveRequest{
 		t:           tr,
 		resolveHex:  []byte{},
 		resolvePos:  0,
-		resolveHash: hashNode(common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8").Bytes()),
+		resolveHash: hashNode(rootHash.Bytes()),
 	}
 	resolver := NewResolver(0, false, 0)
 	resolver.AddRequest(req)
+
 	if err := resolver.ResolveWithDb(db, 0); err != nil {
+		t.Errorf("Resolve error: %v", err)
+	}
+
+	// Resolve the branch node
+
+	branchRlp := hasher.hashChildren(&branch, 0)
+
+	req2 := &ResolveRequest{
+		t:           tr,
+		resolveHex:  []byte{0xd},
+		resolvePos:  1,
+		resolveHash: hashNode(crypto.Keccak256(branchRlp)),
+	}
+	resolver2 := NewResolver(0, false, 0)
+	resolver2.AddRequest(req2)
+
+	if err := resolver2.ResolveWithDb(db, 0); err != nil {
 		t.Errorf("Resolve error: %v", err)
 	}
 }

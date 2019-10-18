@@ -896,27 +896,24 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			resolver := trie.NewResolver(0, true, block.NumberU64())
-			resolver.SetHistorical(true)
-
-			var resRequests []*trie.ResolveRequest
 			tr := trie.New(common.Hash{})
 
-			for i := 0; i < n; i++ {
+			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
 				prefix := request.Prefixes[i]
 				rr := tr.NewResolveRequest(nil, prefix.ToHex(), prefix.Nibbles(), nil)
 				rr.RequiresRLP = true
+
+				resolver := trie.NewResolver(0, true, block.NumberU64())
+				resolver.SetHistorical(true)
 				resolver.AddRequest(rr)
-				resRequests = append(resRequests, rr)
-			}
 
-			if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
-				return err2
-			}
+				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+					return err2
+				}
 
-			for i, responseSize := 0, 0; i < n && responseSize < softResponseLimit; i++ {
-				node := resRequests[i].NodeRLP
-				response.Nodes[i] = node
+				node := rr.NodeRLP
+				response.Nodes[i] = make([]byte, len(node))
+				copy(response.Nodes[i], node)
 				responseSize += len(node)
 			}
 		} else {
@@ -943,8 +940,6 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			resolver := trie.NewResolver(0, false, block.NumberU64())
-			resolver.SetHistorical(true)
 
 			for j, responseSize := 0, 0; j < numReq; j++ {
 				req := request.Requests[j]
@@ -957,10 +952,9 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					return err
 				}
 
-				var resRequests []*trie.ResolveRequest
 				tr := trie.New(common.Hash{})
 
-				for i := 0; i < n; i++ {
+				for i := 0; i < n && responseSize < softResponseLimit; i++ {
 					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
@@ -968,17 +962,18 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					storagePrefix := req.Prefixes[i]
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
 					rr.RequiresRLP = true
+
+					resolver := trie.NewResolver(0, false, block.NumberU64())
+					resolver.SetHistorical(true)
 					resolver.AddRequest(rr)
-					resRequests = append(resRequests, rr)
-				}
 
-				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
-					return err2
-				}
+					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+						return err2
+					}
 
-				for i := 0; i < n && responseSize < softResponseLimit; i++ {
-					node := resRequests[i].NodeRLP
-					response.Nodes[j][i] = node
+					node := rr.NodeRLP
+					response.Nodes[j][i] = make([]byte, len(node))
+					copy(response.Nodes[j][i], node)
 					responseSize += len(node)
 				}
 			}

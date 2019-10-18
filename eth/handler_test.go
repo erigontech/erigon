@@ -1098,10 +1098,9 @@ func TestFirehoseStorageNodesB(t *testing.T) {
 	storageReq.ID = 1
 	storageReq.Block = pm.blockchain.GetBlockByNumber(1).Hash()
 	emptyPrefix := trie.Keybytes{Data: []byte{}, Odd: false, Terminating: false}
-	// nibblePrefix := trie.Keybytes{Data: common.FromHex("f0"), Odd: true, Terminating: false}
+	nibblePrefix := trie.Keybytes{Data: common.FromHex("f0"), Odd: true, Terminating: false}
 	storageReq.Requests = []storageReqForOneAccount{
-		// TODO [Andrew] also request the intermediate branch node
-		{Account: addr.Bytes(), Prefixes: []trie.Keybytes{emptyPrefix}},
+		{Account: addr.Bytes(), Prefixes: []trie.Keybytes{emptyPrefix, nibblePrefix}},
 	}
 
 	assert.NoError(t, p2p.Send(peer.app, GetStorageNodesCode, storageReq))
@@ -1148,9 +1147,9 @@ func TestFirehoseStorageNodesB(t *testing.T) {
 	var storageReply storageNodesMsg
 	storageReply.ID = 1
 	storageReply.Nodes = make([][][]byte, 1)
-	storageReply.Nodes[0] = make([][]byte, 1)
+	storageReply.Nodes[0] = make([][]byte, 2)
 	storageReply.Nodes[0][0] = extensionRlp
-	// storageReply.Nodes[0][1] = branchRlp
+	storageReply.Nodes[0][1] = branchRlp
 
 	err = p2p.ExpectMsg(peer.app, StorageNodesCode, storageReply)
 	if err != nil {

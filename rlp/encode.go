@@ -24,11 +24,19 @@ import (
 	"sync"
 )
 
+// https://github.com/ethereum/wiki/wiki/RLP
+const (
+	// EmptyStringCode is the RLP code for empty strings.
+	EmptyStringCode = 0x80
+	// EmptyListCode is the RLP code for empty lists.
+	EmptyListCode = 0xC0
+)
+
 var (
 	// Common encoded values.
 	// These are useful when implementing EncodeRLP.
-	EmptyString = []byte{0x80}
-	EmptyList   = []byte{0xC0}
+	EmptyString = []byte{EmptyStringCode}
+	EmptyList   = []byte{EmptyListCode}
 )
 
 // Encoder is implemented by types that require custom
@@ -174,7 +182,7 @@ func (w *encbuf) encode(val interface{}) error {
 
 func (w *encbuf) encodeStringHeader(size int) {
 	if size < 56 {
-		w.str = append(w.str, 0x80+byte(size))
+		w.str = append(w.str, EmptyStringCode+byte(size))
 	} else {
 		// TODO: encode to w.str directly
 		sizesize := putint(w.sizebuf[1:], uint64(size))
@@ -373,14 +381,14 @@ func writeRawValue(val reflect.Value, w *encbuf) error {
 func writeUint(val reflect.Value, w *encbuf) error {
 	i := val.Uint()
 	if i == 0 {
-		w.str = append(w.str, 0x80)
+		w.str = append(w.str, EmptyStringCode)
 	} else if i < 128 {
 		// fits single byte
 		w.str = append(w.str, byte(i))
 	} else {
 		// TODO: encode int to w.str directly
 		s := putint(w.sizebuf[1:], i)
-		w.sizebuf[0] = 0x80 + byte(s)
+		w.sizebuf[0] = EmptyStringCode + byte(s)
 		w.str = append(w.str, w.sizebuf[:s+1]...)
 	}
 	return nil
@@ -390,7 +398,7 @@ func writeBool(val reflect.Value, w *encbuf) error {
 	if val.Bool() {
 		w.str = append(w.str, 0x01)
 	} else {
-		w.str = append(w.str, 0x80)
+		w.str = append(w.str, EmptyStringCode)
 	}
 	return nil
 }
@@ -398,7 +406,7 @@ func writeBool(val reflect.Value, w *encbuf) error {
 func writeBigIntPtr(val reflect.Value, w *encbuf) error {
 	ptr := val.Interface().(*big.Int)
 	if ptr == nil {
-		w.str = append(w.str, 0x80)
+		w.str = append(w.str, EmptyStringCode)
 		return nil
 	}
 	return writeBigInt(ptr, w)
@@ -413,7 +421,7 @@ func writeBigInt(i *big.Int, w *encbuf) error {
 	if cmp := i.Cmp(big0); cmp == -1 {
 		return fmt.Errorf("rlp: cannot encode negative *big.Int")
 	} else if cmp == 0 {
-		w.str = append(w.str, 0x80)
+		w.str = append(w.str, EmptyStringCode)
 	} else {
 		w.encodeString(i.Bytes())
 	}
@@ -456,7 +464,7 @@ func writeInterface(val reflect.Value, w *encbuf) error {
 		// Write empty list. This is consistent with the previous RLP
 		// encoder that we had and should therefore avoid any
 		// problems.
-		w.str = append(w.str, 0xC0)
+		w.str = append(w.str, EmptyListCode)
 		return nil
 	}
 	eval := val.Elem()
@@ -526,7 +534,7 @@ func makePtrWriter(typ reflect.Type, ts tags) (writer, error) {
 	writer := func(val reflect.Value, w *encbuf) error {
 		if val.IsNil() {
 			if nilKind == String {
-				w.str = append(w.str, 0x80)
+				w.str = append(w.str, EmptyStringCode)
 			} else {
 				w.listEnd(w.list())
 			}

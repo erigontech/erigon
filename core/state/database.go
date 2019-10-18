@@ -338,7 +338,7 @@ func (tds *TrieDbState) buildStorageTouches() map[addressHashWithIncarnation]Has
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
 func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWithIncarnation]Hashes) error {
-	var resolver *trie.TrieResolver
+	var resolver *trie.Resolver
 	for addressHash, hashes := range storageTouches {
 		var addrHash = addressHash.Hash()
 		for _, keyHash := range hashes {
@@ -417,7 +417,7 @@ func (tds *TrieDbState) buildDeletedAccountTouches() error {
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
 func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
-	var resolver *trie.TrieResolver
+	var resolver *trie.Resolver
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
