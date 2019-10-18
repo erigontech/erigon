@@ -43,6 +43,8 @@ var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
 var name = flag.String("name", "", "name to add to the file names")
+var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
+var image = flag.String("image", "0x1", "image value for preimage action")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -994,13 +996,11 @@ func invTree(wrong, right, diff string, name string) {
 	t1.PrintDiff(t2, c)
 }
 
-func preimage() {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-10/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+func preimage(chaindata string, image common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	p, err := ethDb.Get(dbutils.PreimagePrefix, common.FromHex("0x4f7adcf420b4a9af04b6c7c9e171d34a38e4f66b3d2bac0678a36fdac77dd207"))
+	p, err := ethDb.Get(dbutils.PreimagePrefix, image[:])
 	check(err)
 	fmt.Printf("%x\n", p)
 }
@@ -1251,12 +1251,11 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	if *action == "preimage" {
-		preimage()
+		preimage(*chaindata, common.HexToHash(*image))
 	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)
-	fmt.Printf("%x\n", crypto.Keccak256(common.FromHex("0x0000000000000000000000000000000000000000000000000000000000036fff")))
 	//repair()
 	//readAccount()
 	//repairCurrent()
