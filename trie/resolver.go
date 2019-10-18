@@ -33,8 +33,10 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	return nil
 }
 
-/* One resolver per trie (prefix) */
-type TrieResolver struct {
+// Resolver looks up (resolves) some keys and corresponding values from a database.
+// One resolver per trie (prefix).
+// See also ResolveRequest in trie.go
+type Resolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
 	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
 	requests   []*ResolveRequest
@@ -49,11 +51,11 @@ type TrieResolver struct {
 	prec       bytes.Buffer
 	curr       bytes.Buffer
 	succ       bytes.Buffer
-	groups     []uint32
+	groups     []uint16
 	a          accounts.Account
 }
 
-func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver {
+func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	var leafFunc func(b []byte) (node, error)
 	if forAccounts {
 		leafFunc = func(b []byte) (node, error) {
@@ -69,7 +71,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 	} else {
 		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
 	}
-	tr := TrieResolver{
+	tr := Resolver{
 		accounts:   forAccounts,
 		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
@@ -80,14 +82,14 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver 
 	return &tr
 }
 
-func (tr *TrieResolver) SetHistorical(h bool) {
+func (tr *Resolver) SetHistorical(h bool) {
 	tr.historical = h
 }
 
-// TrieResolver implements sort.Interface
+// Resolver implements sort.Interface
 // and sorts by resolve requests
 // (more general requests come first)
-func (tr *TrieResolver) Len() int {
+func (tr *Resolver) Len() int {
 	return len(tr.requests)
 }
 
@@ -98,7 +100,7 @@ func min(a, b int) int {
 	return b
 }
 
-func (tr *TrieResolver) Less(i, j int) bool {
+func (tr *Resolver) Less(i, j int) bool {
 	ci := tr.requests[i]
 	cj := tr.requests[j]
 	m := min(ci.resolvePos, cj.resolvePos)
@@ -113,22 +115,22 @@ func (tr *TrieResolver) Less(i, j int) bool {
 	return ci.resolvePos < cj.resolvePos
 }
 
-func (tr *TrieResolver) Swap(i, j int) {
+func (tr *Resolver) Swap(i, j int) {
 	tr.requests[i], tr.requests[j] = tr.requests[j], tr.requests[i]
 }
 
-func (tr *TrieResolver) AddRequest(req *ResolveRequest) {
+func (tr *Resolver) AddRequest(req *ResolveRequest) {
 	tr.requests = append(tr.requests, req)
 }
 
-func (tr *TrieResolver) Print() {
+func (tr *Resolver) Print() {
 	for _, req := range tr.requests {
 		fmt.Printf("%s\n", req.String())
 	}
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
-func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
+func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
@@ -171,7 +173,7 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
-func (tr *TrieResolver) finaliseRoot() error {
+func (tr *Resolver) finaliseRoot() error {
 	tr.prec.Reset()
 	tr.prec.Write(tr.curr.Bytes())
 	tr.curr.Reset()
@@ -208,7 +210,7 @@ func (tr *TrieResolver) finaliseRoot() error {
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
+func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -271,7 +273,7 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	return true, nil
 }
 
-func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	var err error
 	if db == nil {
