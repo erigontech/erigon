@@ -227,14 +227,14 @@ func (hb *HashBuilder) leafHash(length int) {
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = rlp.EmptyString[0] + byte(compactLen)
+		keyPrefix[0] = rlp.EmptyStringCode + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
 		kl = 1
 	}
 	val := hb.value.B
-	if len(val) > 1 || val[0] >= rlp.EmptyString[0] {
+	if len(val) > 1 || val[0] >= rlp.EmptyStringCode {
 		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
 		vl = len(val)
 	} else {
@@ -285,7 +285,7 @@ func (hb *HashBuilder) leafHash(length int) {
 		if _, err := hb.sha.Write(val); err != nil {
 			panic(err)
 		}
-		hash[0] = rlp.EmptyString[0] + common.HashLength
+		hash[0] = rlp.EmptyStringCode + common.HashLength
 		if _, err := hb.sha.Read(hash[1:]); err != nil {
 			panic(err)
 		}
@@ -322,6 +322,7 @@ func (hb *HashBuilder) extensionHash(key []byte) {
 	var compactLen int
 	var ni int
 	var compact0 byte
+	// https://github.com/ethereum/wiki/wiki/Patricia-Tree#specification-compact-encoding-of-hex-sequence-with-optional-terminator
 	if hasTerm(key) {
 		compactLen = (len(key)-1)/2 + 1
 		if len(key)&1 == 0 {
@@ -338,7 +339,7 @@ func (hb *HashBuilder) extensionHash(key []byte) {
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = rlp.EmptyString[0] + byte(compactLen)
+		keyPrefix[0] = rlp.EmptyStringCode + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -410,11 +411,11 @@ func (hb *HashBuilder) branchHash(set uint16) {
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == rlp.EmptyString[0]+common.HashLength {
+			if hashes[hashStackStride*i] == rlp.EmptyStringCode+common.HashLength {
 				totalSize += common.HashLength
 			} else {
 				// Embedded node
-				totalSize += int(hashes[hashStackStride*i] - rlp.EmptyList[0])
+				totalSize += int(hashes[hashStackStride*i] - rlp.EmptyListCode)
 			}
 			i++
 		}
@@ -428,16 +429,16 @@ func (hb *HashBuilder) branchHash(set uint16) {
 	// Output children hashes or embedded RLPs
 	i = 0
 	var b [1]byte
-	b[0] = rlp.EmptyString[0]
+	b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == rlp.EmptyString[0]+common.HashLength {
+			if hashes[hashStackStride*i] == rlp.EmptyStringCode+common.HashLength {
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*(i+1)]); err != nil {
 					panic(err)
 				}
 			} else {
 				// Embedded node
-				size := int(hashes[hashStackStride*i] - rlp.EmptyList[0])
+				size := int(hashes[hashStackStride*i] - rlp.EmptyListCode)
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+size+1]); err != nil {
 					panic(err)
 				}
@@ -450,7 +451,7 @@ func (hb *HashBuilder) branchHash(set uint16) {
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
-	hb.hashStack[len(hb.hashStack)-hashStackStride] = rlp.EmptyString[0] + common.HashLength
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = rlp.EmptyStringCode + common.HashLength
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		panic(err)
 	}
