@@ -61,7 +61,7 @@ func TestV2HashBuilding(t *testing.T) {
 	var valueTape OneBytesTape
 	hb.SetKeyTape(&curr)
 	hb.SetValueTape(&valueTape)
-	var groups []uint32
+	var groups []uint16
 	for i, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -135,7 +135,7 @@ func TestV2Resolution(t *testing.T) {
 	var valueTape OneBytesTape
 	hb.SetKeyTape(&curr)
 	hb.SetValueTape(&valueTape)
-	var groups []uint32
+	var groups []uint16
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())

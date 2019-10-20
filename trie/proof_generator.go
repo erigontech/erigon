@@ -658,7 +658,7 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 			if trace {
 				fmt.Printf("BRANCH ")
 			}
-			var set uint32
+			var set uint16
 			if err := decoder.Decode(&set); err != nil {
 				return nil, nil, err
 			}
@@ -669,7 +669,7 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 			if trace {
 				fmt.Printf("BRANCHHASH ")
 			}
-			var set uint32
+			var set uint16
 			if err := decoder.Decode(&set); err != nil {
 				return nil, nil, err
 			}

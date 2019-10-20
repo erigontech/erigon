@@ -49,7 +49,7 @@ type (
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		Key []byte
+		Key []byte // HEX encoding
 		Val node
 	}
 	hashNode  []byte

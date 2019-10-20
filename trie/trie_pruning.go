@@ -19,6 +19,7 @@
 package trie
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -28,7 +29,7 @@ import (
 type TriePruning struct {
 	accountTimestamps map[string]uint64
 
-	// Maps timestamp (uint64) to set of prefixes of nodees (string)
+	// Maps timestamp (uint64) to set of prefixes of nodes (string)
 	accounts map[uint64]map[string]struct{}
 
 	// For each timestamp, keeps number of branch nodes belonging to it
@@ -208,4 +209,15 @@ func (tp *TriePruning) NodeCount() int {
 
 func (tp *TriePruning) GenCounts() map[uint64]int {
 	return tp.generationCounts
+}
+
+// DebugDump is used in the tests to ensure that there are no prunable entries (in such case, this function returns empty string)
+func (tp *TriePruning) DebugDump() string {
+	var sb strings.Builder
+	for timestamp, m := range tp.accounts {
+		for account := range m {
+			sb.WriteString(fmt.Sprintf("%d %x\n", timestamp, account))
+		}
+	}
+	return sb.String()
 }

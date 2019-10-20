@@ -416,7 +416,7 @@ func (tds *TrieDbState) buildStorageTouches() map[addressHashWithIncarnation]Has
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
 func (tds *TrieDbState) resolveStorageTouches(storageTouches map[addressHashWithIncarnation]Hashes) error {
-	var resolver *trie.TrieResolver
+	var resolver *trie.Resolver
 	for addressHash, hashes := range storageTouches {
 		var addrHash = addressHash.Hash()
 		for _, keyHash := range hashes {
@@ -494,7 +494,7 @@ func (tds *TrieDbState) buildDeletedAccountTouches() error {
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
 func (tds *TrieDbState) resolveAccountTouches(accountTouches Hashes) error {
-	var resolver *trie.TrieResolver
+	var resolver *trie.Resolver
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
 			if resolver == nil {
@@ -571,6 +571,8 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 	accountUpdates := tds.aggregateBuffer.accountUpdates
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Address]struct{})
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
@@ -578,6 +580,11 @@ func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for address := range b.created {
+			// Prevent repeated storage clearouts
+			if _, ok := alreadyCreated[address]; ok {
+				continue
+			}
+			alreadyCreated[address] = struct{}{}
 			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
@@ -1304,4 +1311,8 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	return nil
+}
+
+func (tds *TrieDbState) TriePruningDebugDump() string {
+	return tds.tp.DebugDump()
 }

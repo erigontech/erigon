@@ -195,10 +195,8 @@ number of items from the stack as the number of digits in the operand's set, cre
 onto the node stack (and push its hash onto the hash stack). Sets of digits can be seen as the horizontal
 rectangles on the picture `prefix_groups_4`.
 The correspondence between digits in the operand's set and the items popped from the stack is as follows.
-If the special, 17th digit is not present in the set, then the top of the stack (the item being popped off first)
+The top of the stack (the item being popped off first)
 corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
-If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
-item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
 
 `BRANCHHASH` opcode is similar to the `BRANCH` with the difference is that instead of constructing the
 branch node, it only creates its 32-byte hash. It places hash of the node onto the hash stack, and `nil` onto
@@ -316,7 +314,7 @@ it observes three keys (sequences of digits) - current, preceding, and succeedin
 opcodes that manipulate the stack (technically, two stacks, but because they are always of the same lengths, we can
 just say "stack"), it keeps track of what is currently on the stack. Each prefix group which is currently being
 "assembled" by the algorithm, has some number of items on the stack. This is being tracked by an item in the `groups`
-slice. The index of the item in the slice is equal to the length of the prefix of the prefix group. And the `unit32`
+slice. The index of the item in the slice is equal to the length of the prefix of the prefix group. And the `uint16`
 value of the item is the bitmask, with one bit per digit (and also per item on the stack). Whenever the algorithm
 emits an opcode that would push something on the stack, one of the items in the `groups` slice gains one extra bit
 to its bitmask. When the algorithm emits an opcode that would pop one or more things from the stack, the corresponding

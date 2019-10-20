@@ -219,12 +219,12 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 }
 
 // ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
-// subtrie is specifed by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
+// subtrie is specified by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
 // is useful to ensure that specific leaves of the trie are fully expanded (and not rolled into
 // the hashes). One might think of two uses of ResolveRequests (and perhaps we need to consider
 // splitting them into two types). First type is to fetch certain number of levels of a given
 // subtrie, but specifying resolveHex and resolvePos such that resolvePos == len(resolveHex).
-// In such situations, it want to also set topLevels field in the TrieResolver to a non-zero
+// In such situations, it want to also set topLevels field in the Resolver to a non-zero
 // value, otherwise only a hashNode will be resolved.
 // Second type is to fetch a subtrie in such a way that a set of keys will be fully expanded,
 // so that one can perform reads, inserts, and deletes on those keys without needing to do
@@ -1003,8 +1003,12 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
 			if n.storage != nil {
+				h := key[:keyStart]
+				if h[len(h)-1] == 16 {
+					h = h[:len(h)-1]
+				}
 				// Mark all the storage nodes as deleted
-				t.touchAll(n.storage, key[:keyStart], true)
+				t.touchAll(n.storage, h, true)
 			}
 			n.storage = nil
 			n.hashCorrect = false
