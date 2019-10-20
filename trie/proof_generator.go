@@ -54,8 +54,9 @@ const (
 // version of the block witness
 // All buffers are streams of CBOR-encoded items (not a CBOR array, but individual items back-to-back)
 // `Keys` are binary strings
-// `Values` are either binary strings or integers (nonce) or big integers (balance)
-// {nonce - integer, balance - integer, optionally [root hash - binary string, code hash - binary string]}
+// `Values` are binary strings
+// `Nonces` are uint64 integers
+// `Balances` instances of big.Int
 // `Hashes` are binary strings, all of size 32
 // `Codes` are binary strings
 // `Structure` are integers (for opcodes themselves), potentially followed by binary strings (key for EXTENSION) or

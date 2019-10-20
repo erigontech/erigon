@@ -276,15 +276,13 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 	if err := tds.ResolveStateTrie(); err != nil {
 		return nil, err
 	}
-	roots, err := tds.computeTrieRoots(true)
-	tds.clearUpdates()
-	return roots, err
+	return tds.UpdateStateTrie()
 }
 
 // UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
-	roots, err := tds.computeTrieRoots(true)
+	roots, err := tds.updateTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -520,7 +518,10 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches Hashes) {
 	}
 }
 
-func (tds *TrieDbState) ExtractTouches() ([][]byte, [][]byte) {
+// ExtractTouches returns two lists of keys - for accounts and storage items correspondingly
+// Each list is the collection of keys that have been "touched" (inserted, updated, or simply accessed)
+// since the last invocation of `ExtractTouches`.
+func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouches [][]byte) {
 	return tds.pg.ExtractTouches()
 }
 
@@ -569,7 +570,7 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
-func (tds *TrieDbState) computeTrieRoots(forward bool) ([]common.Hash, error) {
+func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	accountUpdates := tds.aggregateBuffer.accountUpdates
 	// The following map is to prevent repeated clearouts of the storage
 	alreadyCreated := make(map[common.Address]struct{})
@@ -778,7 +779,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	if err := tds.ResolveStateTrie(); err != nil {
 		return err
 	}
-	if _, err := tds.computeTrieRoots(false); err != nil {
+	if _, err := tds.updateTrieRoots(false); err != nil {
 		return err
 	}
 	for addrHash, account := range tds.aggregateBuffer.accountUpdates {

@@ -35,7 +35,7 @@ var chartColors = []drawing.Color{
 	chart.ColorGreen,
 }
 
-func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *params.ChainConfig,
+func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	bcb core.ChainContext, header *types.Header, block *types.Block, trace bool, checkRoot bool,
 ) error {
 	vmConfig := vm.Config{}
@@ -229,7 +229,7 @@ func stateless(chaindata string, statefile string) {
 				}
 				return
 			}
-			if err := runBlock(tds, s, chainConfig, bcb, header, block, trace, true); err != nil {
+			if err := runBlock(s, chainConfig, bcb, header, block, trace, true); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			}
