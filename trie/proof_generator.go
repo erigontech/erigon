@@ -583,6 +583,7 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 		return nil, nil, err
 	}
 	hb := NewHashBuilder()
+	// It is important to read the tapes in the same order as they were written
 	startOffset := decoder.NumBytesRead()
 	endOffset := startOffset + lens[KeyTape]
 	hb.SetKeyTape(NewCborBytesTape(bw[startOffset:endOffset]))

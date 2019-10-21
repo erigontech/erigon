@@ -252,6 +252,14 @@ func (tr *Resolver) finaliseRoot() error {
 	return nil
 }
 
+// Various values of the account field set
+const (
+	AccountFieldSetNotAccount       uint32 = 0x00
+	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
+	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
+	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
+)
+
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
@@ -299,12 +307,12 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				return false, err
 			}
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
-				tr.fieldSet = 3
+				tr.fieldSet = AccountFieldSetNotContract
 			} else {
 				if tr.a.HasStorageSize {
-					tr.fieldSet = 31
+					tr.fieldSet = AccountFieldSetContractWithSize
 				} else {
-					tr.fieldSet = 15
+					tr.fieldSet = AccountFieldSetContract
 				}
 				// Load hashes onto the stack of the hashbuilder
 				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
@@ -321,7 +329,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				tr.value.Buffer.WriteByte(byte(128 + len(v)))
 			}
 			tr.value.Buffer.Write(v)
-			tr.fieldSet = 0
+			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}
 	return true, nil
