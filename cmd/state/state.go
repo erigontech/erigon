@@ -470,7 +470,7 @@ func stateGrowthChart1(start int, window int) {
 			StrokeColor: chart.ColorRed,
 		},
 		YAxis:   chart.YAxisSecondary,
-		XValues: blocks,
+		XValues: gBlocks,
 		YValues: gaslimits,
 	}
 	graph1 := chart.Chart{
@@ -574,7 +574,7 @@ func stateGrowthChart2(start, window int) {
 			StrokeColor: chart.ColorRed,
 		},
 		YAxis:   chart.YAxisSecondary,
-		XValues: blocks,
+		XValues: gBlocks,
 		YValues: gaslimits,
 	}
 	graph1 := chart.Chart{
