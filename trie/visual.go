@@ -24,7 +24,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -44,7 +43,6 @@ type VisualOpts struct {
 }
 
 // Visual creates visualisation of trie with highlighting
-// cutTerminals
 func Visual(t *Trie, w io.Writer, opts *VisualOpts) {
 	var leaves map[string]struct{}
 	if opts.Values {
@@ -299,6 +297,8 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 	}
 }
 
+// Fold modifies the trie by folding the given set of keys, making sure that they are inaccessible
+// without resolution via DB
 func (t *Trie) Fold(keys [][]byte) {
 	var hexes = make([][]byte, 0, len(keys))
 	for _, key := range keys {
@@ -400,6 +400,7 @@ func HexToQuad(t *Trie) *Trie {
 	return newTrie
 }
 
+// KeyToQuad converts a key in KEY encoding to QUAD encoding (similar to HEX encoding, but uses digits 0..3 instead of digits 0..15)
 func KeyToQuad(key []byte) []byte {
 	l := len(key)*2 + 1
 	var nibbles = make([]byte, l)
@@ -473,80 +474,8 @@ func hexToQuad(nd node, hex []byte, newTrie *Trie) {
 	}
 }
 
-func MakeBlockProof(t *Trie, rs *ResolveSet) *Trie {
-	newTrie := New(common.Hash{})
-	hr := newHasher(false)
-	defer returnHasherToPool(hr)
-	newTrie.root = makeBlockProof(t.root, []byte{}, rs, hr, true)
-	return newTrie
-}
-
-func makeBlockProof(nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool) node {
-	switch n := nd.(type) {
-	case nil:
-		return nil
-	case valueNode:
-		return n
-	case *shortNode:
-		newNode := &shortNode{Key: n.Key}
-		h := n.Key
-		// Remove terminator
-		if h[len(h)-1] == 16 {
-			h = h[:len(h)-1]
-		}
-		hexVal := concat(hex, h...)
-		newNode.Val = makeBlockProof(n.Val, hexVal, rs, hr, false)
-		return newNode
-	case *duoNode:
-		if rs.HashOnly(hex) {
-			var hn common.Hash
-			hr.hash(n, force, hn[:])
-			return hashNode(hn[:])
-		}
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		newNode := &duoNode{}
-		newNode.flags.dirty = true
-		newNode.child1 = makeBlockProof(n.child1, hex1, rs, hr, false)
-		newNode.child2 = makeBlockProof(n.child2, hex2, rs, hr, false)
-		newNode.mask = n.mask
-		return newNode
-	case *fullNode:
-		if rs.HashOnly(hex) {
-			var hn common.Hash
-			hr.hash(n, len(hex) == 0, hn[:])
-			return hashNode(hn[:])
-		}
-		newNode := &fullNode{}
-		newNode.flags.dirty = true
-		for i, child := range n.Children {
-			if child != nil {
-				newNode.Children[i] = makeBlockProof(child, concat(hex, byte(i)), rs, hr, false)
-			}
-		}
-		return newNode
-	case *accountNode:
-		var ac accounts.Account
-		ac.Copy(&n.Account)
-		newNode := &accountNode{ac, nil, false}
-		if n.storage != nil && rs.HashOnly(hex) {
-			var hn common.Hash
-			hr.hash(n, len(hex) == 0, hn[:])
-			newNode.storage = hashNode(hn[:])
-		} else {
-			newNode.storage = makeBlockProof(n.storage, hex, rs, hr, true)
-		}
-		return newNode
-	default:
-		panic(fmt.Sprintf("%T", nd))
-	}
-}
-
+// FullKeys construct the list of full keys (i.e. keys that can be accessed without resolution via DB) that are present in
+// the given trie
 func FullKeys(t *Trie) []string {
 	return fullKeys(t.root, nil, nil)
 }

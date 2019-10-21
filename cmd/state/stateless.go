@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/csv"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
@@ -25,7 +24,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var chartColors = []drawing.Color{
@@ -37,7 +35,7 @@ var chartColors = []drawing.Color{
 	chart.ColorGreen,
 }
 
-func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *params.ChainConfig,
+func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	bcb core.ChainContext, header *types.Header, block *types.Block, trace bool, checkRoot bool,
 ) error {
 	vmConfig := vm.Config{}
@@ -67,18 +65,13 @@ func runBlock(tds *state.TrieDbState, dbstate *state.Stateless, chainConfig *par
 	if err := statedb.CommitBlock(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(header.Root, checkRoot); err != nil {
-		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
-		f, err1 := os.Create(filename)
-		if err1 == nil {
-			defer f.Close()
-			tds.PrintTrie(f)
-		}
+	if err := dbstate.CheckRoot(header.Root); err != nil {
 		return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
 	}
 	return nil
 }
 
+/*
 func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 	var totalCShorts, totalCValues, totalCodes, totalShorts, totalValues int
 	for _, short := range blockProof.CShortKeys {
@@ -111,8 +104,9 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 		len(blockProof.Masks), len(blockProof.Hashes), len(blockProof.ShortKeys), len(blockProof.Values), totalCShorts, totalCValues, totalCodes, totalShorts, totalValues,
 	)
 }
+*/
 
-func stateless(genLag, consLag int) {
+func stateless(chaindata string, statefile string) {
 	//state.MaxTrieCacheGen = 64*1024
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -124,27 +118,20 @@ func stateless(genLag, consLag int) {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata1")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
-	//slFile, err := os.OpenFile("/Volumes/tb4/turbo-geth/stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	slFile, err := os.OpenFile("stateless.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer slFile.Close()
 	w := bufio.NewWriter(slFile)
 	defer w.Flush()
-	slfFile, err := os.OpenFile(fmt.Sprintf("stateless_%d.csv", consLag), os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	check(err)
-	defer slfFile.Close()
-	wf := bufio.NewWriter(slfFile)
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	stateDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/state")
+	stateDb, err := ethdb.NewBoltDatabase(statefile)
 	check(err)
 	db := stateDb.DB()
 	blockNum := uint64(*block)
@@ -173,21 +160,10 @@ func stateless(genLag, consLag int) {
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 5000000
-	//prev := make(map[uint64]*state.Stateless)
-	var proofGen *state.Stateless  // Generator of proofs
-	var proofCons *state.Stateless // Consumer of proofs
+	var thresholdBlock uint64 = 1
+	var witness []byte
 	for !interrupt {
-		trace := false // blockNum == 1807
-		if trace {
-			filename := fmt.Sprintf("right_%d.txt", blockNum-1)
-			f, err1 := os.Create(filename)
-			if err1 == nil {
-				defer f.Close()
-				tds.PrintTrie(f)
-				//tds.PrintStorageTrie(f, common.HexToHash("1a4fa162e70315921486693f1d5943b7704232081b39206774caa567d63f633f"))
-			}
-		}
+		trace := false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= thresholdBlock)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -226,9 +202,50 @@ func stateless(genLag, consLag int) {
 			return
 		}
 
-		roots, err := tds.ComputeTrieRoots()
+		if err = tds.ResolveStateTrie(); err != nil {
+			fmt.Printf("Failed to resolve state trie: %v\n", err)
+			return
+		}
+		witness = nil
+		if blockNum >= thresholdBlock {
+			// Witness has to be extracted before the state trie is modified
+			witness, err = tds.ExtractWitness(trace)
+			if err != nil {
+				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
+				return
+			}
+		}
+		finalRootFail := false
+		if blockNum >= thresholdBlock && witness != nil { // witness == nil means the extraction fails
+			var s *state.Stateless
+			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace)
+			if err != nil {
+				fmt.Printf("Error making stateless2 for block %d: %v\n", blockNum, err)
+				filename := fmt.Sprintf("right_%d.txt", blockNum-1)
+				f, err1 := os.Create(filename)
+				if err1 == nil {
+					defer f.Close()
+					tds.PrintTrie(f)
+				}
+				return
+			}
+			if err := runBlock(s, chainConfig, bcb, header, block, trace, true); err != nil {
+				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
+				finalRootFail = true
+			}
+		}
+		roots, err := tds.UpdateStateTrie()
 		if err != nil {
-			fmt.Printf("Failed to calculate IntermediateRoot: %v\n", err)
+			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
+			return
+		}
+		if finalRootFail {
+			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			f, err1 := os.Create(filename)
+			if err1 == nil {
+				defer f.Close()
+				tds.PrintTrie(f)
+			}
 			return
 		}
 		if !chainConfig.IsByzantium(header.Number) {
@@ -245,78 +262,23 @@ func stateless(genLag, consLag int) {
 
 		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
-			fmt.Errorf("Commiting block %d failed: %v", blockNum, err)
+			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
 		}
-		if _, err := batch.Commit(); err != nil {
-			fmt.Printf("Failed to commit batch: %v\n", err)
-			return
+		if batch.BatchSize() >= 100000 {
+			if _, err := batch.Commit(); err != nil {
+				fmt.Printf("Failed to commit batch: %v\n", err)
+				return
+			}
 		}
 		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
-			save_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
-		}
-		if blockNum >= thresholdBlock {
-			blockProof := tds.ExtractProofs(trace)
-			dbstate, err := state.NewStateless(preRoot, blockProof, block.NumberU64()-1, trace)
-			if err != nil {
-				fmt.Printf("Error making state for block %d: %v\n", blockNum, err)
-			} else {
-				if err := runBlock(tds, dbstate, chainConfig, bcb, header, block, trace, true); err != nil {
-					fmt.Printf("Error running block %d through stateless0: %v\n", blockNum, err)
-				} else {
-					writeStats(w, blockNum, blockProof)
-				}
-			}
-			if proofCons == nil {
-				proofCons, err = state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
-				if err != nil {
-					fmt.Printf("Error making proof consumer for block %d: %v\n", blockNum, err)
-				}
-			}
-			if proofGen == nil {
-				proofGen, err = state.NewStateless(preRoot, blockProof, block.NumberU64()-1, false)
-				if err != nil {
-					fmt.Printf("Error making proof generator for block %d: %v\n", blockNum, err)
-				}
-			}
-			if proofGen != nil && proofCons != nil {
-				if blockNum > uint64(consLag) {
-					pBlockProof := proofGen.ThinProof(blockProof, block.NumberU64()-1, blockNum-uint64(consLag), trace)
-					if err := proofCons.ApplyProof(preRoot, pBlockProof, block.NumberU64()-1, false); err != nil {
-						fmt.Printf("Error applying thin proof to consumer: %v\n", err)
-						return
-					}
-					writeStats(wf, blockNum, pBlockProof)
-				} else {
-					if err := proofCons.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
-						fmt.Printf("Error applying proof to consumer: %v\n", err)
-						return
-					}
-				}
-				if err := runBlock(tds, proofCons, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through proof consumer: %v\n", blockNum, err)
-				}
-				if blockNum > uint64(consLag) {
-					proofCons.Prune(blockNum-uint64(consLag), false)
-				}
-			}
-			if proofGen != nil {
-				if err := proofGen.ApplyProof(preRoot, blockProof, block.NumberU64()-1, false); err != nil {
-					fmt.Printf("Error applying proof to generator: %v\n", err)
-					return
-				}
-				if err := runBlock(tds, proofGen, chainConfig, bcb, header, block, trace, false); err != nil {
-					fmt.Printf("Error running block %d through proof generator: %v\nn", blockNum, err)
-				}
-				if blockNum > uint64(genLag) {
-					proofGen.Prune(blockNum-uint64(genLag), false)
-				}
-			}
+			// Snapshots of the state will be written to the same directory as the state file
+			save_snapshot(db, fmt.Sprintf("%s_%d", statefile, blockNum))
 		}
 		preRoot = header.Root
 		blockNum++
 		if blockNum%1000 == 0 {
-			tds.PruneTries(true)
+			tds.PruneTries(false)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
@@ -325,6 +287,10 @@ func stateless(genLag, consLag int) {
 			fmt.Println("interrupted, please wait for cleanup...")
 		default:
 		}
+	}
+	if _, err := batch.Commit(); err != nil {
+		fmt.Printf("Failed to commit batch: %v\n", err)
+		return
 	}
 	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"os/signal"
@@ -32,7 +31,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	colorable "github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
@@ -47,9 +49,8 @@ var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
-var genLag = flag.Int("genlag", 4096, "how many blocks to accumulate block proofs over for generator")
-var consLag = flag.Int("conslag", 256, "how many blocks to accumulate block proofs over for consumer")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata file used as input to analysis")
+var statefile = flag.String("statefile", "state", "path to the file where the state will be periodically written during the analysis")
 
 func check(e error) {
 	if e != nil {
@@ -1665,15 +1666,32 @@ func makeSha3Preimages() {
 }
 
 func main() {
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.Lvl(3)) // 3 == verbosity INFO
+
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal("could not create CPU profile: ", err)
+			log.Error("could not create CPU profile", "error", err)
+			return
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("could not start CPU profile: ", err)
+			log.Error("could not start CPU profile", "error", err)
+			return
 		}
 		defer pprof.StopCPUProfile()
 	}
@@ -1706,7 +1724,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*genLag, *consLag)
+		stateless(*chaindata, *statefile)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)
@@ -1742,12 +1760,14 @@ func main() {
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)
 		if err != nil {
-			log.Fatal("could not create mem profile: ", err)
+			log.Error("could not create mem profile", "error", err)
+			return
 		}
 		defer f.Close()
 		runtime.GC() // get up-to-date statistics
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Fatal("could not write memory profile: ", err)
+			log.Error("could not write memory profile", "error", err)
+			return
 		}
 	}
 }
