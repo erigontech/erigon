@@ -6,7 +6,6 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io"
 	"io/ioutil"
 	"log"
@@ -20,6 +19,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -48,6 +49,7 @@ var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
 var genLag = flag.Int("genlag", 4096, "how many blocks to accumulate block proofs over for generator")
 var consLag = flag.Int("conslag", 256, "how many blocks to accumulate block proofs over for consumer")
+var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata file used as input to analysis")
 
 func check(e error) {
 	if e != nil {
@@ -1730,7 +1732,9 @@ func main() {
 		}
 	}
 	//estimate()
-	//verify_snapshot()
+	if *action == "verifySnapshot" {
+		verifySnapshot(*chaindata)
+	}
 	//feemarket()
 	//transaction_stats()
 	//naked_storage_vs_blockproof()

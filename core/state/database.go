@@ -671,12 +671,18 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					return err
 				}
 				b.accountUpdates[addrHash] = &acc
+				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
+					return err
+				}
 			} else {
 				b.accountUpdates[addrHash] = nil
+				if err := tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
+					return err
+				}
 			}
 		} else if bytes.Equal(bucket, dbutils.StorageHistoryBucket) {
-			var address common.Hash
-			copy(address[:], key[:common.HashLength])
+			var addrHash common.Hash
+			copy(addrHash[:], key[:common.HashLength])
 			var keyHash common.Hash
 			copy(keyHash[:], key[common.HashLength+IncarnationLength:])
 			var addrHashWithVersion addressHashWithIncarnation
@@ -688,8 +694,14 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = AddExtraRLPLevel(value)
+				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+IncarnationLength+common.HashLength], value); err != nil {
+					return err
+				}
 			} else {
 				m[keyHash] = nil
+				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+IncarnationLength+common.HashLength]); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -698,35 +710,6 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}
 	if _, err := tds.computeTrieRoots(false); err != nil {
 		return err
-	}
-	for addrHash, account := range tds.aggregateBuffer.accountUpdates {
-		if account == nil {
-			if err := tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
-				return err
-			}
-		} else {
-			//todo is aggregateBuffer collect data from one block?
-			valueLen := account.EncodingLengthForStorage()
-			value := make([]byte, valueLen)
-			account.EncodeForStorage(value)
-			if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
-				return err
-			}
-		}
-	}
-	for addressHash, m := range tds.aggregateBuffer.storageUpdates {
-		for keyHash, value := range m {
-			if len(value) == 0 {
-				if err := tds.db.Delete(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addressHash.Hash(), addressHash.Incarnation(), keyHash)); err != nil {
-					return err
-				}
-			} else {
-				cKey := dbutils.GenerateCompositeStorageKey(addressHash.Hash(), addressHash.Incarnation(), keyHash)
-				if err := tds.db.Put(dbutils.StorageBucket, cKey, value); err != nil {
-					return err
-				}
-			}
-		}
 	}
 	for i := tds.blockNr; i > blockNr; i-- {
 		if err := tds.db.DeleteTimestamp(i); err != nil {

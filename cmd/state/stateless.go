@@ -162,7 +162,7 @@ func stateless(genLag, consLag int) {
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
-		check_roots(stateDb, db, preRoot, blockNum-1)
+		checkRoots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)

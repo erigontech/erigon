@@ -10,7 +10,7 @@ contract Selfdestruct {
 
     constructor() public {
         // Fill some storage positions
-        x = 1;
+        x = 1 << 32; // Large number to make sure encoding has multiple bytes
         y = 2;
         z = 3;
     }
