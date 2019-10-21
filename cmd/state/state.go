@@ -1750,7 +1750,9 @@ func main() {
 		}
 	}
 	//estimate()
-	//verify_snapshot()
+	if *action == "verifySnapshot" {
+		verifySnapshot(*chaindata)
+	}
 	//feemarket()
 	//transaction_stats()
 	//naked_storage_vs_blockproof()

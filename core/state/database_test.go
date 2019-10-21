@@ -303,6 +303,9 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
+	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+	correctValueX := st.GetState(contractAddress, common.Hash{})
+
 	// BLOCKS 2 + 3
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1], blocks[2]}); err != nil {
 		t.Fatal(err)
@@ -320,6 +323,17 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st, _, _ = blockchain.State()
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+	}
+
+	// Reload blockchain from the database
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ = blockchain.State()
+	valueX := st.GetState(contractAddress, common.Hash{})
+	if valueX != correctValueX {
+		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
 }
 func TestCreateOnExistingStorage(t *testing.T) {

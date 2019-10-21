@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"os"
 	"time"
@@ -325,36 +326,36 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	check(err)
 }
 
-func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
+func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
 	r := trie.NewResolver(0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
-	err := r.ResolveWithDb(stateDb, blockNum)
-	if err != nil {
+	var err error
+	if err = r.ResolveWithDb(stateDb, blockNum); err != nil {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Trie computation took %v\n", time.Since(startTime))
 	startTime = time.Now()
-	var address common.Address
-	roots := make(map[common.Address]common.Hash)
+	var addrHash common.Hash
+	roots := make(map[common.Hash]common.Hash)
 	err = db.View(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(dbutils.StorageBucket)
 		b := tx.Bucket(dbutils.AccountsBucket)
 		c := sb.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			copy(address[:], k[:20])
-			if _, ok := roots[address]; !ok {
-				if enc, _ := b.Get(crypto.Keccak256(address[:])); enc == nil {
-					roots[address] = common.Hash{}
+			copy(addrHash[:], k[:32])
+			if _, ok := roots[addrHash]; !ok {
+				if enc, _ := b.Get(addrHash[:]); enc == nil {
+					roots[addrHash] = common.Hash{}
 				} else {
 					var account accounts.Account
 					if err = account.DecodeForStorage(enc); err != nil {
 						return err
 					}
-					roots[address] = account.Root
+					roots[addrHash] = account.Root
 				}
 			}
 		}
@@ -363,21 +364,21 @@ func check_roots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, bloc
 	if err != nil {
 		panic(err)
 	}
-	for address, root := range roots {
+	for addrHash, root := range roots {
 		if root != (common.Hash{}) && root != trie.EmptyRoot {
 			st := trie.New(root)
 			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
-			addrHash := crypto.Keccak256(address.Bytes())
-			copy(contractPrefix, addrHash)
+			copy(contractPrefix, addrHash[:])
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
 			// TODO Issue 99 [Boris] support incarnations
 			streq := st.NewResolveRequest(contractPrefix, key, 0, root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {
-				fmt.Printf("%x: %v\n", address, err)
-				filename := fmt.Sprintf("tries/root_%x.txt", address)
+				fmt.Printf("%x: %v\n", addrHash, err)
+				filename := fmt.Sprintf("tries/root_%x.txt", addrHash)
 				f, err := os.Create(filename)
 				if err == nil {
 					defer f.Close()
@@ -414,26 +415,23 @@ func stateSnapshot() error {
 	block := bc.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
-	check_roots(ethDb, ethDb.DB(), block.Root(), blockNum)
+	checkRoots(ethDb, ethDb.DB(), block.Root(), blockNum)
 	return nil
 }
 
-func verify_snapshot() {
+func verifySnapshot(chaindata string) {
 	blockNum := uint64(*block)
-	ethDb, err := ethdb.NewBoltDatabase(fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum))
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	engine := ethash.NewFullFaker()
 	chainConfig := params.MainnetChainConfig
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	block := bcb.GetBlockByNumber(blockNum)
-	fmt.Printf("Block number: %d\n", blockNum)
-	fmt.Printf("Block root hash: %x\n", block.Root())
-	preRoot := block.Root()
-	stateDb, db := ethdb.NewMemDatabase2()
-	defer stateDb.Close()
-	load_snapshot(db, fmt.Sprintf("state_%d", blockNum))
-	check_roots(ethDb, db, preRoot, blockNum)
+	currentBlock := bc.CurrentBlock()
+	currentBlockNr := currentBlock.NumberU64()
+	fmt.Printf("Block number: %d\n", currentBlockNr)
+	fmt.Printf("Block root hash: %x\n", currentBlock.Root())
+	preRoot := currentBlock.Root()
+	checkRoots(ethDb, ethDb.DB(), preRoot, blockNum)
 }
