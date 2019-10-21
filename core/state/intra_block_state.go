@@ -292,7 +292,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 	if stateObject.code != nil {
 		return len(stateObject.code)
 	}
-	len, err := sdb.stateReader.ReadAccountCodeSize(common.BytesToHash(stateObject.CodeHash()))
+	len, err := sdb.stateReader.ReadAccountCodeSize(addr, common.BytesToHash(stateObject.CodeHash()))
 	if err != nil {
 		sdb.setError(err)
 	}
@@ -786,6 +786,12 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			}
 			stateObject.deleted = true
 		} else {
+			// Write any contract code associated with the state object
+			if stateObject.code != nil && stateObject.dirtyCode {
+				if err := stateWriter.UpdateAccountCode(common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+					return err
+				}
+			}
 			if stateObject.created {
 				if err := stateWriter.CreateContract(addr); err != nil {
 					return err

@@ -49,11 +49,12 @@ func NewResolveSet(minLength int) *ResolveSet {
 	return &ResolveSet{minLength: minLength}
 }
 
-// AddKey adds a new key to the set
+// AddKey adds a new key (in KEY encoding) to the set
 func (rs *ResolveSet) AddKey(key []byte) {
 	rs.hexes = append(rs.hexes, keybytesToHex(key))
 }
 
+// AddHex adds a new key (in HEX encoding) to the set
 func (rs *ResolveSet) AddHex(hex []byte) {
 	rs.hexes = append(rs.hexes, hex)
 }

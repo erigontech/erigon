@@ -194,15 +194,15 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	return enc, nil
 }
 
-func (dbs *DbState) ReadAccountCode(codeHash common.Hash) ([]byte, error) {
+func (dbs *DbState) ReadAccountCode(address common.Address, codeHash common.Hash) ([]byte, error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
 	return dbs.db.Get(dbutils.CodeBucket, codeHash[:])
 }
 
-func (dbs *DbState) ReadAccountCodeSize(codeHash common.Hash) (int, error) {
-	code, err := dbs.ReadAccountCode(codeHash)
+func (dbs *DbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (int, error) {
+	code, err := dbs.ReadAccountCode(address, codeHash)
 	if err != nil {
 		return 0, err
 	}
