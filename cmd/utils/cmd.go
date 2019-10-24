@@ -238,7 +238,7 @@ func ExportAppendChain(blockchain *core.BlockChain, fn string, first uint64, las
 }
 
 // ImportPreimages imports a batch of exported hash preimages into the database.
-func ImportPreimages(db ethdb.Database, fn string) error {
+func ImportPreimages(db rawdb.DatabaseWriter, fn string) error {
 	log.Info("Importing preimages", "file", fn)
 
 	// Open the file handle and potentially unwrap the gzip stream
