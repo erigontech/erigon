@@ -47,7 +47,7 @@ type BoltDatabase struct {
 	log log.Logger // Contextual logger tracking the database path
 }
 
-// NewBoltDatabase returns a LevelDB wrapped object.
+// NewBoltDatabase returns a BoltDB wrapped object.
 func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	logger := log.New("database", file)
 

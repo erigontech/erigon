@@ -49,7 +49,7 @@ func (am *AccountingMetrics) Close() {
 }
 
 //reporter is an internal structure used to write p2p accounting related
-//metrics to a LevelDB. It will periodically write the accrued metrics to the DB.
+//metrics to a database. It will periodically write the accrued metrics to the DB.
 type reporter struct {
 	reg      metrics.Registry //the registry for these metrics (independent of other metrics)
 	interval time.Duration    //duration at which the reporter will persist metrics
@@ -58,13 +58,13 @@ type reporter struct {
 	done     chan struct{}    //signal that reporter loop is done
 }
 
-//NewMetricsDB creates a new LevelDB instance used to persist metrics defined
+//NewMetricsDB creates a new BoltDB instance used to persist metrics defined
 //inside p2p/protocols/accounting.go
 func NewAccountingMetrics(r metrics.Registry, d time.Duration, path string) *AccountingMetrics {
 	var val = make([]byte, 8)
 	var err error
 
-	//Create the LevelDB
+	//Create the BoltDB
 	db, err := bolt.Open(path, 0600, &bolt.Options{})
 	if err != nil {
 		log.Error(err.Error())
@@ -122,7 +122,7 @@ func NewAccountingMetrics(r metrics.Registry, d time.Duration, path string) *Acc
 	return m
 }
 
-//run is the goroutine which periodically sends the metrics to the configured LevelDB
+//run is the goroutine which periodically sends the metrics to the configured BoltDB
 func (r *reporter) run() {
 	// signal that the reporter loop is done
 	defer close(r.done)
@@ -134,7 +134,7 @@ func (r *reporter) run() {
 		case <-intervalTicker.C:
 			//at each tick send the metrics
 			if err := r.save(); err != nil {
-				log.Error("unable to send metrics to LevelDB", "err", err)
+				log.Error("unable to send metrics to BoltDB", "err", err)
 				//If there is an error in writing, exit the routine; we assume here that the error is
 				//severe and don't attempt to write again.
 				//Also, this should prevent leaking when the node is stopped
@@ -143,7 +143,7 @@ func (r *reporter) run() {
 		case <-r.quit:
 			//graceful shutdown
 			if err := r.save(); err != nil {
-				log.Error("unable to send metrics to LevelDB", "err", err)
+				log.Error("unable to send metrics to BoltDB", "err", err)
 			}
 			return
 		}

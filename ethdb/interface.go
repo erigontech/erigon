@@ -62,7 +62,7 @@ type Database interface {
 	MemCopy() Database
 }
 
-// Extended version of the Batch, with read capabilites
+// Extended version of the Batch, with read capabilities
 type Mutation interface {
 	Database
 	Commit() (uint64, error)

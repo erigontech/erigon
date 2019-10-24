@@ -300,7 +300,7 @@ func importPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack)
 	start := time.Now()
 
 	if err := utils.ImportPreimages(diskdb, ctx.Args().First()); err != nil {
@@ -318,7 +318,7 @@ func exportPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack)
 	start := time.Now()
 
 	if err := utils.ExportPreimages(diskdb, ctx.Args().First()); err != nil {

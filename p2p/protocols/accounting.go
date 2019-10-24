@@ -111,7 +111,7 @@ func NewAccounting(balance Balance, po Prices) *Accounting {
 // SetupAccountingMetrics uses a separate registry for p2p accounting metrics;
 // this registry should be independent of any other metrics as it persists at different endpoints.
 // It also starts the persisting go-routine which
-// at the passed interval writes the metrics to a LevelDB
+// at the passed interval writes the metrics to a database.
 func SetupAccountingMetrics(reportInterval time.Duration, path string) *AccountingMetrics {
 	// create the DB and start persisting
 	return NewAccountingMetrics(metrics.AccountingRegistry, reportInterval, path)
