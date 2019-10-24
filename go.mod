@@ -14,7 +14,6 @@ require (
 	github.com/cespare/cp v0.1.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dgraph-io/badger v1.6.0 // indirect
 	github.com/docker/docker v0.0.0-20180625184442-8e610b2b55bf
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
 	github.com/elastic/gosigar v0.0.0-20180330100440-37f05ff46ffa
@@ -50,6 +49,7 @@ require (
 	github.com/pborman/uuid v0.0.0-20170112150404-1b00554d8222
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v0.0.0-20190123174540-a2c9a5303de7
+	github.com/pkg/errors v0.8.1 // indirect
 	github.com/prometheus/prometheus v0.0.0-20170814170113-3101606756c5
 	github.com/rjeczalik/notify v0.9.1
 	github.com/robertkrimen/otto v0.0.0-20170205013659-6a77b7cbc37d
