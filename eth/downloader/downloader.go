@@ -1552,6 +1552,171 @@ func (d *Downloader) importBlockResults(results []*fetchResult) error {
 	return nil
 }
 
+// processFastSyncContent takes fetch results from the queue and writes them to the
+// database. It also controls the synchronisation of state nodes of the pivot block.
+func (d *Downloader) processFastSyncContent(latest *types.Header) error {
+	// Start syncing state of the reported head block. This should get us most of
+	// the state of the pivot block.
+	sync := d.syncState(latest.Root)
+	defer sync.Cancel()
+	closeOnErr := func(s *stateSync) {
+		if err := s.Wait(); err != nil && err != errCancelStateFetch && err != errCanceled {
+			d.queue.Close() // wake up Results
+		}
+	}
+	go closeOnErr(sync)
+	// Figure out the ideal pivot block. Note, that this goalpost may move if the
+	// sync takes long enough for the chain head to move significantly.
+	pivot := uint64(0)
+	if height := latest.Number.Uint64(); height > uint64(fsMinFullBlocks) {
+		pivot = height - uint64(fsMinFullBlocks)
+	}
+	// To cater for moving pivot points, track the pivot block and subsequently
+	// accumulated download results separately.
+	var (
+		oldPivot *fetchResult   // Locked in pivot block, might change eventually
+		oldTail  []*fetchResult // Downloaded content after the pivot
+	)
+	for {
+		// Wait for the next batch of downloaded data to be available, and if the pivot
+		// block became stale, move the goalpost
+		results := d.queue.Results(oldPivot == nil) // Block if we're not monitoring pivot staleness
+		if len(results) == 0 {
+			// If pivot sync is done, stop
+			if oldPivot == nil {
+				return sync.Cancel()
+			}
+			// If sync failed, stop
+			select {
+			case <-d.cancelCh:
+				sync.Cancel()
+				return errCanceled
+			default:
+			}
+		}
+		if d.chainInsertHook != nil {
+			d.chainInsertHook(results)
+		}
+		if oldPivot != nil {
+			results = append(append([]*fetchResult{oldPivot}, oldTail...), results...)
+		}
+		// Split around the pivot block and process the two sides via fast/full sync
+		if atomic.LoadInt32(&d.committed) == 0 {
+			latest = results[len(results)-1].Header
+			if height := latest.Number.Uint64(); height > pivot+2*uint64(fsMinFullBlocks) {
+				log.Warn("Pivot became stale, moving", "old", pivot, "new", height-uint64(fsMinFullBlocks))
+				pivot = height - uint64(fsMinFullBlocks)
+			}
+		}
+		P, beforeP, afterP := splitAroundPivot(pivot, results)
+		if err := d.commitFastSyncData(beforeP, sync); err != nil {
+			return err
+		}
+		if P != nil {
+			// If new pivot block found, cancel old state retrieval and restart
+			if oldPivot != P {
+				sync.Cancel()
+
+				sync = d.syncState(P.Header.Root)
+				defer sync.Cancel()
+				go closeOnErr(sync)
+				oldPivot = P
+			}
+			// Wait for completion, occasionally checking for pivot staleness
+			select {
+			case <-sync.done:
+				if sync.err != nil {
+					return sync.err
+				}
+				if err := d.commitPivotBlock(P); err != nil {
+					return err
+				}
+				oldPivot = nil
+
+			case <-time.After(time.Second):
+				oldTail = afterP
+				continue
+			}
+		}
+		// Fast sync done, pivot commit done, full import
+		if err := d.importBlockResults(afterP); err != nil {
+			return err
+		}
+	}
+}
+
+func splitAroundPivot(pivot uint64, results []*fetchResult) (p *fetchResult, before, after []*fetchResult) {
+	for _, result := range results {
+		num := result.Header.Number.Uint64()
+		switch {
+		case num < pivot:
+			before = append(before, result)
+		case num == pivot:
+			p = result
+		default:
+			after = append(after, result)
+		}
+	}
+	return p, before, after
+}
+
+func (d *Downloader) commitFastSyncData(results []*fetchResult, stateSync *stateSync) error {
+	// Check for any early termination requests
+	if len(results) == 0 {
+		return nil
+	}
+	select {
+	case <-d.quitCh:
+		return errCancelContentProcessing
+	case <-stateSync.done:
+		if err := stateSync.Wait(); err != nil {
+			return err
+		}
+	default:
+	}
+	// Retrieve the a batch of results to import
+	first, last := results[0].Header, results[len(results)-1].Header
+	log.Debug("Inserting fast-sync blocks", "items", len(results),
+		"firstnum", first.Number, "firsthash", first.Hash(),
+		"lastnumn", last.Number, "lasthash", last.Hash(),
+	)
+	blocks := make([]*types.Block, len(results))
+	receipts := make([]types.Receipts, len(results))
+	for i, result := range results {
+		blocks[i] = types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
+		receipts[i] = result.Receipts
+	}
+	if index, err := d.blockchain.InsertReceiptChain(blocks, receipts, d.ancientLimit); err != nil {
+		log.Debug("Downloaded item processing failed", "number", results[index].Header.Number, "hash", results[index].Header.Hash(), "err", err)
+		return errInvalidChain
+	}
+	return nil
+}
+
+func (d *Downloader) commitPivotBlock(result *fetchResult) error {
+	block := types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
+	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
+
+	// Commit the pivot block as the new head, will require full sync from here on
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, d.ancientLimit); err != nil {
+		return err
+	}
+	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {
+		return err
+	}
+	atomic.StoreInt32(&d.committed, 1)
+
+	// If we had a bloom filter for the state sync, deallocate it now. Note, we only
+	// deallocate internally, but keep the empty wrapper. This ensures that if we do
+	// a rollback after committing the pivot and restarting fast sync, we don't end
+	// up using a nil bloom. Empty bloom is fine, it just returns that it does not
+	// have the info we need, so reach down to the database instead.
+	if d.stateBloom != nil {
+		d.stateBloom.Close()
+	}
+	return nil
+}
+
 // DeliverHeaders injects a new batch of block headers received from a remote
 // node into the download schedule.
 func (d *Downloader) DeliverHeaders(id string, headers []*types.Header) (err error) {
