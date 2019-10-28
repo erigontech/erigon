@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -335,9 +335,10 @@ const benchElemCount = 20000
 
 func benchGet(b *testing.B, commit bool) {
 	trie := new(Trie)
+	var tmpdir string
 	var tmpdb ethdb.Database
 	if commit {
-		_, tmpdb = tempDB()
+		tmpdir, tmpdb = tempDB()
 		trie = New(common.Hash{})
 	}
 	k := make([]byte, 32)
@@ -354,9 +355,8 @@ func benchGet(b *testing.B, commit bool) {
 	b.StopTimer()
 
 	if commit {
-		ldb := tmpdb.(*ethdb.BoltDatabase)
-		ldb.Close()
-		os.RemoveAll(ldb.Path())
+		tmpdb.Close()
+		os.RemoveAll(tmpdir)
 	}
 }
 
