@@ -9,10 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"sort"
-
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
@@ -55,7 +54,7 @@ func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number int, keyC
 		indexColors = visual.QuadIndexColors
 		fontColors = visual.QuadFontColors
 	}
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(t, f, &trie.VisualOpts{
 		Highlights:     highlights,
 		IndexColors:    indexColors,
@@ -84,7 +83,7 @@ func keyTape(t *trie.Trie, number int) error {
 	if err != nil {
 		return err
 	}
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	fk := trie.FullKeys(t)
 	sort.Strings(fk)
 	for i, key := range fk {
@@ -109,11 +108,73 @@ func keyTape(t *trie.Trie, number int) error {
 	return nil
 }
 
+func stateDatabaseMap(db* bolt.DB, number int) error {
+	filename := fmt.Sprintf("state_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	i := 0
+	prevName := ""
+	clusterData := ""
+	visual.StartGraph(f, true)
+
+	if err := db.View(func(readTx *bolt.Tx) error {
+		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			if prevName != string(name) && len(prevName) != 0 {
+				visual.Cluster(f, i, prevName, clusterData);
+				clusterData = ""
+			}
+			return b.ForEach(func(k, v []byte) error {
+				clusterData = fmt.Sprintf("%s k_%d -> v_%d", clusterData, i, i)
+				keyKeyBytes := &trie.Keybytes{
+					Data: k,
+					Odd: false,
+					Terminating: false,
+				}
+				valKeyBytes := &trie.Keybytes{
+					Data: v,
+					Odd: false,
+					Terminating: false,
+				}
+				key := keyKeyBytes.ToHex()
+				val := valKeyBytes.ToHex()
+				visual.Horizzontal(f, []byte(key), 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+				if len(val) > 0 {
+					if len([]byte(val)) > 32 {
+						shortenedVal := []byte(val)[:32]
+						visual.Horizzontal(f, shortenedVal, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
+					} else {
+						visual.Horizzontal(f, []byte(val), 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+					}
+				} else {
+					visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
+				}
+				i++
+				prevName = string(name)
+				return nil
+			})
+		})
+	}); err != nil {
+		panic(err)
+	}
+	visual.Cluster(f, i, prevName, clusterData);
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+	return nil
+}
+
 func initialState1() error {
 	fmt.Printf("Initial state 1\n")
 	// Configure and generate a sample block chain
 	var (
-		db       = ethdb.NewMemDatabase()
+		db, dbBolt       = ethdb.NewMemDatabase2()
 		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
@@ -415,5 +476,8 @@ func initialState1() error {
 		return err
 	}
 
+	if err = stateDatabaseMap(dbBolt, 16); err != nil {
+		return err;
+	}
 	return nil
 }
