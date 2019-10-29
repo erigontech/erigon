@@ -1,0 +1,276 @@
+digraph trie {
+		node [shape=none margin=0 width=0 height=0]
+		edge [dir = none headport=n tailport=s]
+	
+	n_ [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#4700A5" port="h5"></td>
+
+			<td bgcolor="#562C05" port="h10"></td>
+
+			<td bgcolor="#C0C0C0" port="h12"></td>
+
+			<td bgcolor="#404040" port="h14"></td>
+
+			<td bgcolor="#000000" port="h15"></td>
+
+		</tr>
+	</table>
+    >];
+	n_:h0 -> n_00;
+	n_:h5 -> n_05;
+	n_:h10 -> n_0a;
+	n_:h12 -> n_0c;
+	n_:h14 -> n_0e;
+	n_:h15 -> n_0f;
+
+	n_00 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+		
+	</table>
+	>];
+	e_00000b0f04090f0404000a010c0d000502070e040d00060e020706050605040c000f05060405020205070501060d0709030a090b080d0600040d0c0f0d0f020a10 [label="3 Ξ8.997" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_00 -> e_00000b0f04090f0404000a010c0d000502070e040d00060e020706050605040c000f05060405020205070501060d0709030a090b080d0600040d0c0f0d0f020a10;
+
+	n_05 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+		
+	</table>
+	>];
+	e_050308000c070b070a0e08010a05080e0b09080d090c07080d0e040a010f0d070f0d090503050f0c0905030e0d020b0e0600020d0a0a0a04010706070301020a10 [label="0 Ξ8.000" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_05 -> e_050308000c070b070a0e08010a05080e0b09080d090c07080d0e040a010f0d070f0d090503050f0c0905030e0d020b0e0600020d0a0a0a04010706070301020a10;
+
+	n_0a [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+		
+	</table>
+	>];
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10 [label="1 Ξ0.000" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0a -> e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10;
+
+	c_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#0000D3"></td><td bgcolor="#FFFFFF"></td><td rowspan="2" border="0"></td><td bgcolor="#000000"></td><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#000000"></td><td bgcolor="#000000"></td><td bgcolor="#FFFFFF"></td><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td colspan="32" border="0"></td></tr>
+				<tr><td bgcolor="#90713A"></td><td bgcolor="#4700A5"></td><td rowspan="2" border="0"></td><td bgcolor="#000000"></td><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#1FB714"></td><td bgcolor="#4700A5"></td><td colspan="20" border="0"></td></tr>
+		
+	</table>
+	>];
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10 -> c_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10;
+				
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FF6403" port="h2"></td>
+
+			<td bgcolor="#F20884" port="h4"></td>
+
+			<td bgcolor="#90713A" port="h11"></td>
+
+		</tr>
+	</table>
+    >];
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f:h2 -> n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f02;
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f:h4 -> n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f04;
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f:h11 -> n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0b;
+
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f02 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+		
+	</table>
+	>];
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0209000d0e0c0d090504080b06020a080d06000304050a0908080308060f0c08040b0a060b0c09050408040000080f060306020f09030106000e0f030e05060310 [label="0a" margin=0.05 shape=Mrecord];
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f02 -> e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0209000d0e0c0d090504080b06020a080d06000304050a0908080308060f0c08040b0a060b0c09050408040000080f060306020f09030106000e0f030e05060310;
+	
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f04 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+		
+	</table>
+	>];
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0400050708070f0a01020a0802030e000f020b070603010c0c04010b030b0a080802080b030302010c0a0801010101010f0a07050c0d030a0a030b0b050a0c0e10 [label="940d..0e7e" margin=0.05 shape=Mrecord];
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f04 -> e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0400050708070f0a01020a0802030e000f020b070603010c0c04010b030b0a080802080b030302010c0a0801010101010f0a07050c0d030a0a030b0b050a0c0e10;
+	
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0b [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#1FB714"></td></tr>
+		
+	</table>
+	>];
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0b060b08000902040e0e07010b0500060e01060a0000000e00000b000f080f030a08020f05030709010c060b08070f050905080f0d0f0506020f030d01020c0810 [label="0a" margin=0.05 shape=Mrecord];
+	n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0b -> e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f0b060b08000902040e0e07010b0500060e01060a0000000e00000b000f080f030a08020f05030709010c060b08070f050905080f0d0f0506020f030d01020c0810;
+	e_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f10 -> n_0a0d03040e06030d020f0608010e0d0c0c060e0201020f04080802080d0703000b07000b09000a0202030f0700080a040e0c0c0808080a01050d010a0d05060f;
+	
+	n_0c [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+		
+	</table>
+	>];
+	e_0c0905070f030e020f00040a000706040c030a000409010b0107050f06090902060d0a06010e0f0b0c0c080f06010f0a010405050f0d020d020b040c0d0d040510 [label="1 Ξ0.199" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0c -> e_0c0905070f030e020f00040a000706040c030a000409010b0107050f06090902060d0a06010e0f0b0c0c080f06010f0a010405050f0d020d020b040c0d0d040510;
+
+	n_0e [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#006412"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#C0C0C0"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#4700A5"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+		
+	</table>
+	>];
+	e_0e0902060d0b06090a0a0c0e0d0501080e090b090f000f0403040a0407030e070107040100090c0904030504080b0b080f02030b0e04010c0a07060d090a0d0210 [label="0 Ξ0.300" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0e -> e_0e0902060d0b06090a0a0c0e0d0501080e090b090f000f0403040a0407030e070107040100090c0904030504080b0b080f02030b0e04010c0a07060d090a0d0210;
+
+	n_0f [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#90713A"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#0000D3"></td></tr>
+				<tr><td bgcolor="#404040"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#DD0907"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#562C05"></td></tr>
+				<tr><td bgcolor="#000000"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#808080"></td></tr>
+		
+	</table>
+	>];
+	e_0f02020b0b04060e0d0f03010a0f0805050903080b0e0f0a0a0807000e0d030d08060a040a0d09030a090e0c0f070c06030c0e0a0a08000d0a0e0a090a0c040d10 [label="0 Ξ0.002" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0f -> e_0f02020b0b04060e0d0f03010a0f0805050903080b0e0f0a0a0807000e0d030d08060a040a0d09030a090e0c0f070c06030c0e0a0a08000d0a0e0a090a0c040d10;
+}

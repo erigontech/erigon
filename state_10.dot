@@ -1,0 +1,1461 @@
+digraph trie {
+		node [shape=none margin=0 width=0 height=0]
+		edge [dir = none headport=n tailport=s]
+	
+	n_ [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_:h0 -> n_00;
+	n_:h1 -> n_01;
+	n_:h2 -> n_02;
+	n_:h3 -> n_03;
+
+	n_00 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+	n_00:h0 -> n_0000;
+	n_00:h1 -> n_0001;
+	n_00:h2 -> n_0002;
+
+	n_0000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_0000 -> n_000000;
+
+	n_000000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_000000:h0 -> n_00000000;
+    n_000000:h3 -> n_00000003;
+
+	n_00000000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_000000000203030301000201030301000100000002020001030003010000010100020103030201000301000001020302000201030102010101020101010003000000030301010102010001010002000201010103010100010102030101030201000302020201020302000301010200000100030103000303030103030002020210 [label="35 Ξ8.965" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_00000000 -> e_000000000203030301000201030301000100000002020001030003010000010100020103030201000301000001020302000201030102010101020101010003000000030301010102010001010002000201010103010100010102030101030201000302020201020302000301010200000100030103000303030103030002020210;
+
+	n_00000003 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_000000030001010302000302010201010301010101030002010103020101010001000000010100030002020302020103010302000301030301020202020302030301010302010300000203010202020002010002020300020003000002020003020001030003010100030003010203010302000301000101020302000301030110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_00000003 -> e_000000030001010302000302010201010301010101030002010103020101010001000000010100030002020302020103010302000301030301020202020302030301010302010300000203010202020002010002020300020003000002020003020001030003010100030003010203010302000301000101020302000301030110;
+
+	n_0001 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0001:h0 -> n_000100;
+    n_0001:h2 -> n_000102;
+
+	n_000100 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_000100010002010303000302010100020303000003010100000000020102030200000101010001030200020202030000010200010303030100000002000100020002020200030202030001030002010103000201030203020003000103000101000102000102030203030002030201020100030003020301030102020202030310 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_000100 -> e_000100010002010303000302010100020303000003010100000000020102030200000101010001030200020202030000010200010303030100000002000100020002020200030202030001030002010103000201030203020003000103000101000102000102030203030002030201020100030003020301030102020202030310;
+
+	n_000102 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+    n_000102:h0 -> n_00010200;
+    n_000102:h2 -> n_00010202;
+
+	n_00010200 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_000102000000020302000302020201030000000300000302000001030202020203010300000302030103030201000000010003000200010200000300020000020102020100010300000100020000010201000001000103030201020101020003000200000002000300000002010103010002030201000201010303020100020310 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_00010200 -> e_000102000000020302000302020201030000000300000302000001030202020203010300000302030103030201000000010003000200010200000300020000020102020100010300000100020000010201000001000103030201020101020003000200000002000300000002010103010002030201000201010303020100020310;
+
+	n_00010202 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_000102020103010302030002020003000101020202020102030200030200030000000000020202010200000202020300020102020302020202010303020102000103010303020103000301030000030103030002020203000003020302020203020202030000010100010101010103030101000001010303020102030003020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_00010202 -> e_000102020103010302030002020003000101020202020102030200030200030000000000020202010200000202020300020102020302020202010303020102000103010303020103000301030000030103030002020203000003020302020203020202030000010100010101010103030101000001010303020102030003020110;
+
+	n_0002 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0002:h1 -> n_000201;
+    n_0002:h2 -> n_000202;
+
+	n_000201 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_000201030300030001020200020200020001010302010203020202020003020101030200020001010000010301020300020203010300030202030003010103030300010303000202020303020103030203020100030300020302020301030203020001010000000101020200010302000300000300030102020201000001010210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_000201 -> e_000201030300030001020200020200020001010302010203020202020003020101030200020001010000010301020300020203010300030202030003010103030300010303000202020303020103030203020100030300020302020301030203020001010000000101020200010302000300000300030102020201000001010210;
+
+	n_000202 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_000202020003000002000203030301010103000202000303030203020102030003030301010201020003000002020102020203030301000103010201030300020000030103010101030103020003000303000301020100000302000102000101030000020003000003030302010003030103020100020002000203000200030110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_000202 -> e_000202020003000002000203030301010103000202000303030203020102030003030301010201020003000002020102020203030301000103010201030300020000030103010101030103020003000303000301020100000302000102000101030000020003000003030302010003030103020100020002000203000200030110;
+
+	n_01 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_01:h0 -> n_0100;
+	n_01:h1 -> n_0101;
+	n_01:h2 -> n_0102;
+	n_01:h3 -> n_0103;
+
+	n_0100 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_0100:h0 -> n_010000;
+	n_0100:h1 -> n_010001;
+	n_0100:h2 -> n_010002;
+	n_0100:h3 -> n_010003;
+
+	n_010000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_010000020100020300000100010201000302030302030302010000030303000103000202020000030001010302030103030003030203020103010002010300010002030300020300000303010301030301030302020200030300010003020103020301020203000102010001020100010300000201020002000103000303000010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010000 -> e_010000020100020300000100010201000302030302030302010000030303000103000202020000030001010302030103030003030203020103010002010300010002030300020300000303010301030301030302020200030300010003020103020301020203000102010001020100010300000201020002000103000303000010;
+
+	n_010001 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_010001 -> n_01000100;
+
+	n_01000100 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_01000100:h0 -> n_0100010000;
+    n_01000100:h3 -> n_0100010003;
+
+	n_0100010000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_010001000003010102010201020102000101000101020002010000030200030000020100020003020300030203010002000303030201010301000003010003020100010001030300010303030103030303020302030000000203020102030101020300010001030302000002030000030302030103000203010100000300030010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0100010000 -> e_010001000003010102010201020102000101000101020002010000030200030000020100020003020300030203010002000303030201010301000003010003020100010001030300010303030103030303020302030000000203020102030101020300010001030302000002030000030302030103000203010100000300030010;
+
+	n_0100010003 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010001000302030202010203020101010302000202000303020001020101030203030301000001010002000103020103020301030203010200030301010000000202010300030202030303010102010200030003020003000203030001020002020300030301020002010301030002010202000302030300010303030201020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0100010003 -> e_010001000302030202010203020101010302000202000303020001020101030203030301000001010002000103020103020301030203010200030301010000000202010300030202030303010102010200030003020003000203030001020002020300030301020002010301030002010202000302030300010303030201020110;
+
+	n_010002 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010002020303020301010201010203000001020003010302020103010002030302010103010001030203020302030003030100000301030302030201010303030000010001020000030303020101030101000202020000010202020103000201010301020201030100030201030100030203000101030202030101030200020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010002 -> e_010002020303020301010201010203000001020003010302020103010002030302010103010001030203020302030003030100000301030302030201010303030000010001020000030303020101030101000202020000010202020103000201010301020201030100030201030100030203000101030202030101030200020110;
+
+	n_010003 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010003030203010003030102010302000300030103010200030202030300020101030003000200030003000000000303030101010101020202020001020002020001030001010103020002000202000002020300030101000302020303030102020301030200030102020100010301000001020301000203030202020000000110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010003 -> e_010003030203010003030102010302000300030103010200030202030300020101030003000200030003000000000303030101010101020202020001020002020001030001010103020002000202000002020300030101000302020303030102020301030200030102020100010301000001020301000203030202020000000110;
+
+	n_0101 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_0101:h0 -> n_010100;
+	n_0101:h2 -> n_010102;
+	n_0101:h3 -> n_010103;
+
+	n_010100 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_010100:h0 -> n_01010000;
+    n_010100:h3 -> n_01010003;
+
+	n_01010000 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_010100000003010203000103000202030300030102000302010100000303010003010000000300030301020100010000030301000303000201020200020003000101020002000101030101020301010103010003000200000200010301020302000302000303020202020100010100030202000203030303000101010303010210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_01010000 -> e_010100000003010203000103000202030300030102000302010100000303010003010000000300030301020100010000030301000303000201020200020003000101020002000101030101020301010103010003000200000200010301020302000302000303020202020100010100030202000203030303000101010303010210;
+
+	n_01010003 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_010100030200000003000103020301030202030202000001020201010200030202030201020003010201030001030200030103020100020200010303030101030303030102010101000301010303030002010101000303020301000202030302010200000002030102020202020201000001010301020103000300010002020210 [label="0 Ξ12.000" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_01010003 -> e_010100030200000003000103020301030202030202000001020201010200030202030201020003010201030001030200030103020100020200010303030101030303030102010101000301010303030002010101000303020301000202030302010200000002030102020202020201000001010301020103000300010002020210;
+
+	n_010102 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_010102020202010202020100000201020001010102000302020002030301010002020303020101020100020101030201010302030003000002020101030201000103000103020103020202000003020302030300000103030303030300000101020100010001030002030303020300020100010102030000010103030202020210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010102 -> e_010102020202010202020100000201020001010102000302020002030301010002020303020101020100020101030201010302030003000002020101030201000103000103020103020202000003020302030300000103030303030300000101020100010001030002030303020300020100010102030000010103030202020210;
+
+	n_010103 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010103010303010300000102020300030003000301030001010001000303010103020000020202030300030301000300020200030201030203020203000103000102020301020203020001010203010200030003010001000100000102000102030002020103030003010103030000010200010000030100030101000203020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010103 -> e_010103010303010300000102020300030003000301030001010001000303010103020000020202030300030301000300020200030201030203020203000103000102020301020203020001010203010200030003010001000100000102000102030002020103030003010103030000010200010000030100030101000203020110;
+
+	n_0102 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0102:h2 -> n_010202;
+    n_0102:h3 -> n_010203;
+
+	n_010202 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010202010000010001020103030201010000020300000000020002030302030102020202020200030200010202020001020302020102030203000100010201010000010200030101010301030003000203010200030102000202000001020100020101030200020102000300020303020301020101010000010302000002020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010202 -> e_010202010000010001020103030201010000020300000000020002030302030102020202020200030200010202020001020302020102030203000100010201010000010200030101010301030003000203010200030102000202000001020100020101030200020102000300020303020301020101010000010302000002020110;
+
+	n_010203 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_010203:h0 -> n_01020300;
+    n_010203:h3 -> n_01020303;
+
+	n_01020300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010203000103030300010300010300030200030101000001000102000200020100030100020101000303030102030302030201000300030302030203000003030301020102030300020201010102010103030201010000020000030303000102000100010300020302000001020303010103000203020201010001020101010110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_01020300 -> e_010203000103030300010300010300030200030101000001000102000200020100030100020101000303030102030302030201000300030302030203000003030301020102030300020201010102010103030201010000020000030303000102000100010300020302000001020303010103000203020201010001020101010110;
+
+	n_01020303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_010203030203000100000100010103030200030102020102010003030102010102020202030203030200020202030000010100010002020203010101000100000100020001010000010202010303010202000302020102020003000101000203000300020000020202030101030103020001000102020103010100030000020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_01020303 -> e_010203030203000100000100010103030200030102020102010003030102010102020202030203030200020202030000010100010002020203010101000100000100020001010000010202010303010202000302020102020003000101000203000300020000020202030101030103020001000102020103010100030000020110;
+
+	n_0103 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0103:h1 -> n_010301;
+    n_0103:h3 -> n_010303;
+
+	n_010301 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_010301010102010002000101000002020300020202010303030202020201010203010001030302010302030103030303000300010102030002020203030102000301010301010003020102000000030200020302020303020203020201000200020001030000030103030303010102030101020101030203000103010001000010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010301 -> e_010301010102010002000101000002020300020202010303030202020201010203010001030302010302030103030303000300010102030002020203030102000301010301010003020102000000030200020302020303020203020201000200020001030000030103030303010102030101020101030203000103010001000010;
+
+	n_010303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_010303000200010202020302020300020302020303000000010301020002010301030100030302000201000001000000030001010302000303010202020102030303010300010302030203030000030200010101030201000100010203020000030100020303000100010202000102020303000302030303010002000200000210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_010303 -> e_010303000200010202020302020300020302020303000000010301020002010301030100030302000201000001000000030001010302000303010202020102030303010300010302030203030000030200010101030201000100010203020000030100020303000100010202000102020303000302030303010002000200000210;
+
+	n_02 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_02:h0 -> n_0200;
+	n_02:h1 -> n_0201;
+	n_02:h2 -> n_0202;
+	n_02:h3 -> n_0203;
+
+	n_0200 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0200:h1 -> n_020001;
+    n_0200:h2 -> n_020002;
+
+	n_020001 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_020001020002000000030002030302020100010001000202020001030102010201020103000101000100010203020101020102020301020303030000010300010002020003010202030202020201020303000002010000030003010103030103020203030300030102020103000003030101020202000301030203030200030210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020001 -> e_020001020002000000030002030302020100010001000202020001030102010201020103000101000100010203020101020102020301020303030000010300010002020003010202030202020201020303000002010000030003010103030103020203030300030102020103000003030101020202000301030203030200030210;
+
+	n_020002 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_020002010201030200020001000300000000020203030203020202020303010302010001010100000302000103030002000002030103000100000301010003000003030303030103020201030300020102030002010100010200030103030202000202020103010101030000030101030100000003000003000000010100020310 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020002 -> e_020002010201030200020001000300000000020203030203020202020303010302010001010100000302000103030002000002030103000100000301010003000003030303030103020201030300020102030002010100010200030103030202000202020103010101030000030101030100000003000003000000010100020310;
+
+	n_0201 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#F20884" port="h2"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_0201:h2 -> n_020102;
+    n_0201:h3 -> n_020103;
+
+	n_020102 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_020102000302000203010300010301010300030302010103000001010301010201020301000303010103000300030000030202030102000003010103000003010003030002030102030303020203030002000001010101010303000101020303000300000102020303010302000301000203000103000003030301030201020210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020102 -> e_020102000302000203010300010301010300030302010103000001010301010201020301000303010103000300030000030202030102000003010103000003010003030002030102030303020203030002000001010101010303000101020303000300000102020303010302000301000203000103000003030301030201020210;
+
+	n_020103 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+ 
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+    n_020103:h1 -> n_02010301;
+    n_020103:h3 -> n_02010303;
+
+	n_02010301 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_020103010303020101010302030101020000030102010203010102030101010100030302000003020101000300030200020300030302010100000100030200000202030303020102010202000102000103000300010303020000010303020300020102030202010301000001030200030301010001010202020300000203030210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_02010301 -> e_020103010303020101010302030101020000030102010203010102030101010100030302000003020101000300030200020300030302010100000100030200000202030303020102010202000102000103000300010303020000010303020300020102030202010301000001030200030301010001010202020300000203030210;
+
+	n_02010303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_020103030303010001010100030100000303020002000103000302000003000202020203010200000201000300030301000302000101010001030200030101000000020202000100010303020203020302020003000102010000030202000101010001030000020101010301010203030100020100000203020301020201000210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_02010303 -> e_020103030303010001010100030100000303020002000103000302000003000202020203010200000201000300030301000302000101010001030200030101000000020202000100010303020203020302020003000102010000030202000101010001030000020101010301010203030100020100000203020301020201000210;
+
+	n_0202 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_0202 -> n_020203;
+
+	n_020203 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_020203:h0 -> n_02020300;
+	n_020203:h1 -> n_02020301;
+	n_020203:h3 -> n_02020303;
+
+	n_02020300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_020203000201010300030000020203000101020302000201020301000003030303010100000201000302000100000101000001030301000103000003000202010201020002000302020200000200000103020200020300030101020203010301000002020300000201010302030000030001020002000001000103010001000010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_02020300 -> e_020203000201010300030000020203000101020302000201020301000003030303010100000201000302000100000101000001030301000103000003000202010201020002000302020200000200000103020200020300030101020203010301000002020300000201010302030000030001020002000001000103010001000010;
+
+	n_02020301 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310 [label="1 Ξ0.000" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_02020301 -> e_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310;
+
+	c_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#0000D3"></td><td bgcolor="#FFFFFF"></td><td rowspan="2" border="0"></td><td bgcolor="#000000"></td><td bgcolor="#000000"></td></tr>
+				<tr><td bgcolor="#000000"></td><td bgcolor="#000000"></td><td bgcolor="#FFFFFF"></td><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td colspan="32" border="0"></td></tr>
+				<tr><td bgcolor="#90713A"></td><td bgcolor="#4700A5"></td><td rowspan="2" border="0"></td><td bgcolor="#000000"></td><td bgcolor="#FF6403"></td></tr>
+				<tr><td bgcolor="#1FB714"></td><td bgcolor="#4700A5"></td><td colspan="20" border="0"></td></tr>
+		
+	</table>
+	>];
+	e_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310 -> c_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310;
+				
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+		</tr>
+	</table>
+    >];
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303:h0 -> n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030300;
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303:h1 -> n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030301;
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303:h2 -> n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030302;
+
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303000202010000030103020300030102010101010002000203010200020202020003010102000000030100010102020201020002000003020001020303030002000100020302020102020303000201010101000200010000000000020003030102000301020002030302010003000101020000030203030003030201010102000310 [label="0a" margin=0.05 shape=Mrecord];
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030300 -> e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303000202010000030103020300030102010101010002000203010200020202020003010102000000030100010102020201020002000003020001020303030002000100020302020102020303000201010101000200010000000000020003030102000301020002030302010003000101020000030203030003030201010102000310;
+	
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030301 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303010000000101010302000103030302020001000202020200000200030302000003030002020301030102000300010300030001000001020300030203020202000200000202000203000300030002000103000202020000010001000100010001030302020103010103000301000302020202000302030203010102020300030210 [label="940d..0e7e" margin=0.05 shape=Mrecord];
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030301 -> e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303010000000101010302000103030302020001000202020200000200030302000003030002020301030102000300010300030001000001020300030203020202000200000202000203000300030002000103000202020000010001000100010001030302020103010103000301000302020202000302030203010102020300030210;
+	
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030302 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030302 -> n_02020301000301000302010200030301000203030102020000010302030103000300010203020002000100020303010002000200000202000301010300030000020301030000020302010000020200020002000303030103000002000202010003020300030002000200020002020001010103010001020203010101010203030203;
+
+	n_02020301000301000302010200030301000203030102020000010302030103000300010203020002000100020303010002000200000202000301010300030000020301030000020302010000020200020002000303030103000002000202010003020300030002000200020002020001010103010001020203010101010203030203 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+
+		</tr>
+	</table>
+    >];
+    n_02020301000301000302010200030301000203030102020000010302030103000300010203020002000100020303010002000200000202000301010300030000020301030000020302010000020200020002000303030103000002000202010003020300030002000200020002020001010103010001020203010101010203030203:h0 -> n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020300;
+    n_02020301000301000302010200030301000203030102020000010302030103000300010203020002000100020303010002000200000202000301010300030000020301030000020302010000020200020002000303030103000002000202010003020300030002000200020002020001010103010001020203010101010203030203:h1 -> n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020301;
+
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020300000103010303030103010100030000020200010003010201000300010101000302030200000000030003030201010002030202020102010001010301010301020302000001030201030302000000000002030002010103030200030100010002020202010103010003030001000201000002000102000101030300010010 [label="03" margin=0.05 shape=Mrecord];
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020300 -> e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020300000103010303030103010100030000020200010003010201000300010101000302030200000000030003030201010002030202020102010001010301010301020302000001030201030302000000000002030002010103030200030100010002020202010103010003030001000201000002000102000101030300010010;
+	
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020301 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020301020203020000000201000201000302030201030001020301010000010203020001010202020000000000000302000000000203000003030200030300030202020000020303010100030103020100010300010202030200010303030101020101010200030303010303010101020002030300030301000100020300020010 [label="07" margin=0.05 shape=Mrecord];
+	n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020301 -> e_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303020301020203020000000201000201000302030201030001020301010000010203020001010202020000000000000302000000000203000003030200030300030202020000020303010100030103020100010300010202030200010303030101020101010200030303010303010101020002030300030301000100020300020010;
+	e_020203010003010003020102000303010002030301020200000103020301030003000102030200020001000203030100020002000002020003010103000300000203010300000203020100000202000200020003030301030000020002020100030203000300020002000200020200010101030100010202030101010102030310 -> n_0202030100030100030201020003030100020303010202000001030203010300030001020302000200010002030301000200020000020200030101030003000002030103000002030201000002020002000200030303010300000200020201000302030003000200020002000202000101010301000102020301010101020303;
+	
+	n_02020303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_020203030003030000000003000300010202000000000201010100010203000001030100000300030302020000000002030302030002000202020100020302020201000202020000030302000201020200000302020002000201010002000101010002000003030202010300020001030002030001000002000201030001000310 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_02020303 -> e_020203030003030000000003000300010202000000000201010100010203000001030100000300030302020000000002030302030002000202020100020302020201000202020000030302000201020200000302020002000201010002000101010002000003030202010300020001030002030001000002000201030001000310;
+
+	n_0203 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_0203:h0 -> n_020300;
+	n_0203:h2 -> n_020302;
+	n_0203:h3 -> n_020303;
+
+	n_020300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_020300020300010303020000000003010200000201020102030300010001010102030102030303020100000102020301020103030200000102010003010301010302000103030301000302010103020102030100030100000200010103000000010102010200010302020003020300000202000102010102010202010001030010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020300 -> e_020300020300010303020000000003010200000201020102030300010001010102030102030303020100000102020301020103030200000102010003010301010302000103030301000302010103020102030100030100000200010103000000010102010200010302020003020300000202000102010102010202010001030010;
+
+	n_020302 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+		
+	</table>
+	>];
+	e_020302010200010003030103030102030001000002000200000102010300030303020200000203020300000102020302000103000002030000000303020201010103000100010303000203000300000102030102000101010302010102030103010202010001030303030000020301010201000201000001000100030100020310 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020302 -> e_020302010200010003030103030102030001000002000200000102010300030303020200000203020300000102020302000103000002030000000303020201010103000100010303000203000300000102030102000101010302010102030103010202010001030303030000020301010201000201000001000100030100020310;
+
+	n_020303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_020303030100010003000101030303010002030001010201030100030000010000010003030303000003010000000202010100000301020301030102010303010203000003030303020203000003030003000300010303010201000003010200030100010102010301000102000001030100000201000300000102030001010210 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_020303 -> e_020303030100010003000101030303010002030001010201030100030000010000010003030303000003010000000202010100000301020301030102010303010203000003030303020203000003030003000300010303010201000003010200030100010102010301000102000001030100000201000300000102030001010210;
+
+	n_03 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FFFFFF" port="h0"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_03:h0 -> n_0300;
+	n_03:h2 -> n_0302;
+	n_03:h3 -> n_0303;
+
+	n_0300 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_0300 -> n_03000201;
+
+	n_03000201 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+
+			<td bgcolor="#FBF305" port="h1"></td>
+
+			<td bgcolor="#F20884" port="h2"></td>
+
+			<td bgcolor="#02ABEA" port="h3"></td>
+
+		</tr>
+	</table>
+    >];
+	n_03000201:h1 -> n_0300020101;
+	n_03000201:h2 -> n_0300020102;
+	n_03000201:h3 -> n_0300020103;
+
+	n_0300020101 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_030002010101010303030003030200020303000001000202000001030102010003000003020200000100020100010203000101030101030301020201020100020102030102020102000103020303020303000300020003030102000103030202000101000101010103030301000203010002020301000300030103010100010110 [label="1 Ξ0.199" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0300020101 -> e_030002010101010303030003030200020303000001000202000001030102010003000003020200000100020100010203000101030101030301020201020100020102030102020102000103020303020303000300020003030102000103030202000101000101010103030301000203010002020301000300030103010100010110;
+
+	n_0300020102 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_030002010203010103010202020201020101020200020003010001030302000002030202020201000002000103010002000000030001000101010003000102020303030200020203000000010203030201020002020201030101030103000101010001020000020203010302000101030103010303010103020300030002020110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0300020102 -> e_030002010203010103010202020201020101020200020003010001030302000002030202020201000002000103010002000000030001000101010003000102020303030200020203000000010203030201020002020201030101030103000101010001020000020203010302000101030103010303010103020300030002020110;
+
+	n_0300020103 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_030002010303000300020100000001020103010203020300010301010101030300000302020301020002030201020203030300000003020103010301010300030200030102030101020002000302000000030002000200000201020300000203020302000203000202000302000102020302020302000202030003000200030110 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0300020103 -> e_030002010303000300020100000001020103010203020300010301010101030300000302020301020002030201020203030300000003020103010301010300030200030102030101020002000302000000030002000200000201020300000203020302000203000202000302000102020302020302000202030003000200030110;
+
+	n_0302 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	
+
+	n_0302 -> n_030202;
+
+	n_030202 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+		<tr>
+ 
+			<td bgcolor="#FFFFFF" port="h0"></td>
+ 
+			<td bgcolor="#FBF305" port="h1"></td>
+
+		</tr>
+	</table>
+    >];
+    n_030202:h0 -> n_03020200;
+    n_030202:h1 -> n_03020201;
+
+	n_03020200 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+		
+	</table>
+	>];
+	e_030202000001000001020303030101010202030303010301010001020002000100020100030103020002020200030101000100030100020203020000030102010200000300020300030301010102020000020103010303030002000300000201000200020000010103000300000103020202020303000203000202020202000010 [label="0 Ξ0.001" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_03020200 -> e_030202000001000001020303030101010202030303010301010001020002000100020100030103020002020200030101000100030100020203020000030102010200000300020300030301010102020000020103010303030002000300000201000200020000010103000300000103020202020303000203000202020202000010;
+
+	n_03020201 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+		
+	</table>
+	>];
+	e_030202010002010203010203010202010202020203000302030101010001020003020201020302010303000003030100000301000202010001030003030201030001010301000001000002010300020101000003010101000200020302030200030300020003020303020100000103000202010301020301020102020301000210 [label="1 Ξ0.299" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_03020201 -> e_030202010002010203010203010202010202020203000302030101010001020003020201020302010303000003030100000301000202010001030003030201030001010301000001000002010300020101000003010101000200020302030200030300020003020303020100000103000202010301020301020102020301000210;
+
+	n_0303 [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+			<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#FFFFFF"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#F20884"></td></tr>
+				<tr><td border="0">|</td></tr>
+					<tr><td bgcolor="#02ABEA"></td></tr>
+				<tr><td bgcolor="#FBF305"></td></tr>
+		
+	</table>
+	>];
+	e_030300020002020302030100010203020301030300030001020203030200010101010201000302000203030203030202020202000103000003020301000303010200010202020100020203010201000302020201030203000303010303000102000303000302020202020200000003010202030202020201020203000100030110 [label="0 Ξ0.002" margin=0.05 shape=Mrecord fillcolor="#E0E0E0" style=filled];
+	n_0303 -> e_030300020002020302030100010203020301030300030001020203030200010101010201000302000203030203030202020202000103000003020301000303010200010202020100020203010201000302020201030203000303010303000102000303000302020202020200000003010202030202020201020203000100030110;
+}

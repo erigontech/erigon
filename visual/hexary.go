@@ -102,16 +102,10 @@ func Horizzontal(w io.Writer, hex []byte, highlighted int, name string, indexCol
 				fmt.Fprintf(w,
 					`		<td bgcolor="%s"><font color="%s">%s</font></td>
 		`, indexColors[h], fontColors[h], hexIndices[h])
-			} else {
-				if int(h) > len(indexColors) - 1 {
-					fmt.Fprintf(w,
-						`		<td bgcolor="%s"></td>
-			`, indexColors[1])
-				} else {					
-					fmt.Fprintf(w,
-						`		<td bgcolor="%s"></td>
-			`, indexColors[h])
-				}
+			} else {					
+				fmt.Fprintf(w,
+					`		<td bgcolor="%s"></td>
+		`, indexColors[h])
 			}
 		} else if compression > 0 && i == len(hex)-3 {
 			fmt.Fprintf(w,

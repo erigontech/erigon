@@ -116,17 +116,20 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 	}
 	i := 0
 	prevName := ""
-	clusterData := ""
 	visual.StartGraph(f, true)
 
 	if err := db.View(func(readTx *bolt.Tx) error {
 		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			if prevName != string(name) && len(prevName) != 0 {
-				visual.Cluster(f, i, prevName, clusterData);
-				clusterData = ""
+			
+			if i == 0 {
+				visual.StartCluster(f, i, string(name));
+			} else {
+				visual.EndCluster(f);
+				visual.StartCluster(f, i, prevName);
 			}
+
 			return b.ForEach(func(k, v []byte) error {
-				clusterData = fmt.Sprintf("%s k_%d -> v_%d", clusterData, i, i)
+				fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
 				keyKeyBytes := &trie.Keybytes{
 					Data: k,
 					Odd: false,
@@ -158,7 +161,7 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 	}); err != nil {
 		panic(err)
 	}
-	visual.Cluster(f, i, prevName, clusterData);
+	visual.EndCluster(f);
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
 		return err

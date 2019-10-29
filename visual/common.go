@@ -46,12 +46,16 @@ func Box(w io.Writer, name string, label string) {
 `, name, label)
 }
 
-func Cluster(w io.Writer, number int, label string, display string) {
+func StartCluster(w io.Writer, number int, label string) {
 	fmt.Fprintf(w,
 		`subgraph cluster_%d {
 			label = "%s";
-			%s
 			color = black;
-		}
-`, number, label, display)
+`, number, label)
+}
+
+func EndCluster(w io.Writer) {
+	fmt.Fprintf(w,
+		`}
+`)	
 }
