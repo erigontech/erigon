@@ -136,13 +136,13 @@ func stateDatabaseMap(db *bolt.DB, number int) error {
 				}
 				key := keyKeyBytes.ToHex()
 				val := valKeyBytes.ToHex()
-				visual.Horizontal(f, []byte(key), 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+				visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
 				if len(val) > 0 {
-					if len([]byte(val)) > 32 {
-						shortenedVal := []byte(val)[:32]
+					if len(val) > 32 {
+						shortenedVal := val[:32]
 						visual.Horizontal(f, shortenedVal, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
 					} else {
-						visual.Horizontal(f, []byte(val), 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+						visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
 					}
 				} else {
 					visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
