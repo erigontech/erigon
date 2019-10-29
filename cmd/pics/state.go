@@ -5,13 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"math/big"
-	"os"
-	"os/exec"
-	"sort"
 	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/ledgerwatch/turbo-geth/visual"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/cmd/pics/contracts"
@@ -25,6 +19,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/visual"
+	"math/big"
+	"os"
+	"os/exec"
+	"sort"
 )
 
 func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
@@ -108,7 +108,7 @@ func keyTape(t *trie.Trie, number int) error {
 	return nil
 }
 
-func stateDatabaseMap(db* bolt.DB, number int) error {
+func stateDatabaseMap(db *bolt.DB, number int) error {
 	filename := fmt.Sprintf("state_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -119,19 +119,19 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 
 	if err := db.View(func(readTx *bolt.Tx) error {
 		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			
-			visual.StartCluster(f, i, string(name));
+
+			visual.StartCluster(f, i, string(name))
 
 			if err := b.ForEach(func(k, v []byte) error {
 				fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
 				keyKeyBytes := &trie.Keybytes{
-					Data: k,
-					Odd: false,
+					Data:        k,
+					Odd:         false,
 					Terminating: false,
 				}
 				valKeyBytes := &trie.Keybytes{
-					Data: v,
-					Odd: false,
+					Data:        v,
+					Odd:         false,
 					Terminating: false,
 				}
 				key := keyKeyBytes.ToHex()
@@ -173,15 +173,15 @@ func initialState1() error {
 	fmt.Printf("Initial state 1\n")
 	// Configure and generate a sample block chain
 	var (
-		db, dbBolt       = ethdb.NewMemDatabase2()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		gspec    = &core.Genesis{
+		db, dbBolt = ethdb.NewMemDatabase2()
+		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		key1, _    = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+		key2, _    = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+		address    = crypto.PubkeyToAddress(key.PublicKey)
+		address1   = crypto.PubkeyToAddress(key1.PublicKey)
+		address2   = crypto.PubkeyToAddress(key2.PublicKey)
+		theAddr    = common.Address{1}
+		gspec      = &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
@@ -476,7 +476,7 @@ func initialState1() error {
 	}
 
 	if err = stateDatabaseMap(dbBolt, 16); err != nil {
-		return err;
+		return err
 	}
 	return nil
 }

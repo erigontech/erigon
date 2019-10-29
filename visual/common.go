@@ -18,7 +18,7 @@ func StartGraph(w io.Writer, tall bool) {
 			`digraph trie {
 		node [shape=none margin=0 width=0 height=0]
 		edge [dir = none headport=n tailport=s]
-	`)		
+	`)
 	}
 }
 
@@ -57,5 +57,5 @@ func StartCluster(w io.Writer, number int, label string) {
 func EndCluster(w io.Writer) {
 	fmt.Fprintf(w,
 		`}
-`)	
+`)
 }

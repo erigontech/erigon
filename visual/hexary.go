@@ -102,7 +102,7 @@ func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColo
 				fmt.Fprintf(w,
 					`		<td bgcolor="%s"><font color="%s">%s</font></td>
 		`, indexColors[h], fontColors[h], hexIndices[h])
-			} else {					
+			} else {
 				fmt.Fprintf(w,
 					`		<td bgcolor="%s"></td>
 		`, indexColors[h])
