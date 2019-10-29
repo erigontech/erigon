@@ -41,7 +41,7 @@ func prefixGroups1() {
 	}
 
 	keys := generatePrefixGroups()
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
 		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
@@ -69,7 +69,7 @@ func prefixGroups2() {
 
 	keys := generatePrefixGroups()
 	sort.Strings(keys)
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	for i, key := range keys {
 		visual.QuadVertical(f, []byte(key), len(key), fmt.Sprintf("q_%x", key))
 		visual.Circle(f, fmt.Sprintf("e_%d", i), fmt.Sprintf("%d", i), false)
@@ -120,7 +120,7 @@ func prefixGroups3() {
 			}
 		}
 	}
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	var prefixStack []string
 	for i, key := range keys {
 		// Close all the groups that do not contain the current key
@@ -202,7 +202,7 @@ func prefixGroups4() {
 		tr.Update(hexKey, []byte(vs), 0)
 		hightlights = append(hightlights, []byte(key))
 	}
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(tr, f, &trie.VisualOpts{
 		Highlights:  hightlights,
 		IndexColors: visual.QuadIndexColors,
@@ -243,7 +243,7 @@ func prefixGroups5() {
 		folds = append(folds, hexKey)
 	}
 	tr.Fold(folds[:8])
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(tr, f, &trie.VisualOpts{
 		Highlights:  hightlights,
 		IndexColors: visual.QuadIndexColors,
@@ -285,7 +285,7 @@ func prefixGroups6() {
 	}
 	tr.Fold(folds[:8])
 	tr.Fold(folds[8:16])
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(tr, f, &trie.VisualOpts{
 		Highlights:  hightlights,
 		IndexColors: visual.QuadIndexColors,
@@ -329,7 +329,7 @@ func prefixGroups7() {
 	tr.Fold(folds[8:16])
 	tr.Fold(folds[16:24])
 	tr.Fold(folds[24:])
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(tr, f, &trie.VisualOpts{
 		Highlights:  hightlights,
 		IndexColors: visual.QuadIndexColors,
@@ -374,7 +374,7 @@ func prefixGroups8() {
 		}
 	}
 	tr.Fold(folds)
-	visual.StartGraph(f)
+	visual.StartGraph(f, false)
 	trie.Visual(tr, f, &trie.VisualOpts{
 		Highlights:  hightlights,
 		IndexColors: visual.QuadIndexColors,
