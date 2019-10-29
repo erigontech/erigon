@@ -115,7 +115,6 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 		return err
 	}
 	i := 0
-	prevName := ""
 	visual.StartGraph(f, true)
 
 	if err := db.View(func(readTx *bolt.Tx) error {
@@ -125,7 +124,7 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 				visual.StartCluster(f, i, string(name));
 			} else {
 				visual.EndCluster(f);
-				visual.StartCluster(f, i, prevName);
+				visual.StartCluster(f, i, string(name));
 			}
 
 			return b.ForEach(func(k, v []byte) error {
@@ -154,7 +153,6 @@ func stateDatabaseMap(db* bolt.DB, number int) error {
 					visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
 				}
 				i++
-				prevName = string(name)
 				return nil
 			})
 		})
