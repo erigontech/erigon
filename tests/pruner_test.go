@@ -4,6 +4,11 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"math/big"
+	"reflect"
+	"testing"
+	"time"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
@@ -18,10 +23,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/tests/contracts"
-	"math/big"
-	"reflect"
-	"testing"
-	"time"
 )
 
 func TestBasisAccountPruning(t *testing.T) {
@@ -513,7 +514,7 @@ type stateStats struct {
 	AccountsInState                 uint64
 }
 
-func getStat(db *ethdb.BoltDatabase) (stateStats, error) {
+func getStat(db ethdb.Database) (stateStats, error) {
 	stat := stateStats{
 		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),

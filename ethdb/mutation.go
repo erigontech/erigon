@@ -2,11 +2,21 @@ package ethdb
 
 import (
 	"bytes"
+	"sync"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/petar/GoLLRB/llrb"
-	"sync"
 )
+
+type PutItem struct {
+	key, value []byte
+}
+
+func (a *PutItem) Less(b llrb.Item) bool {
+	bi := b.(*PutItem)
+	return bytes.Compare(a.key, bi.key) < 0
+}
 
 type mutation struct {
 	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
@@ -214,6 +224,7 @@ func (m *mutation) walkMem(bucket, startkey []byte, fixedbits uint, walker func(
 	return nil
 }
 
+// WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
 	if m.db == nil {
 		return m.walkMem(bucket, startkey, fixedbits, walker)
@@ -225,6 +236,7 @@ func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []u
 	panic("Not implemented")
 }
 
+// WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
 	if m.db == nil {
 		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
@@ -401,7 +413,7 @@ func (m *mutation) Close() {
 	m.Rollback()
 }
 
-func (m *mutation) NewBatch() Mutation {
+func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:         m,
 		puts:       make(map[string]*llrb.LLRB),
