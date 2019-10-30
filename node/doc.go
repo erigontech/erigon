@@ -39,7 +39,7 @@ offered by registered services will be offered on those endpoints. Users can res
 endpoint to a subset of RPC modules. Node itself offers the "debug", "admin" and "web3"
 modules.
 
-Service implementations can open LevelDB databases through the service context. Package
+Service implementations can open databases through the service context. Package
 node chooses the file system location of each database. If the node is configured to run
 without a data directory, databases are opened in memory instead.
 
@@ -58,7 +58,7 @@ stored in a directory with the same name as the instance. Thus, multiple node in
 using the same data directory will store this information in different subdirectories of
 the data directory.
 
-LevelDB databases are also stored within the instance subdirectory. If multiple node
+Databases are also stored within the instance subdirectory. If multiple node
 instances use the same data directory, opening the databases with identical names will
 create one database for each instance.
 
@@ -76,14 +76,14 @@ directory. Node instance A opens the database "db", node instance B opens the da
         A/
             nodekey            -- devp2p node key of instance A
             nodes/             -- devp2p discovery knowledge database of instance A
-            db/                -- LevelDB content for "db"
+            db/                -- data for "db"
         A.ipc                  -- JSON-RPC UNIX domain socket endpoint of instance A
         B/
             nodekey            -- devp2p node key of node B
             nodes/             -- devp2p discovery knowledge database of instance B
             static-nodes.json  -- devp2p static node list of instance B
-            db/                -- LevelDB content for "db"
-            db-2/              -- LevelDB content for "db-2"
+            db/                -- data for "db"
+            db-2/              -- data for "db-2"
         B.ipc                  -- JSON-RPC UNIX domain socket endpoint of instance B
         keystore/              -- account key store, used by both instances
 */

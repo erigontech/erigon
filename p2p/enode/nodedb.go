@@ -85,7 +85,7 @@ func newMemoryDB() (*DB, error) {
 	return &DB{lvl: db, quit: make(chan struct{})}, nil
 }
 
-// newPersistentNodeDB creates/opens a leveldb backed persistent node database,
+// newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentDB(path string) (*DB, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{})

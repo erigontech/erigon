@@ -4,14 +4,14 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
-	"github.com/ledgerwatch/bolt"
+	"sync"
+	"time"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"sync"
-	"time"
 )
 
 const DeleteLimit = 70000
@@ -46,10 +46,7 @@ type BasicPruner struct {
 }
 
 func (p *BasicPruner) Start() error {
-	db, ok := p.db.(*ethdb.BoltDatabase)
-	if !ok {
-		return errors.New("it's not ethdb.BoltDatabase")
-	}
+	db := p.db
 	p.LastPrunedBlockNum = p.ReadLastPrunedBlockNum()
 	p.wg.Add(1)
 	go p.pruningLoop(db)
@@ -57,7 +54,7 @@ func (p *BasicPruner) Start() error {
 
 	return nil
 }
-func (p *BasicPruner) pruningLoop(db *ethdb.BoltDatabase) {
+func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 	prunerRun := time.NewTicker(p.config.PruneTimeout)
 	saveLastPrunedBlockNum := time.NewTicker(time.Minute * 5)
 	defer prunerRun.Stop()
@@ -126,7 +123,7 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 	}
 }
 
-func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error {
+func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 	keysToRemove := newKeysToRemove()
 	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
@@ -159,7 +156,7 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 	if err != nil {
 		return err
 	}
-	err = batchDelete(db.DB(), keysToRemove)
+	err = batchDelete(db, keysToRemove)
 	if err != nil {
 		return err
 	}
@@ -167,25 +164,24 @@ func Prune(db *ethdb.BoltDatabase, blockNumFrom uint64, blockNumTo uint64) error
 	return nil
 }
 
-func batchDelete(db *bolt.DB, keys *keysToRemove) error {
-	log.Debug("Removed: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.Suffix))
+func batchDelete(db ethdb.Database, keys *keysToRemove) error {
+	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.Suffix))
 	iterator := LimitIterator(keys, DeleteLimit)
 	for iterator.HasMore() {
 		iterator.ResetLimit()
-		err := db.Batch(func(tx *bolt.Tx) error {
-			for {
-				key, bucketKey, ok := iterator.GetNext()
-				if !ok {
-					return nil
-				}
-				b := tx.Bucket(bucketKey)
-				err := b.Delete(key)
-				if err != nil {
-					log.Warn("Unable to remove", "bucket", bucketKey, "addr", common.Bytes2Hex(key), "err", err)
-					continue
-				}
+		batch := db.NewBatch()
+		for {
+			key, bucketKey, ok := iterator.GetNext()
+			if !ok {
+				break
 			}
-		})
+			err := batch.Delete(bucketKey, key)
+			if err != nil {
+				log.Warn("Unable to remove", "bucket", bucketKey, "addr", common.Bytes2Hex(key), "err", err)
+				continue
+			}
+		}
+		_, err := batch.Commit()
 		if err != nil {
 			return err
 		}

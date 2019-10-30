@@ -1744,7 +1744,7 @@ func NewPrivateDebugAPI(b Backend) *PrivateDebugAPI {
 	return &PrivateDebugAPI{b: b}
 }
 
-// ChaindbProperty returns leveldb properties of the key-value database.
+// ChaindbProperty returns properties of the chain database.
 func (api *PrivateDebugAPI) ChaindbProperty(property string) (string, error) {
 	return "N/A", nil
 }

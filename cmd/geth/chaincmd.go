@@ -323,10 +323,10 @@ func importPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	db := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack)
 	start := time.Now()
 
-	if err := utils.ImportPreimages(db, ctx.Args().First()); err != nil {
+	if err := utils.ImportPreimages(diskdb, ctx.Args().First()); err != nil {
 		utils.Fatalf("Import error: %v\n", err)
 	}
 	fmt.Printf("Import done in %v\n", time.Since(start))
@@ -341,7 +341,7 @@ func exportPreimages(ctx *cli.Context) error {
 	stack := makeFullNode(ctx)
 	defer stack.Close()
 
-	diskdb := utils.MakeChainDatabase(ctx, stack).(*ethdb.BoltDatabase)
+	diskdb := utils.MakeChainDatabase(ctx, stack)
 	start := time.Now()
 
 	if err := utils.ExportPreimages(diskdb, ctx.Args().First()); err != nil {
