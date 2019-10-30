@@ -2,10 +2,11 @@ package ethdb
 
 import (
 	"bytes"
+	"sync"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/petar/GoLLRB/llrb"
-	"sync"
 )
 
 type mutation struct {
@@ -401,7 +402,7 @@ func (m *mutation) Close() {
 	m.Rollback()
 }
 
-func (m *mutation) NewBatch() Mutation {
+func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:         m,
 		puts:       make(map[string]*llrb.LLRB),

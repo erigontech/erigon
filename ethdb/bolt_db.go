@@ -642,7 +642,7 @@ func (a *PutItem) Less(b llrb.Item) bool {
 	return bytes.Compare(a.key, bi.key) < 0
 }
 
-func (db *BoltDatabase) NewBatch() Mutation {
+func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:         db,
 		puts:       make(map[string]*llrb.LLRB),

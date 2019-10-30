@@ -90,7 +90,7 @@ func (dt *table) Close() {
 	// Do nothing; don't close the underlying DB.
 }
 
-func (dt *table) NewBatch() Mutation {
+func (dt *table) NewBatch() DbWithPendingMutations {
 	panic("Not supported")
 }
 
