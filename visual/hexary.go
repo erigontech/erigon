@@ -84,3 +84,38 @@ func Vertical(w io.Writer, hex []byte, highlighted int, name string, indexColors
 	>];
 	`)
 }
+
+func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColors []string, fontColors []string, compression int) {
+	fmt.Fprintf(w,
+		`
+	%s [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+	<tr>`, name)
+	if hex[len(hex)-1] == 16 {
+		hex = hex[:len(hex)-1]
+	} else {
+		compression = 0 // No compression for non-terminal keys
+	}
+	for i, h := range hex {
+		if i < len(hex)-compression-2 || i > len(hex)-3 {
+			if i < highlighted {
+				fmt.Fprintf(w,
+					`		<td bgcolor="%s"><font color="%s">%s</font></td>
+		`, indexColors[h], fontColors[h], hexIndices[h])
+			} else {
+				fmt.Fprintf(w,
+					`		<td bgcolor="%s"></td>
+		`, indexColors[h])
+			}
+		} else if compression > 0 && i == len(hex)-3 {
+			fmt.Fprintf(w,
+				`		<td border="0">-</td>
+			`)
+		}
+	}
+	fmt.Fprintf(w,
+		`
+	</tr></table>
+	>];
+	`)
+}

@@ -5,12 +5,21 @@ import (
 	"io"
 )
 
-func StartGraph(w io.Writer) {
-	fmt.Fprintf(w,
-		`digraph trie {
-	node [shape=none margin=0 width=0 height=0]
-    edge [dir = none headport=n tailport=s]
-`)
+func StartGraph(w io.Writer, tall bool) {
+	if tall {
+		fmt.Fprintf(w,
+			`digraph trie {
+		rankdir=LR;
+		node [shape=none margin=0 width=0 height=0]
+		edge [dir = none headport=w tailport=e]
+	`)
+	} else {
+		fmt.Fprintf(w,
+			`digraph trie {
+		node [shape=none margin=0 width=0 height=0]
+		edge [dir = none headport=n tailport=s]
+	`)
+	}
 }
 
 func EndGraph(w io.Writer) {
@@ -35,4 +44,18 @@ func Box(w io.Writer, name string, label string) {
 	fmt.Fprintf(w,
 		`%s [label="%s" shape=box margin=0.1 width=0 height=0 fillcolor="#FF6403" style=filled];
 `, name, label)
+}
+
+func StartCluster(w io.Writer, number int, label string) {
+	fmt.Fprintf(w,
+		`subgraph cluster_%d {
+			label = "%s";
+			color = black;
+`, number, label)
+}
+
+func EndCluster(w io.Writer) {
+	fmt.Fprintf(w,
+		`}
+`)
 }
