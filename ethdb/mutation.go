@@ -9,6 +9,15 @@ import (
 	"github.com/petar/GoLLRB/llrb"
 )
 
+type PutItem struct {
+	key, value []byte
+}
+
+func (a *PutItem) Less(b llrb.Item) bool {
+	bi := b.(*PutItem)
+	return bytes.Compare(a.key, bi.key) < 0
+}
+
 type mutation struct {
 	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
 	//map[timestamp]map[hBucket]listOfChangedKeys

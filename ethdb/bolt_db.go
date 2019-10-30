@@ -633,15 +633,6 @@ func (db *BoltDatabase) DB() *bolt.DB {
 	return db.db
 }
 
-type PutItem struct {
-	key, value []byte
-}
-
-func (a *PutItem) Less(b llrb.Item) bool {
-	bi := b.(*PutItem)
-	return bytes.Compare(a.key, bi.key) < 0
-}
-
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:         db,
