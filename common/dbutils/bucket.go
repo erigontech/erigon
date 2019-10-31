@@ -10,7 +10,7 @@ var (
 	StorageHistoryBucket  = []byte("hST")
 	CodeBucket            = []byte("CODE")
 
-	SuffixBucket = []byte("SUFFIX")
+	ChangeSetBucket = []byte("ChangeSet")
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = []byte("DatabaseVersion")

@@ -93,7 +93,7 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
-		v, _ := rds.historyDb.Get(dbutils.SuffixBucket, suffixkey)
+		v, _ := rds.historyDb.Get(dbutils.ChangeSetBucket, suffixkey)
 		if len(v) > 0 {
 			keycount := int(binary.BigEndian.Uint32(v))
 			for i, ki := 4, 0; ki < keycount; ki++ {
@@ -131,7 +131,7 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
-		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
+		//if err := rds.historyDb.Put(ethdb.ChangeSetBucket, suffixkey, dv); err != nil {
 		//	panic(err)
 		//}
 	}
@@ -140,7 +140,7 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix)+len(dbutils.StorageHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], dbutils.StorageHistoryBucket)
-		v, _ := rds.historyDb.Get(dbutils.SuffixBucket, suffixkey)
+		v, _ := rds.historyDb.Get(dbutils.ChangeSetBucket, suffixkey)
 		if len(v) > 0 {
 			keycount := int(binary.BigEndian.Uint32(v))
 			for i, ki := 4, 0; ki < keycount; ki++ {
@@ -178,7 +178,7 @@ func (rds *RepairDbState) CheckKeys() {
 		suffixkey := make([]byte, len(suffix)+len(dbutils.StorageHistoryBucket))
 		copy(suffixkey, suffix)
 		copy(suffixkey[len(suffix):], dbutils.StorageHistoryBucket)
-		//if err := rds.historyDb.Put(ethdb.SuffixBucket, suffixkey, dv); err != nil {
+		//if err := rds.historyDb.Put(ethdb.ChangeSetBucket, suffixkey, dv); err != nil {
 		//	panic(err)
 		//}
 	}

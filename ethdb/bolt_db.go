@@ -102,7 +102,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, noHis
 			}
 		}
 
-		sb, err := tx.CreateBucketIfNotExists(dbutils.SuffixBucket, true)
+		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetBucket, true)
 		if err != nil {
 			return err
 		}
@@ -559,7 +559,7 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	suffix := dbutils.EncodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(dbutils.SuffixBucket)
+		sb := tx.Bucket(dbutils.ChangeSetBucket)
 		if sb == nil {
 			return nil
 		}

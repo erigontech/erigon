@@ -294,11 +294,11 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
 	var ok bool
-	if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
+	if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
 		t = llrb.New()
-		m.puts[string(dbutils.SuffixBucket)] = t
+		m.puts[string(dbutils.ChangeSetBucket)] = t
 	}
-	err := m.Walk(dbutils.SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
+	err := m.Walk(dbutils.ChangeSetBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
 		hBucket := k[len(suffix):]
 		changedAccounts, err := dbutils.Decode(v)
 		if err != nil {
@@ -339,9 +339,9 @@ func (m *mutation) Commit() (uint64, error) {
 	var t *llrb.LLRB
 	var ok bool
 	if len(m.suffixkeys) > 0 {
-		if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
+		if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
 			t = llrb.New()
-			m.puts[string(dbutils.SuffixBucket)] = t
+			m.puts[string(dbutils.ChangeSetBucket)] = t
 		}
 		for timestamp, suffixM := range m.suffixkeys {
 			suffix := dbutils.EncodeTimestamp(timestamp)
@@ -350,7 +350,7 @@ func (m *mutation) Commit() (uint64, error) {
 				suffixkey := make([]byte, len(suffix)+len(hBucket))
 				copy(suffixkey, suffix)
 				copy(suffixkey[len(suffix):], hBucket)
-				dat, err := m.getNoLock(dbutils.SuffixBucket, suffixkey)
+				dat, err := m.getNoLock(dbutils.ChangeSetBucket, suffixkey)
 				if err != nil && err != ErrKeyNotFound {
 					return 0, err
 				}

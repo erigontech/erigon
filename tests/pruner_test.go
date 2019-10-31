@@ -25,6 +25,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/tests/contracts"
 )
 
+// It generates several blocks with money transfer, checks that it's correct
+// than prune two times with database state and history checks
 func TestBasisAccountPruning(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -67,6 +69,7 @@ func TestBasisAccountPruning(t *testing.T) {
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+		//Some transactions to generate blocks and history
 		var (
 			tx     *types.Transaction
 			genErr error
@@ -91,13 +94,13 @@ func TestBasisAccountPruning(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	for i := range blocks {
-		_, err = blockchain.InsertChain(types.Blocks{blocks[i]})
-		if err != nil {
-			t.Fatal(err)
-		}
+	// Insert blocks
+	_, err = blockchain.InsertChain(blocks)
+	if err != nil {
+		t.Fatal(err)
 	}
 
+	// Get stats
 	res, err := getStat(db)
 	if err != nil {
 		t.Fatal(err)
@@ -128,11 +131,13 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 
+	//Prune database history up to HEAD-1
 	err = core.Prune(db, 0, uint64(numBlocks)-1)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	//Check stats after history
 	res, err = getStat(db)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +158,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 
+	//Prune database history up to HEAD
 	err = core.Prune(db, uint64(numBlocks)-1, uint64(numBlocks))
 	if err != nil {
 		t.Fatal(err)
@@ -177,6 +183,8 @@ func TestBasisAccountPruning(t *testing.T) {
 
 }
 
+// It generates several blocks with money transfer, with noHistory flag enabled, checks that history not saved, but changeset exesists for every block
+// than prune two times with database state and history checks
 func TestBasisAccountPruningNoHistory(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -224,6 +232,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, numBlocks, func(i int, block *core.BlockGen) {
+		//Some transactions to generate blocks and history
 		var (
 			tx     *types.Transaction
 			genErr error
@@ -248,11 +257,9 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	for i := range blocks {
-		_, err = blockchain.InsertChain(types.Blocks{blocks[i]})
-		if err != nil {
-			t.Fatal(err)
-		}
+	_, err = blockchain.InsertChain(blocks)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	res, err := getStat(db)
@@ -310,6 +317,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		t.Fatal("Not equal")
 	}
 
+	//Prune database history up to HEAD
 	err = core.Prune(db, uint64(numBlocks)-1, uint64(numBlocks))
 	if err != nil {
 		t.Fatal(err)
@@ -334,6 +342,8 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 
 }
 
+// It deploys simple contract and makes several state changes, checks that state and history is correct,
+// than prune to numBlock-1 with database state and history checks
 func TestStoragePruning(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -378,9 +388,10 @@ func TestStoragePruning(t *testing.T) {
 	transactOpts2 := bind.NewKeyedTransactor(key2)
 
 	var eipContract *contracts.Eip2027
-
+	blockNum := 6
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(int64(genesis.NumberU64())+1))
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 6, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, blockNum, func(i int, block *core.BlockGen) {
+		//Some manipulations with contract to generate blocks with state history
 		var (
 			tx       *types.Transaction
 			innerErr error
@@ -465,11 +476,9 @@ func TestStoragePruning(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	for i := range blocks {
-		_, err = blockchain.InsertChain(types.Blocks{blocks[i]})
-		if err != nil {
-			t.Fatal(err)
-		}
+	_, err = blockchain.InsertChain(blocks)
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	res, err := getStat(db)
@@ -504,7 +513,7 @@ func TestStoragePruning(t *testing.T) {
 		t.Fatal("not equals")
 	}
 
-	err = core.Prune(db, 0, 5)
+	err = core.Prune(db, 0, uint64(blockNum-1))
 	assertNil(t, err)
 	res, err = getStat(db)
 	assertNil(t, err)
@@ -530,6 +539,7 @@ func TestStoragePruning(t *testing.T) {
 
 }
 
+//Simple E2E test that starts pruning an inserts blocks
 func TestBasisAccountPruningStrategy(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -676,7 +686,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
-	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
 		changedAccounts, err := dbutils.Decode(v)

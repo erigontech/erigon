@@ -19,6 +19,7 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/petar/GoLLRB/llrb"
@@ -32,7 +33,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-	if err := db.Walk(dbutils.SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.ChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
@@ -81,7 +82,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
 	t := llrb.New()
 	startCode := dbutils.EncodeTimestamp(starttimestamp)
-	if err := db.Walk(dbutils.SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			return true, nil
