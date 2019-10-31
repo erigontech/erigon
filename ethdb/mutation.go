@@ -7,6 +7,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/petar/GoLLRB/llrb"
 )
 
@@ -22,7 +23,7 @@ func (a *PutItem) Less(b llrb.Item) bool {
 type mutation struct {
 	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
 	//map[timestamp]map[hBucket]listOfChangedKeys
-	suffixkeys map[uint64]map[string][][]byte
+	suffixkeys map[uint64]map[string][]dbutils.Change
 	mu         sync.RWMutex
 	db         Database
 }
@@ -131,20 +132,26 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 }
 
 // Assumes that bucket, key, and value won't be modified
-func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64) error {
+func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
 	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixM, ok := m.suffixkeys[timestamp]
 	if !ok {
-		suffixM = make(map[string][][]byte)
+		suffixM = make(map[string][]dbutils.Change)
 		m.suffixkeys[timestamp] = suffixM
 	}
 	suffixL, ok := suffixM[string(hBucket)]
 	if !ok {
-		suffixL = [][]byte{}
+		suffixL = make([]dbutils.Change, 0)
 	}
-	suffixL = append(suffixL, key)
+	suffixL = append(suffixL, dbutils.Change{
+		Key:   key,
+		Value: value,
+	})
 	suffixM[string(hBucket)] = suffixL
+	if noHistory {
+		return nil
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var ht *llrb.LLRB
@@ -288,13 +295,17 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
 	var ok bool
-	if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
+	if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
 		t = llrb.New()
-		m.puts[string(dbutils.SuffixBucket)] = t
+		m.puts[string(dbutils.ChangeSetBucket)] = t
 	}
-	err := m.Walk(dbutils.SuffixBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
+	err := m.Walk(dbutils.ChangeSetBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
 		hBucket := k[len(suffix):]
-		changedAccounts := dbutils.ToSuffix(v)
+		changedAccounts, err := dbutils.Decode(v)
+		if err != nil {
+			return false, err
+		}
+
 		keycount := changedAccounts.KeyCount()
 		var ht *llrb.LLRB
 		var ok bool
@@ -306,7 +317,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			}
 		}
 
-		err := changedAccounts.Walk(func(kk []byte) error {
+		err = changedAccounts.Walk(func(kk, _ []byte) error {
 			kk = append(kk, suffix...)
 			ht.ReplaceOrInsert(&PutItem{key: kk, value: nil})
 			return nil
@@ -329,9 +340,9 @@ func (m *mutation) Commit() (uint64, error) {
 	var t *llrb.LLRB
 	var ok bool
 	if len(m.suffixkeys) > 0 {
-		if t, ok = m.puts[string(dbutils.SuffixBucket)]; !ok {
+		if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
 			t = llrb.New()
-			m.puts[string(dbutils.SuffixBucket)] = t
+			m.puts[string(dbutils.ChangeSetBucket)] = t
 		}
 		for timestamp, suffixM := range m.suffixkeys {
 			suffix := dbutils.EncodeTimestamp(timestamp)
@@ -340,18 +351,29 @@ func (m *mutation) Commit() (uint64, error) {
 				suffixkey := make([]byte, len(suffix)+len(hBucket))
 				copy(suffixkey, suffix)
 				copy(suffixkey[len(suffix):], hBucket)
-				dat, err := m.getNoLock(dbutils.SuffixBucket, suffixkey)
+				dat, err := m.getNoLock(dbutils.ChangeSetBucket, suffixkey)
 				if err != nil && err != ErrKeyNotFound {
 					return 0, err
 				}
-				changedAccounts := dbutils.ToSuffix(dat)
+
+				changedAccounts, err := dbutils.Decode(dat)
+				if err != nil {
+					log.Error("Commit Decode suffix err", "err", err)
+				}
+
 				changedAccounts = changedAccounts.MultiAdd(suffixL)
-				t.ReplaceOrInsert(&PutItem{key: suffixkey, value: changedAccounts})
+				changedRLP, err := dbutils.Encode(changedAccounts)
+				if err != nil {
+					log.Error("Commit Decode suffix err", "err", err)
+					return 0, err
+				}
+
+				t.ReplaceOrInsert(&PutItem{key: suffixkey, value: changedRLP})
 			}
 		}
 	}
 
-	m.suffixkeys = make(map[uint64]map[string][][]byte)
+	m.suffixkeys = make(map[uint64]map[string][]dbutils.Change)
 	size := 0
 	for _, t := range m.puts {
 		size += t.Len()
@@ -383,7 +405,7 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.suffixkeys = make(map[uint64]map[string][][]byte)
+	m.suffixkeys = make(map[uint64]map[string][]dbutils.Change)
 	m.puts = make(map[string]*llrb.LLRB)
 }
 
@@ -418,7 +440,7 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:         m,
 		puts:       make(map[string]*llrb.LLRB),
-		suffixkeys: make(map[uint64]map[string][][]byte),
+		suffixkeys: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return mm
 }

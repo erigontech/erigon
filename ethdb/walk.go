@@ -18,7 +18,6 @@ package ethdb
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -32,28 +31,36 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
 func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
 	// Collect list of buckets and keys that need to be considered
-	m := make(map[string]map[string]struct{})
+	m := make(map[string]map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-	if err := db.Walk(dbutils.SuffixBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.ChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-		keycount := int(binary.BigEndian.Uint32(v))
-		if keycount > 0 {
+		ca, err := dbutils.Decode(v)
+		if err != nil {
+			return false, err
+		}
+
+		if ca.KeyCount() > 0 {
 			bucketStr := string(common.CopyBytes(bucket))
-			var t map[string]struct{}
+			var t map[string][]byte
 			var ok bool
 			if t, ok = m[bucketStr]; !ok {
-				t = make(map[string]struct{})
+				t = make(map[string][]byte)
 				m[bucketStr] = t
 			}
-			i := 4
-			for ki := 0; ki < keycount; ki++ {
-				l := int(v[i])
-				i++
-				t[string(common.CopyBytes(v[i:i+l]))] = struct{}{}
-				i += l
+
+			err = ca.Walk(func(k, v []byte) error {
+				if _, ok = t[string(k)]; !ok {
+					t[string(k)] = v
+				}
+
+				return nil
+			})
+			if err != nil {
+				return false, err
 			}
 		}
 		return true, nil
@@ -61,14 +68,9 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 		return err
 	}
 	for bucketStr, t := range m {
-		//t := m[bucketStr]
 		bucket := []byte(bucketStr)
-		for keyStr := range t {
+		for keyStr, value := range t {
 			key := []byte(keyStr)
-			value, err := db.GetAsOf(bucket[1:], bucket, key, timestampDst+1)
-			if err != nil {
-				value = nil
-			}
 			if err := df(bucket, key, value); err != nil {
 				return err
 			}
@@ -80,7 +82,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
 	t := llrb.New()
 	startCode := dbutils.EncodeTimestamp(starttimestamp)
-	if err := db.Walk(dbutils.SuffixBucket, startCode, 0, func(k, v []byte) (bool, error) {
+	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := dbutils.DecodeTimestamp(k)
 		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			return true, nil
@@ -88,13 +90,18 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 		if timestamp > endtimestamp {
 			return false, nil
 		}
-		keycount := int(binary.BigEndian.Uint32(v))
-		for i, ki := 4, 0; ki < keycount; ki++ {
-			l := int(v[i])
-			i++
-			t.ReplaceOrInsert(&PutItem{key: common.CopyBytes(v[i : i+l]), value: nil})
-			i += l
+		d, err := dbutils.Decode(v)
+		if err != nil {
+			return false, err
 		}
+		err = d.Walk(func(k, v []byte) error {
+			t.ReplaceOrInsert(&PutItem{key: k, value: nil})
+			return nil
+		})
+		if err != nil {
+			return false, err
+		}
+
 		return true, nil
 	}); err != nil {
 		return nil, err

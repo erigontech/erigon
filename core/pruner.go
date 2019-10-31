@@ -125,7 +125,7 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 	keysToRemove := newKeysToRemove()
-	err := db.Walk(dbutils.SuffixBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 		if timestamp < blockNumFrom {
 			return true, nil
@@ -136,9 +136,12 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 
 		keysToRemove.Suffix = append(keysToRemove.Suffix, key)
 
-		changedKeys := dbutils.ToSuffix(v)
+		changedKeys, err := dbutils.Decode(v)
+		if err != nil {
+			return false, err
+		}
 
-		err := changedKeys.Walk(func(cKey []byte) error {
+		err = changedKeys.Walk(func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
 			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
 				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
@@ -236,8 +239,8 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
 		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
 	}
-	if bytes.Equal(i.currentBucket, dbutils.SuffixBucket) {
-		return i.k.Suffix[i.currentNum], dbutils.SuffixBucket, true
+	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
+		return i.k.Suffix[i.currentNum], dbutils.ChangeSetBucket, true
 	}
 	return nil, nil, false
 }
@@ -247,7 +250,7 @@ func (i *limitIterator) ResetLimit() {
 }
 
 func (i *limitIterator) HasMore() bool {
-	if bytes.Equal(i.currentBucket, dbutils.SuffixBucket) && len(i.k.Suffix) == i.currentNum {
+	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.Suffix) == i.currentNum {
 		return false
 	}
 	return true
@@ -263,7 +266,7 @@ func (i *limitIterator) updateBucket() {
 	}
 
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.SuffixBucket
+		i.currentBucket = dbutils.ChangeSetBucket
 		i.currentNum = 0
 	}
 }
