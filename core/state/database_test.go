@@ -26,6 +26,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/state/contracts"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -302,6 +303,9 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
 
+	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+	correctValueX := st.GetState(contractAddress, common.Hash{})
+
 	// BLOCKS 2 + 3
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1], blocks[2]}); err != nil {
 		t.Fatal(err)
@@ -319,6 +323,17 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	st, _, _ = blockchain.State()
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+	}
+
+	// Reload blockchain from the database
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ = blockchain.State()
+	valueX := st.GetState(contractAddress, common.Hash{})
+	if valueX != correctValueX {
+		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
 }
 func TestCreateOnExistingStorage(t *testing.T) {
@@ -400,5 +415,63 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	check0 := st.GetState(contractAddress, common.BigToHash(big.NewInt(0)))
 	if check0 != common.HexToHash("0x0") {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0)
+	}
+}
+
+func TestReproduceCrash(t *testing.T) {
+	// This example was taken from Ropsten contract that used to cause a crash
+	// it is created in the block 598915 and then there are 3 transactions modifying
+	// its storage in the same block:
+	// 1. Setting storageKey 1 to a non-zero value
+	// 2. Setting storageKey 2 to a non-zero value
+	// 3. Setting both storageKey1 and storageKey2 to zero values
+	value0 := common.Hash{}
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	storageKey1 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541")
+	value1 := common.HexToHash("0x016345785d8a0000")
+	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
+	value2 := common.HexToHash("0x58c00a51")
+	db := ethdb.NewMemDatabase()
+	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
+	if err != nil {
+		t.Errorf("could not create TrieDbState: %v", err)
+	}
+	tsw := tds.TrieStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+	// Start the 2nd transaction
+	tds.StartNewBuffer()
+	intraBlockState.SetState(contract, storageKey1, value1)
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+	// Start the 3rd transaction
+	tds.StartNewBuffer()
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	intraBlockState.SetState(contract, storageKey2, value2)
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+	// Start the 4th transaction - clearing both storage cells
+	tds.StartNewBuffer()
+	intraBlockState.SubBalance(contract, big.NewInt(1000000000))
+	intraBlockState.SetState(contract, storageKey1, value0)
+	intraBlockState.SetState(contract, storageKey2, value0)
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+	if _, err = tds.ComputeTrieRoots(); err != nil {
+		t.Errorf("ComputeTrieRoots failed: %v", err)
+	}
+	// We expect the list of prunable entries to be empty
+	prunables := tds.TriePruningDebugDump()
+	if len(prunables) > 0 {
+		t.Errorf("Expected empty list of prunables, got:\n %s", prunables)
 	}
 }

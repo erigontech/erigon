@@ -3,17 +3,16 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/valyala/bytebufferpool"
 )
 
 var emptyHash [32]byte
@@ -33,8 +32,56 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	return nil
 }
 
-/* One resolver per trie (prefix) */
-type TrieResolver struct {
+// OneBytesTape implements BytesTape and can only contain one binary string at the time
+type OneBytesTape struct {
+	bytes.Buffer
+}
+
+// Next belongs to the BytesTape interface, and for this type it always returns the
+// content of the buffer
+func (obt *OneBytesTape) Next() ([]byte, error) {
+	return obt.Bytes(), nil
+}
+
+// OneUint64Tape implements Uint64Tape and can only contain one number at a time
+type OneUint64Tape uint64
+
+// Next belongs to the Uint64Tape interface, and for this type it always returns
+// the currently set nonce
+func (out *OneUint64Tape) Next() (uint64, error) {
+	return uint64(*out), nil
+}
+
+// OneBalanceTape implements BigIntTape and can only contain one balance at a time
+type OneBalanceTape big.Int
+
+// Next belongs to the BigIntTape interface, and for this type it always returns
+// the currently set balance
+func (obt *OneBalanceTape) Next() (*big.Int, error) {
+	return (*big.Int)(obt), nil
+}
+
+// TwoHashTape implements HashTape and can only contain two hashes at a time
+type TwoHashTape struct {
+	hashes [2]common.Hash
+	idx    int
+}
+
+// Next belongs to the HashTape interface, and for this type it returns
+// the first hash on the first invocation, and the second hash on all
+// subsequent invocations
+func (tht *TwoHashTape) Next() (common.Hash, error) {
+	h := tht.hashes[tht.idx]
+	if tht.idx == 0 {
+		tht.idx = 1
+	}
+	return h, nil
+}
+
+// Resolver looks up (resolves) some keys and corresponding values from a database.
+// One resolver per trie (prefix).
+// See also ResolveRequest in trie.go
+type Resolver struct {
 	accounts   bool // Is this a resolver for accounts or for storage
 	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
 	requests   []*ResolveRequest
@@ -45,49 +92,43 @@ type TrieResolver struct {
 	historical bool
 	blockNr    uint64
 	hb         *HashBuilder
+	fieldSet   uint32 // fieldSet for the next invocation of step2
 	rss        []*ResolveSet
 	prec       bytes.Buffer
-	curr       bytes.Buffer
+	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
-	groups     []uint32
+	value      OneBytesTape // Current value to be used as the value tape for the hash builder
+	hashes     TwoHashTape  // Current code hash and storage hash as the hash tape for the hash builder
+	groups     []uint16
 	a          accounts.Account
 }
 
-func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *TrieResolver {
-	var leafFunc func(b []byte) (node, error)
-	if forAccounts {
-		leafFunc = func(b []byte) (node, error) {
-			var acc accounts.Account
-			if err := acc.DecodeForHashing(b); err != nil {
-				return nil, err
-			}
-			if acc.Root == EmptyRoot {
-				return &accountNode{acc, nil, true}, nil
-			}
-			return &accountNode{acc, hashNode(acc.Root[:]), true}, nil
-		}
-	} else {
-		leafFunc = func(b []byte) (node, error) { return valueNode(common.CopyBytes(b)), nil }
-	}
-	tr := TrieResolver{
+func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
+	tr := Resolver{
 		accounts:   forAccounts,
 		topLevels:  topLevels,
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder(leafFunc),
+		hb:         NewHashBuilder(),
 	}
+	tr.hb.SetKeyTape(&tr.curr)
+	tr.hb.SetValueTape(&tr.value)
+	tr.hb.SetNonceTape((*OneUint64Tape)(&tr.a.Nonce))
+	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
+	tr.hb.SetHashTape(&tr.hashes)
+	tr.hb.SetSSizeTape((*OneUint64Tape)(&tr.a.StorageSize))
 	return &tr
 }
 
-func (tr *TrieResolver) SetHistorical(h bool) {
+func (tr *Resolver) SetHistorical(h bool) {
 	tr.historical = h
 }
 
-// TrieResolver implements sort.Interface
+// Resolver implements sort.Interface
 // and sorts by resolve requests
 // (more general requests come first)
-func (tr *TrieResolver) Len() int {
+func (tr *Resolver) Len() int {
 	return len(tr.requests)
 }
 
@@ -98,7 +139,7 @@ func min(a, b int) int {
 	return b
 }
 
-func (tr *TrieResolver) Less(i, j int) bool {
+func (tr *Resolver) Less(i, j int) bool {
 	ci := tr.requests[i]
 	cj := tr.requests[j]
 	m := min(ci.resolvePos, cj.resolvePos)
@@ -113,22 +154,22 @@ func (tr *TrieResolver) Less(i, j int) bool {
 	return ci.resolvePos < cj.resolvePos
 }
 
-func (tr *TrieResolver) Swap(i, j int) {
+func (tr *Resolver) Swap(i, j int) {
 	tr.requests[i], tr.requests[j] = tr.requests[j], tr.requests[i]
 }
 
-func (tr *TrieResolver) AddRequest(req *ResolveRequest) {
+func (tr *Resolver) AddRequest(req *ResolveRequest) {
 	tr.requests = append(tr.requests, req)
 }
 
-func (tr *TrieResolver) Print() {
+func (tr *Resolver) Print() {
 	for _, req := range tr.requests {
 		fmt.Printf("%s\n", req.String())
 	}
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
-func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
+func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
@@ -171,14 +212,18 @@ func (tr *TrieResolver) PrepareResolveParams() ([][]byte, []uint) {
 	return startkeys, fixedbits
 }
 
-func (tr *TrieResolver) finaliseRoot() error {
+func (tr *Resolver) finaliseRoot() error {
 	tr.prec.Reset()
 	tr.prec.Write(tr.curr.Bytes())
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
-		tr.groups = genStructStep(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		var err error
+		tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		if err != nil {
+			return err
+		}
 	}
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
@@ -207,8 +252,16 @@ func (tr *TrieResolver) finaliseRoot() error {
 	return nil
 }
 
+// Various values of the account field set
+const (
+	AccountFieldSetNotAccount       uint32 = 0x00
+	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
+	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
+	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
+)
+
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
+func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -242,36 +295,47 @@ func (tr *TrieResolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		}
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
-			tr.groups = genStructStep(tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			var err error
+			tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			if err != nil {
+				return false, err
+			}
 		}
 		// Remember the current key and value
 		if tr.accounts {
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return false, err
 			}
-
-			encodeLen := tr.a.EncodingLengthForHashing()
-			buf := pool.GetBuffer(encodeLen)
-
-			tr.a.EncodeForHashing(buf.B)
-			tr.hb.setKeyValue(skip, k, buf)
-		} else {
-			var vv *bytebufferpool.ByteBuffer
-			if len(v) > 1 || v[0] >= 128 {
-				vv = pool.GetBuffer(uint(len(v) + 1))
-				vv.B[0] = byte(128 + len(v))
-				copy(vv.B[1:], v)
+			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
+				tr.fieldSet = AccountFieldSetNotContract
 			} else {
-				vv = pool.GetBuffer(1)
-				vv.B[0] = v[0]
+				if tr.a.HasStorageSize {
+					tr.fieldSet = AccountFieldSetContractWithSize
+				} else {
+					tr.fieldSet = AccountFieldSetContract
+				}
+				// Load hashes onto the stack of the hashbuilder
+				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
+				tr.hashes.hashes[1] = tr.a.Root     // this will end up on top of the stack
+				tr.hashes.idx = 0                   // Reset the counter
+				// the first item ends up deepest on the stack, the seccond item - on the top
+				if err := tr.hb.hash(2); err != nil {
+					return false, err
+				}
 			}
-			tr.hb.setKeyValue(skip, k, vv)
+		} else {
+			tr.value.Buffer.Reset()
+			if len(v) > 1 || v[0] >= 128 {
+				tr.value.Buffer.WriteByte(byte(128 + len(v)))
+			}
+			tr.value.Buffer.Write(v)
+			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}
 	return true, nil
 }
 
-func (tr *TrieResolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	var err error
 	if db == nil {

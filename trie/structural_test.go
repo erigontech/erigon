@@ -25,8 +25,6 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/valyala/bytebufferpool"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -57,9 +55,13 @@ func TestV2HashBuilding(t *testing.T) {
 	}
 	trieHash := tr.Hash()
 
-	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
-	var prec, curr, succ bytes.Buffer
-	var groups []uint32
+	hb := NewHashBuilder()
+	var prec, succ bytes.Buffer
+	var curr OneBytesTape
+	var valueTape OneBytesTape
+	hb.SetKeyTape(&curr)
+	hb.SetValueTape(&valueTape)
+	var groups []uint16
 	for i, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -73,12 +75,17 @@ func TestV2HashBuilding(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = genStructStep(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			var err error
+			groups, err = genStructStep(0, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
 		}
+		valueTape.Buffer.Reset()
 		if i%2 == 0 {
-			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueLong})
+			valueTape.Buffer.Write(valueLong)
 		} else {
-			hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: valueShort})
+			valueTape.Buffer.Write(valueShort)
 		}
 	}
 	prec.Reset()
@@ -86,7 +93,9 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	genStructStep(func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	if _, err := genStructStep(0, func(_ []byte) bool { return true }, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
 	builtHash := hb.rootHash()
 	if trieHash != builtHash {
 		t.Errorf("Expected hash %x, got %x", trieHash, builtHash)
@@ -120,9 +129,13 @@ func TestV2Resolution(t *testing.T) {
 		rs.AddKey(crypto.Keccak256([]byte(keys[i]))[:8])
 	}
 
-	hb := NewHashBuilder(func(b []byte) (node, error) { return valueNode(b), nil })
-	var prec, curr, succ bytes.Buffer
-	var groups []uint32
+	hb := NewHashBuilder()
+	var prec, succ bytes.Buffer
+	var curr OneBytesTape
+	var valueTape OneBytesTape
+	hb.SetKeyTape(&curr)
+	hb.SetValueTape(&valueTape)
+	var groups []uint16
 	for _, key := range keys {
 		prec.Reset()
 		prec.Write(curr.Bytes())
@@ -136,16 +149,23 @@ func TestV2Resolution(t *testing.T) {
 		}
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
-			groups = genStructStep(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			var err error
+			groups, err = genStructStep(0, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			if err != nil {
+				t.Errorf("Could not execute step of structGen algorithm: %v", err)
+			}
 		}
-		hb.setKeyValue(0, []byte(key), &bytebufferpool.ByteBuffer{B: value})
+		valueTape.Buffer.Reset()
+		valueTape.Buffer.Write(value)
 	}
 	prec.Reset()
 	prec.Write(curr.Bytes())
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	genStructStep(rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+	if _, err := genStructStep(0, rs.HashOnly, false, prec.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+		t.Errorf("Could not execute step of structGen algorithm: %v", err)
+	}
 	tr1 := New(common.Hash{})
 	tr1.root = hb.root()
 	builtHash := hb.rootHash()

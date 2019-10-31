@@ -47,7 +47,7 @@ type BoltDatabase struct {
 	log log.Logger // Contextual logger tracking the database path
 }
 
-// NewBoltDatabase returns a LevelDB wrapped object.
+// NewBoltDatabase returns a BoltDB wrapped object.
 func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	logger := log.New("database", file)
 
@@ -650,16 +650,7 @@ func (db *BoltDatabase) DB() *bolt.DB {
 	return db.db
 }
 
-type PutItem struct {
-	key, value []byte
-}
-
-func (a *PutItem) Less(b llrb.Item) bool {
-	bi := b.(*PutItem)
-	return bytes.Compare(a.key, bi.key) < 0
-}
-
-func (db *BoltDatabase) NewBatch() Mutation {
+func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:         db,
 		puts:       make(map[string]*llrb.LLRB),

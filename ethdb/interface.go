@@ -43,11 +43,6 @@ type Deleter interface {
 	Delete(bucket, key []byte) error
 }
 
-type GetterPutter interface {
-	Getter
-	Putter
-}
-
 // Database wraps all database operations. All methods are safe for concurrent use.
 type Database interface {
 	Getter
@@ -56,14 +51,16 @@ type Database interface {
 	MultiPut(tuples ...[]byte) (uint64, error)
 	RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error
 	Close()
-	NewBatch() Mutation
+	NewBatch() DbWithPendingMutations
 	Size() int
 	Keys() ([][]byte, error)
 	MemCopy() Database
 }
 
-// Extended version of the Batch, with read capabilites
-type Mutation interface {
+// DbWithPendingMutations is an extended version of the Database,
+// where all changes are first made in memory.
+// Later they can either be committed to the database or rolled back.
+type DbWithPendingMutations interface {
 	Database
 	Commit() (uint64, error)
 	Rollback()

@@ -23,7 +23,6 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -220,12 +219,12 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 }
 
 // ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
-// subtrie is specifed by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
+// subtrie is specified by the resolveHex[:resolvePos]. The remaining part of resolveHex (if present)
 // is useful to ensure that specific leaves of the trie are fully expanded (and not rolled into
 // the hashes). One might think of two uses of ResolveRequests (and perhaps we need to consider
 // splitting them into two types). First type is to fetch certain number of levels of a given
 // subtrie, but specifying resolveHex and resolvePos such that resolvePos == len(resolveHex).
-// In such situations, it want to also set topLevels field in the TrieResolver to a non-zero
+// In such situations, it want to also set topLevels field in the Resolver to a non-zero
 // value, otherwise only a hashNode will be resolved.
 // Second type is to fetch a subtrie in such a way that a set of keys will be fully expanded,
 // so that one can perform reads, inserts, and deletes on those keys without needing to do
@@ -310,115 +309,6 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation^0xffffffffffffffff)
 			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
 
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
-	}
-}
-
-func (t *Trie) PopulateBlockProofData(contract []byte, key []byte, pg *ProofGenerator) {
-	var nd = t.root
-	hex := keybytesToHex(key)
-	pos := 0
-	for {
-		switch n := nd.(type) {
-		case nil:
-			return
-		case *shortNode:
-			pg.addShort(contract, hex, pos, n.Key)
-			matchlen := prefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) {
-				nd = n.Val
-				pos += matchlen
-			} else {
-				proofHex := make([]byte, pos+len(n.Key))
-				copy(proofHex, hex[:pos])
-				copy(proofHex[pos:], n.Key)
-				if v, ok := n.Val.(valueNode); ok {
-					pg.addValue(contract, proofHex, pos+len(n.Key), common.CopyBytes(v))
-				} else if v, ok := n.Val.(*accountNode); ok {
-					encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
-					v.EncodeForHashing(encodedAccount.B)
-					enc := encodedAccount.Bytes()
-					pool.PutBuffer(encodedAccount)
-
-					pg.addValue(contract, proofHex, pos+len(n.Key), enc)
-				} else {
-					pg.addSoleHash(contract, proofHex, pos+len(n.Key), common.BytesToHash(n.Val.hash()))
-				}
-				return
-			}
-		case *duoNode:
-			mask, hashes, m := n.hashesExcept(hex[pos])
-			pg.addProof(contract, hex, pos, mask, hashes)
-			if m != nil {
-				for idx, s := range m {
-					proofHex := make([]byte, pos+1+len(s.Key))
-					copy(proofHex, hex[:pos])
-					proofHex[pos] = idx
-					copy(proofHex[pos+1:], s.Key)
-					pg.addShort(contract, proofHex, pos+1, s.Key)
-					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
-					} else if v, ok := s.Val.(*accountNode); ok {
-						encodedAccount := pool.GetBuffer(v.EncodingLengthForHashing())
-						v.EncodeForHashing(encodedAccount.B)
-						enc := encodedAccount.Bytes()
-						pool.PutBuffer(encodedAccount)
-						pg.addValue(contract, proofHex, pos+1+len(s.Key), enc)
-					} else {
-						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
-					}
-				}
-			}
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				nd = n.child1
-				pos++
-			case i2:
-				nd = n.child2
-				pos++
-			default:
-				return
-			}
-		case *fullNode:
-			mask, hashes, m := n.hashesExcept(hex[pos])
-			pg.addProof(contract, hex, pos, mask, hashes)
-			if m != nil {
-				for idx, s := range m {
-					proofHex := make([]byte, pos+1+len(s.Key))
-					copy(proofHex, hex[:pos])
-					proofHex[pos] = idx
-					copy(proofHex[pos+1:], s.Key)
-					pg.addShort(contract, proofHex, pos+1, s.Key)
-					if v, ok := s.Val.(valueNode); ok {
-						pg.addValue(contract, proofHex, pos+1+len(s.Key), common.CopyBytes(v))
-					} else {
-						pg.addSoleHash(contract, proofHex, pos+1+len(s.Key), common.BytesToHash(s.Val.hash()))
-					}
-				}
-			}
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return
-			} else {
-				nd = child
-				pos++
-			}
-		case valueNode:
-			pg.addValue(contract, hex, pos, common.CopyBytes(n))
-			return
-		case *accountNode:
-			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
-			n.EncodeForHashing(encodedAccount.B)
-			enc := encodedAccount.Bytes()
-			pool.PutBuffer(encodedAccount)
-			pg.addValue(contract, hex, pos, enc)
-			return
-		case hashNode:
-			pg.addSoleHash(contract, hex, pos, common.BytesToHash(n))
-			return
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
@@ -1113,8 +1003,12 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
 			if n.storage != nil {
+				h := key[:keyStart]
+				if h[len(h)-1] == 16 {
+					h = h[:len(h)-1]
+				}
 				// Mark all the storage nodes as deleted
-				t.touchAll(n.storage, key[:keyStart], true)
+				t.touchAll(n.storage, h, true)
 			}
 			n.storage = nil
 			n.hashCorrect = false
@@ -1252,6 +1146,9 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		return
 	}
 	var hn common.Hash
+	if nd == nil {
+		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
+	}
 	h.hash(nd, len(hex) == 0, hn[:])
 	hnode := hashNode(hn[:])
 	switch p := parent.(type) {

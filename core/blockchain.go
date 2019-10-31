@@ -105,9 +105,9 @@ type BlockChain struct {
 	chainConfig *params.ChainConfig // Chain & network configuration
 	cacheConfig *CacheConfig        // Cache configuration for pruning
 
-	db     ethdb.Mutation // Low level persistent database to store final content in
-	triegc *prque.Prque   // Priority queue mapping block numbers to tries to gc
-	gcproc time.Duration  // Accumulates canonical block processing for trie dumping
+	db     ethdb.DbWithPendingMutations // Low level persistent database to store final content in
+	triegc *prque.Prque                 // Priority queue mapping block numbers to tries to gc
+	gcproc time.Duration                // Accumulates canonical block processing for trie dumping
 
 	hc            *HeaderChain
 	rmLogsFeed    event.Feed
@@ -1396,7 +1396,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 const statsReportLimit = 8 * time.Second
 const commitLimit = 60 * time.Second
 
-func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.Mutation, index int) bool {
+func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPendingMutations, index int) bool {
 	var (
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
@@ -1410,7 +1410,7 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.Mutation, ind
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.Mutation) {
+func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()

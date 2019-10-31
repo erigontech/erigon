@@ -195,17 +195,16 @@ number of items from the stack as the number of digits in the operand's set, cre
 onto the node stack (and push its hash onto the hash stack). Sets of digits can be seen as the horizontal
 rectangles on the picture `prefix_groups_4`.
 The correspondence between digits in the operand's set and the items popped from the stack is as follows.
-If the special, 17th digit is not present in the set, then the top of the stack (the item being popped off first)
+The top of the stack (the item being popped off first)
 corresponds to the highest digit, and the item being popped off last corresponds to the lowest digit in the set.
-If the 17th digit is present (it is used to embed leaf values into branch nodes), then the corresponding
-item is the one popped off the stack last (after the one corresponding to the lowest non-special digit).
 
 `BRANCHHASH` opcode is similar to the `BRANCH` with the difference is that instead of constructing the
 branch node, it only creates its 32-byte hash. It places hash of the node onto the hash stack, and `nil` onto
 the node stack.
 
 `HASH` opcode takes specified number of hashes from the input sequence (tape) of hashes, and places them on
-the hash stack. It also places the same number of `nil` entries onto the node stack.
+the hash stack. It also places the same number of `nil` entries onto the node stack. The first item consumed ends up
+the deepest on the stack, the last item consumed ends up on the top of the stack.
 
 This is the structural information for the chunk containing leaves from `0` to `7` (inclusive):
 ```
@@ -315,7 +314,7 @@ it observes three keys (sequences of digits) - current, preceding, and succeedin
 opcodes that manipulate the stack (technically, two stacks, but because they are always of the same lengths, we can
 just say "stack"), it keeps track of what is currently on the stack. Each prefix group which is currently being
 "assembled" by the algorithm, has some number of items on the stack. This is being tracked by an item in the `groups`
-slice. The index of the item in the slice is equal to the length of the prefix of the prefix group. And the `unit32`
+slice. The index of the item in the slice is equal to the length of the prefix of the prefix group. And the `uint16`
 value of the item is the bitmask, with one bit per digit (and also per item on the stack). Whenever the algorithm
 emits an opcode that would push something on the stack, one of the items in the `groups` slice gains one extra bit
 to its bitmask. When the algorithm emits an opcode that would pop one or more things from the stack, the corresponding
@@ -418,8 +417,8 @@ sequence (tape) is added, containing the bytecodes of contracts.
 
 8. `CODE`
 9. `CODEHASH`
-10. `CONTRACTLEAF`
-11. `CONTRACTLEAFHASH`
+10. `ACCOUNTLEAF length field-set`
+11. `ACCOUNTLEAFHASH length field-set`
 12. `EMPTYROOT`
 
 `CODE` opcode consumes the next item in the bytecode sequence, creates a code node and pushes it onto the node stack.
@@ -428,12 +427,28 @@ It also pushes the hash of the byte code onto the hash stack.
 `CODEHASH` opcode consumes the next hash from the hash sequence, pushes it onto the hash stack, and pushes `nil` into the
 node stack.
 
-`CONTRACTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key-value tape. Then it pops two things
-from the node stack (and also from the hash stack). One thing has to be code node, another - root node of the storage
-for that contract. Storage root can be empty (that would be introduced by `EMPTYROOT` opcode). Out of all this information,
-an account leaf node is constructed and pushed onto the node stack. Its hash is pushed onto the hash stack.
+`ACCOUNTLEAF` opcode is similar to `LEAF`. It consumes the next item from the key tape. The rest of the semantics
+depends on the value of the `field-set`. Field set can be respresented by a bitmask. In that case, bit 0 would
+correspond to field 0, bit 1 (number 2) - to field 1, bit 2 (number 4) - to field 2. Currently, field 0 means
+account nonce, field 1 means account balance, field 2 means contract storage, field 3 means contract code.
 
-`CONTRACTLEAFHASH` opcode's difference from `CONTRACTLEAF` is that it does not push the leaf node onto the node stack,
+ * If field 0 is present in the `field-set`, the opcode consumes one item from the nonce tape (tape 0), otherwise
+it assumes default nonce (zero). This becomes the nonce of the newly created account/contract node.
+ * If field 1 is present in the `field-set`, the opcode consumes one item from the balance tape (tape 1), otherwise
+ it assumes default balance (zero). This becomes the balance of the newly created account/contract node.
+ * If field 2 is present in the `field-set`, the opcode pops a node from the node stack and a hash from the hash stack.
+This node or hash (in this order of preference) becomes the storage of the newly created contract node.
+Storage root can be empty (that would introduced by `EMPTYROOT` opcode).
+* If field 3 is present in the `field-set`, the opcode pops a code node from the node stack and a hash from the hash stack.
+This node or hash (in the order of preference) becomes the code or code hash of the newly created contract node.
+
+Out of all the information collected through the tapes and the stacks (as directed by the `field-set`), an account leaf node
+is constructed and pushed onto the node stack. Its hash is pushed onto the hash stack.
+Field set is introduced to make the specification of what is an account extensible in a backwards compatible way.
+If a new field is added to the account in the future, it can be introduced without a need to re-encode the pre-existing
+structures.
+
+`ACCOUNTLEAFHASH` opcode's difference from `ACCOUNTLEAF` is that it does not push the leaf node onto the node stack,
 pushing `nil` instead. The hash of would-be account leaf node is pushed onto the hash stack.
 
 `EMPTYROOT` is a way of placing a special value signifying an empty node onto the node stack. It also pushes the

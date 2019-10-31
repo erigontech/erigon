@@ -6,10 +6,8 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"os/signal"
@@ -21,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -31,7 +31,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
+	colorable "github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
@@ -46,8 +49,10 @@ var reset = flag.Int("reset", -1, "reset to given block number")
 var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
 var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
-var genLag = flag.Int("genlag", 4096, "how many blocks to accumulate block proofs over for generator")
-var consLag = flag.Int("conslag", 256, "how many blocks to accumulate block proofs over for consumer")
+var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata file used as input to analysis")
+var statefile = flag.String("statefile", "state", "path to the file where the state will be periodically written during the analysis")
+var start = flag.Int("start", 0, "number of data points to skip when making a chart")
+var window = flag.Int("window", 1024, "size of the window for moving average")
 
 func check(e error) {
 	if e != nil {
@@ -119,36 +124,20 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-func stateGrowth1() {
+func stateGrowth1(chaindata string) {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	creatorsFile, err := os.Open("creators.csv")
-	check(err)
-	defer creatorsFile.Close()
-	creatorsReader := csv.NewReader(bufio.NewReader(creatorsFile))
-	creators := make(map[common.Address]common.Address)
-	for records, _ := creatorsReader.Read(); records != nil; records, _ = creatorsReader.Read() {
-		creators[common.HexToAddress(records[0])] = common.HexToAddress(records[1])
-	}
 	var count int
 	var maxTimestamp uint64
 	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Address]uint64)
+	lastTimestamps := make(map[common.Hash]uint64)
 	// For each timestamp, how many accounts were created in the state
 	creationsByBlock := make(map[uint64]int)
-	creatorsByBlock := make(map[common.Address]map[uint64]int)
 	var addrHash common.Hash
-	var address common.Address
 	// Go through the history of account first
 	err = db.View(func(tx *bolt.Tx) error {
-		pre := tx.Bucket(dbutils.PreimagePrefix)
-		if pre == nil {
-			return nil
-		}
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
@@ -157,28 +146,17 @@ func stateGrowth1() {
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// First 32 bytes is the hash of the address, then timestamp encoding
 			copy(addrHash[:], k[:32])
-			// Figure out the addrees via preimage
-			addr, _ := pre.Get(addrHash[:])
-			copy(address[:], addr)
-			creator := creators[address]
 			timestamp, _ := decodeTimestamp(k[32:])
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
 			if len(v) == 0 {
-				cr, ok := creatorsByBlock[creator]
-				if !ok {
-					cr = make(map[uint64]int)
-					creatorsByBlock[creator] = cr
-				}
 				creationsByBlock[timestamp]++
-				cr[timestamp]++
-				if lt, ok := lastTimestamps[address]; ok {
+				if lt, ok := lastTimestamps[addrHash]; ok {
 					creationsByBlock[lt]--
-					cr[lt]--
 				}
 			}
-			lastTimestamps[address] = timestamp
+			lastTimestamps[addrHash] = timestamp
 			count++
 			if count%100000 == 0 {
 				fmt.Printf("Processed %d account records\n", count)
@@ -201,10 +179,7 @@ func stateGrowth1() {
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], k[:32])
-			// Figure out the addrees via preimage
-			addr, _ := pre.Get(addrHash[:])
-			copy(address[:], addr)
-			lastTimestamps[address] = maxTimestamp
+			lastTimestamps[addrHash] = maxTimestamp
 			count++
 			if count%100000 == 0 {
 				fmt.Printf("Processed %d account records\n", count)
@@ -213,16 +188,9 @@ func stateGrowth1() {
 		return nil
 	})
 	check(err)
-	for address, lt := range lastTimestamps {
+	for _, lt := range lastTimestamps {
 		if lt < maxTimestamp {
 			creationsByBlock[lt]--
-			creator := creators[address]
-			cr, ok := creatorsByBlock[creator]
-			if !ok {
-				cr = make(map[uint64]int)
-				creatorsByBlock[creator] = cr
-			}
-			cr[lt]--
 		}
 	}
 
@@ -247,69 +215,22 @@ func stateGrowth1() {
 	cumulative := 0
 	for i := 0; i < tsi.length; i++ {
 		cumulative += tsi.values[i]
-		fmt.Fprintf(w, "%d, %d\n", tsi.timestamps[i], cumulative)
-	}
-	cisa := NewIntSorterAddr(len(creatorsByBlock))
-	idx = 0
-	for creator, cr := range creatorsByBlock {
-		cumulative := 0
-		for _, count := range cr {
-			cumulative += count
-		}
-		cisa.ints[idx] = cumulative
-		cisa.values[idx] = creator
-		idx++
-	}
-	sort.Sort(cisa)
-	// Top 16 account creators
-	for i := 0; i < 20 && i < cisa.length; i++ {
-		creator := cisa.values[i]
-		tsi := NewTimeSorterInt(len(creatorsByBlock[creator]))
-		idx := 0
-		for timestamp, count := range creatorsByBlock[creator] {
-			tsi.timestamps[idx] = timestamp
-			tsi.values[idx] = count
-			idx++
-		}
-		sort.Sort(tsi)
-		fmt.Printf("Writing dataset for creator %x...\n", creator[:])
-		f, err := os.Create(fmt.Sprintf("acc_creator_%x.csv", creator[:]))
-		check(err)
-		defer f.Close()
-		w := bufio.NewWriter(f)
-		defer w.Flush()
-		cumulative := 0
-		for i := 0; i < tsi.length; i++ {
-			cumulative += tsi.values[i]
-			fmt.Fprintf(w, "%d, %d\n", tsi.timestamps[i], cumulative)
-		}
+		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
 }
 
-func stateGrowth2() {
+func stateGrowth2(chaindata string) {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Volumes/tb4/turbo-geth-10/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	creatorsFile, err := os.Open("creators.csv")
-	check(err)
-	defer creatorsFile.Close()
-	creatorsReader := csv.NewReader(bufio.NewReader(creatorsFile))
-	creators := make(map[common.Address]common.Address)
-	for records, _ := creatorsReader.Read(); records != nil; records, _ = creatorsReader.Read() {
-		creators[common.HexToAddress(records[0])] = common.HexToAddress(records[1])
-	}
 	var count int
 	var maxTimestamp uint64
 	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Address]map[common.Hash]uint64)
+	lastTimestamps := make(map[common.Hash]map[common.Hash]uint64)
 	// For each timestamp, how many storage items were created
-	creationsByBlock := make(map[common.Address]map[uint64]int)
-	// For each timestamp, how many accounts or storage items were created by the creator
-	creatorsByBlock := make(map[common.Address]map[uint64]int)
-	var address common.Address
+	creationsByBlock := make(map[common.Hash]map[uint64]int)
+	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
 	err = db.View(func(tx *bolt.Tx) error {
@@ -320,40 +241,32 @@ func stateGrowth2() {
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// First 20 bytes is the address
-			copy(address[:], k[:20])
-			copy(hash[:], k[20:52])
-			timestamp, _ := decodeTimestamp(k[52:])
-			creator := creators[address]
+			copy(addrHash[:], k[:32])
+			copy(hash[:], k[40:72])
+			timestamp, _ := decodeTimestamp(k[72:])
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
 			if len(v) == 0 {
-				c, ok := creationsByBlock[address]
+				c, ok := creationsByBlock[addrHash]
 				if !ok {
 					c = make(map[uint64]int)
-					creationsByBlock[address] = c
+					creationsByBlock[addrHash] = c
 				}
 				c[timestamp]++
-				cr, ok := creatorsByBlock[creator]
-				if !ok {
-					cr = make(map[uint64]int)
-					creatorsByBlock[creator] = cr
-				}
-				cr[timestamp]++
-				l, ok := lastTimestamps[address]
+				l, ok := lastTimestamps[addrHash]
 				if !ok {
 					l = make(map[common.Hash]uint64)
-					lastTimestamps[address] = l
+					lastTimestamps[addrHash] = l
 				}
 				if lt, ok := l[hash]; ok {
 					c[lt]--
-					cr[lt]--
 				}
 			}
-			l, ok := lastTimestamps[address]
+			l, ok := lastTimestamps[addrHash]
 			if !ok {
 				l = make(map[common.Hash]uint64)
-				lastTimestamps[address] = l
+				lastTimestamps[addrHash] = l
 			}
 			l[hash] = timestamp
 			count++
@@ -372,12 +285,12 @@ func stateGrowth2() {
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			copy(address[:], k[:20])
-			copy(hash[:], k[20:52])
-			l, ok := lastTimestamps[address]
+			copy(addrHash[:], k[:32])
+			copy(hash[:], k[40:72])
+			l, ok := lastTimestamps[addrHash]
 			if !ok {
 				l = make(map[common.Hash]uint64)
-				lastTimestamps[address] = l
+				lastTimestamps[addrHash] = l
 			}
 			l[hash] = maxTimestamp
 			count++
@@ -392,13 +305,6 @@ func stateGrowth2() {
 		for _, lt := range l {
 			if lt < maxTimestamp {
 				creationsByBlock[address][lt]--
-				creator := creators[address]
-				cr, ok := creatorsByBlock[creator]
-				if !ok {
-					cr = make(map[uint64]int)
-					creatorsByBlock[creator] = cr
-				}
-				cr[lt]--
 			}
 		}
 	}
@@ -407,22 +313,16 @@ func stateGrowth2() {
 	fmt.Printf("Storage history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
-	isa := NewIntSorterAddr(len(creationsByBlock))
-	idx := 0
-	for addr, c := range creationsByBlock {
+	for _, c := range creationsByBlock {
 		cumulative := 0
 		for timestamp, count := range c {
 			totalCreationsByBlock[timestamp] += count
 			cumulative += count
 		}
-		isa.ints[idx] = cumulative
-		isa.values[idx] = addr
-		idx++
 	}
-	sort.Sort(isa)
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
-	idx = 0
+	idx := 0
 	for timestamp, count := range totalCreationsByBlock {
 		tsi.timestamps[idx] = timestamp
 		tsi.values[idx] = count
@@ -438,66 +338,37 @@ func stateGrowth2() {
 	cumulative := 0
 	for i := 0; i < tsi.length; i++ {
 		cumulative += tsi.values[i]
-		fmt.Fprintf(w, "%d, %d\n", tsi.timestamps[i], cumulative)
+		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
-	// Top 16 contracts
-	for i := 0; i < 16 && i < isa.length; i++ {
-		addr := isa.values[i]
-		tsi := NewTimeSorterInt(len(creationsByBlock[addr]))
-		idx := 0
-		for timestamp, count := range creationsByBlock[addr] {
-			tsi.timestamps[idx] = timestamp
-			tsi.values[idx] = count
-			idx++
+}
+
+func gasLimits(chaindata string) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	vmConfig := vm.Config{}
+	engine := ethash.NewFullFaker()
+	chainConfig := params.MainnetChainConfig
+	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil)
+	check(err)
+	f, err := os.Create("gas_limits.csv")
+	check(err)
+	defer f.Close()
+	w := bufio.NewWriter(f)
+	defer w.Flush()
+	var blockNum uint64 = 5346726
+	for {
+		block := bcb.GetBlockByNumber(blockNum)
+		if block == nil {
+			break
 		}
-		sort.Sort(tsi)
-		fmt.Printf("Writing dataset for contract %x...\n", addr[:])
-		f, err := os.Create(fmt.Sprintf("growth_%x.csv", addr[:]))
-		check(err)
-		defer f.Close()
-		w := bufio.NewWriter(f)
-		defer w.Flush()
-		cumulative := 0
-		for i := 0; i < tsi.length; i++ {
-			cumulative += tsi.values[i]
-			fmt.Fprintf(w, "%d, %d\n", tsi.timestamps[i], cumulative)
-		}
-	}
-	cisa := NewIntSorterAddr(len(creatorsByBlock))
-	idx = 0
-	for creator, cr := range creatorsByBlock {
-		cumulative := 0
-		for _, count := range cr {
-			cumulative += count
-		}
-		cisa.ints[idx] = cumulative
-		cisa.values[idx] = creator
-		idx++
-	}
-	sort.Sort(cisa)
-	// Top 16 creators
-	for i := 0; i < 16 && i < cisa.length; i++ {
-		creator := cisa.values[i]
-		tsi := NewTimeSorterInt(len(creatorsByBlock[creator]))
-		idx := 0
-		for timestamp, count := range creatorsByBlock[creator] {
-			tsi.timestamps[idx] = timestamp
-			tsi.values[idx] = count
-			idx++
-		}
-		sort.Sort(tsi)
-		fmt.Printf("Writing dataset for creator %x...\n", creator[:])
-		f, err := os.Create(fmt.Sprintf("creator_%x.csv", creator[:]))
-		check(err)
-		defer f.Close()
-		w := bufio.NewWriter(f)
-		defer w.Flush()
-		cumulative := 0
-		for i := 0; i < tsi.length; i++ {
-			cumulative += tsi.values[i]
-			fmt.Fprintf(w, "%d, %d\n", tsi.timestamps[i], cumulative)
+		fmt.Fprintf(w, "%d, %d\n", blockNum, block.GasLimit())
+		blockNum++
+		if blockNum%100000 == 0 {
+			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 	}
+	fmt.Printf("Read %d blocks\n", blockNum)
 }
 
 func parseFloat64(str string) float64 {
@@ -511,8 +382,8 @@ func parseFloat64(str string) float64 {
 func readData(filename string) (blocks []float64, items []float64, err error) {
 	err = util.File.ReadByLines(filename, func(line string) error {
 		parts := strings.Split(line, ",")
-		blocks = append(blocks, parseFloat64(strings.Trim(parts[0], " "))/1000000.0)
-		items = append(items, parseFloat64(strings.Trim(parts[1], " "))/1000000.0)
+		blocks = append(blocks, parseFloat64(strings.Trim(parts[0], " ")))
+		items = append(items, parseFloat64(strings.Trim(parts[1], " ")))
 		return nil
 	})
 	return
@@ -527,6 +398,7 @@ func blockMillions() []chart.GridLine {
 		{Value: 5.0},
 		{Value: 6.0},
 		{Value: 7.0},
+		{Value: 8.0},
 	}
 }
 
@@ -544,20 +416,63 @@ func accountMillions() []chart.GridLine {
 	}
 }
 
-func stateGrowthChart1() {
+func startFrom(axis, data []float64, start float64) ([]float64, []float64) {
+	// Find position where axis[i] >= start
+	for i := 0; i < len(axis); i++ {
+		if axis[i] >= start {
+			return axis[i:], data[i:]
+		}
+	}
+	return []float64{}, []float64{}
+}
+
+func movingAverage(axis, data []float64, window float64) []float64 {
+	var windowSum float64
+	var windowStart int
+	movingAvgs := make([]float64, len(data))
+	for j := 0; j < len(data); j++ {
+		windowSum += data[j]
+		for axis[j]-axis[windowStart] > window {
+			windowSum -= data[windowStart]
+			windowStart++
+		}
+		if axis[j]-axis[windowStart] > 0 {
+			movingAvgs[j] = windowSum / (axis[j] - axis[windowStart])
+		}
+	}
+	return movingAvgs
+}
+
+func stateGrowthChart1(start int, window int) {
 	blocks, accounts, err := readData("accounts_growth.csv")
 	check(err)
+	accounts = movingAverage(blocks, accounts, float64(window))
+	blocks, accounts = startFrom(blocks, accounts, float64(start))
+	gBlocks, gaslimits, err := readData("gas_limits.csv")
+	check(err)
+	gaslimits = movingAverage(gBlocks, gaslimits, float64(window))
+	gBlocks, gaslimits = startFrom(gBlocks, gaslimits, float64(start))
 	mainSeries := &chart.ContinuousSeries{
-		Name: "Number of accounts (EOA and contracts)",
+		Name: fmt.Sprintf("Number of accounts created per block (EOA and contracts), moving average over %d blocks", window),
 		Style: chart.Style{
 			Show:        true,
+			StrokeWidth: 1,
 			StrokeColor: chart.ColorBlue,
 			FillColor:   chart.ColorBlue.WithAlpha(100),
 		},
 		XValues: blocks,
 		YValues: accounts,
 	}
-
+	gasLimitSeries := &chart.ContinuousSeries{
+		Name: fmt.Sprintf("Block gas limit, moving average over %d blocks", window),
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorRed,
+		},
+		YAxis:   chart.YAxisSecondary,
+		XValues: gBlocks,
+		YValues: gaslimits,
+	}
 	graph1 := chart.Chart{
 		Width:  1280,
 		Height: 720,
@@ -567,21 +482,28 @@ func stateGrowthChart1() {
 			},
 		},
 		YAxis: chart.YAxis{
-			Name:      "Accounts",
+			Name:      "Accounts created",
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
-			},
-			ValueFormatter: func(v interface{}) string {
-				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorBlue,
 				StrokeWidth: 1.0,
 			},
-			GridLines: accountMillions(),
+		},
+		YAxisSecondary: chart.YAxis{
+			Name:      "Block gas limit",
+			NameStyle: chart.StyleShow(),
+			Style:     chart.StyleShow(),
+			TickStyle: chart.Style{
+				TextRotationDegrees: 45.0,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%.2fm", v.(float64)/1000000.0)
+			},
 		},
 		XAxis: chart.XAxis{
 			Name: "Blocks, million",
@@ -589,17 +511,18 @@ func stateGrowthChart1() {
 				Show: true,
 			},
 			ValueFormatter: func(v interface{}) string {
-				return fmt.Sprintf("%.3fm", v.(float64))
+				return fmt.Sprintf("%.3fm", v.(float64)/1000000.0)
 			},
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
-			GridLines: blockMillions(),
+			//GridLines: blockMillions(),
 		},
 		Series: []chart.Series{
 			mainSeries,
+			gasLimitSeries,
 		},
 	}
 
@@ -624,20 +547,36 @@ func storageMillions() []chart.GridLine {
 	}
 }
 
-func stateGrowthChart2() {
+func stateGrowthChart2(start, window int) {
 	blocks, accounts, err := readData("storage_growth.csv")
 	check(err)
+	accounts = movingAverage(blocks, accounts, float64(window))
+	blocks, accounts = startFrom(blocks, accounts, float64(start))
+	gBlocks, gaslimits, err := readData("gas_limits.csv")
+	check(err)
+	gaslimits = movingAverage(gBlocks, gaslimits, float64(window))
+	gBlocks, gaslimits = startFrom(gBlocks, gaslimits, float64(start))
 	mainSeries := &chart.ContinuousSeries{
-		Name: "Number of contract storage items",
+		Name: fmt.Sprintf("Storage items created per block, moving average over %d blocks", window),
 		Style: chart.Style{
 			Show:        true,
+			StrokeWidth: 1,
 			StrokeColor: chart.ColorGreen,
 			FillColor:   chart.ColorGreen.WithAlpha(100),
 		},
 		XValues: blocks,
 		YValues: accounts,
 	}
-
+	gasLimitSeries := &chart.ContinuousSeries{
+		Name: fmt.Sprintf("Block gas limit, moving average over %d blocks", window),
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorRed,
+		},
+		YAxis:   chart.YAxisSecondary,
+		XValues: gBlocks,
+		YValues: gaslimits,
+	}
 	graph1 := chart.Chart{
 		Width:  1280,
 		Height: 720,
@@ -647,21 +586,28 @@ func stateGrowthChart2() {
 			},
 		},
 		YAxis: chart.YAxis{
-			Name:      "Storage items",
+			Name:      "Storage items created",
 			NameStyle: chart.StyleShow(),
 			Style:     chart.StyleShow(),
 			TickStyle: chart.Style{
 				TextRotationDegrees: 45.0,
-			},
-			ValueFormatter: func(v interface{}) string {
-				return fmt.Sprintf("%.3fm", v.(float64))
 			},
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorBlue,
 				StrokeWidth: 1.0,
 			},
-			GridLines: storageMillions(),
+		},
+		YAxisSecondary: chart.YAxis{
+			Name:      "Block gas limit",
+			NameStyle: chart.StyleShow(),
+			Style:     chart.StyleShow(),
+			TickStyle: chart.Style{
+				TextRotationDegrees: 45.0,
+			},
+			ValueFormatter: func(v interface{}) string {
+				return fmt.Sprintf("%.2fm", v.(float64)/1000000.0)
+			},
 		},
 		XAxis: chart.XAxis{
 			Name: "Blocks, million",
@@ -669,17 +615,18 @@ func stateGrowthChart2() {
 				Show: true,
 			},
 			ValueFormatter: func(v interface{}) string {
-				return fmt.Sprintf("%.3fm", v.(float64))
+				return fmt.Sprintf("%.3fm", v.(float64)/1000000.0)
 			},
 			GridMajorStyle: chart.Style{
 				Show:        true,
 				StrokeColor: chart.ColorAlternateGray,
 				StrokeWidth: 1.0,
 			},
-			GridLines: blockMillions(),
+			//GridLines: blockMillions(),
 		},
 		Series: []chart.Series{
 			mainSeries,
+			gasLimitSeries,
 		},
 	}
 
@@ -1387,10 +1334,10 @@ func oldStorage() {
 	iba := NewIntSorterAddr(len(itemsByAddress))
 	idx := 0
 	total := 0
-	for address, items := range itemsByAddress {
+	for addrHash, items := range itemsByAddress {
 		total += items
 		iba.ints[idx] = items
-		iba.values[idx] = address
+		iba.values[idx] = addrHash
 		idx++
 	}
 	sort.Sort(iba)
@@ -1663,17 +1610,47 @@ func makeSha3Preimages() {
 }
 
 func main() {
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.Lvl(3)) // 3 == verbosity INFO
+
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal("could not create CPU profile: ", err)
+			log.Error("could not create CPU profile", "error", err)
+			return
 		}
 		defer f.Close()
 		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("could not start CPU profile: ", err)
+			log.Error("could not start CPU profile", "error", err)
+			return
 		}
 		defer pprof.StopCPUProfile()
+	}
+	if *action == "stateGrowth" {
+		stateGrowth1(*chaindata)
+		stateGrowth2(*chaindata)
+	}
+	if *action == "gasLimits" {
+		gasLimits(*chaindata)
+	}
+	if *action == "stateGrowthChart1" {
+		stateGrowthChart1(*start, *window)
+	}
+	if *action == "stateGrowthChart2" {
+		stateGrowthChart2(*start, *window)
 	}
 	//stateGrowth1()
 	//stateGrowthChart1()
@@ -1704,7 +1681,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*genLag, *consLag)
+		stateless(*chaindata, *statefile)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)
@@ -1730,7 +1707,9 @@ func main() {
 		}
 	}
 	//estimate()
-	//verify_snapshot()
+	if *action == "verifySnapshot" {
+		verifySnapshot(*chaindata)
+	}
 	//feemarket()
 	//transaction_stats()
 	//naked_storage_vs_blockproof()
@@ -1738,12 +1717,14 @@ func main() {
 	if *memprofile != "" {
 		f, err := os.Create(*memprofile)
 		if err != nil {
-			log.Fatal("could not create mem profile: ", err)
+			log.Error("could not create mem profile", "error", err)
+			return
 		}
 		defer f.Close()
 		runtime.GC() // get up-to-date statistics
 		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Fatal("could not write memory profile: ", err)
+			log.Error("could not write memory profile", "error", err)
+			return
 		}
 	}
 }

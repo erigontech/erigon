@@ -246,7 +246,7 @@ func (rds *RepairDbState) getStorageTrie(address common.Address, create bool) (*
 
 func (rds *RepairDbState) UpdateAccountData(_ context.Context, address common.Address, original, account *accounts.Account) error {
 	// Perform resolutions first
-	var resolver *trie.TrieResolver
+	var resolver *trie.Resolver
 	var storageTrie *trie.Trie
 	var err error
 	if m, ok := rds.storageUpdates[address]; ok {

@@ -87,7 +87,7 @@ func newMemoryNodeDB(self NodeID) (*nodeDB, error) {
 	}, nil
 }
 
-// newPersistentNodeDB creates/opens a leveldb backed persistent node database,
+// newPersistentNodeDB creates/opens a persistent node database,
 // also flushing its contents in case of a version mismatch.
 func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error) {
 	db, err := bolt.Open(path, 0600, &bolt.Options{})
@@ -135,7 +135,7 @@ func newPersistentNodeDB(path string, version int, self NodeID) (*nodeDB, error)
 	}, nil
 }
 
-// makeKey generates the leveldb key-blob from a node id and its particular
+// makeKey generates the key-blob from a node id and its particular
 // field of interest.
 func makeKey(id NodeID, field string) []byte {
 	if bytes.Equal(id[:], nodeDBNilNodeID[:]) {
