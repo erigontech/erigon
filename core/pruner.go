@@ -89,12 +89,12 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 	}
 }
 
-func calculateNumOfPrunedBlocks(curentBlock, lastPrunedBlock uint64, blocksBeforePruning uint64, blocksBatch uint64) (uint64, uint64, bool) {
-	diff := curentBlock - lastPrunedBlock - blocksBeforePruning
+func calculateNumOfPrunedBlocks(currentBlock, lastPrunedBlock uint64, blocksBeforePruning uint64, blocksBatch uint64) (uint64, uint64, bool) {
+	diff := currentBlock - lastPrunedBlock
 	switch {
-	case diff >= blocksBatch:
+	case diff >= blocksBatch && diff >= blocksBeforePruning+blocksBatch:
 		return lastPrunedBlock, lastPrunedBlock + blocksBatch, true
-	case diff > 0 && diff < blocksBatch:
+	case diff > 0 && diff < blocksBatch && diff >= blocksBeforePruning:
 		return lastPrunedBlock, lastPrunedBlock + diff, true
 	default:
 		return lastPrunedBlock, lastPrunedBlock, false
