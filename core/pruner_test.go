@@ -90,7 +90,9 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 		},
 	}
 
-	for i, v := range testcases {
+	for i := range testcases {
+		i := i
+		v := testcases[i]
 		t.Run("case "+strconv.Itoa(i)+" "+v.Description, func(t *testing.T) {
 			from, to, res := calculateNumOfPrunedBlocks(v.CurrentBlock, v.LastPrunedBlock, v.BlocksBeforePruning, v.BlocksBatch)
 			if from != v.From || to != v.To || res != v.Result {
