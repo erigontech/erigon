@@ -25,9 +25,10 @@ import (
 	"crypto/sha512"
 	"fmt"
 
-	"github.com/ledgerwatch/turbo-geth/crypto"
 	pcsc "github.com/gballet/go-libpcsclite"
-	"github.com/wsddn/go-ecdh"
+	ecdh "github.com/wsddn/go-ecdh"
+
+	"github.com/ledgerwatch/turbo-geth/crypto"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/text/unicode/norm"
 )
@@ -71,7 +72,7 @@ func NewSecureChannelSession(card *pcsc.Card, keyData []byte) (*SecureChannelSes
 
 	cardPublic, ok := gen.Unmarshal(keyData)
 	if !ok {
-		return nil, fmt.Errorf("Could not unmarshal public key from card")
+		return nil, fmt.Errorf("could not unmarshal public key from card")
 	}
 
 	secret, err := gen.GenerateSharedSecret(private, cardPublic)
@@ -101,28 +102,46 @@ func (s *SecureChannelSession) Pair(pairingPassword []byte) error {
 	}
 
 	md := sha256.New()
-	md.Write(secretHash[:])
-	md.Write(challenge)
+	_, err = md.Write(secretHash[:])
+	if err != nil {
+		return err
+	}
+	_, err = md.Write(challenge)
+	if err != nil {
+		return err
+	}
 
 	expectedCryptogram := md.Sum(nil)
 	cardCryptogram := response.Data[:32]
 	cardChallenge := response.Data[32:64]
 
 	if !bytes.Equal(expectedCryptogram, cardCryptogram) {
-		return fmt.Errorf("Invalid card cryptogram %v != %v", expectedCryptogram, cardCryptogram)
+		return fmt.Errorf("invalid card cryptogram %v != %v", expectedCryptogram, cardCryptogram)
 	}
 
 	md.Reset()
-	md.Write(secretHash[:])
-	md.Write(cardChallenge)
+	_, err = md.Write(secretHash[:])
+	if err != nil {
+		return err
+	}
+	_, err = md.Write(cardChallenge)
+	if err != nil {
+		return err
+	}
 	response, err = s.pair(pairP1LastStep, md.Sum(nil))
 	if err != nil {
 		return err
 	}
 
 	md.Reset()
-	md.Write(secretHash[:])
-	md.Write(response.Data[1:])
+	_, err = md.Write(secretHash[:])
+	if err != nil {
+		return err
+	}
+	_, err = md.Write(response.Data[1:])
+	if err != nil {
+		return err
+	}
 	s.PairingKey = md.Sum(nil)
 	s.PairingIndex = response.Data[0]
 
@@ -132,7 +151,7 @@ func (s *SecureChannelSession) Pair(pairingPassword []byte) error {
 // Unpair disestablishes an existing pairing.
 func (s *SecureChannelSession) Unpair() error {
 	if s.PairingKey == nil {
-		return fmt.Errorf("Cannot unpair: not paired")
+		return fmt.Errorf("cannot unpair: not paired")
 	}
 
 	_, err := s.transmitEncrypted(claSCWallet, insUnpair, s.PairingIndex, 0, []byte{})
@@ -148,7 +167,7 @@ func (s *SecureChannelSession) Unpair() error {
 // Open initializes the secure channel.
 func (s *SecureChannelSession) Open() error {
 	if s.iv != nil {
-		return fmt.Errorf("Session already opened")
+		return fmt.Errorf("session already opened")
 	}
 
 	response, err := s.open()
@@ -159,9 +178,19 @@ func (s *SecureChannelSession) Open() error {
 	// Generate the encryption/mac key by hashing our shared secret,
 	// pairing key, and the first bytes returned from the Open APDU.
 	md := sha512.New()
-	md.Write(s.secret)
-	md.Write(s.PairingKey)
-	md.Write(response.Data[:scSecretLength])
+	_, err = md.Write(s.secret)
+	if err != nil {
+		return err
+	}
+	_, err = md.Write(s.PairingKey)
+	if err != nil {
+		return err
+	}
+	_, err = md.Write(response.Data[:scSecretLength])
+	if err != nil {
+		return err
+	}
+
 	keyData := md.Sum(nil)
 	s.sessionEncKey = keyData[:scSecretLength]
 	s.sessionMacKey = keyData[scSecretLength : scSecretLength*2]
@@ -185,11 +214,11 @@ func (s *SecureChannelSession) mutuallyAuthenticate() error {
 		return err
 	}
 	if response.Sw1 != 0x90 || response.Sw2 != 0x00 {
-		return fmt.Errorf("Got unexpected response from MUTUALLY_AUTHENTICATE: 0x%x%x", response.Sw1, response.Sw2)
+		return fmt.Errorf("got unexpected response from MUTUALLY_AUTHENTICATE: 0x%x%x", response.Sw1, response.Sw2)
 	}
 
 	if len(response.Data) != scSecretLength {
-		return fmt.Errorf("Response from MUTUALLY_AUTHENTICATE was %d bytes, expected %d", len(response.Data), scSecretLength)
+		return fmt.Errorf("response from MUTUALLY_AUTHENTICATE was %d bytes, expected %d", len(response.Data), scSecretLength)
 	}
 
 	return nil
@@ -220,9 +249,10 @@ func (s *SecureChannelSession) pair(p1 uint8, data []byte) (*responseAPDU, error
 }
 
 // transmitEncrypted sends an encrypted message, and decrypts and returns the response.
+//nolint:unparam
 func (s *SecureChannelSession) transmitEncrypted(cla, ins, p1, p2 byte, data []byte) (*responseAPDU, error) {
 	if s.iv == nil {
-		return nil, fmt.Errorf("Channel not open")
+		return nil, fmt.Errorf("channel not open")
 	}
 
 	data, err := s.encryptAPDU(data)
@@ -261,14 +291,16 @@ func (s *SecureChannelSession) transmitEncrypted(cla, ins, p1, p2 byte, data []b
 		return nil, err
 	}
 	if !bytes.Equal(s.iv, rmac) {
-		return nil, fmt.Errorf("Invalid MAC in response")
+		return nil, fmt.Errorf("invalid MAC in response")
 	}
 
 	rapdu := &responseAPDU{}
-	rapdu.deserialize(plainData)
+	if err := rapdu.deserialize(plainData); err != nil {
+		return nil, err
+	}
 
 	if rapdu.Sw1 != sw1Ok {
-		return nil, fmt.Errorf("Unexpected response status Cla=0x%x, Ins=0x%x, Sw=0x%x%x", cla, ins, rapdu.Sw1, rapdu.Sw2)
+		return nil, fmt.Errorf("unexpected response status Cla=0x%x, Ins=0x%x, Sw=0x%x%x", cla, ins, rapdu.Sw1, rapdu.Sw2)
 	}
 
 	return rapdu, nil
@@ -277,7 +309,7 @@ func (s *SecureChannelSession) transmitEncrypted(cla, ins, p1, p2 byte, data []b
 // encryptAPDU is an internal method that serializes and encrypts an APDU.
 func (s *SecureChannelSession) encryptAPDU(data []byte) ([]byte, error) {
 	if len(data) > maxPayloadSize {
-		return nil, fmt.Errorf("Payload of %d bytes exceeds maximum of %d", len(data), maxPayloadSize)
+		return nil, fmt.Errorf("payload of %d bytes exceeds maximum of %d", len(data), maxPayloadSize)
 	}
 	data = pad(data, 0x80)
 
@@ -323,10 +355,10 @@ func unpad(data []byte, terminator byte) ([]byte, error) {
 		case terminator:
 			return data[:len(data)-i], nil
 		default:
-			return nil, fmt.Errorf("Expected end of padding, got %d", data[len(data)-i])
+			return nil, fmt.Errorf("expected end of padding, got %d", data[len(data)-i])
 		}
 	}
-	return nil, fmt.Errorf("Expected end of padding, got 0")
+	return nil, fmt.Errorf("expected end of padding, got 0")
 }
 
 // updateIV is an internal method that updates the initialization vector after

@@ -43,6 +43,15 @@ const (
 	LangObjC
 )
 
+const (
+	typeBigInt        string = "BigInt"
+	typeBoolean       string = "boolean"
+	typeBytes         string = "[]byte"
+	typeAddress       string = "Address"
+	typeByteArrayJava string = "byte[]"
+	typeString        string = "String"
+)
+
 // Bind generates a Go wrapper around a contract ABI. This wrapper isn't meant
 // to be used as is in client code, but rather as an intermediate struct which
 // enforces compile time type safety and naming convention opposed to having to
@@ -229,7 +238,7 @@ func bindBasicTypeGo(kind abi.Type) string {
 	case abi.FixedBytesTy:
 		return fmt.Sprintf("[%d]byte", kind.Size)
 	case abi.BytesTy:
-		return "[]byte"
+		return typeBytes
 	case abi.FunctionTy:
 		return "[24]byte"
 	default:
@@ -258,7 +267,7 @@ func bindTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 func bindBasicTypeJava(kind abi.Type) string {
 	switch kind.T {
 	case abi.AddressTy:
-		return "Address"
+		return typeAddress
 	case abi.IntTy, abi.UintTy:
 		// Note that uint and int (without digits) are also matched,
 		// these are size 256, and will translate to BigInt (the default).
@@ -269,7 +278,7 @@ func bindBasicTypeJava(kind abi.Type) string {
 		// All unsigned integers should be translated to BigInt since gomobile doesn't
 		// support them.
 		if parts[1] == "u" {
-			return "BigInt"
+			return typeBigInt
 		}
 
 		namedSize := map[string]string{
@@ -281,15 +290,15 @@ func bindBasicTypeJava(kind abi.Type) string {
 
 		// default to BigInt
 		if namedSize == "" {
-			namedSize = "BigInt"
+			namedSize = typeBigInt
 		}
 		return namedSize
 	case abi.FixedBytesTy, abi.BytesTy:
-		return "byte[]"
+		return typeByteArrayJava
 	case abi.BoolTy:
-		return "boolean"
+		return typeBoolean
 	case abi.StringTy:
-		return "String"
+		return typeString
 	case abi.FunctionTy:
 		return "byte[24]"
 	default:
@@ -301,15 +310,15 @@ func bindBasicTypeJava(kind abi.Type) string {
 // type in go side.
 func pluralizeJavaType(typ string) string {
 	switch typ {
-	case "boolean":
+	case typeBoolean:
 		return "Bools"
-	case "String":
+	case typeString:
 		return "Strings"
-	case "Address":
+	case typeAddress:
 		return "Addresses"
-	case "byte[]":
+	case typeByteArrayJava:
 		return "Binaries"
-	case "BigInt":
+	case typeBigInt:
 		return "BigInts"
 	}
 	return typ + "[]"
@@ -340,7 +349,7 @@ var bindTopicType = map[Lang]func(kind abi.Type, structs map[string]*tmplStruct)
 // funcionality as for simple types, but dynamic types get converted to hashes.
 func bindTopicTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 	bound := bindTypeGo(kind, structs)
-	if bound == "string" || bound == "[]byte" {
+	if bound == "string" || bound == typeBytes {
 		bound = "common.Hash"
 	}
 	return bound
@@ -350,7 +359,7 @@ func bindTopicTypeGo(kind abi.Type, structs map[string]*tmplStruct) string {
 // funcionality as for simple types, but dynamic types get converted to hashes.
 func bindTopicTypeJava(kind abi.Type, structs map[string]*tmplStruct) string {
 	bound := bindTypeJava(kind, structs)
-	if bound == "String" || bound == "byte[]" {
+	if bound == typeString || bound == typeByteArrayJava {
 		bound = "Hash"
 	}
 	return bound
@@ -430,9 +439,9 @@ var namedType = map[Lang]func(string, abi.Type) string{
 // be used as parts of method names.
 func namedTypeJava(javaKind string, solKind abi.Type) string {
 	switch javaKind {
-	case "byte[]":
+	case typeByteArrayJava:
 		return "Binary"
-	case "boolean":
+	case typeBoolean:
 		return "Bool"
 	default:
 		parts := regexp.MustCompile(`(u)?int([0-9]*)(\[[0-9]*\])?`).FindStringSubmatch(solKind.String())
@@ -519,9 +528,8 @@ loop:
 	}
 	if s, exist := structs[embedded]; exist {
 		return prefix + s.Name
-	} else {
-		return arg.Type.String()
 	}
+	return arg.Type.String()
 }
 
 // formatMethod transforms raw method representation into a user friendly one.

@@ -189,6 +189,7 @@ func (hub *Hub) refreshWallets() {
 	// Transform the current list of wallets into the new one
 	hub.stateLock.Lock()
 
+	//nolint:prealloc
 	var (
 		wallets = make([]accounts.Wallet, 0, len(devices))
 		events  []accounts.WalletEvent

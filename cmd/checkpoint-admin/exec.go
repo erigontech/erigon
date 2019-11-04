@@ -85,6 +85,7 @@ var commandPublish = cli.Command{
 // the network where the connected node is located.
 func deploy(ctx *cli.Context) error {
 	// Gather all the addresses that should be permitted to sign
+	//nolint:prealloc
 	var addrs []common.Address
 	for _, account := range strings.Split(ctx.String(signersFlag.Name), ",") {
 		if trimmed := strings.TrimSpace(account); !common.IsHexAddress(trimmed) {
@@ -251,7 +252,7 @@ func ecrecover(sighash []byte, sig []byte) common.Address {
 func publish(ctx *cli.Context) error {
 	// Print the checkpoint oracle's current status to make sure we're interacting
 	// with the correct network and contract.
-	status(ctx)
+	_ = status(ctx)
 
 	// Gather the signatures from the CLI
 	var sigs [][]byte

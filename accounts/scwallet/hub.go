@@ -41,11 +41,11 @@ import (
 	"sync"
 	"time"
 
+	pcsc "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
-	pcsc "github.com/gballet/go-libpcsclite"
 )
 
 // Scheme is the URI prefix for smartcard wallets.
@@ -238,7 +238,7 @@ func (hub *Hub) refreshWallets() {
 		wallet := NewWallet(hub, card)
 		if err = wallet.connect(); err != nil {
 			log.Debug("Failed to connect to smart card", "reader", reader, "err", err)
-			card.Disconnect(pcsc.LeaveCard)
+			_ = card.Disconnect(pcsc.LeaveCard)
 			continue
 		}
 		// Card connected, start tracking in amongs the wallets

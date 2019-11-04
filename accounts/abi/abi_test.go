@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
@@ -729,7 +730,7 @@ func TestUnpackEventIntoMap(t *testing.T) {
 		"amount": big.NewInt(1),
 		"memo":   []byte{88},
 	}
-	if err := abi.UnpackIntoMap(receivedMap, "received", data); err != nil {
+	if err = abi.UnpackIntoMap(receivedMap, "received", data); err != nil {
 		t.Error(err)
 	}
 	if len(receivedMap) != 3 {
@@ -927,7 +928,7 @@ func TestABI_MethodById(t *testing.T) {
 		}
 		b := fmt.Sprintf("%v", m2)
 		if a != b {
-			t.Errorf("Method %v (id %v) not 'findable' by id in ABI", name, common.ToHex(m.ID()))
+			t.Errorf("Method %v (id %v) not 'findable' by id in ABI", name, hexutil.Encode(m.ID()))
 		}
 	}
 	// Also test empty

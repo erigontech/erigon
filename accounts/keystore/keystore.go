@@ -137,6 +137,7 @@ func (ks *KeyStore) refreshWallets() {
 	accs := ks.cache.accounts()
 
 	// Transform the current list of wallets into the new one
+	// nolint:prealloc
 	var (
 		wallets = make([]accounts.Wallet, 0, len(accs))
 		events  []accounts.WalletEvent

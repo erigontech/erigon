@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:unused
 package scwallet
 
 import (
@@ -167,7 +168,7 @@ func transmit(card *pcsc.Card, command *commandAPDU) (*responseAPDU, error) {
 	}
 
 	if response.Sw1 != sw1Ok {
-		return nil, fmt.Errorf("Unexpected insecure response status Cla=0x%x, Ins=0x%x, Sw=0x%x%x", command.Cla, command.Ins, response.Sw1, response.Sw2)
+		return nil, fmt.Errorf("unexpected insecure response status Cla=0x%x, Ins=0x%x, Sw=0x%x%x", command.Cla, command.Ins, response.Sw1, response.Sw2)
 	}
 
 	return response, nil
@@ -252,7 +253,7 @@ func (w *Wallet) release() error {
 // with the wallet.
 func (w *Wallet) pair(puk []byte) error {
 	if w.session.paired() {
-		return fmt.Errorf("Wallet already paired")
+		return fmt.Errorf("wallet already paired")
 	}
 	pairing, err := w.session.pair(puk)
 	if err != nil {
@@ -577,7 +578,7 @@ func (w *Wallet) Accounts() []accounts.Account {
 		for address, path := range pairing.Accounts {
 			ret = append(ret, w.makeAccount(address, path))
 		}
-		sort.Sort(accounts.AccountsByURL(ret))
+		sort.Sort(accounts.ByURL(ret))
 		return ret
 	}
 	return nil
@@ -773,16 +774,16 @@ func (w *Wallet) findAccountPath(account accounts.Account) (accounts.DerivationP
 
 	// Look for the path in the URL
 	if account.URL.Scheme != w.Hub.scheme {
-		return nil, fmt.Errorf("Scheme %s does not match wallet scheme %s", account.URL.Scheme, w.Hub.scheme)
+		return nil, fmt.Errorf("scheme %s does not match wallet scheme %s", account.URL.Scheme, w.Hub.scheme)
 	}
 
 	parts := strings.SplitN(account.URL.Path, "/", 2)
 	if len(parts) != 2 {
-		return nil, fmt.Errorf("Invalid URL format: %s", account.URL)
+		return nil, fmt.Errorf("invalid URL format: %s", account.URL)
 	}
 
 	if parts[0] != fmt.Sprintf("%x", w.PublicKey[1:3]) {
-		return nil, fmt.Errorf("URL %s is not for this wallet", account.URL)
+		return nil, fmt.Errorf("url %s is not for this wallet", account.URL)
 	}
 
 	return accounts.ParseDerivationPath(parts[1])
@@ -813,7 +814,7 @@ func (s *Session) pair(secret []byte) (smartcardPairing, error) {
 // unpair deletes an existing pairing.
 func (s *Session) unpair() error {
 	if !s.verified {
-		return fmt.Errorf("Unpair requires that the PIN be verified")
+		return fmt.Errorf("unpair requires that the PIN be verified")
 	}
 	return s.Channel.Unpair()
 }
@@ -850,7 +851,7 @@ func (s *Session) paired() bool {
 // authenticate uses an existing pairing to establish a secure channel.
 func (s *Session) authenticate(pairing smartcardPairing) error {
 	if !bytes.Equal(s.Wallet.PublicKey, pairing.PublicKey) {
-		return fmt.Errorf("Cannot pair using another wallet's pairing; %x != %x", s.Wallet.PublicKey, pairing.PublicKey)
+		return fmt.Errorf("cannot pair using another wallet's pairing; %x != %x", s.Wallet.PublicKey, pairing.PublicKey)
 	}
 	s.Channel.PairingKey = pairing.PairingKey
 	s.Channel.PairingIndex = pairing.PairingIndex
@@ -913,7 +914,9 @@ func (s *Session) initialize(seed []byte) error {
 
 	// HMAC the seed to produce the private key and chain code
 	mac := hmac.New(sha512.New, []byte("Bitcoin seed"))
-	mac.Write(seed)
+	if _, err = mac.Write(seed); err != nil {
+		return err
+	}
 	seed = mac.Sum(nil)
 
 	key, err := crypto.ToECDSA(seed[:32])
@@ -958,7 +961,7 @@ func (s *Session) derive(path accounts.DerivationPath) (accounts.Account, error)
 
 	data := new(bytes.Buffer)
 	for _, segment := range path {
-		if err := binary.Write(data, binary.BigEndian, segment); err != nil {
+		if err = binary.Write(data, binary.BigEndian, segment); err != nil {
 			return accounts.Account{}, err
 		}
 	}
@@ -974,7 +977,7 @@ func (s *Session) derive(path accounts.DerivationPath) (accounts.Account, error)
 	}
 
 	sigdata := new(signatureData)
-	if _, err := asn1.UnmarshalWithParams(response.Data, sigdata, "tag:0"); err != nil {
+	if _, err = asn1.UnmarshalWithParams(response.Data, sigdata, "tag:0"); err != nil {
 		return accounts.Account{}, err
 	}
 	rbytes, sbytes := sigdata.Signature.R.Bytes(), sigdata.Signature.S.Bytes()
@@ -982,7 +985,7 @@ func (s *Session) derive(path accounts.DerivationPath) (accounts.Account, error)
 	copy(sig[32-len(rbytes):32], rbytes)
 	copy(sig[64-len(sbytes):64], sbytes)
 
-	if err := confirmPublicKey(sig, sigdata.PublicKey); err != nil {
+	if err = confirmPublicKey(sig, sigdata.PublicKey); err != nil {
 		return accounts.Account{}, err
 	}
 	pub, err := crypto.UnmarshalPubkey(sigdata.PublicKey)
@@ -1036,7 +1039,7 @@ func (s *Session) sign(path accounts.DerivationPath, hash []byte) ([]byte, error
 		return nil, err
 	}
 	sigdata := new(signatureData)
-	if _, err := asn1.UnmarshalWithParams(response.Data, sigdata, "tag:0"); err != nil {
+	if _, err = asn1.UnmarshalWithParams(response.Data, sigdata, "tag:0"); err != nil {
 		return nil, err
 	}
 	// Serialize the signature
