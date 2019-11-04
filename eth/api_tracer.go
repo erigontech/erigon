@@ -80,10 +80,9 @@ type txTraceResult struct {
 // being traced.
 type blockTraceTask struct {
 	tds     *state.TrieDbState
-	statedb *state.IntraBlockState // Intermediate state prepped for tracing
-	block   *types.Block           // Block to trace the transactions from
-	rootref common.Hash            // Trie root reference held for this task
-	results []*txTraceResult       // Trace results procudes by the task
+	block   *types.Block     // Block to trace the transactions from
+	rootref common.Hash      // Trie root reference held for this task
+	results []*txTraceResult // Trace results procudes by the task
 }
 
 // blockTraceResult represets the results of tracing a single block when an entire
@@ -210,14 +209,16 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 					msg, _ := tx.AsMessage(signer)
 					vmctx := core.NewEVMContext(msg, task.block.Header(), api.eth.blockchain, nil)
 
-					res, err := api.traceTx(ctx, msg, vmctx, task.statedb, config)
+					statedb := state.New(task.tds)
+
+					res, err := api.traceTx(ctx, msg, vmctx, statedb, config)
 					if err != nil {
 						task.results[i] = &txTraceResult{Error: err.Error()}
 						log.Warn("Tracing failed", "hash", tx.Hash(), "block", task.block.NumberU64(), "err", err)
 						break
 					}
 					// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-					_ = task.statedb.FinalizeTx(api.eth.blockchain.Config().WithEIPsFlags(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
+					_ = statedb.FinalizeTx(api.eth.blockchain.Config().WithEIPsFlags(context.Background(), task.block.Number()), task.tds.TrieStateWriter())
 					task.results[i] = &txTraceResult{Result: res}
 				}
 				// Stream the result back to the user or abort on teardown
@@ -283,7 +284,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 				txs := block.Transactions()
 
 				select {
-				case tasks <- &blockTraceTask{statedb: statedb.Copy(), tds: tds.Copy(), block: block, rootref: proot, results: make([]*txTraceResult, len(txs))}:
+				case tasks <- &blockTraceTask{tds: tds.Copy(), block: block, rootref: proot, results: make([]*txTraceResult, len(txs))}:
 				case <-notifier.Closed():
 					return
 				}
@@ -475,7 +476,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 	var failed error
 	for i, tx := range txs {
 		// Send the trace task over for execution
-		jobs <- &txTraceTask{statedb: statedb.Copy(), index: i}
+		jobs <- &txTraceTask{statedb: state.New(dbstate), index: i}
 
 		// Generate the next state snapshot fast without tracing
 		msg, _ := tx.AsMessage(signer)

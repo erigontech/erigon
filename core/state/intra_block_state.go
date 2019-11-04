@@ -676,55 +676,6 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	newObj.created = true
 }
 
-// Copy creates a deep, independent copy of the state.
-// Snapshots of the copied state cannot be applied to the copy.
-func (sdb *IntraBlockState) Copy() *IntraBlockState {
-	// Copy all the basic fields, initialize the memory ones
-	state := &IntraBlockState{
-		stateReader:       sdb.stateReader,
-		stateObjects:      make(map[common.Address]*stateObject, len(sdb.journal.dirties)),
-		stateObjectsDirty: make(map[common.Address]struct{}, len(sdb.journal.dirties)),
-		nilAccounts:       make(map[common.Address]struct{}),
-		refund:            sdb.refund,
-		logs:              make(map[common.Hash][]*types.Log, len(sdb.logs)),
-		logSize:           sdb.logSize,
-		preimages:         make(map[common.Hash][]byte, len(sdb.preimages)),
-		journal:           newJournal(),
-	}
-	// Copy the dirty states, logs, and preimages
-	for addr := range sdb.journal.dirties {
-		// As documented [here](https://github.com/ledgerwatch/turbo-geth/pull/16485#issuecomment-380438527),
-		// and in the FinalizeTx method, there is a case where an object is in the journal but not
-		// in the stateObjects: OOG after touch on ripeMD prior to Byzantium. Thus, we need to check for
-		// nil
-		if object, exist := sdb.stateObjects[addr]; exist {
-			state.stateObjects[addr] = object.deepCopy(state)
-			state.stateObjectsDirty[addr] = struct{}{}
-		}
-	}
-	// Above, we don't copy the actual journal. This means that if the copy is copied, the
-	// loop above will be a no-op, since the copy's journal is empty.
-	// Thus, here we iterate over stateObjects, to enable copies of copies
-	for addr := range sdb.stateObjectsDirty {
-		if _, exist := state.stateObjects[addr]; !exist {
-			state.stateObjects[addr] = sdb.stateObjects[addr].deepCopy(state)
-			state.stateObjectsDirty[addr] = struct{}{}
-		}
-	}
-	for hash, logs := range sdb.logs {
-		cpy := make([]*types.Log, len(logs))
-		for i, l := range logs {
-			cpy[i] = new(types.Log)
-			*cpy[i] = *l
-		}
-		state.logs[hash] = cpy
-	}
-	for hash, preimage := range sdb.preimages {
-		state.preimages[hash] = preimage
-	}
-	return state
-}
-
 // Snapshot returns an identifier for the current revision of the state.
 func (sdb *IntraBlockState) Snapshot() int {
 	id := sdb.nextRevisionID
