@@ -94,8 +94,8 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 			1,
 			10,
 			20,
-			20,
-			false,
+			29,
+			true,
 			"It checks success case after sync",
 		},
 		{

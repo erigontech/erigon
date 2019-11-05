@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -617,35 +616,39 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		if i%5 == 0 {
+			time.Sleep(300 * time.Millisecond)
+		}
 	}
-	time.Sleep(time.Second * 3)
-	//check that we stopped on 20th block
-	res, err := getStat(db)
-	if err != nil {
-		t.Fatal(err)
-	}
+	timeout := time.After(time.Second * 5)
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("Prunnig timeout")
+		default:
+			//wait pruning correct state
+			res, err := getStat(db)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	expected := stateStats{
-		NotFoundAccountsInHistory:     0,
-		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 15,
-		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
-			21: 3,
-			22: 3,
-			23: 3,
-			24: 3,
-			25: 3,
-		},
-		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
-		AccountsInState:                 5,
+			expected := stateStats{
+				NotFoundAccountsInHistory:     0,
+				ErrAccountsInHistory:          0,
+				ErrDecodedAccountsInHistory:   0,
+				NumOfChangesInAccountsHistory: 3,
+				AccountSuffixRecordsByTimestamp: map[uint64]uint32{
+					25: 3,
+				},
+				StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
+				AccountsInState:                 5,
+			}
+			if reflect.DeepEqual(expected, res) {
+				return
+			}
+			time.Sleep(time.Millisecond * 100)
+		}
 	}
-	if !reflect.DeepEqual(expected, res) {
-		spew.Dump(res)
-		fmt.Println("pruner.LastPrunedBlockNum", pruner.LastPrunedBlockNum)
-		t.Fatal("Not equal")
-	}
-
 }
 
 type stateStats struct {
