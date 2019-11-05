@@ -22,7 +22,6 @@ import (
 	"errors"
 	"os"
 	"path"
-	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -36,17 +35,14 @@ var ErrKeyNotFound = errors.New("boltdb: key not found in range")
 
 const HeapSize = 512 * 1024 * 1024
 
+// BoltDatabase is a wrapper over BoltDb,
+// compatible with the Database interface.
 type BoltDatabase struct {
-	fn string   // filename for reporting
-	db *bolt.DB // BoltDB instance
-
-	quitLock sync.Mutex      // Mutex protecting the quit channel access
-	quitChan chan chan error // Quit channel to stop the metrics collection before closing the database
-
+	db  *bolt.DB   // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 }
 
-// NewBoltDatabase returns a BoltDB wrapped object.
+// NewBoltDatabase returns a BoltDB wrapper.
 func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	logger := log.New("database", file)
 
@@ -61,18 +57,12 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil, err
 	}
 	return &BoltDatabase{
-		fn:  file,
 		db:  db,
 		log: logger,
 	}, nil
 }
 
-// Path returns the path to the database directory.
-func (db *BoltDatabase) Path() string {
-	return db.fn
-}
-
-// Put puts the given key / value to the queue
+// Put inserts or updates a single entry.
 func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucketIfNotExists(bucket, true)
@@ -84,14 +74,15 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-// Put puts the given key / value to the queue
-func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
+// PutS adds a new entry to the historical buckets:
+// hBucket (unless changeSetBucketOnly) and ChangeSet.
+func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
 	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
 	suffixkey := make([]byte, len(suffix)+len(hBucket))
 	copy(suffixkey, suffix)
 	copy(suffixkey[len(suffix):], hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		if !noHistory {
+		if !changeSetBucketOnly {
 			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 			if err != nil {
 				return err
@@ -606,18 +597,6 @@ func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
 }
 
 func (db *BoltDatabase) Close() {
-	// Stop the metrics collection to avoid internal database races
-	db.quitLock.Lock()
-	defer db.quitLock.Unlock()
-
-	if db.quitChan != nil {
-		errc := make(chan error)
-		db.quitChan <- errc
-		if err := <-errc; err != nil {
-			db.log.Error("Metrics collection failed", "err", err)
-		}
-		db.quitChan = nil
-	}
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 	} else {
