@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"reflect"
 	"testing"
@@ -573,7 +574,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		signer = types.HomesteadSigner{}
 	)
 
-	numBlocks := 30
+	numBlocks := 25
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
 	if err != nil {
@@ -616,56 +617,32 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		if i >= 10 && i%10 == 0 {
-			pruner.Stop()
-			time.Sleep(time.Second * 2)
-			err = pruner.Start()
-			assertNil(t, err)
-		} else {
-			time.Sleep(time.Millisecond * 500)
-		}
 	}
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 3)
+	//check that we stopped on 20th block
 	res, err := getStat(db)
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	expected := stateStats{
 		NotFoundAccountsInHistory:     0,
 		ErrAccountsInHistory:          0,
 		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 3,
+		NumOfChangesInAccountsHistory: 15,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
-			30: 3,
+			21: 3,
+			22: 3,
+			23: 3,
+			24: 3,
+			25: 3,
 		},
 		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
 		AccountsInState:                 5,
 	}
 	if !reflect.DeepEqual(expected, res) {
 		spew.Dump(res)
-		t.Fatal("Not equal")
-	}
-
-	err = core.Prune(db, uint64(numBlocks)-1, uint64(numBlocks))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err = getStat(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected = stateStats{
-		NotFoundAccountsInHistory:       0,
-		ErrAccountsInHistory:            0,
-		ErrDecodedAccountsInHistory:     0,
-		NumOfChangesInAccountsHistory:   0,
-		AccountSuffixRecordsByTimestamp: map[uint64]uint32{},
-		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
-		AccountsInState:                 5,
-	}
-	if !reflect.DeepEqual(expected, res) {
-		spew.Dump(res)
+		fmt.Println("pruner.LastPrunedBlockNum", pruner.LastPrunedBlockNum)
 		t.Fatal("Not equal")
 	}
 

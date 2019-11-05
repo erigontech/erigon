@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -75,6 +76,7 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 				continue
 			}
 			from, to, ok := calculateNumOfPrunedBlocks(cb.Number().Uint64(), p.LastPrunedBlockNum, p.config.BlocksBeforePruning, p.config.BlocksToPrune)
+			fmt.Printf("%v,%v,%v = calculateNumOfPrunedBlocks(%v,%v,%v,%v)\n\n", from, to, ok, cb.Number().Uint64(), p.LastPrunedBlockNum, p.config.BlocksBeforePruning, p.config.BlocksToPrune)
 			if !ok {
 				continue
 			}
@@ -92,7 +94,7 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 func calculateNumOfPrunedBlocks(currentBlock, lastPrunedBlock uint64, blocksBeforePruning uint64, blocksBatch uint64) (uint64, uint64, bool) {
 	diff := currentBlock - lastPrunedBlock
 	switch {
-	case diff >= blocksBatch && diff >= blocksBeforePruning+blocksBatch:
+	case diff >= blocksBatch:
 		return lastPrunedBlock, lastPrunedBlock + blocksBatch, true
 	case diff > 0 && diff < blocksBatch && diff >= blocksBeforePruning:
 		return lastPrunedBlock, lastPrunedBlock + diff, true

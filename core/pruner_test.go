@@ -88,6 +88,26 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 			true,
 			"It checks success case after sync",
 		},
+		{
+			30,
+			20,
+			1,
+			10,
+			20,
+			20,
+			false,
+			"It checks success case after sync",
+		},
+		{
+			25,
+			20,
+			1,
+			10,
+			20,
+			24,
+			true,
+			"It checks that diff calculates correctly",
+		},
 	}
 
 	for i := range testcases {
