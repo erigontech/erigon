@@ -219,14 +219,14 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	hex := keybytesToHex(key)
 	if t.root == nil {
 		var newnode node
-		if value.Root == EmptyRoot {
+		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
 			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true}}
 		} else {
 			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true}}
 		}
 		t.root = newnode
 	} else {
-		if value.Root == EmptyRoot {
+		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
 			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, nil, true})
 		} else {
 			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, hashNode(value.Root[:]), true})
@@ -270,10 +270,10 @@ func (rr *ResolveRequest) String() string {
 // from the database, if one were to access the key specified
 // In the case of "Yes", also returns a corresponding ResolveRequest
 // contract, if not empty, must be equal to the address hash
-// key must be in the KEYBYTES encoding
-func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveRequest) {
+// storageKey must be the concatenation of contract's address hash and the hash of the item's key, in the KEYBYTES encoding
+func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *ResolveRequest) {
 	var nd = t.root
-	hex := keybytesToHex(concat(contract, key...))
+	hex := keybytesToHex(storageKey)
 	pos := 0
 	var incarnation uint64
 	for {
@@ -323,7 +323,8 @@ func (t *Trie) NeedResolution(contract []byte, key []byte) (bool, *ResolveReques
 			prefix := make([]byte, len(contract)+8)
 			copy(prefix, contract)
 			binary.BigEndian.PutUint64(prefix[len(contract):], incarnation^0xffffffffffffffff)
-			return true, t.NewResolveRequest(prefix, keybytesToHex(key), pos-len(contract)*2, common.CopyBytes(n))
+			hexContractLen := 2 * len(contract) // Length of 'contract' prefix in HEX encoding
+			return true, t.NewResolveRequest(prefix, hex[hexContractLen:], pos-hexContractLen, common.CopyBytes(n))
 
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))

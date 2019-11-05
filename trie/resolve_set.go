@@ -51,7 +51,9 @@ func (rs *ResolveSet) ensureInited() {
 	if rs.inited {
 		return
 	}
-	sort.Sort(rs.hexes)
+	if !sort.IsSorted(rs.hexes) {
+		sort.Sort(rs.hexes)
+	}
 	rs.lteIndex = 0
 	rs.inited = true
 }
@@ -83,4 +85,11 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 		return false
 	}
 	return true
+}
+
+// Current returns the hex value that has been used for the latest comparison in `HashOnly` function
+// It is only used in one edge case at the moment - to distinguish between the accounts' key
+// and the storage keys of the same account
+func (rs *ResolveSet) Current() []byte {
+	return rs.hexes[rs.lteIndex]
 }

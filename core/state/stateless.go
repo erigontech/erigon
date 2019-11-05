@@ -217,9 +217,16 @@ func (s *Stateless) CreateContract(address common.Address) error {
 
 // CheckRoot finalises the execution of a block and computes the resulting state root
 func (s *Stateless) CheckRoot(expected common.Hash) error {
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Hash]struct{})
 	// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 	// that might be remaining in the trie and figure out the next incarnations
 	for addrHash := range s.created {
+		// Prevent repeated storage clearouts
+		if _, ok := alreadyCreated[addrHash]; ok {
+			continue
+		}
+		alreadyCreated[addrHash] = struct{}{}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
@@ -259,6 +266,17 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 	}
 	// For the contracts that got deleted
 	for addrHash := range s.deleted {
+		if _, ok := s.created[addrHash]; ok {
+			// In some rather artificial circumstances, an account can be recreated after having been self-destructed
+			// in the same block. It can only happen when contract is introduced in the genesis state with nonce 0
+			// rather than created by a transaction (in that case, its starting nonce is 1). The self-destructed
+			// contract actually gets removed from the state only at the end of the block, so if its nonce is not 0,
+			// it will prevent any re-creation within the same block. However, if the contract is introduced in
+			// the genesis state, its nonce is 0, and that means it can be self-destructed, and then re-created,
+			// all in the same block. In such cases, we must preserve storage modifications happening after the
+			// self-destruction
+			continue
+		}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}

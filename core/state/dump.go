@@ -85,14 +85,14 @@ func (self iterativeDump) onRoot(root common.Hash) {
 		Root common.Hash `json:"root"`
 	}{root})
 }
-func (self *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
+func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
 	emptyAddress := (common.Address{})
 	missingPreimages := 0
-	c.onRoot(self.t.Hash())
+	c.onRoot(tds.t.Hash())
 	var acc accounts.Account
 	var prefix [32]byte
-	err := self.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
-		addr := common.BytesToAddress(self.GetKey(k))
+	err := tds.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+		addr := common.BytesToAddress(tds.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
 			return false, err
@@ -100,7 +100,7 @@ func (self *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeM
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {
-			if code, err = self.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
+			if code, err = tds.db.Get(dbutils.CodeBucket, acc.CodeHash[:]); err != nil {
 				return false, err
 			}
 		}
@@ -131,13 +131,13 @@ func (self *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeM
 		buf := make([]byte, binary.MaxVarintLen64)
 		binary.PutUvarint(buf, acc.GetIncarnation())
 
-		addrHash, err := self.HashAddress(addr, false)
+		addrHash, err := tds.HashAddress(addr, false)
 		if err != nil {
 			return false, err
 		}
 
-		err = self.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
-			key := self.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
+		err = tds.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := tds.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {
 				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
@@ -157,26 +157,26 @@ func (self *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeM
 }
 
 // RawDump returns the entire state an a single large object
-func (self *TrieDbState) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
+func (tds *TrieDbState) RawDump(excludeCode, excludeStorage, excludeMissingPreimages bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
 	}
-	self.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages)
+	tds.dump(dump, excludeCode, excludeStorage, excludeMissingPreimages)
 	return *dump
 }
 
-func (self *TrieDbState) DefaultRawDump() Dump {
-	return self.RawDump(false, false, false)
+func (tds *TrieDbState) DefaultRawDump() Dump {
+	return tds.RawDump(false, false, false)
 }
 
 // DefaultDump returns a JSON string representing the state with the default params
-func (self *TrieDbState) DefaultDump() []byte {
-	return self.Dump(false, false, false)
+func (tds *TrieDbState) DefaultDump() []byte {
+	return tds.Dump(false, false, false)
 }
 
 // Dump returns a JSON string representing the entire state as a single json-object
-func (self *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
-	dump := self.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
+func (tds *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimages bool) []byte {
+	dump := tds.RawDump(excludeCode, excludeStorage, excludeMissingPreimages)
 	json, err := json.MarshalIndent(dump, "", "    ")
 	if err != nil {
 		fmt.Println("dump err", err)
@@ -185,6 +185,6 @@ func (self *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimag
 }
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
-func (self *TrieDbState) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
-	self.dump(iterativeDump(*output), excludeCode, excludeStorage, excludeMissingPreimages)
+func (tds *TrieDbState) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
+	tds.dump(iterativeDump(*output), excludeCode, excludeStorage, excludeMissingPreimages)
 }
