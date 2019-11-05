@@ -318,7 +318,7 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 			}
 		}
 	}
-	for k, _ := range smg {
+	for k := range smg {
 		if _, ok := sm[k]; !ok {
 			fmt.Printf("%x not present in sm\n", k)
 			return false
@@ -654,7 +654,7 @@ func bench1() {
 			}
 			req_id++
 			template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
-			for account, _ := range accountSet {
+			for account := range accountSet {
 				var logs EthLogs
 				if err := post(client, turbogeth_url, fmt.Sprintf(template, prevBn, bn, account, req_id), &logs); err != nil {
 					fmt.Printf("Could not get logs for account %x: %v\n", account, err)

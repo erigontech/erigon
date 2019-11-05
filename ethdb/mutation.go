@@ -3,12 +3,12 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"sync"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/petar/GoLLRB/llrb"
+	"sync"
 )
 
 type PutItem struct {
