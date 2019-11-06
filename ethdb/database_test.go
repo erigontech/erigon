@@ -80,7 +80,7 @@ func TestBadgerDB_PutGet(t *testing.T) {
 	testPutGet(db, t)
 }
 
-func testPutGet(db SimpleDatabase, t *testing.T) {
+func testPutGet(db MinDatabase, t *testing.T) {
 	t.Parallel()
 
 	for _, k := range testValues {
@@ -184,7 +184,7 @@ func TestBadgerDB_ParallelPutGet(t *testing.T) {
 	defer remove()
 	testParallelPutGet(db)
 }
-func testParallelPutGet(db SimpleDatabase) {
+func testParallelPutGet(db MinDatabase) {
 	const n = 8
 	var pending sync.WaitGroup
 
@@ -209,7 +209,7 @@ func testParallelPutGet(db SimpleDatabase) {
 				panic("get failed: " + err.Error())
 			}
 			if !bytes.Equal(data, []byte("v"+key)) {
-				panic(fmt.Sprintf("get failed, got %q expected %q", []byte(data), []byte("v"+key)))
+				panic(fmt.Sprintf("get failed, got %q expected %q", data, []byte("v"+key)))
 			}
 		}(strconv.Itoa(i))
 	}

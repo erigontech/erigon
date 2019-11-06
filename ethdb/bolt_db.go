@@ -545,7 +545,7 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-// Deletes all keys with specified suffix from all the buckets
+// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	suffix := dbutils.EncodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
@@ -566,10 +566,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			}
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
 				kk = append(kk, suffix...)
-				if err := hb.Delete(kk); err != nil {
-					return err
-				}
-				return nil
+				return hb.Delete(kk)
 			})
 			if err != nil {
 				return err

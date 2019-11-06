@@ -67,18 +67,16 @@ func bucketKey(bucket, key []byte) []byte {
 
 // Delete removes a single entry.
 func (db *BadgerDatabase) Delete(bucket, key []byte) error {
-	err := db.db.Update(func(txn *badger.Txn) error {
+	return db.db.Update(func(txn *badger.Txn) error {
 		return txn.Delete(bucketKey(bucket, key))
 	})
-	return err
 }
 
 // Put inserts or updates a single entry.
 func (db *BadgerDatabase) Put(bucket, key []byte, value []byte) error {
-	err := db.db.Update(func(txn *badger.Txn) error {
+	return db.db.Update(func(txn *badger.Txn) error {
 		return txn.Set(bucketKey(bucket, key), value)
 	})
-	return err
 }
 
 // Get returns a single value.
@@ -98,15 +96,16 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 // PutS adds a new entry to the historical buckets:
 // hBucket (unless changeSetBucketOnly) and ChangeSet.
 func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
-	suffixkey := make([]byte, len(suffix)+len(hBucket))
-	copy(suffixkey, suffix)
-	copy(suffixkey[len(suffix):], hBucket)
-
+	composite, encodedStamp := dbutils.CompositeKeySuffix(key, timestamp)
 	hKey := bucketKey(hBucket, composite)
+
+	suffixkey := make([]byte, len(encodedStamp)+len(hBucket))
+	copy(suffixkey, encodedStamp)
+	copy(suffixkey[len(encodedStamp):], hBucket)
+
 	changeSetKey := bucketKey(dbutils.ChangeSetBucket, suffixkey)
 
-	err := db.db.Update(func(tx *badger.Txn) error {
+	return db.db.Update(func(tx *badger.Txn) error {
 		if !changeSetBucketOnly {
 			if err := tx.Set(hKey, value); err != nil {
 				return err
@@ -121,10 +120,11 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 		var sh dbutils.ChangeSet
 		if err == nil {
 			err = changeSetItem.Value(func(val []byte) error {
-				sh, err = dbutils.Decode(val)
-				if err != nil {
-					log.Error("PutS Decode suffix err", "err", err)
-					return err
+				var err2 error
+				sh, err2 = dbutils.Decode(val)
+				if err2 != nil {
+					log.Error("PutS Decode suffix err", "err", err2)
+					return err2
 				}
 				return nil
 			})
@@ -142,7 +142,48 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 
 		return tx.Set(changeSetKey, dat)
 	})
-	return err
+}
+
+// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
+	encodedStamp := dbutils.EncodeTimestamp(timestamp)
+	prefix := bucketKey(dbutils.ChangeSetBucket, encodedStamp)
+	return db.db.Update(func(tx *badger.Txn) error {
+		var keys [][]byte
+		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			k := item.Key()
+
+			var changedAccounts dbutils.ChangeSet
+			err := item.Value(func(v []byte) error {
+				var err2 error
+				changedAccounts, err2 = dbutils.Decode(v)
+				return err2
+			})
+			if err != nil {
+				return err
+			}
+
+			bucket := k[len(encodedStamp):]
+			err = changedAccounts.Walk(func(kk, _ []byte) error {
+				kk = append(kk, encodedStamp...)
+				return tx.Delete(bucketKey(bucket, kk))
+			})
+			if err != nil {
+				return err
+			}
+
+			keys = append(keys, k)
+		}
+		for _, k := range keys {
+			if err := tx.Delete(bucketKey(dbutils.ChangeSetBucket, k)); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // TODO [Andrew] implement the full Database interface

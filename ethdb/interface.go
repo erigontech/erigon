@@ -27,9 +27,8 @@ type Putter interface {
 
 	// PutS adds a new entry to the historical buckets:
 	// hBucket (unless changeSetBucketOnly) and ChangeSet.
+	// timestamp == block number
 	PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error
-
-	DeleteTimestamp(timestamp uint64) error
 }
 
 // Getter wraps the database read operations.
@@ -49,6 +48,10 @@ type Getter interface {
 type Deleter interface {
 	// Delete removes a single entry.
 	Delete(bucket, key []byte) error
+
+	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+	// timestamp == block number
+	DeleteTimestamp(timestamp uint64) error
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.
@@ -69,12 +72,11 @@ type Database interface {
 	TruncateAncients(items uint64) error
 }
 
-// SimpleDatabase is a minimalistic version of the Database interface.
-// TODO [Andrew] remove the interface.
-type SimpleDatabase interface {
-	Deleter
-	Put(bucket, key, value []byte) error
+// MinDatabase is a minimalistic version of the Database interface.
+type MinDatabase interface {
 	Get(bucket, key []byte) ([]byte, error)
+	Put(bucket, key, value []byte) error
+	Delete(bucket, key []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,
