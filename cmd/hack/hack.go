@@ -910,7 +910,7 @@ func relayoutKeys() {
 	defer db.Close()
 	var count int
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("SUFFIX"))
+		b := tx.Bucket(dbutils.ChangeSetBucket)
 		if b == nil {
 			return nil
 		}
@@ -1005,35 +1005,6 @@ func preimage(chaindata string, image common.Hash) {
 	fmt.Printf("%x\n", p)
 }
 
-func encodeTimestamp(timestamp uint64) []byte {
-	var suffix []byte
-	var limit uint64
-	limit = 32
-	for bytecount := 1; bytecount <= 8; bytecount++ {
-		if timestamp < limit {
-			suffix = make([]byte, bytecount)
-			b := timestamp
-			for i := bytecount - 1; i > 0; i-- {
-				suffix[i] = byte(b & 0xff)
-				b >>= 8
-			}
-			suffix[0] = byte(b) | (byte(bytecount) << 5) // 3 most significant bits of the first byte are bytecount
-			break
-		}
-		limit <<= 8
-	}
-	return suffix
-}
-
-func decodeTimestamp(suffix []byte) (uint64, []byte) {
-	bytecount := int(suffix[0] >> 5)
-	timestamp := uint64(suffix[0] & 0x1f)
-	for i := 1; i < bytecount; i++ {
-		timestamp = (timestamp << 8) | uint64(suffix[i])
-	}
-	return timestamp, suffix[bytecount:]
-}
-
 func loadAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
@@ -1041,7 +1012,7 @@ func loadAccount() {
 	check(err)
 	defer ethDb.Close()
 	blockNr := uint64(*block)
-	blockSuffix := encodeTimestamp(blockNr)
+	blockSuffix := dbutils.EncodeTimestamp(blockNr)
 	accountBytes := common.FromHex(*account)
 	secKey := crypto.Keccak256(accountBytes)
 	accountData, err := ethDb.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, secKey, blockNr+1)

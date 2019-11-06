@@ -134,7 +134,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.Suffix = append(keysToRemove.Suffix, key)
+		keysToRemove.ChangeSet = append(keysToRemove.ChangeSet, key)
 
 		changedKeys, err := dbutils.Decode(v)
 		if err != nil {
@@ -168,7 +168,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 }
 
 func batchDelete(db ethdb.Database, keys *keysToRemove) error {
-	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.Suffix))
+	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.ChangeSet))
 	iterator := LimitIterator(keys, DeleteLimit)
 	for iterator.HasMore() {
 		iterator.ResetLimit()
@@ -196,14 +196,14 @@ func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
 		AccountHistoryKeys: make([][]byte, 0),
 		StorageHistoryKeys: make([][]byte, 0),
-		Suffix:             make([][]byte, 0),
+		ChangeSet:          make([][]byte, 0),
 	}
 }
 
 type keysToRemove struct {
 	AccountHistoryKeys [][]byte
 	StorageHistoryKeys [][]byte
-	Suffix             [][]byte
+	ChangeSet          [][]byte
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
@@ -240,7 +240,7 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
 	}
 	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
-		return i.k.Suffix[i.currentNum], dbutils.ChangeSetBucket, true
+		return i.k.ChangeSet[i.currentNum], dbutils.ChangeSetBucket, true
 	}
 	return nil, nil, false
 }
@@ -250,7 +250,7 @@ func (i *limitIterator) ResetLimit() {
 }
 
 func (i *limitIterator) HasMore() bool {
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.Suffix) == i.currentNum {
+	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.ChangeSet) == i.currentNum {
 		return false
 	}
 	return true
