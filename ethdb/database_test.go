@@ -233,7 +233,7 @@ func testParallelPutGet(db MinDatabase) {
 			defer pending.Done()
 			_, err := db.Get(bucket, []byte(key))
 			if err == nil {
-				//panic("get succeeded")
+				panic("get succeeded")
 			}
 		}(strconv.Itoa(i))
 	}
