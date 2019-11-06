@@ -85,7 +85,8 @@ lintci:
 	    --config ./.golangci/step4.yml
 
 lintci-deps:
-	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.16.0
+	rm -f ./build/bin/golangci-lint
+	curl -sfL https://install.goreleaser.com/github.com/golangci/golangci-lint.sh | sh -s -- -b ./build/bin v1.20.1
 
 clean:
 	./build/clean_go_build_cache.sh
