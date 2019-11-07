@@ -153,7 +153,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 	}
 	batch := stateDb.NewBatch()
 	defer func() {
-		if _, err := batch.Commit(); err != nil {
+		if _, err = batch.Commit(); err != nil {
 			fmt.Printf("Failed to commit batch: %v\n", err)
 		}
 	}()
