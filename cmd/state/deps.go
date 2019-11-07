@@ -80,12 +80,12 @@ func (dt *DepTracer) CaptureFault(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 func (dt *DepTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time.Duration, err error) error {
 	if err == nil {
 		// Merge frame writes with the tx writes
-		for addr, _ := range dt.accountsWriteSetFrame {
+		for addr := range dt.accountsWriteSetFrame {
 			dt.accountsWriteSet[addr] = struct{}{}
 		}
 		for addr, smap := range dt.storageWriteSetFrame {
 			if smap_dest, ok := dt.storageWriteSet[addr]; ok {
-				for loc, _ := range smap {
+				for loc := range smap {
 					smap_dest[loc] = struct{}{}
 				}
 			} else {
