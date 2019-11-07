@@ -18,6 +18,8 @@ package ethdb
 
 // IdealBatchSize defines the size of the data batches should ideally add in one
 // write.
+import "github.com/ledgerwatch/bolt"
+
 const IdealBatchSize = 100 * 1024
 
 // Putter wraps the database write operation supported by both batches and regular databases.
@@ -55,6 +57,7 @@ type Database interface {
 	Size() int
 	Keys() ([][]byte, error)
 	MemCopy() Database
+	DB() *bolt.DB
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)

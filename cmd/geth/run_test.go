@@ -25,8 +25,8 @@ import (
 	"time"
 
 	"github.com/docker/docker/pkg/reexec"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/internal/cmdtest"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 func tmpdir(t *testing.T) string {

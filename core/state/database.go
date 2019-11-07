@@ -550,10 +550,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 		for addressHash, m := range b.storageUpdates {
 			addrHash := addressHash.Hash()
-			if _, ok := b.deletedHashes[addressHash.Hash()]; ok {
-				// Deleted contracts will be dealth with later, in the next loop
-				continue
-			}
 
 			for keyHash, v := range m {
 				cKey := dbutils.GenerateCompositeTrieKey(addressHash.Hash(), keyHash)
@@ -592,6 +588,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
 						account.Root = root
+						//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
 					} else {
 						//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
@@ -601,6 +598,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
 						account.Root = root
+						//fmt.Printf("Set %x root for addrHash %x\n", root, addrHash)
 					} else {
 						//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
 						account.Root = trie.EmptyRoot
@@ -632,14 +630,27 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 		// For the contracts that got deleted
 		for address := range b.deleted {
+			if _, ok := b.created[address]; ok {
+				// In some rather artificial circumstances, an account can be recreated after having been self-destructed
+				// in the same block. It can only happen when contract is introduced in the genesis state with nonce 0
+				// rather than created by a transaction (in that case, its starting nonce is 1). The self-destructed
+				// contract actually gets removed from the state only at the end of the block, so if its nonce is not 0,
+				// it will prevent any re-creation within the same block. However, if the contract is introduced in
+				// the genesis state, its nonce is 0, and that means it can be self-destructed, and then re-created,
+				// all in the same block. In such cases, we must preserve storage modifications happening after the
+				// self-destruction
+				continue
+			}
 			addrHash, err := tds.HashAddress(address, false /*save*/)
 			if err != nil {
 				return nil, err
 			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				//fmt.Printf("(b)Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
 			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
 			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
@@ -1052,12 +1063,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	}
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
-	// TODO [Alexey] Are these lines below still required?
-	addrHashWithInc := newAddressHashWithIncarnation(addrHash, account.GetIncarnation())
-	if _, ok := tsw.tds.currentBuffer.storageUpdates[addrHashWithInc]; !ok && account.GetIncarnation() > 0 {
-		tsw.tds.currentBuffer.storageUpdates[addrHashWithInc] = map[common.Hash][]byte{}
-	}
-
 	return nil
 }
 
@@ -1097,6 +1102,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 		return err
 	}
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = nil
+	delete(tsw.tds.currentBuffer.storageUpdates, newAddressHashWithIncarnation(addrHash, original.GetIncarnation()))
 	tsw.tds.currentBuffer.deleted[address] = struct{}{}
 	return nil
 }
