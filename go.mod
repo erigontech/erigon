@@ -5,7 +5,7 @@ go 1.12
 require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.0 // indirect
-	github.com/JekaMas/notify v0.9.1
+	github.com/JekaMas/notify v0.9.3
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/allegro/bigcache v0.0.0-20181022200625-bff00e20c68d
 	github.com/apilayer/freegeoip v3.5.0+incompatible
@@ -66,7 +66,7 @@ require (
 	github.com/wsddn/go-ecdh v0.0.0-20161211032359-48726bab9208
 	golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2
 	golang.org/x/net v0.0.0-20191014212845-da9a3fd4c582
-	golang.org/x/sys v0.0.0-20190626221950-04f50cda93cb
+	golang.org/x/sys v0.0.0-20191105231009-c1f44814a5cd
 	golang.org/x/text v0.3.0
 	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
