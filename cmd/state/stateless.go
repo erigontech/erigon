@@ -152,6 +152,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 		checkRoots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
+	defer batch.Commit()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
@@ -287,10 +288,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 			fmt.Println("interrupted, please wait for cleanup...")
 		default:
 		}
-	}
-	if _, err := batch.Commit(); err != nil {
-		fmt.Printf("Failed to commit batch: %v\n", err)
-		return
 	}
 	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)
