@@ -68,12 +68,17 @@ func ConfigKey(hash common.Hash) []byte {
 	return append(ConfigPrefix, hash.Bytes()...)
 }
 
+// AddrHash + KeyHash
+// Only for trie
 func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
 	compositeKey := make([]byte, 0, common.HashLength+common.HashLength)
 	compositeKey = append(compositeKey, addressHash[:]...)
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
+
+// AddrHash + incarnation + KeyHash
+// For contract storage
 func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, seckey common.Hash) []byte {
 	compositeKey := make([]byte, 0, common.HashLength+8+common.HashLength)
 	compositeKey = append(compositeKey, GenerateStoragePrefix(addressHash, incarnation)...)
@@ -91,10 +96,18 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	return prefix
 }
 
-func CompositeKeySuffix(key []byte, timestamp uint64) (composite, suffix []byte) {
-	suffix = EncodeTimestamp(timestamp)
-	composite = make([]byte, len(key)+len(suffix))
+// Key + blockNum
+func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []byte) {
+	encodedTS = EncodeTimestamp(timestamp)
+	composite = make([]byte, len(key)+len(encodedTS))
 	copy(composite, key)
-	copy(composite[len(key):], suffix)
-	return composite, suffix
+	copy(composite[len(key):], encodedTS)
+	return composite, encodedTS
+}
+
+func CompositeChangeSetKey(encodedTS, hBucket []byte) []byte {
+	changeSetKey := make([]byte, len(encodedTS)+len(hBucket))
+	copy(changeSetKey, encodedTS)
+	copy(changeSetKey[len(encodedTS):], hBucket)
+	return changeSetKey
 }
