@@ -138,6 +138,7 @@ func (mnr *Miner) Stop() {
 }
 
 func (mnr *Miner) Close() {
+	mnr.worker.stop()
 	mnr.worker.close()
 	close(mnr.exitCh)
 }

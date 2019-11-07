@@ -28,7 +28,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/mohae/deepcopy"
-	"github.com/rjeczalik/notify"
+	"github.com/JekaMas/notify"
 )
 
 var emptyChunk = json.RawMessage("[]")

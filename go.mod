@@ -5,6 +5,7 @@ go 1.12
 require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.0 // indirect
+	github.com/JekaMas/notify v0.9.1
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/allegro/bigcache v0.0.0-20181022200625-bff00e20c68d
 	github.com/apilayer/freegeoip v3.5.0+incompatible
@@ -50,7 +51,6 @@ require (
 	github.com/petar/GoLLRB v0.0.0-20190514000832-33fb24c13b99
 	github.com/peterh/liner v0.0.0-20190123174540-a2c9a5303de7
 	github.com/prometheus/tsdb v0.10.0
-	github.com/rjeczalik/notify v0.9.1
 	github.com/robertkrimen/otto v0.0.0-20170205013659-6a77b7cbc37d
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
 	github.com/rs/xhandler v0.0.0-20170707052532-1eb70cf1520d // indirect

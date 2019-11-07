@@ -29,7 +29,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"sync"
 	"time"
 
@@ -101,12 +100,6 @@ func (ks *KeyStore) init(keydir string) {
 	ks.unlocked = make(map[common.Address]*unlocked)
 	ks.cache, ks.changes = newAccountCache(keydir)
 
-	// TODO: In order for this finalizer to work, there must be no references
-	// to ks. addressCache doesn't keep a reference but unlocked keys do,
-	// so the finalizer will not trigger until all timed unlocks have expired.
-	runtime.SetFinalizer(ks, func(m *KeyStore) {
-		m.cache.close()
-	})
 	// Create the initial list of wallets from the cache
 	accs := ks.cache.accounts()
 	ks.wallets = make([]accounts.Wallet, len(accs))
@@ -485,6 +478,10 @@ func (ks *KeyStore) ImportPreSaleKey(keyJSON []byte, passphrase string) (account
 	ks.cache.add(a)
 	ks.refreshWallets()
 	return a, nil
+}
+
+func (ks *KeyStore) Close() {
+	ks.cache.close()
 }
 
 // zeroKey zeroes a private key in memory.

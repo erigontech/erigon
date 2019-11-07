@@ -438,6 +438,18 @@ func (n *Node) Stop() error {
 	n.stopWS()
 	n.stopHTTP()
 	n.stopIPC()
+
+	type stop interface {
+		Close()
+	}
+
+	for _, api := range n.rpcAPIs {
+		closeAPI, ok := api.Service.(stop)
+		if ok {
+			closeAPI.Close()
+		}
+	}
+
 	n.rpcAPIs = nil
 	failure := &StopError{
 		Services: make(map[reflect.Type]error),
