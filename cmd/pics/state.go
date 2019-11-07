@@ -5,6 +5,11 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
+	"os"
+	"os/exec"
+	"sort"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
@@ -21,10 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/ledgerwatch/turbo-geth/visual"
-	"math/big"
-	"os"
-	"os/exec"
-	"sort"
 )
 
 func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
@@ -96,6 +97,92 @@ func keyTape(t *trie.Trie, number int) error {
 		fmt.Fprintf(f,
 			`q_%x -> e_%d;
 `, key, i)
+	}
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+	return nil
+}
+
+func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error {
+	filename := fmt.Sprintf("changes_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	i := 0
+	visual.StartGraph(f, true)
+	m := make(map[string]string)
+
+	if err := first.View(func(readTx *bolt.Tx) error {
+		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			return b.ForEach(func(k, v []byte) error {
+				m[fmt.Sprintf("%x_%x", name, k)] = string(v)
+				return nil
+			})
+		})
+	}); err != nil {
+		panic(err)
+	}
+
+	if err := second.View(func(readTx *bolt.Tx) error {
+		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
+			visual.StartCluster(f, i, string(name))
+			if err := b.ForEach(func(k, v []byte) error {
+				keyKeyBytes := &trie.Keybytes{
+					Data:        k,
+					Odd:         false,
+					Terminating: false,
+				}
+				valKeyBytes := &trie.Keybytes{
+					Data:        v,
+					Odd:         false,
+					Terminating: false,
+				}
+				val := valKeyBytes.ToHex()
+				key := keyKeyBytes.ToHex()
+				if m[fmt.Sprintf("%x_%x", name, k)] != string(v) {
+					fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
+					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+					if len(val) > 0 {
+						if len(val) > 32 {
+							shortenedVal := val[:32]
+							visual.Horizontal(f, shortenedVal, 99999, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
+						} else {
+							visual.Horizontal(f, val, 99999, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+						}
+					} else {
+						visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
+					}
+				} else {
+					fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
+					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+					if len(val) > 0 {
+						if len(val) > 32 {
+							shortenedVal := val[:32]
+							visual.Horizontal(f, shortenedVal, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
+						} else {
+							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
+						}
+					} else {
+						visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
+					}
+				}
+				i++
+				return nil
+			}); err != nil {
+				return err
+			}
+			visual.EndCluster(f)
+			return nil
+		})
+	}); err != nil {
+		return err
 	}
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
@@ -214,6 +301,7 @@ func initialState1() error {
 		return err
 	}
 	t := tds.Trie()
+	snapshotDb := db.MemCopy().DB()
 	var codeMap map[common.Hash][]byte
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
@@ -222,6 +310,9 @@ func initialState1() error {
 		return err
 	}
 	if _, err = statePicture(t, codeMap, 1, 48, false, false, false, false, nil); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 0); err != nil {
 		return err
 	}
 
@@ -334,10 +425,15 @@ func initialState1() error {
 	})
 
 	// BLOCK 1
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 1); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, codeMap, 2, 48, false, false, false, false, nil); err != nil {
@@ -345,10 +441,15 @@ func initialState1() error {
 	}
 
 	// BLOCK 2
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 2); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, codeMap, 3, 48, false, false, false, false, nil); err != nil {
@@ -356,10 +457,15 @@ func initialState1() error {
 	}
 
 	// BLOCK 3
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 3); err != nil {
 		return err
 	}
 	if _, err = statePicture(t, codeMap, 4, 48, false, false, false, false, nil); err != nil {
@@ -373,7 +479,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 4
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 4); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -384,7 +495,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 5
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -395,7 +511,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 6
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -409,7 +530,12 @@ func initialState1() error {
 	}
 
 	// BLOCK 7
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 7); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -422,7 +548,12 @@ func initialState1() error {
 
 	tds.SetResolveReads(true)
 	// BLOCK 8
+	snapshotDb = db.MemCopy().DB()
+
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[7]}); err != nil {
+		return err
+	}
+	if err = stateDatabaseComparison(snapshotDb, dbBolt, 8); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
