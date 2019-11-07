@@ -106,8 +106,8 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string) {
-	//state.MaxTrieCacheGen = 64*1024
+func stateless(chaindata string, statefile string, triesize int) {
+	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
