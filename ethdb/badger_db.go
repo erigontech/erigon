@@ -186,4 +186,10 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 	})
 }
 
+// GetS returns a single value that was put into a given historical bucket for an exact timestamp.
+func (db *BadgerDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	return db.Get(hBucket, composite)
+}
+
 // TODO [Andrew] implement the full Database interface

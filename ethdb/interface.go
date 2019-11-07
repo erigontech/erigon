@@ -35,7 +35,11 @@ type Putter interface {
 type Getter interface {
 	// Get returns a single value.
 	Get(bucket, key []byte) ([]byte, error)
+
+	// GetS returns a single value that was put into a given historical bucket for an exact timestamp.
+	// timestamp == block number
 	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
+
 	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
 	Has(bucket, key []byte) (bool, error)
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
