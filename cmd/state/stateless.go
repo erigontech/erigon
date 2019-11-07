@@ -152,7 +152,11 @@ func stateless(chaindata string, statefile string, triesize int) {
 		checkRoots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
-	defer batch.Commit()
+	defer func() {
+		if _, err := batch.Commit(); err != nil {
+			fmt.Printf("Failed to commit batch: %v\n", err)
+		}
+	}()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
