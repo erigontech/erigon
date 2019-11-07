@@ -89,12 +89,21 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 	}
 }
 
-func calculateNumOfPrunedBlocks(curentBlock, lastPrunedBlock uint64, blocksBeforePruning uint64, blocksBatch uint64) (uint64, uint64, bool) {
-	diff := curentBlock - lastPrunedBlock - blocksBeforePruning
+func calculateNumOfPrunedBlocks(currentBlock, lastPrunedBlock uint64, blocksBeforePruning uint64, blocksBatch uint64) (uint64, uint64, bool) {
+	//underflow see https://github.com/ledgerwatch/turbo-geth/issues/115
+	if currentBlock <= lastPrunedBlock {
+		return lastPrunedBlock, lastPrunedBlock, false
+	}
+
+	diff := currentBlock - lastPrunedBlock
+	if diff <= blocksBeforePruning {
+		return lastPrunedBlock, lastPrunedBlock, false
+	}
+	diff = diff - blocksBeforePruning
 	switch {
 	case diff >= blocksBatch:
 		return lastPrunedBlock, lastPrunedBlock + blocksBatch, true
-	case diff > 0 && diff < blocksBatch:
+	case diff < blocksBatch:
 		return lastPrunedBlock, lastPrunedBlock + diff, true
 	default:
 		return lastPrunedBlock, lastPrunedBlock, false
