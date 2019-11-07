@@ -44,7 +44,7 @@ type structInfoReceiver interface {
 	hash(number int) error
 }
 
-// genStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
+// GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
 // an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
@@ -59,8 +59,7 @@ type structInfoReceiver interface {
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-
-func genStructStep(
+func GenStructStep(
 	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
 	recursive bool,
@@ -153,7 +152,7 @@ func genStructStep(
 	}
 
 	// Recursion
-	return genStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return GenStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
 // BytesTape is an abstraction for an input tape that allows reading binary strings ([]byte) sequentially
@@ -799,6 +798,13 @@ func (hb *HashBuilder) emptyRoot() {
 	hash[0] = rlp.EmptyStringCode + common.HashLength
 	copy(hash[1:], EmptyRoot[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
+}
+
+func (hb *HashBuilder) RootHash() (common.Hash, error) {
+	if !hb.hasRoot() {
+		return common.Hash{}, fmt.Errorf("no root in the tree")
+	}
+	return hb.rootHash(), nil
 }
 
 func (hb *HashBuilder) rootHash() common.Hash {
