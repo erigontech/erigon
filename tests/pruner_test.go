@@ -573,7 +573,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		signer = types.HomesteadSigner{}
 	)
 
-	numBlocks := 30
+	numBlocks := 25
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
 	if err != nil {
@@ -616,59 +616,39 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-
-		if i >= 10 && i%10 == 0 {
-			pruner.Stop()
-			time.Sleep(time.Second * 2)
-			err = pruner.Start()
-			assertNil(t, err)
-		} else {
-			time.Sleep(time.Millisecond * 500)
+		if i%5 == 0 {
+			time.Sleep(300 * time.Millisecond)
 		}
 	}
-	time.Sleep(time.Second * 2)
-	res, err := getStat(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := stateStats{
-		NotFoundAccountsInHistory:     0,
-		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 3,
-		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
-			30: 3,
-		},
-		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
-		AccountsInState:                 5,
-	}
-	if !reflect.DeepEqual(expected, res) {
-		spew.Dump(res)
-		t.Fatal("Not equal")
-	}
+	timeout := time.After(time.Second * 5)
+	for {
+		select {
+		case <-timeout:
+			t.Fatal("Prunnig timeout")
+		default:
+			//wait pruning correct state
+			res, err := getStat(db)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	err = core.Prune(db, uint64(numBlocks)-1, uint64(numBlocks))
-	if err != nil {
-		t.Fatal(err)
+			expected := stateStats{
+				NotFoundAccountsInHistory:     0,
+				ErrAccountsInHistory:          0,
+				ErrDecodedAccountsInHistory:   0,
+				NumOfChangesInAccountsHistory: 3,
+				AccountSuffixRecordsByTimestamp: map[uint64]uint32{
+					25: 3,
+				},
+				StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
+				AccountsInState:                 5,
+			}
+			if reflect.DeepEqual(expected, res) {
+				return
+			}
+			time.Sleep(time.Millisecond * 100)
+		}
 	}
-	res, err = getStat(db)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected = stateStats{
-		NotFoundAccountsInHistory:       0,
-		ErrAccountsInHistory:            0,
-		ErrDecodedAccountsInHistory:     0,
-		NumOfChangesInAccountsHistory:   0,
-		AccountSuffixRecordsByTimestamp: map[uint64]uint32{},
-		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
-		AccountsInState:                 5,
-	}
-	if !reflect.DeepEqual(expected, res) {
-		spew.Dump(res)
-		t.Fatal("Not equal")
-	}
-
 }
 
 type stateStats struct {

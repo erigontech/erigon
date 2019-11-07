@@ -3,12 +3,12 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"sync"
-
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/petar/GoLLRB/llrb"
+	"sync"
 )
 
 type PutItem struct {
@@ -23,9 +23,9 @@ func (a *PutItem) Less(b llrb.Item) bool {
 type mutation struct {
 	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
 	//map[timestamp]map[hBucket]listOfChangedKeys
-	suffixkeys map[uint64]map[string][]dbutils.Change
-	mu         sync.RWMutex
-	db         Database
+	changeSetByBlock map[uint64]map[string][]dbutils.Change
+	mu               sync.RWMutex
+	db               Database
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
@@ -135,20 +135,20 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
 	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	suffixM, ok := m.suffixkeys[timestamp]
+	changesByBucket, ok := m.changeSetByBlock[timestamp]
 	if !ok {
-		suffixM = make(map[string][]dbutils.Change)
-		m.suffixkeys[timestamp] = suffixM
+		changesByBucket = make(map[string][]dbutils.Change)
+		m.changeSetByBlock[timestamp] = changesByBucket
 	}
-	suffixL, ok := suffixM[string(hBucket)]
+	changes, ok := changesByBucket[string(hBucket)]
 	if !ok {
-		suffixL = make([]dbutils.Change, 0)
+		changes = make([]dbutils.Change, 0)
 	}
-	suffixL = append(suffixL, dbutils.Change{
+	changes = append(changes, dbutils.Change{
 		Key:   key,
 		Value: value,
 	})
-	suffixM[string(hBucket)] = suffixL
+	changesByBucket[string(hBucket)] = changes
 	if noHistory {
 		return nil
 	}
@@ -288,9 +288,9 @@ func (m *mutation) Delete(bucket, key []byte) error {
 	return nil
 }
 
-// Deletes all keys with specified suffix from all the buckets
+// Deletes all keys with specified suffix(blockNum) from all the buckets
 func (m *mutation) DeleteTimestamp(timestamp uint64) error {
-	suffix := dbutils.EncodeTimestamp(timestamp)
+	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
@@ -299,8 +299,9 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		t = llrb.New()
 		m.puts[string(dbutils.ChangeSetBucket)] = t
 	}
-	err := m.Walk(dbutils.ChangeSetBucket, suffix, uint(8*len(suffix)), func(k, v []byte) (bool, error) {
-		hBucket := k[len(suffix):]
+	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
+		// k = encodedTS + hBucket
+		hBucket := k[len(encodedTS):]
 		changedAccounts, err := dbutils.Decode(v)
 		if err != nil {
 			return false, err
@@ -318,7 +319,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		}
 
 		err = changedAccounts.Walk(func(kk, _ []byte) error {
-			kk = append(kk, suffix...)
+			kk = append(kk, encodedTS...)
 			ht.ReplaceOrInsert(&PutItem{key: kk, value: nil})
 			return nil
 		})
@@ -339,41 +340,39 @@ func (m *mutation) Commit() (uint64, error) {
 	defer m.mu.Unlock()
 	var t *llrb.LLRB
 	var ok bool
-	if len(m.suffixkeys) > 0 {
+	if len(m.changeSetByBlock) > 0 {
 		if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
 			t = llrb.New()
 			m.puts[string(dbutils.ChangeSetBucket)] = t
 		}
-		for timestamp, suffixM := range m.suffixkeys {
-			suffix := dbutils.EncodeTimestamp(timestamp)
-			for bucketStr, suffixL := range suffixM {
+		for timestamp, changesByBucket := range m.changeSetByBlock {
+			encodedTS := dbutils.EncodeTimestamp(timestamp)
+			for bucketStr, changes := range changesByBucket {
 				hBucket := []byte(bucketStr)
-				suffixkey := make([]byte, len(suffix)+len(hBucket))
-				copy(suffixkey, suffix)
-				copy(suffixkey[len(suffix):], hBucket)
-				dat, err := m.getNoLock(dbutils.ChangeSetBucket, suffixkey)
+				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
+				dat, err := m.getNoLock(dbutils.ChangeSetBucket, changeSetKey)
 				if err != nil && err != ErrKeyNotFound {
 					return 0, err
 				}
 
 				changedAccounts, err := dbutils.Decode(dat)
 				if err != nil {
-					log.Error("Commit Decode suffix err", "err", err)
+					log.Error("Decode changedAccounts error on commit", "err", err)
 				}
 
-				changedAccounts = changedAccounts.MultiAdd(suffixL)
+				changedAccounts = changedAccounts.MultiAdd(changes)
 				changedRLP, err := dbutils.Encode(changedAccounts)
 				if err != nil {
-					log.Error("Commit Decode suffix err", "err", err)
+					log.Error("Encode changedAccounts error on commit", "err", err)
 					return 0, err
 				}
 
-				t.ReplaceOrInsert(&PutItem{key: suffixkey, value: changedRLP})
+				t.ReplaceOrInsert(&PutItem{key: changeSetKey, value: changedRLP})
 			}
 		}
 	}
 
-	m.suffixkeys = make(map[uint64]map[string][]dbutils.Change)
+	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
 	size := 0
 	for _, t := range m.puts {
 		size += t.Len()
@@ -405,7 +404,7 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.suffixkeys = make(map[uint64]map[string][]dbutils.Change)
+	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
 	m.puts = make(map[string]*llrb.LLRB)
 }
 
@@ -438,9 +437,9 @@ func (m *mutation) Close() {
 
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:         m,
-		puts:       make(map[string]*llrb.LLRB),
-		suffixkeys: make(map[uint64]map[string][]dbutils.Change),
+		db:               m,
+		puts:             make(map[string]*llrb.LLRB),
+		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return mm
 }
@@ -460,4 +459,9 @@ func (m *mutation) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *mutation) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+// Get bolt database instance
+func (m *mutation) DB() *bolt.DB {
+	return m.db.DB()
 }

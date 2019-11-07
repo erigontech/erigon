@@ -53,20 +53,12 @@ var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata fil
 var statefile = flag.String("statefile", "state", "path to the file where the state will be periodically written during the analysis")
 var start = flag.Int("start", 0, "number of data points to skip when making a chart")
 var window = flag.Int("window", 1024, "size of the window for moving average")
+var triesize = flag.Int("triesize", 1024*1024, "maximum number of nodes in the state trie")
 
 func check(e error) {
 	if e != nil {
 		panic(e)
 	}
-}
-
-func decodeTimestamp(suffix []byte) (uint64, []byte) {
-	bytecount := int(suffix[0] >> 5)
-	timestamp := uint64(suffix[0] & 0x1f)
-	for i := 1; i < bytecount; i++ {
-		timestamp = (timestamp << 8) | uint64(suffix[i])
-	}
-	return timestamp, suffix[bytecount:]
 }
 
 // Implements sort.Interface
@@ -146,7 +138,7 @@ func stateGrowth1(chaindata string) {
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// First 32 bytes is the hash of the address, then timestamp encoding
 			copy(addrHash[:], k[:32])
-			timestamp, _ := decodeTimestamp(k[32:])
+			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
@@ -243,7 +235,7 @@ func stateGrowth2(chaindata string) {
 			// First 20 bytes is the address
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
-			timestamp, _ := decodeTimestamp(k[72:])
+			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
@@ -1286,8 +1278,8 @@ func oldStorage() {
 	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	histKey := make([]byte, 32+len(ethdb.EndSuffix))
-	copy(histKey[32:], ethdb.EndSuffix)
+	histKey := make([]byte, common.HashLength+len(ethdb.EndSuffix))
+	copy(histKey[common.HashLength:], ethdb.EndSuffix)
 	// Go through the current state
 	var addr common.Address
 	itemsByAddress := make(map[common.Address]int)
@@ -1321,7 +1313,7 @@ func oldStorage() {
 			c.Seek(histKey)
 			k, _ := c.Prev()
 			if bytes.HasPrefix(k, addrHash[:]) {
-				timestamp, _ := decodeTimestamp(k[32:])
+				timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 				if timestamp > 4530000 {
 					delete(itemsByAddress, addr)
 				}
@@ -1681,7 +1673,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*chaindata, *statefile)
+		stateless(*chaindata, *statefile, *triesize)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)

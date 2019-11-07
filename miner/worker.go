@@ -255,7 +255,9 @@ func (w *worker) pending() (*types.Block, *state.IntraBlockState, *state.TrieDbS
 	if w.snapshotState == nil {
 		return nil, nil, nil
 	}
-	return w.snapshotBlock, w.snapshotState.Copy(), w.snapshotTds.Copy()
+	// FIXME: fix miner code
+	// https://github.com/ledgerwatch/turbo-geth/issues/131
+	return w.snapshotBlock, w.snapshotState, w.snapshotTds.Copy()
 }
 
 // pendingBlock returns pending block.
@@ -703,7 +705,9 @@ func (w *worker) updateSnapshot() {
 		w.current.receipts,
 	)
 
-	w.snapshotState = w.current.state.Copy()
+	// FIXME: fix miner code
+	// https://github.com/ledgerwatch/turbo-geth/issues/131
+	w.snapshotState = w.current.state
 }
 
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
@@ -973,7 +977,9 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		receipts[i] = new(types.Receipt)
 		*receipts[i] = *l
 	}
-	s := w.current.state.Copy()
+	// FIXME: fix miner code
+	// https://github.com/ledgerwatch/turbo-geth/issues/131
+	s := w.current.state
 	tds := w.current.tds.Copy()
 	block, err := w.engine.FinalizeAndAssemble(w.chainConfig, w.current.header, s, w.current.txs, uncles, w.current.receipts)
 	if err != nil {

@@ -106,8 +106,8 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string) {
-	//state.MaxTrieCacheGen = 64*1024
+func stateless(chaindata string, statefile string, triesize int) {
+	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -152,6 +152,11 @@ func stateless(chaindata string, statefile string) {
 		checkRoots(stateDb, db, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
+	defer func() {
+		if _, err = batch.Commit(); err != nil {
+			fmt.Printf("Failed to commit batch: %v\n", err)
+		}
+	}()
 	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	check(err)
 	if blockNum > 1 {
@@ -287,10 +292,6 @@ func stateless(chaindata string, statefile string) {
 			fmt.Println("interrupted, please wait for cleanup...")
 		default:
 		}
-	}
-	if _, err := batch.Commit(); err != nil {
-		fmt.Printf("Failed to commit batch: %v\n", err)
-		return
 	}
 	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)

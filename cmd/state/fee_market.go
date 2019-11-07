@@ -64,7 +64,7 @@ func feemarket() {
 		if minFee.Cmp(minimum) < 0 {
 			minFee.Set(minimum)
 		}
-		for _, _ = range block.Transactions() {
+		for range block.Transactions() {
 			txCount++
 		}
 		fmt.Fprintf(w, "%d,%d\n", blockNum, minFee)
