@@ -75,7 +75,7 @@ func readJSONFile(fn string, value interface{}) error {
 
 	err = readJSON(file, value)
 	if err != nil {
-		return fmt.Errorf("%s in file %s", err.Error(), fn)
+		return fmt.Errorf("%signer in file %signer", err.Error(), fn)
 	}
 	return nil
 }
@@ -186,7 +186,7 @@ func (tm *testMatcher) checkFailureWithName(t *testing.T, name string, err error
 		}
 	}
 	if failReason != "" {
-		t.Logf("expected failure: %s", failReason)
+		t.Logf("expected failure: %signer", failReason)
 		if err != nil {
 			t.Logf("error: %v", err)
 			return nil
@@ -204,7 +204,7 @@ func (tm *testMatcher) walk(t *testing.T, dir string, runTest interface{}) {
 	// Walk the directory.
 	dirinfo, err := os.Stat(dir)
 	if os.IsNotExist(err) || !dirinfo.IsDir() {
-		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
+		fmt.Fprintf(os.Stderr, "can't find test files in %signer, did you clone the tests submodule?\n", dir)
 		t.Skip("missing test files")
 	}
 	err = filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
@@ -264,7 +264,7 @@ func makeMapFromTestFunc(f interface{}) reflect.Value {
 	testingT := reflect.TypeOf((*testing.T)(nil))
 	ftyp := reflect.TypeOf(f)
 	if ftyp.Kind() != reflect.Func || ftyp.NumIn() != 3 || ftyp.NumOut() != 0 || ftyp.In(0) != testingT || ftyp.In(1) != stringT {
-		panic(fmt.Sprintf("bad test function type: want func(*testing.T, string, <TestType>), have %s", ftyp))
+		panic(fmt.Sprintf("bad test function type: want func(*testing.T, string, <TestType>), have %signer", ftyp))
 	}
 	testType := ftyp.In(2)
 	mp := reflect.New(reflect.MapOf(stringT, testType))

@@ -338,8 +338,6 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
-
-		fmt.Println("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
 		if err != nil {
 			log.Error("Creation aborted", "error", err)
@@ -1594,11 +1592,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			}
 		}
 		stateDB := state.New(bc.trieDbState)
-		fmt.Println("!!!!!!!!!!!!!!!! 1 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String())
 		// Process block using the parent state as reference point.
 		//t0 := time.Now()
 		receipts, logs, usedGas, err := bc.processor.Process(block, stateDB, bc.trieDbState, bc.vmConfig)
-		fmt.Println("!!!!!!!!!!!!!!!! 2 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String())
 		//t1 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
@@ -1622,7 +1618,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// Validate the state using the default validator
 		err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
-		fmt.Println("!!!!!!!!!!!!!!!! 3 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String())
 		if err != nil {
 			bc.db.Rollback()
 			bc.trieDbState = nil
@@ -1641,8 +1636,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// Write the block to the chain and get the status.
 		status, err := bc.writeBlockWithState(block, receipts, stateDB, bc.trieDbState)
-		fmt.Println("!!!!!!!!!!!!!!!! 4 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String(), err)
-
 		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()

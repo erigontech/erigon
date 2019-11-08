@@ -25,7 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/tests/contracts"
 )
 
-// It generates several blocks with money transfer, checks that it's correct
+// It generates several blocks with money transfer, checks that it'signer correct
 // than prune two times with database state and history checks
 func TestBasisAccountPruning(t *testing.T) {
 	// Configure and generate a sample block chain

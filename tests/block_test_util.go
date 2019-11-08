@@ -160,13 +160,13 @@ func (t *BlockTest) genesis(config *params.ChainConfig) *core.Genesis {
 
 /* See https://github.com/ethereum/tests/wiki/Blockchain-Tests-II
 
-   Whether a block is valid or not is a bit subtle, it's defined by presence of
+   Whether a block is valid or not is a bit subtle, it'signer defined by presence of
    blockHeader, transactions and uncleHeaders fields. If they are missing, the block is
    invalid and we must verify that we do not accept it.
 
    Since some tests mix valid and invalid blocks we need to check this for every block.
 
-   If a block is invalid it does not necessarily fail the test, if it's invalidness is
+   If a block is invalid it does not necessarily fail the test, if it'signer invalidness is
    expected we are expected to ignore it and continue processing and then validate the
    post state.
 */
@@ -257,18 +257,18 @@ func validateHeader(h *btHeader, h2 *types.Header) error {
 func (t *BlockTest) validatePostState(statedb *state.IntraBlockState) error {
 	// validate post state accounts in test file against what we have in state db
 	for addr, acct := range t.json.Post {
-		// address is indirectly verified by the other fields, as it's the db key
+		// address is indirectly verified by the other fields, as it'signer the db key
 		code2 := statedb.GetCode(addr)
 		balance2 := statedb.GetBalance(addr)
 		nonce2 := statedb.GetNonce(addr)
 		if !bytes.Equal(code2, acct.Code) {
-			return fmt.Errorf("account code mismatch for addr: %s want: %v have: %s", addr, acct.Code, hex.EncodeToString(code2))
+			return fmt.Errorf("account code mismatch for addr: %signer want: %v have: %signer", addr, acct.Code, hex.EncodeToString(code2))
 		}
 		if balance2.Cmp(acct.Balance) != 0 {
-			return fmt.Errorf("account balance mismatch for addr: %s, want: %d, have: %d", addr, acct.Balance, balance2)
+			return fmt.Errorf("account balance mismatch for addr: %signer, want: %d, have: %d", addr, acct.Balance, balance2)
 		}
 		if nonce2 != acct.Nonce {
-			return fmt.Errorf("account nonce mismatch for addr: %s want: %d have: %d", addr, acct.Nonce, nonce2)
+			return fmt.Errorf("account nonce mismatch for addr: %signer want: %d have: %d", addr, acct.Nonce, nonce2)
 		}
 	}
 	return nil
