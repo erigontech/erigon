@@ -1641,7 +1641,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		// Write the block to the chain and get the status.
 		status, err := bc.writeBlockWithState(block, receipts, stateDB, bc.trieDbState)
-		fmt.Println("!!!!!!!!!!!!!!!! 4 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String())
+		fmt.Println("!!!!!!!!!!!!!!!! 4 - ", block.Number().Uint64(), bc.trieDbState.LastRoot().String(), err)
 
 		//t3 := time.Now()
 		if err != nil {
