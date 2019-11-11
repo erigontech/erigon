@@ -19,7 +19,6 @@ package ethdb
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"path"
 
@@ -31,7 +30,6 @@ import (
 )
 
 var OpenFileLimit = 64
-var ErrKeyNotFound = errors.New("boltdb: key not found in range")
 
 const HeapSize = 512 * 1024 * 1024
 
@@ -165,7 +163,7 @@ func (db *BoltDatabase) Size() int {
 	return db.db.Size()
 }
 
-// Get returns the given key if it's present.
+// Get returns the value for a given key if it's present.
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
@@ -186,14 +184,13 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-// GetS returns a single value that was put into a given historical bucket for an exact timestamp.
+// GetS returns the value that was put into a given historical bucket for an exact timestamp.
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
 }
 
-// GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
-// if there are not such (k, v)
+// GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte

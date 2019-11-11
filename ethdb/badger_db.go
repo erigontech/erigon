@@ -79,7 +79,7 @@ func (db *BadgerDatabase) Put(bucket, key []byte, value []byte) error {
 	})
 }
 
-// Get returns a single value.
+// Get returns the value for a given key if it's present.
 func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 	var val []byte
 	err := db.db.View(func(txn *badger.Txn) error {
@@ -90,6 +90,9 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 		val, err = item.ValueCopy(nil)
 		return err
 	})
+	if err == badger.ErrKeyNotFound {
+		return nil, ErrKeyNotFound
+	}
 	return val, err
 }
 
@@ -186,10 +189,43 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 	})
 }
 
-// GetS returns a single value that was put into a given historical bucket for an exact timestamp.
+// GetS returns the value that was put into a given historical bucket for an exact timestamp.
 func (db *BadgerDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
+}
+
+// GetAsOf returns the value valid as of a given timestamp.
+func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	var dat []byte
+	err := db.db.View(func(tx *badger.Txn) error {
+		{ // first look in the historical bucket
+			it := tx.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+			it.Seek(bucketKey(hBucket, composite))
+
+			if it.ValidForPrefix(bucketKey(hBucket, key)) {
+				var err2 error
+				dat, err2 = it.Item().ValueCopy(nil)
+				return err2
+			}
+		}
+
+		{ // fall back to the current bucket
+			item, err2 := tx.Get(bucketKey(bucket, key))
+			if err2 != nil {
+				return err2
+			}
+			dat, err2 = item.ValueCopy(nil)
+			return err2
+		}
+	})
+
+	if err == badger.ErrKeyNotFound {
+		return dat, ErrKeyNotFound
+	}
+	return dat, err
 }
 
 // TODO [Andrew] implement the full Database interface

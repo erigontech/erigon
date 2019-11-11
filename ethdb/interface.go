@@ -16,10 +16,16 @@
 
 package ethdb
 
-// IdealBatchSize defines the size of the data batches should ideally add in one
-// write.
-import "github.com/ledgerwatch/bolt"
+import (
+	"errors"
 
+	"github.com/ledgerwatch/bolt"
+)
+
+// ErrKeyNotFound is returned when key isn't found in the database.
+var ErrKeyNotFound = errors.New("db: key not found")
+
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
 const IdealBatchSize = 100 * 1024
 
 // Putter wraps the database write operations.
@@ -35,14 +41,17 @@ type Putter interface {
 
 // Getter wraps the database read operations.
 type Getter interface {
-	// Get returns a single value.
+	// Get returns the value for a given key if it's present.
 	Get(bucket, key []byte) ([]byte, error)
 
-	// GetS returns a single value that was put into a given historical bucket for an exact timestamp.
+	// GetS returns the value that was put into a given historical bucket for an exact timestamp.
 	// timestamp == block number
 	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
 
+	// GetAsOf returns the value valid as of a given timestamp.
+	// timestamp == block number
 	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
+
 	Has(bucket, key []byte) (bool, error)
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
@@ -72,6 +81,7 @@ type Database interface {
 	Size() int
 	Keys() ([][]byte, error)
 	MemCopy() Database
+	// TODO [Andrew] don't expose Bolt DB
 	DB() *bolt.DB
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
