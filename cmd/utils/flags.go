@@ -297,9 +297,9 @@ var (
 		Name:  "ulc.onlyannounce",
 		Usage: "Ultra light server sends announcements only",
 	}
-	DownloaderFlag = cli.BoolFlag{
-		Name:  "downloader",
-		Usage: "Run in downloader mode - only fetch blocks but not process them",
+	DownloadOnlyFlag = cli.BoolFlag{
+		Name:  "downloa-only",
+		Usage: "Run in download only mode - only fetch blocks but not process them",
 	}
 	// Dashboard settings
 	DashboardEnabledFlag = cli.BoolFlag{
@@ -1472,7 +1472,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
 
-	cfg.DownloadOnly = ctx.GlobalBoolT(DownloaderFlag.Name)
+	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
 	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 

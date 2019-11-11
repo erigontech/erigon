@@ -1309,7 +1309,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	if !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
-	if stateDb != nil {
+	if stateDb != nil && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 

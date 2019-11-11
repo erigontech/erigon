@@ -109,7 +109,7 @@ var (
 		utils.CacheTrieFlag,
 		utils.CacheGCFlag,
 		utils.TrieCacheGenFlag,
-		utils.DownloaderFlag,
+		utils.DownloadOnlyFlag,
 		utils.NoHistory,
 		utils.ArchiveSyncInterval,
 		utils.ListenPortFlag,
