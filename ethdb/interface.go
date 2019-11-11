@@ -18,8 +18,6 @@ package ethdb
 
 import (
 	"errors"
-
-	"github.com/ledgerwatch/bolt"
 )
 
 // ErrKeyNotFound is returned when key isn't found in the database.
@@ -81,8 +79,6 @@ type Database interface {
 	Size() int
 	Keys() ([][]byte, error)
 	MemCopy() Database
-	// TODO [Andrew] don't expose Bolt DB
-	DB() *bolt.DB
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
