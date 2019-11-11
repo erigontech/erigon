@@ -298,7 +298,7 @@ var (
 		Usage: "Ultra light server sends announcements only",
 	}
 	DownloadOnlyFlag = cli.BoolFlag{
-		Name:  "downloa-only",
+		Name:  "download-only",
 		Usage: "Run in download only mode - only fetch blocks but not process them",
 	}
 	// Dashboard settings
