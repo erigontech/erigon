@@ -75,10 +75,8 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 // PutS adds a new entry to the historical buckets:
 // hBucket (unless changeSetBucketOnly) and ChangeSet.
 func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, suffix := dbutils.CompositeKeySuffix(key, timestamp)
-	suffixkey := make([]byte, len(suffix)+len(hBucket))
-	copy(suffixkey, suffix)
-	copy(suffixkey[len(suffix):], hBucket)
+	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
+	changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if !changeSetBucketOnly {
 			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
@@ -95,20 +93,20 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			return err
 		}
 
-		dat, _ := sb.Get(suffixkey)
+		dat, _ := sb.Get(changeSetKey)
 		sh, err := dbutils.Decode(dat)
 		if err != nil {
-			log.Error("PutS Decode suffix err", "err", err)
+			log.Error("PutS Decode changeSet err", "err", err)
 			return err
 		}
 		sh = sh.Add(key, value)
 		dat, err = dbutils.Encode(sh)
 		if err != nil {
-			log.Error("PutS Decode suffix err", "err", err)
+			log.Error("PutS Decode changeSet err", "err", err)
 			return err
 		}
 
-		return sb.Put(suffixkey, dat)
+		return sb.Put(changeSetKey, dat)
 	})
 	return err
 }
@@ -322,9 +320,9 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	fixedbytes, mask := bytesmask(fixedbits)
-	suffix := dbutils.EncodeTimestamp(timestamp)
+	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
-	sl := l + len(suffix)
+	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(EndSuffix))
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -356,9 +354,9 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			}
 
 			// historical key points to an old block
-			if hK != nil && bytes.Compare(hK[l:], suffix) < 0 {
+			if hK != nil && bytes.Compare(hK[l:], encodedTS) < 0 {
 				copy(keyBuffer, hK[:l])
-				copy(keyBuffer[l:], suffix)
+				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
 				continue
@@ -405,9 +403,9 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	keyIdx := 0 // What is the current key we are extracting
 	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
-	suffix := dbutils.EncodeTimestamp(timestamp)
+	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
-	sl := l + len(suffix)
+	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(EndSuffix))
 	if err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -480,9 +478,9 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				fit = cmp == 0
 				hKFit = hCmp == 0
 			}
-			if hKFit && bytes.Compare(hK[l:], suffix) < 0 {
+			if hKFit && bytes.Compare(hK[l:], encodedTS) < 0 {
 				copy(keyBuffer, hK[:l])
-				copy(keyBuffer[l:], suffix)
+				copy(keyBuffer[l:], encodedTS)
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
 				continue
 			}
@@ -543,9 +541,10 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+// DeleteTimestamp removes data for a given timestamp (block number)
+// from all historical buckets (incl. ChangeSet).
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
-	suffix := dbutils.EncodeTimestamp(timestamp)
+	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(dbutils.ChangeSetBucket)
 		if sb == nil {
@@ -553,8 +552,9 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 		}
 		var keys [][]byte
 		c := sb.Cursor()
-		for k, v := c.Seek(suffix); k != nil && bytes.HasPrefix(k, suffix); k, v = c.Next() {
-			hb := tx.Bucket(k[len(suffix):])
+		for k, v := c.Seek(encodedTS); k != nil && bytes.HasPrefix(k, encodedTS); k, v = c.Next() {
+			// k = encodedTS + hBucket
+			hb := tx.Bucket(k[len(encodedTS):])
 			if hb == nil {
 				return nil
 			}
@@ -563,7 +563,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 				return err
 			}
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				kk = append(kk, suffix...)
+				kk = append(kk, encodedTS...)
 				return hb.Delete(kk)
 			})
 			if err != nil {
@@ -625,9 +625,9 @@ func (db *BoltDatabase) DB() *bolt.DB {
 
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:         db,
-		puts:       make(map[string]*llrb.LLRB),
-		suffixkeys: make(map[uint64]map[string][]dbutils.Change),
+		db:               db,
+		puts:             make(map[string]*llrb.LLRB),
+		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return m
 }
