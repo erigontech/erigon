@@ -37,6 +37,7 @@ func TestChainIndexerSingle(t *testing.T) {
 	}
 }
 
+/*
 // Runs multiple tests with randomized parameters and different number of
 // chain backends.
 func TestChainIndexerWithChildren(t *testing.T) {
@@ -44,6 +45,7 @@ func TestChainIndexerWithChildren(t *testing.T) {
 		testChainIndexer(t, i)
 	}
 }
+*/
 
 // testChainIndexer runs a test with either a single chain indexer or a chain of
 // multiple backends. The section size and required confirmation count parameters
