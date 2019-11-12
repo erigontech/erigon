@@ -42,7 +42,7 @@ type Getter interface {
 	// Get returns the value for a given key if it's present.
 	Get(bucket, key []byte) ([]byte, error)
 
-	// GetS returns the value that was put into a given historical bucket for an exact timestamp.
+	// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 	// timestamp == block number
 	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
 
@@ -50,7 +50,9 @@ type Getter interface {
 	// timestamp == block number
 	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
 
+	// Has indicates whether a key exists in the database.
 	Has(bucket, key []byte) (bool, error)
+
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error

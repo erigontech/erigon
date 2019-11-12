@@ -189,7 +189,7 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 	})
 }
 
-// GetS returns the value that was put into a given historical bucket for an exact timestamp.
+// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 func (db *BadgerDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
@@ -226,6 +226,15 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 		return dat, ErrKeyNotFound
 	}
 	return dat, err
+}
+
+// Has indicates whether a key exists in the database.
+func (db *BadgerDatabase) Has(bucket, key []byte) (bool, error) {
+	_, err := db.Get(bucket, key)
+	if err == ErrKeyNotFound {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // TODO [Andrew] implement the full Database interface
