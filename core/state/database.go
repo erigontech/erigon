@@ -719,7 +719,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				b.storageUpdates[addrHashWithVersion] = m
 			}
 			if len(value) > 0 {
-				m[keyHash] = AddExtraRLPLevel(value)
+				m[keyHash] = value
 				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+IncarnationLength+common.HashLength], value); err != nil {
 					return err
 				}
@@ -867,12 +867,7 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	}
 
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
-	if ok {
-		// Unwrap one RLP level
-		if len(enc) > 1 {
-			enc = enc[1:]
-		}
-	} else {
+	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
 			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
@@ -1158,8 +1153,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 		return err
 	}
 	if len(v) > 0 {
-		// Write into 1 extra RLP level
-		m[seckey] = AddExtraRLPLevel(v)
+		m[seckey] = v
 	} else {
 		m[seckey] = nil
 	}

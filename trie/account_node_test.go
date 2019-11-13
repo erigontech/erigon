@@ -2,14 +2,15 @@ package trie
 
 import (
 	"crypto/ecdsa"
+	"math/big"
+	"reflect"
+	"testing"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"golang.org/x/crypto/sha3"
-	"math/big"
-	"reflect"
-	"testing"
 )
 
 func TestGetAccount(t *testing.T) {
@@ -119,7 +120,7 @@ func TestHash(t *testing.T) {
 	}
 
 	trie := New(common.Hash{})
-	trie2 := New(common.Hash{})
+	trie2 := NewTestRLPTrie(common.Hash{})
 
 	trie.UpdateAccount(addr1.Bytes(), acc1)
 	trie.UpdateAccount(addr2.Bytes(), acc2)

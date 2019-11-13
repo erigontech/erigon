@@ -75,7 +75,7 @@ func hashesEqual(h1, h2 common.Hash) bool {
 
 func legacyDeriveSha(list DerivableList) common.Hash {
 	keybuf := new(bytes.Buffer)
-	trie := trie.New(common.Hash{})
+	trie := trie.NewTestRLPTrie(common.Hash{})
 	for i := 0; i < list.Len(); i++ {
 		keybuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))

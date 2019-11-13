@@ -391,7 +391,7 @@ func (rds *RepairDbState) WriteAccountStorage(address common.Address, incarnatio
 		rds.storageUpdates[address] = m
 	}
 	if len(v) > 0 {
-		m[seckey] = AddExtraRLPLevel(v)
+		m[seckey] = v
 	} else {
 		m[seckey] = nil
 	}

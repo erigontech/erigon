@@ -18,6 +18,7 @@ package trie
 
 import (
 	"fmt"
+	"io"
 	"math/big"
 	"math/bits"
 
@@ -155,47 +156,21 @@ func GenStructStep(
 	return GenStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
 }
 
-// BytesTape is an abstraction for an input tape that allows reading binary strings ([]byte) sequentially
-// To be used for keys and binary string values
-type BytesTape interface {
-	// Returned slice is only valid until the next invocation of NextBytes()
-	// i.e. the underlying array/slice may be shared between invocations
-	Next() ([]byte, error)
-}
-
-// Uint64Tape is an abstraction for an input tape that allows reading unsigned 64-bit integers sequentially
-// To be used for nonces of the accounts
-type Uint64Tape interface {
-	Next() (uint64, error)
-}
-
-// BigIntTape is an abstraction for an input tape that allows reading *big.Int values sequentially
-// To be used for balances of the accounts
-type BigIntTape interface {
-	// Returned pointer is only valid until the next invocation of NextBitInt()
-	// i.e. the underlying big.Int object may be shared between invocation
-	Next() (*big.Int, error)
-}
-
-// HashTape is an abstraction for an input table that allows reading 32-byte hashes (common.Hash) sequentially
-// To be used for intermediate hashes in the Patricia Merkle tree
-type HashTape interface {
-	Next() (common.Hash, error)
-}
-
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
-	keyTape     BytesTape  // the source of key sequence
-	valueTape   BytesTape  // the source of values (for values that are not accounts or contracts)
-	nonceTape   Uint64Tape // the source of nonces for accounts and contracts (field 0)
-	balanceTape BigIntTape // the source of balances for accounts and contracts (field 1)
-	sSizeTape   Uint64Tape // the source of storage sizes for contracts (field 4)
-	hashTape    HashTape   // the source of hashes
-	codeTape    BytesTape  // the source of bytecodes
+	keyTape     BytesTape           // the source of key sequence
+	valueTape   RlpSerializableTape // the source of values (for values that are not accounts or contracts)
+	nonceTape   Uint64Tape          // the source of nonces for accounts and contracts (field 0)
+	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
+	sSizeTape   Uint64Tape          // the source of storage sizes for contracts (field 4)
+	hashTape    HashTape            // the source of hashes
+	codeTape    BytesTape           // the source of bytecodes
+
+	byteArrayWriter *ByteArrayWriter
 
 	hashStack []byte           // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
 	nodeStack []node           // Stack of nodes
@@ -206,7 +181,8 @@ type HashBuilder struct {
 // NewHashBuilder creates a new HashBuilder
 func NewHashBuilder() *HashBuilder {
 	return &HashBuilder{
-		sha: sha3.NewLegacyKeccak256().(keccakState),
+		sha:             sha3.NewLegacyKeccak256().(keccakState),
+		byteArrayWriter: &ByteArrayWriter{},
 	}
 }
 
@@ -216,7 +192,7 @@ func (hb *HashBuilder) SetKeyTape(keyTape BytesTape) {
 }
 
 // SetValueTape sets the value tape to be used by this builder (opcodes leaf and leafHash)
-func (hb *HashBuilder) SetValueTape(valueTape BytesTape) {
+func (hb *HashBuilder) SetValueTape(valueTape RlpSerializableTape) {
 	hb.valueTape = valueTape
 }
 
@@ -262,19 +238,18 @@ func (hb *HashBuilder) leaf(length int) error {
 	if err != nil {
 		return err
 	}
-	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val))}
+	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	return hb.leafHashWithKeyVal(key, val)
 }
 
 // To be called internally
-func (hb *HashBuilder) leafHashWithKeyVal(key, val []byte) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error {
 	var hash [hashStackStride]byte // RLP representation of hash (or of un-hashed value if short)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
-	var valPrefix [4]byte
 	var lenPrefix [4]byte
-	var kp, vp, kl, vl int
+	var kp, kl int
 	// Write key
 	var compactLen int
 	var ni int
@@ -301,62 +276,53 @@ func (hb *HashBuilder) leafHashWithKeyVal(key, val []byte) error {
 	} else {
 		kl = 1
 	}
-	if len(val) > 1 || val[0] >= rlp.EmptyStringCode {
-		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
-		vl = len(val)
-	} else {
-		vl = 1
-	}
-	totalLen := kp + kl + vp + vl
+
+	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := generateStructLen(lenPrefix[:], totalLen)
-	if pt+totalLen < common.HashLength {
+
+	var writer io.Writer
+	var reader io.Reader
+
+	if totalLen+pt < common.HashLength {
 		// Embedded node
-		pos := 0
-		copy(hash[pos:], lenPrefix[:pt])
-		pos += pt
-		copy(hash[pos:], keyPrefix[:kp])
-		pos += kp
-		hash[pos] = compact0
-		pos++
-		for i := 1; i < compactLen; i++ {
-			hash[pos] = key[ni]*16 + key[ni+1]
-			pos++
-			ni += 2
-		}
-		copy(hash[pos:], valPrefix[:vp])
-		pos += vp
-		copy(hash[pos:], val)
+		hb.byteArrayWriter.Setup(hash[:], 0)
+		writer = hb.byteArrayWriter
 	} else {
 		hb.sha.Reset()
-		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+		writer = hb.sha
+		reader = hb.sha
+	}
+
+	if _, err := writer.Write(lenPrefix[:pt]); err != nil {
+		return err
+	}
+	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
+		return err
+	}
+	var b [1]byte
+	b[0] = compact0
+	if _, err := writer.Write(b[:]); err != nil {
+		return err
+	}
+	for i := 1; i < compactLen; i++ {
+		b[0] = key[ni]*16 + key[ni+1]
+		if _, err := writer.Write(b[:]); err != nil {
 			return err
 		}
-		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
-			return err
-		}
-		var b [1]byte
-		b[0] = compact0
-		if _, err := hb.sha.Write(b[:]); err != nil {
-			return err
-		}
-		for i := 1; i < compactLen; i++ {
-			b[0] = key[ni]*16 + key[ni+1]
-			if _, err := hb.sha.Write(b[:]); err != nil {
-				return err
-			}
-			ni += 2
-		}
-		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
-			return err
-		}
-		if _, err := hb.sha.Write(val); err != nil {
-			return err
-		}
+		ni += 2
+	}
+
+	if err := val.ToDoubleRLP(writer); err != nil {
+		return err
+	}
+
+	if reader != nil {
 		hash[0] = rlp.EmptyStringCode + common.HashLength
-		if _, err := hb.sha.Read(hash[1:]); err != nil {
+		if _, err := reader.Read(hash[1:]); err != nil {
 			return err
 		}
 	}
+
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
 		hb.nodeStack = append(hb.nodeStack, nil)

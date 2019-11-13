@@ -27,9 +27,9 @@ import (
 )
 
 type hasher struct {
-	sha           keccakState
-	encodeToBytes bool
-	buffers       [1024 * 1024]byte
+	sha                  keccakState
+	valueNodesRlpEncoded bool
+	buffers              [1024 * 1024]byte
 }
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
@@ -43,14 +43,14 @@ type keccakState interface {
 // hashers live in a global db.
 var hasherPool = make(chan *hasher, 128)
 
-func newHasher(encodeToBytes bool) *hasher {
+func newHasher(valueNodesRlpEncoded bool) *hasher {
 	var h *hasher
 	select {
 	case h = <-hasherPool:
 	default:
 		h = &hasher{sha: sha3.NewLegacyKeccak256().(keccakState)}
 	}
-	h.encodeToBytes = encodeToBytes
+	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
 }
 
@@ -155,10 +155,61 @@ func generateByteArrayLen(buffer []byte, pos int, l int) int {
 	return pos
 }
 
+func generateRlpPrefixLen(l int) int {
+	if l < 2 {
+		return 0
+	}
+	if l < 56 {
+		return 1
+	}
+	if l < 256 {
+		return 2
+	}
+	if l < 65536 {
+		return 3
+	}
+	return 4
+}
+
+func generateRlpPrefixLenDouble(l int, firstByte byte) int {
+	if l < 2 {
+		if firstByte >= 0x80 {
+			return 2
+		}
+		return 0
+	}
+	if l < 55 {
+		return 2
+	}
+	if l < 56 { // 2 + 1
+		return 3
+	}
+	if l < 254 {
+		return 4
+	}
+	if l < 256 {
+		return 5
+	}
+	if l < 65533 {
+		return 6
+	}
+	if l < 65536 {
+		return 7
+	}
+	return 8
+}
+
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 	if l < 55 {
 		// After first wrapping, the length will be l + 1 < 56
 		buffer[pos] = byte(128 + l + 1)
+		pos++
+		buffer[pos] = byte(128 + l)
+		pos++
+	} else if l < 56 {
+		buffer[pos] = byte(183 + 1)
+		pos++
+		buffer[pos] = byte(l + 1)
 		pos++
 		buffer[pos] = byte(128 + l)
 		pos++
@@ -184,7 +235,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 		pos++
 		buffer[pos] = byte(l)
 		pos++
-	} else if l < 65534 {
+	} else if l < 65533 {
 		// Both wrappings are 3 bytes
 		buffer[pos] = byte(183 + 2)
 		pos++
@@ -243,6 +294,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 	buffer := h.buffers[bufOffset:]
 	pos := 4
+
 	switch n := original.(type) {
 	case *shortNode:
 		// Starting at position 3, to leave space for len prefix
@@ -263,11 +315,11 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 				buffer[pos] = vn[0]
 				pos++
 			} else {
-				if h.encodeToBytes {
-					// Wrapping into another byte array
-					pos = generateByteArrayLenDouble(buffer, pos, len(vn))
-				} else {
+				if h.valueNodesRlpEncoded {
 					pos = generateByteArrayLen(buffer, pos, len(vn))
+				} else {
+					// value node contains raw values
+					pos = generateByteArrayLenDouble(buffer, pos, len(vn))
 				}
 				copy(buffer[pos:], vn)
 				pos += len(vn)
@@ -370,6 +422,8 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			}
 		}
 		var enc []byte
+		needsDoubleRlpEncoding := false
+
 		switch n := n.Children[16].(type) {
 		case *accountNode:
 			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
@@ -377,9 +431,10 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			enc = encodedAccount.Bytes()
 			pool.PutBuffer(encodedAccount)
 		case valueNode:
+			needsDoubleRlpEncoding = !h.valueNodesRlpEncoded
 			enc = n
 		case nil:
-		//	skip
+			//	skip
 		default:
 			//	skip
 		}
@@ -391,7 +446,11 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			buffer[pos] = enc[0]
 			pos++
 		} else {
-			pos = generateByteArrayLen(buffer, pos, len(enc))
+			if needsDoubleRlpEncoding {
+				pos = generateByteArrayLenDouble(buffer, pos, len(enc))
+			} else {
+				pos = generateByteArrayLen(buffer, pos, len(enc))
+			}
 			copy(buffer[pos:], enc)
 			pos += len(enc)
 		}
@@ -402,9 +461,10 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			buffer[pos] = n[0]
 			pos++
 		} else {
-			if h.encodeToBytes {
-				// Wrapping into another byte array
+			if h.valueNodesRlpEncoded {
 				pos = generateByteArrayLen(buffer, pos, len(n))
+			} else {
+				pos = generateByteArrayLenDouble(buffer, pos, len(n))
 			}
 			copy(buffer[pos:], n)
 			pos += len(n)
@@ -420,10 +480,6 @@ func (h *hasher) hashChildren(original node, bufOffset int) []byte {
 			buffer[pos] = enc[0]
 			pos++
 		} else {
-			if h.encodeToBytes {
-				// Wrapping into another byte array
-				pos = generateByteArrayLen(buffer, pos, len(enc))
-			}
 			copy(buffer[pos:], enc)
 			pos += len(enc)
 		}
