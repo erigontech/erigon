@@ -28,11 +28,11 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(2000), nil),
 			fromKey,
 		},
 	})
@@ -56,7 +56,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	// insert a correct block
 	blockchain, blocks, receipts, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(data.addresses[1], to, big.NewInt(5000), 21000, new(big.Int), nil),
+			getBlockTx(data.addresses[1], to, big.NewInt(5000), nil),
 			data.keys[1],
 		},
 	})
@@ -89,11 +89,11 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(2000), nil),
 			fromKey,
 		},
 	})
@@ -117,7 +117,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	// insert a correct block
 	blockchain, blocks, receipts, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(5000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(5000), nil),
 			fromKey,
 		},
 	})
@@ -150,11 +150,11 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(2000), nil),
 			fromKey,
 		},
 	})
@@ -175,7 +175,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 	// insert a correct block
 	blockchain, blocks, receipts, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 	})
@@ -208,11 +208,11 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 		1: {
-			getBlockTx(from, to, big.NewInt(2000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(2000), nil),
 			fromKey,
 		},
 	})
@@ -233,7 +233,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 	// insert a correct block
 	blockchain, blocks, receipts, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 	})
@@ -266,11 +266,11 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(3000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(3000), nil),
 			fromKey,
 		},
 		1: {
-			getBlockTx(data.addresses[1], to, big.NewInt(2000), 21000, new(big.Int), nil),
+			getBlockTx(data.addresses[1], to, big.NewInt(2000), nil),
 			data.keys[1],
 		},
 	})
@@ -290,7 +290,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	// insert a correct block
 	blockchain, blocks, receipts, err = genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(1000), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(1000), nil),
 			fromKey,
 		},
 	})
@@ -326,7 +326,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(10), nil),
 			fromKey,
 		},
 		1: {
@@ -396,7 +396,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(10), nil),
 			fromKey,
 		},
 		1: {
@@ -466,7 +466,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(10), nil),
 			fromKey,
 		},
 		1: {
@@ -545,7 +545,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
 		0: {
-			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			getBlockTx(from, to, big.NewInt(10), nil),
 			fromKey,
 		},
 		1: {
@@ -631,8 +631,8 @@ func getGenesis(funds ...*big.Int) initialData {
 	keys[1], _ = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	keys[2], _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 
-	var addresses []common.Address
-	var transactOpts []*bind.TransactOpts
+	addresses := make([]common.Address, 0, len(keys))
+	transactOpts := make([]*bind.TransactOpts, 0, len(keys))
 	allocs := core.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
@@ -718,9 +718,9 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 
 type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)
 
-func getBlockTx(from common.Address, to common.Address, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) blockTx {
+func getBlockTx(from common.Address, to common.Address, amount *big.Int, data []byte) blockTx {
 	return func(block *core.BlockGen, _ bind.ContractBackend) (*types.Transaction, bool) {
-		return types.NewTransaction(block.TxNonce(from), to, amount, gasLimit, gasPrice, data), false
+		return types.NewTransaction(block.TxNonce(from), to, amount, 21000, new(big.Int), data), false
 	}
 }
 
