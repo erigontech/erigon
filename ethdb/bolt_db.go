@@ -94,7 +94,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, noHis
 			if err != nil {
 				return err
 			}
-			if err = hb.Put(composite, value); err != nil {
+			if err = hb.Put(composite, []byte{}); err != nil {
 				return err
 			}
 		}
@@ -105,15 +105,15 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, noHis
 		}
 
 		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.Decode(dat)
+		sh, err := dbutils.DecodeChangeset(dat)
 		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
+			log.Error("PutS DecodeChangeset changeSet err", "err", err)
 			return err
 		}
 		sh = sh.Add(key, value)
 		dat, err = dbutils.Encode(sh)
 		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
+			log.Error("PutS DecodeChangeset changeSet err", "err", err)
 			return err
 		}
 
@@ -201,14 +201,15 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 // GetAsOf returns the first pair (k, v) where key is a prefix of k, or nil
 // if there are not such (k, v)
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		{
+			//check
 			hB := tx.Bucket(hBucket)
 			if hB == nil {
 				return ErrKeyNotFound
 			}
+			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 			hC := hB.Cursor()
 			hK, hV := hC.Seek(composite)
 			if hK != nil && bytes.HasPrefix(hK, key) {
@@ -223,6 +224,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				return ErrKeyNotFound
 			}
 			c := b.Cursor()
+
 			k, v := c.Seek(key)
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
@@ -568,7 +570,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts, err := dbutils.Decode(v)
+			changedAccounts, err := dbutils.DecodeChangeset(v)
 			if err != nil {
 				return err
 			}

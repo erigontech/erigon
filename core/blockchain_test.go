@@ -1815,10 +1815,10 @@ func TestLowDiffLongChain(t *testing.T) {
 	})
 
 	// Import the canonical chain
-	diskdb := ethdb.NewMemDatabase()
-	new(Genesis).MustCommit(diskdb)
+	diskDB := ethdb.NewMemDatabase()
+	new(Genesis).MustCommit(diskDB)
 
-	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil)
+	chain, err := NewBlockChain(diskDB, nil, params.TestChainConfig, engine, vm.Config{}, nil)
 	if err != nil {
 		t.Fatalf("failed to create tester chain: %v", err)
 	}

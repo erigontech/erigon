@@ -1197,9 +1197,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	_, noHistory := params.GetNoHistory(ctx)
 	noHistory = dsw.tds.noHistory || noHistory
 	o := bytes.TrimLeft(original[:], "\x00")
-	oo := make([]byte, len(o))
-	copy(oo, o)
-	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr, noHistory)
+	originalValue := make([]byte, len(o))
+	copy(originalValue, o)
+	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, originalValue, dsw.tds.blockNr, noHistory)
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form

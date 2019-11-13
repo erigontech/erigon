@@ -159,7 +159,7 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 		ht = llrb.New()
 		m.puts[string(hBucket)] = ht
 	}
-	ht.ReplaceOrInsert(&PutItem{key: composite, value: value})
+	ht.ReplaceOrInsert(&PutItem{key: composite, value: []byte{}})
 	return nil
 }
 
@@ -302,7 +302,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
 		hBucket := k[len(encodedTS):]
-		changedAccounts, err := dbutils.Decode(v)
+		changedAccounts, err := dbutils.DecodeChangeset(v)
 		if err != nil {
 			return false, err
 		}
@@ -355,9 +355,9 @@ func (m *mutation) Commit() (uint64, error) {
 					return 0, err
 				}
 
-				changedAccounts, err := dbutils.Decode(dat)
+				changedAccounts, err := dbutils.DecodeChangeset(dat)
 				if err != nil {
-					log.Error("Decode changedAccounts error on commit", "err", err)
+					log.Error("DecodeChangeset changedAccounts error on commit", "err", err)
 				}
 
 				changedAccounts = changedAccounts.MultiAdd(changes)

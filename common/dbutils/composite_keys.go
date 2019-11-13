@@ -85,6 +85,8 @@ func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, se
 	compositeKey = append(compositeKey, seckey[:]...)
 	return compositeKey
 }
+
+// address hash + incarnation prefix
 func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	prefix := make([]byte, 0, common.HashLength+8)
 	prefix = append(prefix, addressHash[:]...)
@@ -105,6 +107,7 @@ func CompositeKeySuffix(key []byte, timestamp uint64) (composite, encodedTS []by
 	return composite, encodedTS
 }
 
+// blockNum + history bucket
 func CompositeChangeSetKey(encodedTS, hBucket []byte) []byte {
 	changeSetKey := make([]byte, len(encodedTS)+len(hBucket))
 	copy(changeSetKey, encodedTS)

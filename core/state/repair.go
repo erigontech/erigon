@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"runtime"
 	"sort"
 
@@ -90,19 +91,23 @@ func (rds *RepairDbState) CheckKeys() {
 	aSet := make(map[string]struct{})
 	suffix := encodeTimestamp(rds.blockNr)
 	{
-		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
-		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
+
+		suffixkey := dbutils.CompositeChangeSetKey(suffix, dbutils.AccountsHistoryBucket)
 		v, _ := rds.historyDb.Get(dbutils.ChangeSetBucket, suffixkey)
-		if len(v) > 0 {
-			keycount := int(binary.BigEndian.Uint32(v))
-			for i, ki := 4, 0; ki < keycount; ki++ {
-				l := int(v[i])
-				i++
-				aSet[string(v[i:i+l])] = struct{}{}
-				i += l
-			}
+		changeSet, err:=dbutils.DecodeChangeset(v)
+		if err!=nil {
+			log.Error("Unable to decode changeset","err",err)
 		}
+		if changeSet.KeyCount()>0 {
+			if err:=changeSet.Walk(func(k, v []byte) error {
+				aSet[string(k)]= struct{}{}
+				return nil
+			}); err!=nil {
+				log.Error("Unable to decode changeset","err",err)
+			}
+
+		}
+
 	}
 	aDiff := len(aSet) != len(rds.accountsKeys)
 	if !aDiff {
@@ -114,6 +119,10 @@ func (rds *RepairDbState) CheckKeys() {
 		}
 	}
 	if aDiff {
+		//fixme unable to fix fast
+		// changeSet consist of old value of account
+		// previous implementation consist of account addresses
+		panic("It's not working well")
 		fmt.Printf("Accounts key set does not match for block %d\n", rds.blockNr)
 		newlen := 4 + len(rds.accountsKeys)
 		for key := range rds.accountsKeys {
@@ -128,9 +137,7 @@ func (rds *RepairDbState) CheckKeys() {
 			copy(dv[i:], key)
 			i += len(key)
 		}
-		suffixkey := make([]byte, len(suffix)+len(dbutils.AccountsHistoryBucket))
-		copy(suffixkey, suffix)
-		copy(suffixkey[len(suffix):], dbutils.AccountsHistoryBucket)
+		//suffixkey := dbutils.CompositeChangeSetKey(suffix, dbutils.AccountsHistoryBucket)
 		//if err := rds.historyDb.Put(ethdb.ChangeSetBucket, suffixkey, dv); err != nil {
 		//	panic(err)
 		//}

@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func Decode(b []byte) (ChangeSet, error) {
+func DecodeChangeset(b []byte) (ChangeSet, error) {
 	if len(b) == 0 {
 		return ChangeSet{
 			Changes: make([]Change, 0),

@@ -17,7 +17,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -106,10 +105,8 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := stateStats{
-		NotFoundAccountsInHistory:     5,
+		NumOfChangesInAccountsHistory: 33,
 		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 28,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			0:  3,
 			1:  3,
@@ -143,9 +140,7 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected = stateStats{
-		NotFoundAccountsInHistory:     0,
 		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
 		NumOfChangesInAccountsHistory: 3,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			10: 3,
@@ -168,10 +163,8 @@ func TestBasisAccountPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected = stateStats{
-		NotFoundAccountsInHistory:       0,
-		ErrAccountsInHistory:            0,
-		ErrDecodedAccountsInHistory:     0,
 		NumOfChangesInAccountsHistory:   0,
+		ErrAccountsInHistory:            0,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{},
 		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
 		AccountsInState:                 5,
@@ -267,10 +260,8 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected := stateStats{
-		NotFoundAccountsInHistory:     33,
-		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 0,
+		ErrAccountsInHistory:          30, //not in history
+		NumOfChangesInAccountsHistory: 3, // exists in history
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			0:  3,
 			1:  3,
@@ -302,9 +293,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected = stateStats{
-		NotFoundAccountsInHistory:     3,
-		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
+		ErrAccountsInHistory:          3, //not in history after prune
 		NumOfChangesInAccountsHistory: 0,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			10: 3,
@@ -327,10 +316,8 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	expected = stateStats{
-		NotFoundAccountsInHistory:       0,
 		ErrAccountsInHistory:            0,
-		ErrDecodedAccountsInHistory:     0,
-		NumOfChangesInAccountsHistory:   0,
+		NumOfChangesInAccountsHistory: 0,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{},
 		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
 		AccountsInState:                 5,
@@ -485,10 +472,8 @@ func TestStoragePruning(t *testing.T) {
 	assertNil(t, err)
 
 	expected := stateStats{
-		NotFoundAccountsInHistory:     5,
 		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
-		NumOfChangesInAccountsHistory: 26,
+		NumOfChangesInAccountsHistory: 31,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			0: 3,
 			1: 3,
@@ -519,9 +504,7 @@ func TestStoragePruning(t *testing.T) {
 	assertNil(t, err)
 
 	expected = stateStats{
-		NotFoundAccountsInHistory:     0,
 		ErrAccountsInHistory:          0,
-		ErrDecodedAccountsInHistory:   0,
 		NumOfChangesInAccountsHistory: 5,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			6: 5,
@@ -633,9 +616,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 			}
 
 			expected := stateStats{
-				NotFoundAccountsInHistory:     0,
 				ErrAccountsInHistory:          0,
-				ErrDecodedAccountsInHistory:   0,
 				NumOfChangesInAccountsHistory: 3,
 				AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 					25: 3,
@@ -652,10 +633,8 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 }
 
 type stateStats struct {
-	NotFoundAccountsInHistory       uint64
+	NumOfChangesInAccountsHistory uint64
 	ErrAccountsInHistory            uint64
-	ErrDecodedAccountsInHistory     uint64
-	NumOfChangesInAccountsHistory   uint64
 	AccountSuffixRecordsByTimestamp map[uint64]uint32
 	StorageSuffixRecordsByTimestamp map[uint64]uint32
 	AccountsInState                 uint64
@@ -669,7 +648,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
-		changedAccounts, err := dbutils.Decode(v)
+		changedAccounts, err := dbutils.DecodeChangeset(v)
 		if err != nil {
 			return false, err
 		}
@@ -690,23 +669,13 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
 			err := changedAccounts.Walk(func(k, _ []byte) error {
 				compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
-				b, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
-				if len(b) == 0 {
-					//genesis account or noHistory enabled
-					stat.NotFoundAccountsInHistory++
-					return nil
-				}
+				_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 				if err != nil {
 					stat.ErrAccountsInHistory++
-				} else {
-					acc := &accounts.Account{}
-					errInn := acc.DecodeForStorage(b)
-					if errInn != nil {
-						stat.ErrDecodedAccountsInHistory++
-					} else {
-						stat.NumOfChangesInAccountsHistory++
-					}
+					return nil
 				}
+				stat.NumOfChangesInAccountsHistory++
+
 				return nil
 			})
 			if err != nil {

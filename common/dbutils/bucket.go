@@ -4,12 +4,28 @@ import "github.com/ledgerwatch/turbo-geth/metrics"
 
 // The fields below define the low level database schema prefixing.
 var (
+	// key - address hash
+	// value - account encoded for storage
 	AccountsBucket        = []byte("AT")
+
+	//key - key + encoded timestamp(block number)
+	//value - account for storage(old/original value)
 	AccountsHistoryBucket = []byte("hAT")
+
+	//key - address hash + incarnation + storage key hash
+	//value - storage value(common.hash)
 	StorageBucket         = []byte("ST")
+
+	//key - address hash + incarnation + storage key hash
+	//value - storage value(common.hash)
 	StorageHistoryBucket  = []byte("hST")
+
+	//key - contract code hash
+	//value - contract code
 	CodeBucket            = []byte("CODE")
 
+	// key - encoded timestamp(block number) + history bucket
+	// value - rlp encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
 	ChangeSetBucket = []byte("ChangeSet")
 
 	// databaseVerisionKey tracks the current database version.
@@ -48,5 +64,7 @@ var (
 	PreimageCounter    = metrics.NewRegisteredCounter("db/preimage/total", nil)
 	PreimageHitCounter = metrics.NewRegisteredCounter("db/preimage/hits", nil)
 
+	// last block that was pruned
+	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
 )
