@@ -27,6 +27,9 @@ import (
 	"strconv"
 	"sync"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func newTestBoltDB() (*BoltDatabase, func()) {
@@ -238,4 +241,53 @@ func testParallelPutGet(db MinDatabase) {
 		}(strconv.Itoa(i))
 	}
 	pending.Wait()
+}
+
+func TestMemoryDB_Walk(t *testing.T) {
+	testWalk(NewMemDatabase(), t)
+}
+
+func TestBoltDB_Walk(t *testing.T) {
+	db, remove := newTestBoltDB()
+	defer remove()
+	testWalk(db, t)
+}
+
+func TestBadgerDB_Walk(t *testing.T) {
+	db, remove := newTestBadgerDB()
+	defer remove()
+	testWalk(db, t)
+}
+
+var hexEntries = map[string]string{
+	"6b": "89c6",
+	"91": "c476",
+	"a8": "0a514e",
+	"bb": "7a",
+	"bd": "fe76",
+	"c0": "12",
+}
+
+var startKey = common.FromHex("a0")
+var fixedBits uint = 3
+
+var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
+
+func testWalk(db MinDatabase, t *testing.T) {
+	for k, v := range hexEntries {
+		err := db.Put(bucket, common.FromHex(k), common.FromHex(v))
+		if err != nil {
+			t.Fatalf("put failed: %v", err)
+		}
+	}
+
+	var gotKeys [][]byte
+
+	err := db.Walk(bucket, startKey, fixedBits, func(key, val []byte) (bool, error) {
+		gotKeys = append(gotKeys, key)
+		return true, nil
+	})
+	assert.NoError(t, err)
+
+	assert.Equal(t, keysInRange, gotKeys)
 }

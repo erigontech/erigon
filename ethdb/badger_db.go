@@ -17,6 +17,8 @@
 package ethdb
 
 import (
+	"bytes"
+
 	"github.com/dgraph-io/badger"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -65,6 +67,13 @@ func bucketKey(bucket, key []byte) []byte {
 	return composite
 }
 
+func keyWithoutBucket(key, bucket []byte) []byte {
+	if len(key) <= len(bucket) || !bytes.HasPrefix(key, bucket) || key[len(bucket)] != bucketSeparator {
+		return nil
+	}
+	return key[len(bucket)+1:]
+}
+
 // Delete removes a single entry.
 func (db *BadgerDatabase) Delete(bucket, key []byte) error {
 	return db.db.Update(func(txn *badger.Txn) error {
@@ -99,14 +108,9 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 // PutS adds a new entry to the historical buckets:
 // hBucket (unless changeSetBucketOnly) and ChangeSet.
 func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, encodedStamp := dbutils.CompositeKeySuffix(key, timestamp)
+	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
 	hKey := bucketKey(hBucket, composite)
-
-	suffixkey := make([]byte, len(encodedStamp)+len(hBucket))
-	copy(suffixkey, encodedStamp)
-	copy(suffixkey[len(encodedStamp):], hBucket)
-
-	changeSetKey := bucketKey(dbutils.ChangeSetBucket, suffixkey)
+	changeSetKey := bucketKey(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(encodedTS, hBucket))
 
 	return db.db.Update(func(tx *badger.Txn) error {
 		if !changeSetBucketOnly {
@@ -149,8 +153,8 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 
 // DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
 func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
-	encodedStamp := dbutils.EncodeTimestamp(timestamp)
-	prefix := bucketKey(dbutils.ChangeSetBucket, encodedStamp)
+	encodedTS := dbutils.EncodeTimestamp(timestamp)
+	prefix := bucketKey(dbutils.ChangeSetBucket, encodedTS)
 	return db.db.Update(func(tx *badger.Txn) error {
 		var keys [][]byte
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
@@ -169,9 +173,9 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 				return err
 			}
 
-			bucket := k[len(encodedStamp):]
+			bucket := k[len(prefix):]
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				kk = append(kk, encodedStamp...)
+				kk = append(kk, encodedTS...)
 				return tx.Delete(bucketKey(bucket, kk))
 			})
 			if err != nil {
@@ -181,7 +185,7 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 			keys = append(keys, k)
 		}
 		for _, k := range keys {
-			if err := tx.Delete(bucketKey(dbutils.ChangeSetBucket, k)); err != nil {
+			if err := tx.Delete(k); err != nil {
 				return err
 			}
 		}
@@ -235,6 +239,45 @@ func (db *BadgerDatabase) Has(bucket, key []byte) (bool, error) {
 		return false, nil
 	}
 	return err == nil, err
+}
+
+// Walk iterates over entries with keys greater or equals to startkey.
+// Only the keys whose first fixedbits match those of startkey are iterated over.
+// walker is called for each eligible entry.
+// If walker returns false or an error, the walk stops.
+func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+	fixedbytes, mask := bytesmask(fixedbits)
+	prefix := bucketKey(bucket, startkey)
+	err := db.db.View(func(tx *badger.Txn) error {
+		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(prefix); ; it.Next() {
+			item := it.Item()
+			k := keyWithoutBucket(item.Key(), bucket)
+			if k == nil {
+				break
+			}
+
+			goOn := fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)
+			if !goOn {
+				break
+			}
+
+			err := item.Value(func(v []byte) error {
+				var err2 error
+				goOn, err2 = walker(k, v)
+				return err2
+			})
+			if err != nil {
+				return err
+			}
+			if !goOn {
+				break
+			}
+		}
+		return nil
+	})
+	return err
 }
 
 // TODO [Andrew] implement the full Database interface

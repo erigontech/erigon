@@ -20,6 +20,9 @@ import (
 	"errors"
 )
 
+// TODO [Andrew] Add some comments about historical buckets & ChangeSet.
+// https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
+
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
@@ -53,6 +56,10 @@ type Getter interface {
 	// Has indicates whether a key exists in the database.
 	Has(bucket, key []byte) (bool, error)
 
+	// Walk iterates over entries with keys greater or equal to startkey.
+	// Only the keys whose first fixedbits match those of startkey are iterated over.
+	// walker is called for each eligible entry.
+	// If walker returns false or an error, the walk stops.
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
@@ -92,6 +99,8 @@ type MinDatabase interface {
 	Get(bucket, key []byte) ([]byte, error)
 	Put(bucket, key, value []byte) error
 	Delete(bucket, key []byte) error
+
+	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,
