@@ -98,7 +98,10 @@ type Config struct {
 	NoPruning  bool // Whether to disable pruning and flush everything to disk
 	NoPrefetch bool // Whether to disable prefetching and only load state on demand
 
-	NoHistory           bool
+	NoHistory bool
+	// DownloadOnly is set when the node does not need to process the blocks, but simply
+	// download them
+	DownloadOnly        bool
 	ArchiveSyncInterval int
 	BlocksBeforePruning uint64
 	BlocksToPrune       uint64

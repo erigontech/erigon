@@ -220,7 +220,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -296,7 +296,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = genStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 			if err != nil {
 				return false, err
 			}
