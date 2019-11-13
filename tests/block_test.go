@@ -55,5 +55,5 @@ func TestBlockchain(t *testing.T) {
 
 	// There is also a LegacyTests folder, containing blockchain tests generated
 	// prior to Istanbul. However, they are all derived from GeneralStateTests,
-	// which run natively, so there'signer no reason to run them here.
+	// which run natively, so there's no reason to run them here.
 }

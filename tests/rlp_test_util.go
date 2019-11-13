@@ -42,8 +42,8 @@ type RLPTest struct {
 	Out string
 }
 
-// FromHex returns the bytes represented by the hexadecimal string signer.
-// signer may be prefixed with "0x".
+// FromHex returns the bytes represented by the hexadecimal string s.
+// s may be prefixed with "0x".
 // This is copy-pasted from bytes.go, which does not return the error
 func FromHex(s string) ([]byte, error) {
 	if len(s) > 1 && (s[0:2] == "0x" || s[0:2] == "0X") {
@@ -117,7 +117,7 @@ func translateJSON(v interface{}) interface{} {
 	}
 }
 
-// checkDecodeFromJSON decodes from signer guided by exp. exp drives the
+// checkDecodeFromJSON decodes from s guided by exp. exp drives the
 // Stream by invoking decoding operations (Uint, Big, List, ...) based
 // on the type of each value. The value decoded from the RLP stream
 // must match the JSON value.
@@ -167,6 +167,6 @@ func checkDecodeFromJSON(s *rlp.Stream, exp interface{}) error {
 
 func addStack(op string, val interface{}, err error) error {
 	lines := strings.Split(err.Error(), "\n")
-	lines = append(lines, fmt.Sprintf("\t%signer: %v", op, val))
+	lines = append(lines, fmt.Sprintf("\t%s: %v", op, val))
 	return errors.New(strings.Join(lines, "\n"))
 }

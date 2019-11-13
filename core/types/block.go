@@ -261,31 +261,6 @@ func NewBlock(header *Header, txs []*Transaction, uncles []*Header, receipts []*
 	return b
 }
 
-func NewBlockX(header *Header, txs []*Transaction, uncles []*Header) *Block {
-	b := &Block{header: CopyHeader(header), td: new(big.Int)}
-
-	// TODO: panic if len(txs) != len(receipts)
-	if len(txs) == 0 {
-		b.header.TxHash = EmptyRootHash
-	} else {
-		b.header.TxHash = DeriveSha(Transactions(txs))
-		b.transactions = make(Transactions, len(txs))
-		copy(b.transactions, txs)
-	}
-
-	if len(uncles) == 0 {
-		b.header.UncleHash = EmptyUncleHash
-	} else {
-		b.header.UncleHash = CalcUncleHash(uncles)
-		b.uncles = make([]*Header, len(uncles))
-		for i := range uncles {
-			b.uncles[i] = CopyHeader(uncles[i])
-		}
-	}
-
-	return b
-}
-
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.

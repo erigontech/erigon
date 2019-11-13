@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"crypto/ecdsa"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -315,84 +316,27 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 }
 
 func TestAccountDeployIncorrectRoot(t *testing.T) {
-	// Configure and generate a sample block chain
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		// this code generates a log
-		signer = types.HomesteadSigner{}
-	)
+	data := getGenesis()
+	from := data.addresses[0]
+	fromKey := data.keys[0]
+	to := common.Address{1}
 
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	var contractAddress common.Address
+	eipContract := new(contracts.Eip2027)
+
+	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+		0: {
+			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			fromKey,
+		},
+		1: {
+			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			fromKey,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 2, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-		case 1:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
 
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -400,7 +344,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -418,7 +362,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -432,7 +376,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -442,87 +386,31 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountCreateIncorrectRoot(t *testing.T) {
-	// Configure and generate a sample block chain
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		// this code generates a log
-		signer = types.HomesteadSigner{}
-	)
+	data := getGenesis()
+	from := data.addresses[0]
+	fromKey := data.keys[0]
+	to := common.Address{1}
 
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	var contractAddress common.Address
+	eipContract := new(contracts.Eip2027)
+
+	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+		0: {
+			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			fromKey,
+		},
+		1: {
+			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			fromKey,
+		},
+		2: {
+			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			fromKey,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-		case 1:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		case 2:
-			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
 
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -530,17 +418,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
 	if st.Exist(contractAddress) {
 		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
-
-	hasStorageSize, _ := st.StorageSize(address)
-	if hasStorageSize {
-		t.Fatal("storage size should be absent at the block 0")
 	}
 
 	// BLOCK 2
@@ -549,7 +432,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -573,88 +456,35 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountUpdateIncorrectRoot(t *testing.T) {
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		// this code generates a log
-		signer = types.HomesteadSigner{}
-	)
+	data := getGenesis()
+	from := data.addresses[0]
+	fromKey := data.keys[0]
+	to := common.Address{1}
 
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	var contractAddress common.Address
+	eipContract := new(contracts.Eip2027)
+
+	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+		0: {
+			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			fromKey,
+		},
+		1: {
+			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			fromKey,
+		},
+		2: {
+			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			fromKey,
+		},
+		3: {
+			getBlockEip2027Tx(data.transactOpts[0], eipContract.Update, big.NewInt(0)),
+			fromKey,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-		case 1:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		case 2:
-			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-		case 3:
-			tx, err = eipContract.Update(transactOpts1, big.NewInt(0))
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
 
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -662,17 +492,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
 	if st.Exist(contractAddress) {
 		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
-
-	hasStorageSize, _ := st.StorageSize(address)
-	if hasStorageSize {
-		t.Fatal("storage size should be absent at the block 0")
 	}
 
 	// BLOCK 2
@@ -681,7 +506,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -710,89 +535,35 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 }
 
 func TestAccountDeleteIncorrectRoot(t *testing.T) {
-	// Configure and generate a sample block chain
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		// this code generates a log
-		signer = types.HomesteadSigner{}
-	)
+	data := getGenesis()
+	from := data.addresses[0]
+	fromKey := data.keys[0]
+	to := common.Address{1}
 
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	var contractAddress common.Address
+	eipContract := new(contracts.Eip2027)
+
+	blockchain, blocks, receipts, err := genBlocks(data.genesisSpec, map[int]tx{
+		0: {
+			getBlockTx(from, to, big.NewInt(10), 21000, new(big.Int), nil),
+			fromKey,
+		},
+		1: {
+			getBlockDeployEip2027Tx(data.transactOpts[0], &contractAddress, eipContract),
+			fromKey,
+		},
+		2: {
+			getBlockEip2027Tx(data.transactOpts[0], eipContract.Create, big.NewInt(2)),
+			fromKey,
+		},
+		3: {
+			getBlockEip2027Tx(data.transactOpts[0], eipContract.Remove),
+			fromKey,
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-		case 1:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		case 2:
-			tx, err = eipContract.Create(transactOpts1, big.NewInt(2))
-		case 3:
-			tx, err = eipContract.Remove(transactOpts1)
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
 
 	// BLOCK 1
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
@@ -800,7 +571,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -814,7 +585,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
+	if !st.Exist(from) {
 		t.Error("expected account to exist")
 	}
 
@@ -838,268 +609,15 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 
 	// BLOCK 4
 	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAccountRevertRemoveIncorrectRoot(t *testing.T) {
-	// Configure and generate a sample block chain
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		theAddr  = common.Address{1}
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				EIP2027Block:        big.NewInt(4),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-		// this code generates a log
-		signer = types.HomesteadSigner{}
-	)
-
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts2 := bind.NewKeyedTransactor(key2)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), theAddr, big.NewInt(1000), 21000, new(big.Int), nil), signer, key)
-		case 1:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		case 2:
-			tx, err = eipContract.Create(transactOpts2, big.NewInt(3))
-		case 3:
-			tx, _ = eipContract.RemoveAndRevert(transactOpts2)
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
-
-	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
-		t.Fatal(err)
-	}
-
-	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist at the block 0", contractAddress.Hash().String())
-	}
-
-	hasStorageSize, _ := st.StorageSize(address)
-	if hasStorageSize {
-		t.Fatal("storage size should be absent at the block 0")
-	}
-
-	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
-		t.Fatal(err)
-	}
-
-	st, _, _ = blockchain.State()
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 1", contractAddress.Hash().String())
-	}
-
-	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
-		t.Fatal(err)
-	}
-
-	// BLOCK 4 - INCORRECT
-	incorrectHeader := blocks[3].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
-
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
-		t.Fatal("should fail")
-	}
-
-	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestAccountRevertUpdateIncorrectRoot(t *testing.T) {
-	// Configure and generate a sample block chain
-	var (
-		db       = ethdb.NewMemDatabase()
-		key, _   = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		key1, _  = crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
-		key2, _  = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
-		address  = crypto.PubkeyToAddress(key.PublicKey)
-		address1 = crypto.PubkeyToAddress(key1.PublicKey)
-		address2 = crypto.PubkeyToAddress(key2.PublicKey)
-		funds    = big.NewInt(1000000000)
-		gspec    = &core.Genesis{
-			Config: &params.ChainConfig{
-				ChainID:             big.NewInt(1),
-				HomesteadBlock:      new(big.Int),
-				EIP155Block:         new(big.Int),
-				EIP158Block:         big.NewInt(1),
-				EIP2027Block:        big.NewInt(4),
-				ConstantinopleBlock: big.NewInt(1),
-			},
-			Alloc: core.GenesisAlloc{
-				address:  {Balance: funds},
-				address1: {Balance: funds},
-				address2: {Balance: funds},
-			},
-		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
-	)
-
-	engine := ethash.NewFaker()
-	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	blockchain.EnableReceipts(true)
-
-	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts1 := bind.NewKeyedTransactor(key1)
-
-	var contractAddress common.Address
-	var eipContract *contracts.Eip2027
-
-	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 3, func(i int, block *core.BlockGen) {
-		var (
-			tx  *types.Transaction
-			err error
-		)
-
-		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
-
-		switch i {
-		case 0:
-			contractAddress, tx, eipContract, err = contracts.DeployEip2027(transactOpts, contractBackend)
-		case 1:
-			tx, err = eipContract.Create(transactOpts1, big.NewInt(3))
-		case 2:
-			tx, _ = eipContract.UpdateAndRevert(transactOpts1, big.NewInt(0))
-		}
-
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		if tx != nil {
-			if eipContract == nil {
-				err = contractBackend.SendTransaction(ctx, tx)
-				if err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			block.AddTx(tx)
-		}
-
-		contractBackend.Commit()
-	})
-
-	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
-		t.Fatal(err)
-	}
-
-	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-
-	if !st.Exist(contractAddress) {
-		t.Error("expected contractAddress to exist at the block 0", contractAddress.Hash().String())
-	}
-
-	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
-		t.Fatal(err)
-	}
-
-	// BLOCK 3 - INCORRECT
-	incorrectHeader := blocks[2].Header()
-	incorrectHeader.Root = blocks[1].Header().Root
-	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
-
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
-		t.Fatal("should fail")
-	}
-
-	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 }
 
 type initialData struct {
-	keys        []*ecdsa.PrivateKey
-	addresses   []common.Address
-	genesisSpec *core.Genesis
+	keys         []*ecdsa.PrivateKey
+	addresses    []common.Address
+	transactOpts []*bind.TransactOpts
+	genesisSpec  *core.Genesis
 }
 
 func getGenesis(funds ...*big.Int) initialData {
@@ -1114,17 +632,20 @@ func getGenesis(funds ...*big.Int) initialData {
 	keys[2], _ = crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 
 	var addresses []common.Address
+	var transactOpts []*bind.TransactOpts
 	allocs := core.GenesisAlloc{}
 	for _, key := range keys {
 		addr := crypto.PubkeyToAddress(key.PublicKey)
 		addresses = append(addresses, addr)
+		transactOpts = append(transactOpts, bind.NewKeyedTransactor(key))
 
 		allocs[addr] = core.GenesisAccount{Balance: accountFunds}
 	}
 
 	return initialData{
-		keys:      keys,
-		addresses: addresses,
+		keys:         keys,
+		addresses:    addresses,
+		transactOpts: transactOpts,
 		genesisSpec: &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
@@ -1158,22 +679,28 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
+	var blockNumber int
 	blocks, receipts := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, len(txs), func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
+		var isContractCall bool
+		blockNumber = i
 		signer := types.HomesteadSigner{}
 		ctx = gspec.Config.WithEIPsFlags(ctx, block.Number())
 
 		if txToSend, ok := txs[i]; ok {
-			tx, err = types.SignTx(txToSend.txFn(block), signer, txToSend.key)
+			tx, isContractCall = txToSend.txFn(block, contractBackend)
+			tx, err = types.SignTx(tx, signer, txToSend.key)
 			if err != nil {
 				return
 			}
 		}
 
 		if tx != nil {
-			err = contractBackend.SendTransaction(ctx, tx)
-			if err != nil {
-				return
+			if !isContractCall {
+				err = contractBackend.SendTransaction(ctx, tx)
+				if err != nil {
+					return
+				}
 			}
 
 			block.AddTx(tx)
@@ -1182,13 +709,58 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 		contractBackend.Commit()
 	})
 
+	if err != nil {
+		err = fmt.Errorf("block %d, error %w", blockNumber, err)
+	}
+
 	return blockchain, blocks, receipts, err
 }
 
-type blockTx func(block *core.BlockGen) *types.Transaction
+type blockTx func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool)
 
 func getBlockTx(from common.Address, to common.Address, amount *big.Int, gasLimit uint64, gasPrice *big.Int, data []byte) blockTx {
-	return func(block *core.BlockGen) *types.Transaction {
-		return types.NewTransaction(block.TxNonce(from), to, amount, gasLimit, gasPrice, data)
+	return func(block *core.BlockGen, _ bind.ContractBackend) (*types.Transaction, bool) {
+		return types.NewTransaction(block.TxNonce(from), to, amount, gasLimit, gasPrice, data), false
+	}
+}
+
+func getBlockDeployEip2027Tx(transactOpts *bind.TransactOpts, contractAddress *common.Address, eipContract *contracts.Eip2027) blockTx {
+	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
+		contractAddressRes, tx, eipContractRes, err := contracts.DeployEip2027(transactOpts, backend)
+		if err != nil {
+			panic(err)
+		}
+
+		*contractAddress = contractAddressRes
+		*eipContract = *eipContractRes
+
+		return tx, true
+	}
+}
+
+func getBlockEip2027Tx(transactOpts *bind.TransactOpts, contractCall interface{}, newBalance ...*big.Int) blockTx {
+	return func(_ *core.BlockGen, backend bind.ContractBackend) (*types.Transaction, bool) {
+		var (
+			tx  *types.Transaction
+			err error
+		)
+
+		switch fn := contractCall.(type) {
+		case func(opts *bind.TransactOpts) (*types.Transaction, error):
+			tx, err = fn(transactOpts)
+		case func(opts *bind.TransactOpts, newBalance *big.Int) (*types.Transaction, error):
+			if len(newBalance) != 1 {
+				panic("*big.Int type new balance is expected")
+			}
+			tx, err = fn(transactOpts, newBalance[0])
+		default:
+			panic("non expected function type")
+		}
+
+		if err != nil {
+			panic(err)
+		}
+
+		return tx, true
 	}
 }
