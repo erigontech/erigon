@@ -49,7 +49,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -64,7 +64,7 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -110,7 +110,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 	}
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -125,7 +125,7 @@ func TestInsertIncorrectStateRootSameAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -168,7 +168,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -183,7 +183,7 @@ func TestInsertIncorrectStateRootSameAccountSameAmount(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,7 +226,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -241,7 +241,7 @@ func TestInsertIncorrectStateRootAllFundsRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -283,7 +283,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[0].Transactions(), blocks[0].Uncles(), receipts[0])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -298,7 +298,7 @@ func TestInsertIncorrectStateRootAllFunds(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -339,7 +339,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -357,7 +357,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[1].Transactions(), blocks[1].Uncles(), receipts[1])
 
 	// BLOCK 2 - INCORRECT
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
@@ -371,7 +371,7 @@ func TestAccountDeployIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2 - CORRECT
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -413,7 +413,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -427,7 +427,7 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -445,12 +445,12 @@ func TestAccountCreateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[2].Transactions(), blocks[2].Uncles(), receipts[2])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -487,7 +487,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -501,7 +501,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -515,7 +515,7 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -524,12 +524,12 @@ func TestAccountUpdateIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -566,7 +566,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -580,7 +580,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -594,7 +594,7 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -603,12 +603,12 @@ func TestAccountDeleteIncorrectRoot(t *testing.T) {
 	incorrectHeader.Root = blocks[1].Header().Root
 	incorrectBlock := types.NewBlock(incorrectHeader, blocks[3].Transactions(), blocks[3].Uncles(), receipts[3])
 
-	if _, err := blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
+	if _, err = blockchain.InsertChain(types.Blocks{incorrectBlock}); err == nil {
 		t.Fatal("should fail")
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 }
