@@ -663,26 +663,3 @@ Author: Guillaume Ballet <gballet@gmail.com>
 Date:   Thu Nov 14 10:09:16 2019 +0100
 
     whisper/whisperv6: fix staticcheck issues (#20288)
-
-commit afe0b65405e9e0ad2dadc2ed6e35cd46d41686d5
-Author: Felix Lange <fjl@twurst.com>
-Date:   Thu Nov 14 10:04:16 2019 +0100
-
-    dashboard: remove the dashboard (#20279)
-    
-    This removes the dashboard project. The dashboard was an experimental
-    browser UI for geth which displayed metrics and chain information in
-    real time. We are removing it because it has marginal utility and nobody
-    on the team can maintain it.
-    
-    Removing the dashboard removes a lot of dependency code and shaves
-    6 MB off the geth binary size.
-
-commit 987648b0ade10a2e64f18fae616a2277eef2a3c2
-Author: Felix Lange <fjl@twurst.com>
-Date:   Thu Nov 14 09:05:17 2019 +0100
-
-    cmd/faucet: use github.com/gorilla/websocket (#20283)
-    
-    golang.org/x/net/websocket is unmaintained, and we have already
-    switched to using github.com/gorilla/websocket for package rpc.
