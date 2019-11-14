@@ -34,7 +34,7 @@ type watcher struct {
 	quit     chan struct{}
 }
 
-var watcherCount = new(uint32)
+var watcherCount = new(int32)
 
 func newWatcher(ac *accountCache) *watcher {
 	return &watcher{
@@ -60,7 +60,7 @@ func (w *watcher) close() {
 }
 
 func (w *watcher) loop() {
-	atomic.AddUint32(watcherCount, 1)
+	atomic.AddInt32(watcherCount, 1)
 
 	defer func() {
 		w.ac.mu.Lock()
@@ -77,7 +77,7 @@ func (w *watcher) loop() {
 
 	defer func() {
 		notify.Stop(w.ev)
-		if count := atomic.AddUint32(watcherCount, ^uint32(0)); count == 0 {
+		if count := atomic.AddInt32(watcherCount, -1); count == 0 {
 			notify.Close()
 		}
 	}()

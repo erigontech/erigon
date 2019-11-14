@@ -439,12 +439,12 @@ func (n *Node) Stop() error {
 	n.stopHTTP()
 	n.stopIPC()
 
-	type stop interface {
+	type closer interface {
 		Close()
 	}
 
 	for _, api := range n.rpcAPIs {
-		closeAPI, ok := api.Service.(stop)
+		closeAPI, ok := api.Service.(closer)
 		if ok {
 			closeAPI.Close()
 		}
