@@ -444,8 +444,7 @@ func (n *Node) Stop() error {
 	}
 
 	for _, api := range n.rpcAPIs {
-		closeAPI, ok := api.Service.(closer)
-		if ok {
+		if closeAPI, ok := api.Service.(closer); ok {
 			closeAPI.Close()
 		}
 	}
