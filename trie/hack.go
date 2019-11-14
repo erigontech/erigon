@@ -2,6 +2,7 @@ package trie
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -78,12 +79,12 @@ func hashRoot(n node, title string) {
 	defer returnHasherToPool(h)
 	defer returnHasherToPool(h1)
 	var hash common.Hash
-	hLen := h.hash(n, true, hash[:])
+	hLen, _ := h.hash(n, true, hash[:])
 	if hLen < 32 {
 		panic("expected hashNode")
 	}
 	fmt.Printf("%s noencode: %x\n", title, hash[:])
-	hLen = h1.hash(n, true, hash[:])
+	hLen, _ = h1.hash(n, true, hash[:])
 	if hLen < 32 {
 		panic("expected hashNode")
 	}

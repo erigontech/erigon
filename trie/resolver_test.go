@@ -229,7 +229,10 @@ func TestTwoStorageItems(t *testing.T) {
 
 	hasher := newHasher(false)
 	defer returnHasherToPool(hasher)
-	rootRlp := hasher.hashChildren(&root, 0)
+	rootRlp, err := hasher.hashChildren(&root, 0)
+	if err != nil {
+		t.Errorf("failed ot hash children: %v", err)
+	}
 
 	// Resolve the root node
 
@@ -251,7 +254,10 @@ func TestTwoStorageItems(t *testing.T) {
 
 	// Resolve the branch node
 
-	branchRlp := hasher.hashChildren(&branch, 0)
+	branchRlp, err := hasher.hashChildren(&branch, 0)
+	if err != nil {
+		t.Errorf("failed ot hash children: %v", err)
+	}
 
 	req2 := &ResolveRequest{
 		t:           tr,

@@ -1,7 +1,9 @@
-package trie
+package rlphacks
 
 import (
 	"io"
+
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type RlpSerializableBytes []byte
@@ -37,7 +39,7 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 
 func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBufferSize uint) error {
 	// > 1 byte, write a prefix or prefixes first
-	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
+	if len(source) > 1 || (len(source) == 1 && source[0] >= rlp.EmptyStringCode) {
 		prefix := make([]byte, prefixBufferSize)
 		prefixLen := prefixGenFunc(prefix, 0, len(source))
 
@@ -50,18 +52,10 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 	return err
 }
 
-type ByteArrayWriter struct {
-	dest []byte
-	pos  int
-}
-
-func (w *ByteArrayWriter) Setup(dest []byte, pos int) {
-	w.dest = dest
-	w.pos = pos
-}
-
-func (w *ByteArrayWriter) Write(data []byte) (int, error) {
-	copy(w.dest[w.pos:], data)
-	w.pos += len(data)
-	return len(data), nil
+func EncodeByteArrayAsRlp(raw []byte, w io.Writer) (int, error) {
+	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, 4)
+	if err != nil {
+		return 0, err
+	}
+	return generateRlpPrefixLen(len(raw)) + len(raw), nil
 }

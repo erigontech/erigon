@@ -1,19 +1,3 @@
-// Copyright 2019 The go-ethereum Authors
-// This file is part of the go-ethereum library.
-//
-// The go-ethereum library is free software: you can redistribute it and/or modify
-// it under the terms of the GNU Lesser General Public License as published by
-// the Free Software Foundation, either version 3 of the License, or
-// (at your option) any later version.
-//
-// The go-ethereum library is distributed in the hope that it will be useful,
-// but WITHOUT ANY WARRANTY; without even the implied warranty off
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-// GNU Lesser General Public License for more details.
-//
-// You should have received a copy of the GNU Lesser General Public License
-// along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
-
 package trie
 
 import (
@@ -27,136 +11,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 	"golang.org/x/crypto/sha3"
 )
 
-// Experimental code for separating data and structural information
-// Each function corresponds to an opcode
-// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-type structInfoReceiver interface {
-	leaf(length int) error
-	leafHash(length int) error
-	accountLeaf(length int, fieldset uint32) error
-	accountLeafHash(length int, fieldset uint32) error
-	extension(key []byte) error
-	extensionHash(key []byte) error
-	branch(set uint16) error
-	branchHash(set uint16) error
-	hash(number int) error
-}
-
-// GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
-// `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
-// an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
-// `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
-// compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
-// implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
-// `recursive` parameter is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf.
-// Recursive invocation is used to emit opcodes for non-leaf nodes.
-// `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
-// makes decisions about the local structure, i.e. the presense of the prefix groups.
-// `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
-// `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
-// Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
-// then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
-// DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
-func GenStructStep(
-	fieldSet uint32,
-	hashOnly func(prefix []byte) bool,
-	recursive bool,
-	prec, curr, succ []byte,
-	e structInfoReceiver,
-	groups []uint16,
-) ([]uint16, error) {
-	if !recursive && len(prec) == 0 {
-		prec = nil
-	}
-	// Calculate the prefix of the smallest prefix group containing curr
-	precLen := prefixLen(prec, curr)
-	succLen := prefixLen(succ, curr)
-	var maxLen int
-	if precLen > succLen {
-		maxLen = precLen
-	} else {
-		maxLen = succLen
-	}
-	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d, prefix: %x\n", prec, curr, succ, maxLen, prefix)
-	// Add the digit immediately following the max common prefix and compute length of remainder length
-	extraDigit := curr[maxLen]
-	for maxLen >= len(groups) {
-		groups = append(groups, 0)
-	}
-	groups[maxLen] |= (uint16(1) << extraDigit)
-	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
-	remainderStart := maxLen
-	if len(succ) > 0 || prec != nil {
-		remainderStart++
-	}
-	remainderLen := len(curr) - remainderStart
-	// Emit LEAF or EXTENSION based on the remainder
-	if recursive {
-		if remainderLen > 0 {
-			if hashOnly(curr[:maxLen]) {
-				e.extensionHash(curr[remainderStart : remainderStart+remainderLen])
-			} else {
-				e.extension(curr[remainderStart : remainderStart+remainderLen])
-			}
-		}
-	} else {
-		if hashOnly(curr[:maxLen]) {
-			if fieldSet == 0 {
-				if err := e.leafHash(remainderLen); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.accountLeafHash(remainderLen, fieldSet); err != nil {
-					return nil, err
-				}
-			}
-		} else {
-			if fieldSet == 0 {
-				if err := e.leaf(remainderLen); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.accountLeaf(remainderLen, fieldSet); err != nil {
-					return nil, err
-				}
-			}
-		}
-	}
-	// Check for the optional part
-	if precLen <= succLen && len(succ) > 0 {
-		return groups, nil
-	}
-	// Close the immediately encompassing prefix group, if needed
-	if len(succ) > 0 || prec != nil {
-		if hashOnly(curr[:maxLen]) {
-			e.branchHash(groups[maxLen])
-		} else {
-			e.branch(groups[maxLen])
-		}
-	}
-	groups = groups[:maxLen]
-	// Check the end of recursion
-	if precLen == 0 {
-		return groups, nil
-	}
-	// Identify preceding key for the recursive invocation
-	newCurr := curr[:precLen]
-	var newPrec []byte
-	for len(groups) > 0 && groups[len(groups)-1] == 0 {
-		groups = groups[:len(groups)-1]
-	}
-	if len(groups) >= 1 {
-		newPrec = curr[:len(groups)-1]
-	}
-
-	// Recursion
-	return GenStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
-}
-
 const hashStackStride = common.HashLength + 1 // + 1 byte for RLP encoding
+var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
 // HashBuilder implements the interface `structInfoReceiver` and opcodes that the structural information of the trie
 // is comprised of
@@ -278,7 +138,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 	}
 
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := generateStructLen(lenPrefix[:], totalLen)
+	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
@@ -343,8 +203,6 @@ func (hb *HashBuilder) leafHash(length int) error {
 	}
 	return hb.leafHashWithKeyVal(key, val)
 }
-
-var EmptyCodeHash = crypto.Keccak256Hash(nil)
 
 func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	//fmt.Printf("ACCOUNTLEAF %d\n", length)
@@ -457,9 +315,8 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	var hash [33]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
-	var valPrefix [4]byte
 	var lenPrefix [4]byte
-	var kp, vp, kl, vl int
+	var kp, kl int
 	// Write key
 	var compactLen int
 	var ni int
@@ -490,60 +347,49 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	valBuf := pool.GetBuffer(valLen)
 	defer pool.PutBuffer(valBuf)
 	hb.acc.EncodeForHashing(valBuf.B)
-	val := valBuf.B
-	if len(val) > 1 || val[0] >= 128 {
-		vp = generateByteArrayLen(valPrefix[:], 0, len(val))
-		vl = len(val)
-	} else {
-		vl = 1
-	}
-	totalLen := kp + kl + vp + vl
-	pt := generateStructLen(lenPrefix[:], totalLen)
-	if pt+totalLen < 32 {
+	val := rlphacks.RlpEncodedBytes(valBuf.B)
+
+	totalLen := kp + kl + val.DoubleRLPLen()
+	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
+
+	// FIXME: extract copy-paste
+
+	var writer io.Writer
+	var reader io.Reader
+
+	if pt+totalLen < common.HashLength {
 		// Embedded node
-		pos := 0
-		copy(hash[pos:], lenPrefix[:pt])
-		pos += pt
-		copy(hash[pos:], keyPrefix[:kp])
-		pos += kp
-		hash[pos] = compact0
-		pos++
-		for i := 1; i < compactLen; i++ {
-			hash[pos] = key[ni]*16 + key[ni+1]
-			pos++
-			ni += 2
-		}
-		copy(hash[pos:], valPrefix[:vp])
-		pos += vp
-		copy(hash[pos:], val)
+		hb.byteArrayWriter.Setup(hash[:], 0)
+		writer = hb.byteArrayWriter
 	} else {
 		hb.sha.Reset()
-		if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+		writer = hb.sha
+		reader = hb.sha
+	}
+	if _, err := writer.Write(lenPrefix[:pt]); err != nil {
+		return err
+	}
+	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
+		return err
+	}
+	var b [1]byte
+	b[0] = compact0
+	if _, err := writer.Write(b[:]); err != nil {
+		return err
+	}
+	for i := 1; i < compactLen; i++ {
+		b[0] = key[ni]*16 + key[ni+1]
+		if _, err := writer.Write(b[:]); err != nil {
 			return err
 		}
-		if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
-			return err
-		}
-		var b [1]byte
-		b[0] = compact0
-		if _, err := hb.sha.Write(b[:]); err != nil {
-			return err
-		}
-		for i := 1; i < compactLen; i++ {
-			b[0] = key[ni]*16 + key[ni+1]
-			if _, err := hb.sha.Write(b[:]); err != nil {
-				return err
-			}
-			ni += 2
-		}
-		if _, err := hb.sha.Write(valPrefix[:vp]); err != nil {
-			return err
-		}
-		if _, err := hb.sha.Write(val); err != nil {
-			return err
-		}
+		ni += 2
+	}
+	if err := val.ToDoubleRLP(writer); err != nil {
+		return err
+	}
+	if reader != nil {
 		hash[0] = byte(128 + 32)
-		if _, err := hb.sha.Read(hash[1:]); err != nil {
+		if _, err := reader.Read(hash[1:]); err != nil {
 			return err
 		}
 	}
@@ -606,7 +452,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := generateStructLen(lenPrefix[:], totalLen)
+	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
 		return err
@@ -685,7 +531,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	}
 	hb.sha.Reset()
 	var lenPrefix [4]byte
-	pt := generateStructLen(lenPrefix[:], totalSize)
+	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalSize)
 	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
 		return err
 	}

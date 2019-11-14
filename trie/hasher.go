@@ -18,11 +18,14 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"hash"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 	"golang.org/x/crypto/sha3"
 )
 
@@ -30,7 +33,10 @@ type hasher struct {
 	sha                  keccakState
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
+	bw                   *ByteArrayWriter
 }
+
+const rlpPrefixLength = 4
 
 // keccakState wraps sha3.state. In addition to the usual hash methods, it also supports
 // Read to get a variable amount of data from the hash state. Read is faster than Sum
@@ -48,7 +54,10 @@ func newHasher(valueNodesRlpEncoded bool) *hasher {
 	select {
 	case h = <-hasherPool:
 	default:
-		h = &hasher{sha: sha3.NewLegacyKeccak256().(keccakState)}
+		h = &hasher{
+			sha: sha3.NewLegacyKeccak256().(keccakState),
+			bw:  &ByteArrayWriter{},
+		}
 	}
 	h.valueNodesRlpEncoded = valueNodesRlpEncoded
 	return h
@@ -64,27 +73,31 @@ func returnHasherToPool(h *hasher) {
 
 // hash collapses a node down into a hash node, also returning a copy of the
 // original node initialized with the computed hash to replace the original one.
-func (h *hasher) hash(n node, force bool, storeTo []byte) int {
+func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 	//n.makedirty()
-	hh := h.hashInternal(n, force, storeTo, 0)
-	return hh
+	return h.hashInternal(n, force, storeTo, 0)
 }
 
 // hash collapses a node down into a hash node, also returning a copy of the
 // original node initialized with the computed hash to replace the original one.
-func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) int {
+func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
 		copy(storeTo, hn)
-		return 32
+		return common.HashLength, nil
 	}
 	if !n.dirty() {
 		copy(storeTo, n.hash())
-		return 32
+		return common.HashLength, nil
 	}
 	// Trie not processed yet or needs storage, walk the children
-	children := h.hashChildren(n, bufOffset)
+	children, err := h.hashChildren(n, bufOffset)
+	if err != nil {
+		return 0, err
+	}
+
 	hashLen := h.store(children, force, storeTo)
-	if hashLen == 32 {
+
+	if hashLen == common.HashLength {
 		switch n := n.(type) {
 		case *accountNode:
 			n.hashCorrect = true
@@ -96,11 +109,11 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 			n.flags.dirty = false
 		}
 	}
-	return hashLen
+	return hashLen, nil
 }
 
-func finishRLP(buffer []byte, pos int) []byte {
-	serLength := pos - 4
+func writeRlpPrefix(buffer []byte, pos int) []byte {
+	serLength := pos - rlpPrefixLength
 	if serLength < 56 {
 		buffer[3] = byte(192 + serLength)
 		return buffer[3:pos]
@@ -123,372 +136,172 @@ func finishRLP(buffer []byte, pos int) []byte {
 	}
 }
 
-func generateByteArrayLen(buffer []byte, pos int, l int) int {
-	if l < 56 {
-		buffer[pos] = byte(128 + l)
-		pos++
-	} else if l < 256 {
-		// len(vn) can be encoded as 1 byte
-		buffer[pos] = byte(183 + 1)
-		pos++
-		buffer[pos] = byte(l)
-		pos++
-	} else if l < 65536 {
-		// len(vn) is encoded as two bytes
-		buffer[pos] = byte(183 + 2)
-		pos++
-		buffer[pos] = byte(l >> 8)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	} else {
-		// len(vn) is encoded as three bytes
-		buffer[pos] = byte(183 + 3)
-		pos++
-		buffer[pos] = byte(l >> 16)
-		pos++
-		buffer[pos] = byte((l >> 8) & 255)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	}
-	return pos
-}
-
-func generateRlpPrefixLen(l int) int {
-	if l < 2 {
-		return 0
-	}
-	if l < 56 {
-		return 1
-	}
-	if l < 256 {
-		return 2
-	}
-	if l < 65536 {
-		return 3
-	}
-	return 4
-}
-
-func generateRlpPrefixLenDouble(l int, firstByte byte) int {
-	if l < 2 {
-		if firstByte >= 0x80 {
-			return 2
-		}
-		return 0
-	}
-	if l < 55 {
-		return 2
-	}
-	if l < 56 { // 2 + 1
-		return 3
-	}
-	if l < 254 {
-		return 4
-	}
-	if l < 256 {
-		return 5
-	}
-	if l < 65533 {
-		return 6
-	}
-	if l < 65536 {
-		return 7
-	}
-	return 8
-}
-
-func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
-	if l < 55 {
-		// After first wrapping, the length will be l + 1 < 56
-		buffer[pos] = byte(128 + l + 1)
-		pos++
-		buffer[pos] = byte(128 + l)
-		pos++
-	} else if l < 56 {
-		buffer[pos] = byte(183 + 1)
-		pos++
-		buffer[pos] = byte(l + 1)
-		pos++
-		buffer[pos] = byte(128 + l)
-		pos++
-	} else if l < 254 {
-		// After first wrapping, the length will be l + 2 < 256
-		buffer[pos] = byte(183 + 1)
-		pos++
-		buffer[pos] = byte(l + 2)
-		pos++
-		buffer[pos] = byte(183 + 1)
-		pos++
-		buffer[pos] = byte(l)
-		pos++
-	} else if l < 256 {
-		// First wrapping is 2 bytes, second wrapping 3 bytes
-		buffer[pos] = byte(183 + 2)
-		pos++
-		buffer[pos] = byte((l + 2) >> 8)
-		pos++
-		buffer[pos] = byte((l + 2) & 255)
-		pos++
-		buffer[pos] = byte(183 + 1)
-		pos++
-		buffer[pos] = byte(l)
-		pos++
-	} else if l < 65533 {
-		// Both wrappings are 3 bytes
-		buffer[pos] = byte(183 + 2)
-		pos++
-		buffer[pos] = byte((l + 3) >> 8)
-		pos++
-		buffer[pos] = byte((l + 3) & 255)
-		pos++
-		buffer[pos] = byte(183 + 2)
-		pos++
-		buffer[pos] = byte(l >> 8)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	} else if l < 65536 {
-		// First wrapping is 3 bytes, second wrapping is 4 bytes
-		buffer[pos] = byte(183 + 3)
-		pos++
-		buffer[pos] = byte((l + 3) >> 16)
-		pos++
-		buffer[pos] = byte(((l + 3) >> 8) & 255)
-		pos++
-		buffer[pos] = byte((l + 3) & 255)
-		pos++
-		buffer[pos] = byte(183 + 2)
-		pos++
-		buffer[pos] = byte((l >> 8) & 255)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	} else {
-		// Both wrappings are 4 bytes
-		buffer[pos] = byte(183 + 3)
-		pos++
-		buffer[pos] = byte((l + 4) >> 16)
-		pos++
-		buffer[pos] = byte(((l + 4) >> 8) & 255)
-		pos++
-		buffer[pos] = byte((l + 4) & 255)
-		pos++
-		buffer[pos] = byte(183 + 3)
-		pos++
-		buffer[pos] = byte(l >> 16)
-		pos++
-		buffer[pos] = byte((l >> 8) & 255)
-		pos++
-		buffer[pos] = byte(l & 255)
-		pos++
-	}
-	return pos
-}
-
 // hashChildren replaces the children of a node with their hashes if the encoded
 // size of the child is larger than a hash, returning the collapsed node as well
 // as a replacement for the original node with the child hashes cached in.
 // DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
-func (h *hasher) hashChildren(original node, bufOffset int) []byte {
+func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 	buffer := h.buffers[bufOffset:]
-	pos := 4
+	pos := rlpPrefixLength
 
 	switch n := original.(type) {
 	case *shortNode:
 		// Starting at position 3, to leave space for len prefix
 		// Encode key
 		compactKey := hexToCompact(n.Key)
-		if len(compactKey) == 1 && compactKey[0] < 128 {
-			buffer[pos] = compactKey[0]
-			pos++
-		} else {
-			buffer[pos] = byte(128 + len(compactKey))
-			pos++
-			copy(buffer[pos:], compactKey)
-			pos += len(compactKey)
+		h.bw.Setup(buffer, pos)
+		written, err := rlphacks.EncodeByteArrayAsRlp(compactKey, h.bw)
+		if err != nil {
+			return nil, err
 		}
+		pos += written
+
 		// Encode value
 		if vn, ok := n.Val.(valueNode); ok {
-			if len(vn) == 1 && vn[0] < 128 {
-				buffer[pos] = vn[0]
-				pos++
-			} else {
-				if h.valueNodesRlpEncoded {
-					pos = generateByteArrayLen(buffer, pos, len(vn))
-				} else {
-					// value node contains raw values
-					pos = generateByteArrayLenDouble(buffer, pos, len(vn))
-				}
-				copy(buffer[pos:], vn)
-				pos += len(vn)
+			written, err := h.valueNodeToBuffer(vn, buffer, pos)
+			if err != nil {
+				return nil, err
 			}
+			pos += written
+
 		} else if ac, ok := n.Val.(*accountNode); ok {
 			// Hashing the storage trie if necessary
 			if ac.storage == nil {
 				ac.Root = EmptyRoot
 			} else {
-				h.hashInternal(ac.storage, true, ac.Root[:], bufOffset+pos)
-			}
-
-			encodingLen := ac.EncodingLengthForHashing()
-			pos = generateByteArrayLen(buffer, pos, int(encodingLen))
-			ac.EncodeForHashing(buffer[pos:])
-			pos += int(encodingLen)
-		} else {
-			if n.Val == nil {
-				// empty byte array
-				buffer[pos] = byte(128)
-				pos++
-			} else {
-				// Reserve one byte for length
-				hashLen := h.hashInternal(n.Val, false, buffer[pos+1:], bufOffset+pos+1)
-				if hashLen == 32 {
-					buffer[pos] = byte(128 + 32)
-					pos += 33
-				} else {
-					// Shift one byte backwards, because it is not treated as a byte array but embedded RLP
-					copy(buffer[pos:pos+hashLen], buffer[pos+1:])
-					pos += hashLen
+				_, err := h.hashInternal(ac.storage, true, ac.Root[:], bufOffset+pos)
+				if err != nil {
+					return nil, err
 				}
 			}
+
+			written, err := h.accountNodeToBuffer(ac, buffer, pos)
+			if err != nil {
+				return nil, err
+			}
+			pos += written
+		} else {
+			written, err := h.hashChild(n.Val, buffer, pos, bufOffset)
+			if err != nil {
+				return nil, err
+			}
+			pos += written
 		}
-		return finishRLP(buffer, pos)
+		return writeRlpPrefix(buffer, pos), nil
 
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
 		for i := 0; i < 17; i++ {
+			var child node
+
 			if i == int(i1) {
-				if n.child1 == nil {
-					// empty byte array
-					buffer[pos] = byte(128)
-					pos++
-				} else {
-					// Reserve one byte for length
-					hashLen := h.hashInternal(n.child1, false, buffer[pos+1:], bufOffset+pos+1)
-					if hashLen == 32 {
-						buffer[pos] = byte(128 + 32)
-						pos += 33
-					} else {
-						// Shift one byte backwards, because it is not treated as a byte array but embedded RLP
-						copy(buffer[pos:pos+hashLen], buffer[pos+1:])
-						pos += hashLen
-					}
-				}
+				child = n.child1
 			} else if i == int(i2) {
-				if n.child2 == nil {
-					// empty byte array
-					buffer[pos] = byte(128)
-					pos++
-				} else {
-					// Reserve one byte for length
-					hashLen := h.hashInternal(n.child2, false, buffer[pos+1:], bufOffset+pos+1)
-					if hashLen == 32 {
-						buffer[pos] = byte(128 + 32)
-						pos += 33
-					} else {
-						// Shift one byte backwards, because it is not treated as a byte array but embedded RLP
-						copy(buffer[pos:pos+hashLen], buffer[pos+1:])
-						pos += hashLen
-					}
+				child = n.child2
+			}
+
+			if child != nil {
+				written, err := h.hashChild(child, buffer, pos, bufOffset)
+				if err != nil {
+					return nil, err
 				}
+				pos += written
 			} else {
-				// empty byte array
-				buffer[pos] = byte(128)
-				pos++
+				pos += writeEmptyByteArray(buffer, pos)
 			}
 		}
-		return finishRLP(buffer, pos)
+		return writeRlpPrefix(buffer, pos), nil
 
 	case *fullNode:
 		// Hash the full node's children, caching the newly hashed subtrees
 		for _, child := range n.Children[:16] {
-			if child == nil {
-				// empty byte array
-				buffer[pos] = byte(128)
-				pos++
-			} else {
-				// Reserve one byte for length
-				hashLen := h.hashInternal(child, false, buffer[pos+1:], bufOffset+pos+1)
-				if hashLen == 32 {
-					buffer[pos] = byte(128 + 32)
-					pos += 33
-				} else {
-					// Shift one byte backwards, because it is not treated as a byte array but embedded RLP
-					copy(buffer[pos:pos+hashLen], buffer[pos+1:])
-					pos += hashLen
-				}
+			written, err := h.hashChild(child, buffer, pos, bufOffset)
+			if err != nil {
+				return nil, err
 			}
+			pos += written
 		}
-		var enc []byte
-		needsDoubleRlpEncoding := false
-
 		switch n := n.Children[16].(type) {
 		case *accountNode:
-			encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
-			n.EncodeForHashing(encodedAccount.B)
-			enc = encodedAccount.Bytes()
-			pool.PutBuffer(encodedAccount)
+			written, err := h.accountNodeToBuffer(n, buffer, pos)
+			if err != nil {
+				return nil, err
+			}
+			pos += written
+
 		case valueNode:
-			needsDoubleRlpEncoding = !h.valueNodesRlpEncoded
-			enc = n
+			written, err := h.valueNodeToBuffer(n, buffer, pos)
+			if err != nil {
+				return nil, err
+			}
+			pos += written
+
 		case nil:
-			//	skip
+			pos += writeEmptyByteArray(buffer, pos)
+
 		default:
-			//	skip
+			pos += writeEmptyByteArray(buffer, pos)
 		}
 
-		if enc == nil {
-			buffer[pos] = byte(128)
-			pos++
-		} else if len(enc) == 1 && enc[0] < 128 {
-			buffer[pos] = enc[0]
-			pos++
-		} else {
-			if needsDoubleRlpEncoding {
-				pos = generateByteArrayLenDouble(buffer, pos, len(enc))
-			} else {
-				pos = generateByteArrayLen(buffer, pos, len(enc))
-			}
-			copy(buffer[pos:], enc)
-			pos += len(enc)
-		}
-		return finishRLP(buffer, pos)
+		return writeRlpPrefix(buffer, pos), nil
 
 	case valueNode:
-		if len(n) == 1 && n[0] < 128 {
-			buffer[pos] = n[0]
-			pos++
-		} else {
-			if h.valueNodesRlpEncoded {
-				pos = generateByteArrayLen(buffer, pos, len(n))
-			} else {
-				pos = generateByteArrayLenDouble(buffer, pos, len(n))
-			}
-			copy(buffer[pos:], n)
-			pos += len(n)
+		written, err := h.valueNodeToBuffer(n, buffer, pos)
+		if err != nil {
+			return nil, err
 		}
-		return buffer[4:pos]
+		pos += written
+
+		return buffer[rlpPrefixLength:pos], nil
 
 	case *accountNode:
+		// we don't do double RLP here, so `accountNodeToBuffer` is not applicable
 		encodedAccount := pool.GetBuffer(n.EncodingLengthForHashing())
+
 		n.EncodeForHashing(encodedAccount.B)
-		enc := encodedAccount.Bytes()
+		pos += copy(buffer[pos:], encodedAccount.Bytes())
+
 		pool.PutBuffer(encodedAccount)
-		if len(enc) == 1 && enc[0] < 128 {
-			buffer[pos] = enc[0]
-			pos++
-		} else {
-			copy(buffer[pos:], enc)
-			pos += len(enc)
-		}
-		return buffer[4:pos]
+
+		return buffer[rlpPrefixLength:pos], nil
 
 	case hashNode:
-		panic("hashNode")
+		return nil, errors.New("hasher#hashChildren: met unexpected hash node")
 	}
-	return nil
+
+	return nil, nil
+}
+
+func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, error) {
+	h.bw.Setup(buffer, pos)
+
+	var val RlpSerializable
+
+	if h.valueNodesRlpEncoded {
+		val = rlphacks.RlpEncodedBytes(vn)
+	} else {
+		val = rlphacks.RlpSerializableBytes(vn)
+	}
+
+	if err := val.ToDoubleRLP(h.bw); err != nil {
+		return 0, err
+	}
+	return val.DoubleRLPLen(), nil
+}
+
+func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (int, error) {
+	encodedAccount := pool.GetBuffer(ac.EncodingLengthForHashing())
+	defer pool.PutBuffer(encodedAccount)
+
+	ac.EncodeForHashing(encodedAccount.B)
+	enc := rlphacks.RlpEncodedBytes(encodedAccount.Bytes())
+	h.bw.Setup(buffer, pos)
+
+	if err := enc.ToDoubleRLP(h.bw); err != nil {
+		return 0, err
+	}
+
+	return enc.DoubleRLPLen(), nil
 }
 
 func EncodeAsValue(data []byte) ([]byte, error) {
@@ -524,4 +337,30 @@ func (h *hasher) makeHashNode(data []byte) hashNode {
 	h.sha.Write(data)
 	h.sha.Read(n)
 	return n
+}
+
+func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (int, error) {
+	if child == nil {
+		return writeEmptyByteArray(buffer, pos), nil
+	}
+
+	// Reserve one byte for length
+	hashLen, err := h.hashInternal(child, false, buffer[pos+1:], bufOffset+pos+1)
+	if err != nil {
+		return 0, err
+	}
+
+	if hashLen == common.HashLength {
+		buffer[pos] = byte(rlp.EmptyStringCode + common.HashLength)
+		return common.HashLength + 1, nil
+	}
+
+	// Shift one byte backwards, because it is not treated as a byte array but embedded RLP
+	copy(buffer[pos:pos+hashLen], buffer[pos+1:])
+	return hashLen, nil
+}
+
+func writeEmptyByteArray(buffer []byte, pos int) int {
+	buffer[pos] = rlp.EmptyStringCode
+	return 1
 }
