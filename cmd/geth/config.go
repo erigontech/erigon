@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
+
 	"github.com/naoina/toml"
 )
 
@@ -77,7 +78,6 @@ type gethConfig struct {
 	Eth       eth.Config
 	Node      node.Config
 	Ethstats  ethstatsConfig
-	Dashboard dashboard.Config
 }
 
 func loadConfig(file string, cfg *gethConfig) error {
@@ -110,7 +110,6 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	cfg := gethConfig{
 		Eth:       eth.DefaultConfig,
 		Node:      defaultNodeConfig(),
-		Dashboard: dashboard.DefaultConfig,
 	}
 
 	// Load config file.
@@ -130,7 +129,6 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	if ctx.GlobalIsSet(utils.EthStatsURLFlag.Name) {
 		cfg.Ethstats.URL = ctx.GlobalString(utils.EthStatsURLFlag.Name)
 	}
-	utils.SetDashboardConfig(ctx, &cfg.Dashboard)
 
 	return stack, cfg
 }
@@ -153,12 +151,6 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 	// Add the Ethereum Stats daemon if requested.
 	if cfg.Ethstats.URL != "" {
 		utils.RegisterEthStatsService(stack, cfg.Ethstats.URL)
-	}
-
-	// Add dashboard daemon if requested. This should be the last registered service
-	// in order to be able to collect information about the other services.
-	if ctx.GlobalBool(utils.DashboardEnabledFlag.Name) {
-		utils.RegisterDashboardService(stack, &cfg.Dashboard, gitCommit)
 	}
 	return stack
 }
