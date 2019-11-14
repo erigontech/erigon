@@ -276,6 +276,7 @@ func doInstall(cmdline []string) {
 			os.RemoveAll(filepath.Join(path, "pkg", runtime.GOOS+"_arm"))
 		}
 	}
+
 	// Seems we are cross compiling, work around forbidden GOBIN
 	goinstall := goToolArch(*arch, *cc, "install", buildFlags(env)...)
 	goinstall.Args = append(goinstall.Args, "-v")
