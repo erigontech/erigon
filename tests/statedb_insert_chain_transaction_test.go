@@ -76,6 +76,9 @@ func TestInsertIncorrectStateRootDifferentAccounts(t *testing.T) {
 	if balance := st.GetBalance(from); balance.Cmp(big.NewInt(1000000000)) != 0 {
 		t.Fatalf("got %v, expected %v", balance, big.NewInt(1000000000))
 	}
+	if balance := st.GetBalance(data.addresses[1]); balance.Cmp(big.NewInt(999995000)) != 0 {
+		t.Fatalf("got %v, expected %v", balance, big.NewInt(5000))
+	}
 	if balance := st.GetBalance(to); balance.Cmp(big.NewInt(5000)) != 0 {
 		t.Fatalf("got %v, expected %v", balance, big.NewInt(5000))
 	}
