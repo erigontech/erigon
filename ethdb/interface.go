@@ -61,6 +61,7 @@ type Getter interface {
 	// walker is called for each eligible entry.
 	// If walker returns false or an error, the walk stops.
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
+
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error
@@ -99,8 +100,6 @@ type MinDatabase interface {
 	Get(bucket, key []byte) ([]byte, error)
 	Put(bucket, key, value []byte) error
 	Delete(bucket, key []byte) error
-
-	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,

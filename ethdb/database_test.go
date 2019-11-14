@@ -273,7 +273,7 @@ var fixedBits uint = 3
 
 var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.FromHex("bd")}
 
-func testWalk(db MinDatabase, t *testing.T) {
+func testWalk(db Database, t *testing.T) {
 	for k, v := range hexEntries {
 		err := db.Put(bucket, common.FromHex(k), common.FromHex(v))
 		if err != nil {
