@@ -2,8 +2,6 @@ package rlphacks
 
 import (
 	"io"
-
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 type RlpSerializableBytes []byte
@@ -39,7 +37,7 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 
 func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBufferSize uint) error {
 	// > 1 byte, write a prefix or prefixes first
-	if len(source) > 1 || (len(source) == 1 && source[0] >= rlp.EmptyStringCode) {
+	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
 		prefix := make([]byte, prefixBufferSize)
 		prefixLen := prefixGenFunc(prefix, 0, len(source))
 

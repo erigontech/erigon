@@ -351,7 +351,7 @@ func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (i
 	}
 
 	if hashLen == common.HashLength {
-		buffer[pos] = byte(rlp.EmptyStringCode + common.HashLength)
+		buffer[pos] = byte(0x80 + common.HashLength)
 		return common.HashLength + 1, nil
 	}
 

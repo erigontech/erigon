@@ -1,7 +1,5 @@
 package rlphacks
 
-import "github.com/ledgerwatch/turbo-geth/rlp"
-
 func multiByteHeaderPrefixOfLen(l int) byte {
 	// > If a string is more than 55 bytes long, the
 	// > RLP encoding consists of a single byte with value 0xB7 plus the length
@@ -16,7 +14,7 @@ func multiByteHeaderPrefixOfLen(l int) byte {
 
 func generateByteArrayLen(buffer []byte, pos int, l int) int {
 	if l < 56 {
-		buffer[pos] = byte(rlp.EmptyStringCode + l)
+		buffer[pos] = byte(0x80 + l)
 		pos++
 	} else if l < 256 {
 		// len(vn) can be encoded as 1 byte
@@ -64,7 +62,7 @@ func generateRlpPrefixLen(l int) int {
 
 func generateRlpPrefixLenDouble(l int, firstByte byte) int {
 	if l < 2 {
-		if firstByte >= rlp.EmptyStringCode {
+		if firstByte >= 0x80 {
 			return 2
 		}
 		return 0
@@ -93,16 +91,16 @@ func generateRlpPrefixLenDouble(l int, firstByte byte) int {
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 	if l < 55 {
 		// After first wrapping, the length will be l + 1 < 56
-		buffer[pos] = byte(rlp.EmptyStringCode + l + 1)
+		buffer[pos] = byte(0x80 + l + 1)
 		pos++
-		buffer[pos] = byte(rlp.EmptyStringCode + l)
+		buffer[pos] = byte(0x80 + l)
 		pos++
 	} else if l < 56 {
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
 		buffer[pos] = byte(l + 1)
 		pos++
-		buffer[pos] = byte(rlp.EmptyStringCode + l)
+		buffer[pos] = byte(0x80 + l)
 		pos++
 	} else if l < 254 {
 		// After first wrapping, the length will be l + 2 < 256

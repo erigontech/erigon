@@ -130,7 +130,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = rlp.EmptyStringCode + byte(compactLen)
+		keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -190,7 +190,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 	}
 
 	if reader != nil {
-		hash[0] = rlp.EmptyStringCode + common.HashLength
+		hash[0] = 0x80 + common.HashLength
 		if _, err := reader.Read(hash[1:]); err != nil {
 			return err
 		}
@@ -416,7 +416,7 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = rlp.EmptyStringCode + byte(compactLen)
+		keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -491,7 +491,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	var i int
 	for digit := uint(0); digit < 16; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == rlp.EmptyStringCode+common.HashLength {
+			if hashes[hashStackStride*i] == 0x80+common.HashLength {
 				totalSize += common.HashLength
 			} else {
 				// Embedded node
@@ -512,7 +512,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
-			if hashes[hashStackStride*i] == byte(rlp.EmptyStringCode+common.HashLength) {
+			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
 				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
 					return err
 				}
@@ -531,7 +531,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
-	hb.hashStack[len(hb.hashStack)-hashStackStride] = rlp.EmptyStringCode + common.HashLength
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		return err
 	}
@@ -548,7 +548,7 @@ func (hb *HashBuilder) hash(number int) error {
 		if err != nil {
 			return err
 		}
-		hb.hashStack = append(hb.hashStack, rlp.EmptyStringCode+common.HashLength)
+		hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
 		hb.hashStack = append(hb.hashStack, hash[:]...)
 		hb.nodeStack = append(hb.nodeStack, nil)
 	}
@@ -567,7 +567,7 @@ func (hb *HashBuilder) code() ([]byte, common.Hash, error) {
 		return nil, common.Hash{}, err
 	}
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = rlp.EmptyStringCode + common.HashLength
+	hash[0] = 0x80 + common.HashLength
 	if _, err := hb.sha.Read(hash[1:]); err != nil {
 		return nil, common.Hash{}, err
 	}
@@ -578,7 +578,7 @@ func (hb *HashBuilder) code() ([]byte, common.Hash, error) {
 func (hb *HashBuilder) emptyRoot() {
 	hb.nodeStack = append(hb.nodeStack, nil)
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
-	hash[0] = rlp.EmptyStringCode + common.HashLength
+	hash[0] = 0x80 + common.HashLength
 	copy(hash[1:], EmptyRoot[:])
 	hb.hashStack = append(hb.hashStack, hash[:]...)
 }
