@@ -85,7 +85,9 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			var hn common.Hash
-			hr.hash(n, force, hn[:])
+			if _, err := hr.hash(n, force, hn[:]); err != nil {
+				panic(fmt.Sprintf("could not hash duoNode: %v", err))
+			}
 			s.hexes = append(s.hexes, hex)
 			s.hashes = append(s.hashes, hn)
 			if accounts {
@@ -111,7 +113,9 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			var hn common.Hash
-			hr.hash(n, len(hex) == 0, hn[:])
+			if _, err := hr.hash(n, force, hn[:]); err != nil {
+				panic(fmt.Sprintf("could not hash duoNode: %v", err))
+			}
 			s.hexes = append(s.hexes, hex)
 			s.hashes = append(s.hashes, hn)
 			if accounts {
@@ -132,7 +136,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		}
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
 			if n.storage != nil {
-				toStream(n.storage, hex[:len(hex)-1], false /*accounts*/, rs, hr, true, s, trace)
+				toStream(n.storage, hex[:len(hex)-1], false /*accounts*/, rs, hr, true /*force*/, s, trace)
 			}
 		}
 		s.hexes = append(s.hexes, hex)
