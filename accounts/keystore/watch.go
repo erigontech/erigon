@@ -22,8 +22,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/JekaMas/notify"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/rjeczalik/notify"
 )
 
 type watcher struct {

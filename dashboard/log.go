@@ -26,9 +26,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/JekaMas/notify"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/mohae/deepcopy"
+	"github.com/rjeczalik/notify"
 )
 
 var emptyChunk = json.RawMessage("[]")
