@@ -54,6 +54,7 @@ var statefile = flag.String("statefile", "state", "path to the file where the st
 var start = flag.Int("start", 0, "number of data points to skip when making a chart")
 var window = flag.Int("window", 1024, "size of the window for moving average")
 var triesize = flag.Int("triesize", 1024*1024, "maximum number of nodes in the state trie")
+var preroot = flag.Bool("preroot", false, "Attempt to compute hash of the trie without modifying it")
 
 func check(e error) {
 	if e != nil {
@@ -1673,7 +1674,7 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*chaindata, *statefile, *triesize)
+		stateless(*chaindata, *statefile, *triesize, *preroot)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)

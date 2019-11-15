@@ -32,18 +32,16 @@ func DeriveSha(list DerivableList) common.Hash {
 		return trie.EmptyRoot
 	}
 
-	prev := &trie.OneBytesTape{}
 	curr := &trie.OneBytesTape{}
 	succ := &trie.OneBytesTape{}
 	value := &trie.OneBytesTape{}
 
-	hb := trie.NewHashBuilder()
+	hb := trie.NewHashBuilder(false)
 
 	hb.SetKeyTape(curr)
 	hb.SetValueTape(trie.NewRlpEncodedBytesTape(value))
 
 	hb.Reset()
-	prev.Reset()
 	curr.Reset()
 	succ.Reset()
 
@@ -52,8 +50,6 @@ func DeriveSha(list DerivableList) common.Hash {
 	var groups []uint16
 
 	traverseInLexOrder(list, func(i int, next int) {
-		prev.Reset()
-		prev.Write(curr.Bytes())
 		curr.Reset()
 		curr.Write(succ.Bytes())
 		succ.Reset()
@@ -67,7 +63,7 @@ func DeriveSha(list DerivableList) common.Hash {
 
 		if curr.Len() > 0 {
 			value.Write(list.GetRlp(i))
-			groups, _ = trie.GenStructStep(0, hashOnly, false, prev.Bytes(), curr.Bytes(), succ.Bytes(), hb, groups)
+			groups, _ = trie.GenStructStep(0, hashOnly, false, false, curr.Bytes(), succ.Bytes(), hb, groups)
 		}
 	})
 
