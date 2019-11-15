@@ -40,7 +40,7 @@ func DeriveSha(list DerivableList) common.Hash {
 	hb := trie.NewHashBuilder()
 
 	hb.SetKeyTape(curr)
-	hb.SetValueTape(value)
+	hb.SetValueTape(trie.NewRlpEncodedBytesTape(value))
 
 	hb.Reset()
 	prev.Reset()

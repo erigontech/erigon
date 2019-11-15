@@ -589,7 +589,10 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 	hb.SetKeyTape(NewCborBytesTape(bw[startOffset:endOffset]))
 	startOffset = endOffset
 	endOffset = startOffset + lens[ValueTape]
-	hb.SetValueTape(NewCborBytesTape(bw[startOffset:endOffset]))
+	hb.SetValueTape(
+		NewRlpSerializableBytesTape(
+			NewCborBytesTape(bw[startOffset:endOffset])))
+
 	startOffset = endOffset
 	endOffset = startOffset + lens[NonceTape]
 	hb.SetNonceTape(NewCborUint64Tape(bw[startOffset:endOffset]))
