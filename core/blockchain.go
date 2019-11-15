@@ -124,6 +124,7 @@ type CacheConfig struct {
 	BlocksToPrune       uint64
 	PruneTimeout        time.Duration
 	ArchiveSyncInterval uint64
+	DownloadOnly        bool
 	NoHistory           bool
 }
 
@@ -206,6 +207,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 			TrieCleanLimit:      256,
 			TrieDirtyLimit:      256,
 			TrieTimeLimit:       5 * time.Minute,
+			DownloadOnly:        false,
 			NoHistory:           false,
 		}
 	}
@@ -1249,7 +1251,7 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, stateDb *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, nil
 	}
@@ -1272,13 +1274,17 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	rawdb.WriteBlock(bc.db, block)
 
-	tds.SetBlockNr(block.NumberU64())
+	if tds != nil {
+		tds.SetBlockNr(block.NumberU64())
+	}
 
 	ctx := bc.WithContext(context.Background(), block.Number())
-	if err := state.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-		return NonStatTy, err
+	if stateDb != nil {
+		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+			return NonStatTy, err
+		}
 	}
-	if bc.enableReceipts {
+	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1308,8 +1314,12 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
-	rawdb.WriteTxLookupEntries(bc.db, block)
-	rawdb.WritePreimages(bc.db, state.Preimages())
+	if !bc.cacheConfig.DownloadOnly {
+		rawdb.WriteTxLookupEntries(bc.db, block)
+	}
+	if stateDb != nil && !bc.cacheConfig.DownloadOnly {
+		rawdb.WritePreimages(bc.db, stateDb.Preimages())
+	}
 
 	status = CanonStatTy
 	//} else {
@@ -1557,17 +1567,19 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		readBlockNr := parentNumber
 		var root common.Hash
-		if bc.trieDbState == nil {
+		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
 			if _, err = bc.GetTrieDbState(); err != nil {
 				return k, events, coalescedLogs, err
 			}
 		}
-		root = bc.trieDbState.LastRoot()
+		if !bc.cacheConfig.DownloadOnly {
+			root = bc.trieDbState.LastRoot()
+		}
 		var parentRoot common.Hash
 		if parent != nil {
 			parentRoot = parent.Root()
 		}
-		if parent != nil && root != parentRoot {
+		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
@@ -1601,38 +1613,44 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				return 0, events, coalescedLogs, err
 			}
 		}
-		stateDB := state.New(bc.trieDbState)
-		// Process block using the parent state as reference point.
-		//t0 := time.Now()
-		receipts, logs, usedGas, err := bc.processor.Process(block, stateDB, bc.trieDbState, bc.vmConfig)
-		//t1 := time.Now()
-		if err != nil {
-			bc.db.Rollback()
-			bc.trieDbState = nil
-			bc.reportBlock(block, receipts, err)
-			return k, events, coalescedLogs, err
-		}
-		// Update the metrics touched during block processing
-		/*
-			accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete, we can mark them
-			storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete, we can mark them
-			accountUpdateTimer.Update(statedb.AccountUpdates) // Account updates are complete, we can mark them
-			storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete, we can mark them
+		var stateDB *state.IntraBlockState
+		var receipts types.Receipts
+		var logs []*types.Log
+		var usedGas uint64
+		if !bc.cacheConfig.DownloadOnly {
+			stateDB = state.New(bc.trieDbState)
+			// Process block using the parent state as reference point.
+			//t0 := time.Now()
+			receipts, logs, usedGas, err = bc.processor.Process(block, stateDB, bc.trieDbState, bc.vmConfig)
+			//t1 := time.Now()
+			if err != nil {
+				bc.db.Rollback()
+				bc.trieDbState = nil
+				bc.reportBlock(block, receipts, err)
+				return k, events, coalescedLogs, err
+			}
+			// Update the metrics touched during block processing
+			/*
+				accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete, we can mark them
+				storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete, we can mark them
+				accountUpdateTimer.Update(statedb.AccountUpdates) // Account updates are complete, we can mark them
+				storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete, we can mark them
 
-			triehash := statedb.AccountHashes + statedb.StorageHashes // Save to not double count in validation
-			trieproc := statedb.AccountReads + statedb.AccountUpdates
-			trieproc += statedb.StorageReads + statedb.StorageUpdates
+				triehash := statedb.AccountHashes + statedb.StorageHashes // Save to not double count in validation
+				trieproc := statedb.AccountReads + statedb.AccountUpdates
+				trieproc += statedb.StorageReads + statedb.StorageUpdates
 
-			blockExecutionTimer.Update(time.Since(substart) - trieproc - triehash)
-		*/
+				blockExecutionTimer.Update(time.Since(substart) - trieproc - triehash)
+			*/
 
-		// Validate the state using the default validator
-		err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
-		if err != nil {
-			bc.db.Rollback()
-			bc.trieDbState = nil
-			bc.reportBlock(block, receipts, err)
-			return k, events, coalescedLogs, err
+			// Validate the state using the default validator
+			err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
+			if err != nil {
+				bc.db.Rollback()
+				bc.trieDbState = nil
+				bc.reportBlock(block, receipts, err)
+				return k, events, coalescedLogs, err
+			}
 		}
 		proctime := time.Since(start)
 
@@ -1703,7 +1721,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
-			bc.trieDbState.PruneTries(false)
+			if bc.trieDbState != nil {
+				bc.trieDbState.PruneTries(false)
+			}
 			log.Info("Database", "size", bc.db.Size(), "written", written)
 		}
 	}

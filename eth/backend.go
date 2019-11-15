@@ -186,6 +186,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			TrieDirtyLimit:      config.TrieDirtyCache,
 			TrieCleanNoPrefetch: config.NoPrefetch,
 			TrieTimeLimit:       config.TrieTimeout,
+			DownloadOnly:        config.DownloadOnly,
 			NoHistory:           config.NoHistory,
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}

@@ -386,7 +386,7 @@ In the deeper recursive step, max common prefix is empty. Since the common prefi
 the common prefix with the succeeding key (they are both empty). The optional part of the step happens, opcode `BRANCH 0123`
 is emitted, and `groups` is trimmed to become empty. No recursive invocation follows.
 
-The step of this algorithm is implemented by the function `genStructStep` in [trie/structural_2.go](../../trie/structural_2.go).
+The step of this algorithm is implemented by the function `GenStructStep` in [trie/structural_2.go](../../trie/structural_2.go).
 
 ### Converting sequence of keys and value into a multiproof
 
