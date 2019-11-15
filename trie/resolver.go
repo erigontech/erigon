@@ -232,7 +232,11 @@ func (tr *Resolver) finaliseRoot() error {
 		if tr.currentReq.RequiresRLP {
 			hasher := newHasher(false)
 			defer returnHasherToPool(hasher)
-			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+			h, err := hasher.hashChildren(hbRoot, 0)
+			if err != nil {
+				return err
+			}
+			tr.currentReq.NodeRLP = h
 		}
 		var hookKey []byte
 		if tr.currentReq.contract == nil {

@@ -5,6 +5,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 // BytesTape is an abstraction for an input tape that allows reading binary strings ([]byte) sequentially
@@ -35,23 +36,27 @@ type HashTape interface {
 	Next() (common.Hash, error)
 }
 
-// FIXME: comments here
+// RlpSerializableTape is an abstraction for a tape that allows reading a sequence of
+// RlpSerializable values.
 type RlpSerializableTape interface {
 	Next() (RlpSerializable, error)
 }
 
+// RlpSerializable is a value that can be double-RLP coded.
 type RlpSerializable interface {
 	ToDoubleRLP(io.Writer) error
 	DoubleRLPLen() int
 	RawBytes() []byte
 }
 
-func NewRlpSerializableBytesTape(inner BytesTape) RlpSerializableTape {
-	return &RlpSerializableBytesTape{inner}
-}
-
+// RlpSerializableBytesTape is a wrapper on top of BytesTape that wraps every return value
+// into RlpSerializableBytes, treating them as raw bytes.
 type RlpSerializableBytesTape struct {
 	inner BytesTape
+}
+
+func NewRlpSerializableBytesTape(inner BytesTape) RlpSerializableTape {
+	return &RlpSerializableBytesTape{inner}
 }
 
 func (t *RlpSerializableBytesTape) Next() (RlpSerializable, error) {
@@ -60,15 +65,19 @@ func (t *RlpSerializableBytesTape) Next() (RlpSerializable, error) {
 		return nil, err
 	}
 
-	return RlpSerializableBytes(value), nil
+	return rlphacks.RlpSerializableBytes(value), nil
+}
+
+// RlpBytesTape is a wrapper on top of BytesTape that wraps every return value
+// into RlpEncodedBytes, treating them as RLP-encode bytes.
+// Hence, to get the double encoding we only need to encode once.
+// Used when we know for sure that the data is already RLP encoded (accounts, tests, etc)
+type RlpBytesTape struct {
+	inner BytesTape
 }
 
 func NewRlpEncodedBytesTape(inner BytesTape) RlpSerializableTape {
 	return &RlpBytesTape{inner}
-}
-
-type RlpBytesTape struct {
-	inner BytesTape
 }
 
 func (t *RlpBytesTape) Next() (RlpSerializable, error) {
@@ -77,5 +86,5 @@ func (t *RlpBytesTape) Next() (RlpSerializable, error) {
 		return nil, err
 	}
 
-	return RlpEncodedBytes(value), nil
+	return rlphacks.RlpEncodedBytes(value), nil
 }
