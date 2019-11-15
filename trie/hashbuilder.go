@@ -137,6 +137,11 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 		kl = 1
 	}
 
+	return hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash, val)
+
+}
+
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash [33]byte, val RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 
@@ -349,57 +354,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	hb.acc.EncodeForHashing(valBuf.B)
 	val := rlphacks.RlpEncodedBytes(valBuf.B)
 
-	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
-
-	// FIXME: extract copy-paste
-
-	var writer io.Writer
-	var reader io.Reader
-
-	if pt+totalLen < common.HashLength {
-		// Embedded node
-		hb.byteArrayWriter.Setup(hash[:], 0)
-		writer = hb.byteArrayWriter
-	} else {
-		hb.sha.Reset()
-		writer = hb.sha
-		reader = hb.sha
-	}
-	if _, err := writer.Write(lenPrefix[:pt]); err != nil {
-		return err
-	}
-	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
-		return err
-	}
-	var b [1]byte
-	b[0] = compact0
-	if _, err := writer.Write(b[:]); err != nil {
-		return err
-	}
-	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(b[:]); err != nil {
-			return err
-		}
-		ni += 2
-	}
-	if err := val.ToDoubleRLP(writer); err != nil {
-		return err
-	}
-	if reader != nil {
-		hash[0] = byte(128 + 32)
-		if _, err := reader.Read(hash[1:]); err != nil {
-			return err
-		}
-	}
-	if popped > 0 {
-		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*33]
-		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
-	}
-	hb.hashStack = append(hb.hashStack, hash[:]...)
-	hb.nodeStack = append(hb.nodeStack, nil)
-	return nil
+	return hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash, val)
 }
 
 func (hb *HashBuilder) extension(key []byte) error {
