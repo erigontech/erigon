@@ -349,11 +349,11 @@ func (db *BadgerDatabase) MemCopy() Database {
 			for it.Rewind(); it.Valid(); it.Next() {
 				item := it.Item()
 				k := item.Key()
-				err := item.Value(func(v []byte) error {
+				err2 := item.Value(func(v []byte) error {
 					return writeTx.Set(k, v)
 				})
-				if err != nil {
-					return err
+				if err2 != nil {
+					return err2
 				}
 			}
 			return nil
