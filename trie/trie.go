@@ -46,6 +46,8 @@ type Trie struct {
 
 	touchFunc func(hex []byte, del bool)
 
+	newHasherFunc func() *hasher
+
 	Version uint8
 }
 
@@ -57,7 +59,21 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash) *Trie {
 	trie := &Trie{
-		touchFunc: func([]byte, bool) {},
+		touchFunc:     func([]byte, bool) {},
+		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
+	}
+	if (root != common.Hash{}) && root != EmptyRoot {
+		trie.root = hashNode(root[:])
+	}
+	return trie
+}
+
+// NewTestRLPTrie treats all the data provided to `Update` function as rlp-encoded.
+// it is usually used for testing purposes.
+func NewTestRLPTrie(root common.Hash) *Trie {
+	trie := &Trie{
+		touchFunc:     func([]byte, bool) {},
+		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -1080,7 +1096,7 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 		accNode.Root = EmptyRoot
 		accNode.hashCorrect = true
 	} else {
-		h := newHasher(false)
+		h := t.newHasherFunc()
 		defer returnHasherToPool(h)
 		h.hash(accNode.storage, true, accNode.Root[:])
 	}
@@ -1229,7 +1245,7 @@ func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
-	h := newHasher(false)
+	h := t.newHasherFunc()
 	defer returnHasherToPool(h)
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])

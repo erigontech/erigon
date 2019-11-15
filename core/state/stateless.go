@@ -197,8 +197,7 @@ func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Addres
 		return err
 	}
 	if len(v) > 0 {
-		// Write into 1 extra RLP level
-		m[seckey] = AddExtraRLPLevel(v)
+		m[seckey] = v
 	} else {
 		m[seckey] = nil
 	}

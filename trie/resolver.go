@@ -113,7 +113,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		hb:         NewHashBuilder(),
 	}
 	tr.hb.SetKeyTape(&tr.curr)
-	tr.hb.SetValueTape(&tr.value)
+	tr.hb.SetValueTape(NewRlpSerializableBytesTape(&tr.value))
 	tr.hb.SetNonceTape((*OneUint64Tape)(&tr.a.Nonce))
 	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
 	tr.hb.SetHashTape(&tr.hashes)
@@ -325,9 +325,6 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			}
 		} else {
 			tr.value.Buffer.Reset()
-			if len(v) > 1 || v[0] >= 128 {
-				tr.value.Buffer.WriteByte(byte(128 + len(v)))
-			}
 			tr.value.Buffer.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
