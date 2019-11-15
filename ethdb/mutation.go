@@ -2,7 +2,6 @@ package ethdb
 
 import (
 	"bytes"
-	"errors"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -447,8 +446,6 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 func (m *mutation) MemCopy() Database {
 	panic("Not implemented")
 }
-
-var errNotSupported = errors.New("not supported")
 
 // [TURBO-GETH] Freezer support (not implemented yet)
 // Ancients returns an error as we don't have a backing chain freezer.

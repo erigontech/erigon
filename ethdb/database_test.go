@@ -53,14 +53,13 @@ func newTestBadgerDB() (*BadgerDatabase, func()) {
 	if err != nil {
 		panic("failed to create test file: " + err.Error())
 	}
-	db, err := NewBadgerDatabase(path.Join(dirname, "badger_db"))
+	db, err := NewBadgerDatabase(path.Join(dirname, "badger_db"), true)
 	if err != nil {
 		panic("failed to create test database: " + err.Error())
 	}
 
 	return db, func() {
 		db.Close()
-		os.RemoveAll(dirname)
 	}
 }
 

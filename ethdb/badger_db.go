@@ -18,6 +18,9 @@ package ethdb
 
 import (
 	"bytes"
+	"io/ioutil"
+	"os"
+	"path"
 
 	"github.com/dgraph-io/badger"
 
@@ -28,18 +31,27 @@ import (
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
 type BadgerDatabase struct {
-	db *badger.DB // BadgerDB instance
-
-	log log.Logger // Contextual logger tracking the database path
+	db     *badger.DB // BadgerDB instance
+	log    log.Logger // Contextual logger tracking the database path
+	tmpDir string     // Temporary data directory
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
-func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
+// Set tmp to true if you want db.Close() to remove the directory.
+func NewBadgerDatabase(dir string, tmp bool) (*BadgerDatabase, error) {
 	logger := log.New("database", dir)
 
 	db, err := badger.Open(badger.DefaultOptions(dir))
 	if err != nil {
 		return nil, err
+	}
+
+	if tmp {
+		return &BadgerDatabase{
+			db:     db,
+			log:    logger,
+			tmpDir: dir,
+		}, nil
 	}
 
 	return &BadgerDatabase{
@@ -52,6 +64,9 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 func (db *BadgerDatabase) Close() {
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
+		if len(db.tmpDir) > 0 {
+			os.RemoveAll(db.tmpDir)
+		}
 	} else {
 		db.log.Error("Failed to close database", "err", err)
 	}
@@ -314,14 +329,48 @@ func (db *BadgerDatabase) Keys() ([][]byte, error) {
 	panic("Not implemented")
 }
 
+// MemCopy creates a copy of the database in a temporary directory.
+// We don't do it in memory because BadgerDB doesn't support that.
 func (db *BadgerDatabase) MemCopy() Database {
-	panic("Not implemented")
+	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_")
+	if err != nil {
+		panic("failed to create tmp dir: " + err.Error())
+	}
+	newDb, err := NewBadgerDatabase(path.Join(dirname, "badger"), true)
+	if err != nil {
+		panic("failed to create tmp database: " + err.Error())
+	}
+
+	err = db.db.View(func(readTx *badger.Txn) error {
+		return newDb.db.Update(func(writeTx *badger.Txn) error {
+			it := readTx.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				k := item.Key()
+				err := item.Value(func(v []byte) error {
+					return writeTx.Set(k, v)
+				})
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	return newDb
 }
 
 func (db *BadgerDatabase) Ancients() (uint64, error) {
-	panic("Not implemented")
+	return 0, errNotSupported
 }
 
 func (db *BadgerDatabase) TruncateAncients(items uint64) error {
-	panic("Not implemented")
+	return errNotSupported
 }

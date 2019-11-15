@@ -88,6 +88,8 @@ type Database interface {
 	NewBatch() DbWithPendingMutations
 	Size() int
 	Keys() ([][]byte, error)
+
+	// MemCopy creates a copy of the database in memory.
 	MemCopy() Database
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
@@ -111,3 +113,5 @@ type DbWithPendingMutations interface {
 	Rollback()
 	BatchSize() int
 }
+
+var errNotSupported = errors.New("not supported")
