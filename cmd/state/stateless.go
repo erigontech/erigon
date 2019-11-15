@@ -133,6 +133,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 	check(err)
 	stateDb, err := ethdb.NewBoltDatabase(statefile)
 	check(err)
+	defer stateDb.Close()
 	db := stateDb.DB()
 	blockNum := uint64(*block)
 	var preRoot common.Hash
@@ -275,6 +276,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}
+			tds.PruneTries(false)
 		}
 		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
 			// Snapshots of the state will be written to the same directory as the state file
@@ -283,7 +285,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 		preRoot = header.Root
 		blockNum++
 		if blockNum%1000 == 0 {
-			tds.PruneTries(false)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
@@ -293,7 +294,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 		default:
 		}
 	}
-	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
