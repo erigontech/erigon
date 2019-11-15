@@ -82,6 +82,10 @@ type Database interface {
 	Getter
 	Putter
 	Deleter
+
+	// MultiPut inserts or updates multiple entries.
+	// Entries are passed as an array:
+	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
 	RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error
 	Close()

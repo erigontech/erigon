@@ -23,6 +23,7 @@ import (
 	"path"
 
 	"github.com/dgraph-io/badger"
+	"github.com/petar/GoLLRB/llrb"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -309,8 +310,26 @@ func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]by
 	panic("Not implemented")
 }
 
-func (db *BadgerDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	panic("Not implemented")
+// MultiPut inserts or updates multiple entries.
+// Entries are passed as an array:
+// bucket0, key0, val0, bucket1, key1, val1, ...
+func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
+	l := len(triplets)
+	err := db.db.Update(func(tx *badger.Txn) error {
+		for i := 0; i < l; i += 3 {
+			bucket := triplets[i]
+			key := triplets[i+1]
+			val := triplets[i+2]
+			if err := tx.Set(bucketKey(bucket, key), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(l / 3), err
 }
 
 func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
@@ -318,7 +337,12 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 }
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
-	panic("Not implemented")
+	m := &mutation{
+		db:               db,
+		puts:             make(map[string]*llrb.LLRB),
+		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+	}
+	return m
 }
 
 func (db *BadgerDatabase) Size() int {
