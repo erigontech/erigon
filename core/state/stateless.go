@@ -104,12 +104,7 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 		return nil, err
 	}
 
-	enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
-	if ok {
-		// Unwrap one RLP level
-		if len(enc) > 1 {
-			enc = enc[1:]
-		}
+	if enc, ok := s.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey)); ok {
 		return enc, nil
 	}
 	return nil, fmt.Errorf("could not find storage item %x in account with address %x", key, address)
@@ -151,7 +146,7 @@ func (s *Stateless) UpdateAccountData(_ context.Context, address common.Address,
 		return err
 	}
 	if s.trace {
-		fmt.Printf("UpdateAccountData for addrHash %x\n", addrHash)
+		fmt.Printf("UpdateAccountData for address %x, addrHash %x\n", address, addrHash)
 	}
 	s.accountUpdates[addrHash] = account
 	return nil
@@ -210,6 +205,9 @@ func (s *Stateless) CreateContract(address common.Address) error {
 	addrHash, err := common.HashData(address[:])
 	if err != nil {
 		return err
+	}
+	if s.trace {
+		fmt.Printf("Stateless: CreateContract %x hash %x\n", address, addrHash)
 	}
 	s.created[addrHash] = struct{}{}
 	return nil

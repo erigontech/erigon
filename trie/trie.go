@@ -1048,7 +1048,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return
 
 	default:
-		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
+		panic(fmt.Sprintf("[block %d] %T: invalid node: %v (%v)", blockNr, n, n, key[:keyStart]))
 	}
 }
 
