@@ -137,11 +137,19 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 		kl = 1
 	}
 
-	return hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash, val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash[:], val)
+	if err != nil {
+		return err
+	}
 
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
+		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash [33]byte, val RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 
@@ -188,10 +196,6 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 		}
 	}
 
-	hb.hashStack = append(hb.hashStack, hash[:]...)
-	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
-		hb.nodeStack = append(hb.nodeStack, nil)
-	}
 	return nil
 }
 
@@ -354,7 +358,19 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	hb.acc.EncodeForHashing(valBuf.B)
 	val := rlphacks.RlpEncodedBytes(valBuf.B)
 
-	return hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash, val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash[:], val)
+	if err != nil {
+		return err
+	}
+
+	if popped > 0 {
+		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*33]
+		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
+	}
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	hb.nodeStack = append(hb.nodeStack, nil)
+
+	return nil
 }
 
 func (hb *HashBuilder) extension(key []byte) error {
