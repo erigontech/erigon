@@ -351,7 +351,7 @@ func (m *mutation) Commit() (uint64, error) {
 		for key := range bt {
 			value, _ := bt.GetStr(key)
 			if err := tuples.Append(bucketB, []byte(key), value); err != nil {
-				return err
+				return 0, err
 			}
 		}
 	}
@@ -380,7 +380,7 @@ func (m *mutation) Keys() ([][]byte, error) {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			if err := tuples.Append(bucketB, []byte(key)); err != nil {
-				return err
+				return nil, err
 			}
 		}
 	}
