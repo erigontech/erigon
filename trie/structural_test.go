@@ -204,10 +204,10 @@ var streamTests = []struct {
 		sHexKeys:          []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
 		sHexValues:        []string{"0x01", "0x02"},
 		rsHex:             []string{},
-		hexesExpected:     []string{"0x0000000000000000000000000000000000", "0x0000000000000000000000000000000010"},
+		hexesExpected:     []string{"0x0000000000000000000000000000000010"},
 		aBalancesExpected: []int64{13},
 		sValuesExpected:   []string{},
-		hashesExpected:    []string{"0xd1b74ae953b84c313b9f299e720dba7a88eb18d4a62d058cebd5c130afdda018"},
+		hashesExpected:    []string{},
 	},
 	{
 		aHexKeys:          []string{"0x0000000000000000", "0x000f000000000000"},
@@ -215,15 +215,14 @@ var streamTests = []struct {
 		sHexKeys:          []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
 		sHexValues:        []string{"0x01", "0x02"},
 		rsHex:             []string{"0x0000000000000000", "0x000f000000000000"},
-		hexesExpected:     []string{"0x0000000000000000000000000000000000", "0x0000000000000000000000000000000010", "0x0000000f00000000000000000000000010"},
+		hexesExpected:     []string{"0x0000000000000000000000000000000010", "0000000f00000000000000000000000010"},
 		aBalancesExpected: []int64{13, 567},
 		sValuesExpected:   []string{},
-		hashesExpected:    []string{"0xd1b74ae953b84c313b9f299e720dba7a88eb18d4a62d058cebd5c130afdda018"},
+		hashesExpected:    []string{},
 	},
 }
 
 func TestToStream(t *testing.T) {
-	t.Skip("still debugging")
 	trace := true
 	for tn, streamTest := range streamTests {
 		if trace {
@@ -290,7 +289,7 @@ func TestToStream(t *testing.T) {
 			}
 		}
 		// Check that the hash of the stream is equal to the hash of the trie
-		streamHash, err := StreamHash(s, trace)
+		streamHash, err := StreamHash(s, 8, trace)
 		if trace {
 			fmt.Printf("want:\n%s\n", tr.root.fstring(""))
 		}

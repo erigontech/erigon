@@ -69,14 +69,14 @@ func GenStructStep(
 	} else {
 		maxLen = succLen
 	}
-	//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen)
+	//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen, succLen)
 	// Add the digit immediately following the max common prefix and compute length of remainder length
 	extraDigit := curr[maxLen]
 	for maxLen >= len(groups) {
 		groups = append(groups, 0)
 	}
 	groups[maxLen] |= (uint16(1) << extraDigit)
-	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
+	//fmt.Printf("groups is now %b\n", groups)
 	remainderStart := maxLen
 	if len(succ) > 0 || precExists {
 		remainderStart++

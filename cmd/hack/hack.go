@@ -44,7 +44,7 @@ var block = flag.Int("block", 1, "specifies a block number for operation")
 var account = flag.String("account", "0x", "specifies account to investigate")
 var name = flag.String("name", "", "name to add to the file names")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
-var image = flag.String("image", "0x1", "image value for preimage action")
+var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -872,13 +872,13 @@ func testDifficulty() {
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
 }
 
-func testBlockHashes() {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	for i := uint64(1000000); i < uint64(1751612); i++ {
+	for i := uint64(block); i < uint64(block+1000); i++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, i)
 		header := rawdb.ReadHeader(ethDb, hash, i)
-		if header.Root == common.BytesToHash(common.FromHex("0x18186d0c469558437ade9b424ca9176b56fa0a8ca465eaf0f468294b37b693f8")) {
+		if header.Root == stateRoot || stateRoot == (common.Hash{}) {
 			fmt.Printf("\n===============\nCanonical hash for %d: %x\n", i, hash)
 			fmt.Printf("Header.Root: %x\n", header.Root)
 			fmt.Printf("Header.TxHash: %x\n", header.TxHash)
@@ -1208,7 +1208,7 @@ func main() {
 	//	testReset(uint64(*reset))
 	//}
 	if *action == "testBlockHashes" {
-		testBlockHashes()
+		testBlockHashes(*chaindata, *block, common.HexToHash(*hash))
 	}
 	//printBuckets(db)
 	//printTxHashes()
@@ -1222,7 +1222,7 @@ func main() {
 	//invTree("iw", "ir", "id", *block, true)
 	//loadAccount()
 	if *action == "preimage" {
-		preimage(*chaindata, common.HexToHash(*image))
+		preimage(*chaindata, common.HexToHash(*hash))
 	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
