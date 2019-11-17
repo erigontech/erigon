@@ -5,12 +5,13 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-type puts map[string]putsBucket
-type putsBucket map[string][]byte
+type puts map[string]putsBucket   //map[bucket]putsBucket
+type putsBucket map[string][]byte //map[key]value
 
 func newPuts() puts {
 	return make(puts)
@@ -344,25 +345,18 @@ func (m *mutation) Commit() (uint64, error) {
 
 	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
 
-	tuples := make([][]byte, m.puts.Size()*3)
-	var index int
+	tuples := common.NewTuples(m.puts.Size(), 3, 1)
 	for bucketStr, bt := range m.puts {
 		bucketB := []byte(bucketStr)
-		keys := bt.GetSortedKeys()
-		for _, key := range keys {
-			tuples[index] = bucketB
-			index++
-			tuples[index] = []byte(key)
-			index++
-
+		for key := range bt {
 			value, _ := bt.GetStr(key)
-			tuples[index] = value
-			index++
+			tuples.Append(bucketB, []byte(key), value)
 		}
 	}
 	var written uint64
 	var putErr error
-	if written, putErr = m.db.MultiPut(tuples...); putErr != nil {
+	sort.Sort(tuples)
+	if written, putErr = m.db.MultiPut(tuples.Values...); putErr != nil {
 		return 0, putErr
 	}
 	m.puts = make(puts)
@@ -379,19 +373,15 @@ func (m *mutation) Rollback() {
 func (m *mutation) Keys() ([][]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	pairs := make([][]byte, 2*m.puts.Size())
-	idx := 0
+	tuples := common.NewTuples(m.puts.Size(), 2, 1)
 	for bucketStr, bt := range m.puts {
 		bucketB := []byte(bucketStr)
-		keys := bt.GetSortedKeys()
-		for _, key := range keys {
-			pairs[idx] = bucketB
-			idx++
-			pairs[idx] = []byte(key)
-			idx++
+		for key := range bt {
+			tuples.Append(bucketB, []byte(key))
 		}
 	}
-	return pairs, nil
+	sort.Sort(tuples)
+	return tuples.Values, nil
 }
 
 func (m *mutation) Close() {
