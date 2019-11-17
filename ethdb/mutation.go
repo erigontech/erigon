@@ -180,6 +180,7 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	var ok bool
 	if t, ok = m.puts[string(bb)]; !ok {
 		m.puts[string(bb)] = make(putsBucket)
+		t = m.puts[string(bb)]
 	}
 	t[string(k)] = v
 	return nil
