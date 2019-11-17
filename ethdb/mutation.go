@@ -22,7 +22,7 @@ func (p puts) Set(bucket, key, value []byte) {
 	var ok bool
 	if bucketPuts, ok = p[string(bucket)]; !ok {
 		p[string(bucket)] = make(putsBucket)
-		bucketPuts = p[bucket]
+		bucketPuts = p[string(bucket)]
 	}
 	bucketPuts[string(key)] = value
 }
