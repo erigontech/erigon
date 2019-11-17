@@ -24,6 +24,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -438,10 +439,14 @@ func hexToQuad(nd node, hex []byte, newTrie *Trie) {
 	case nil:
 		return
 	case valueNode:
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, n)
+		nCopy := make(valueNode, len(n))
+		copy(nCopy, n)
+		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, nCopy)
 		return
 	case *accountNode:
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, &accountNode{n.Account, nil, true})
+		accountCopy := accounts.NewAccount()
+		accountCopy.Copy(&n.Account)
+		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, &accountNode{accountCopy, nil, true})
 		aHex := hex
 		if aHex[len(aHex)-1] == 16 {
 			aHex = aHex[:len(aHex)-1]
