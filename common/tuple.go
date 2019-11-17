@@ -23,14 +23,14 @@ func NewTuples(size, n, sortBy int) *Tuple {
 }
 
 func (t *Tuple) Append(values ...[]byte) error {
-	if len(values) < t.N {
+	if len(values) != t.N {
 		return errors.New("got an incorrect number of values")
 	}
 
 	t.Length++
 
-	for i, value := range values {
-		t.Values[t.Length*t.N+i] = value
+	for _, value := range values {
+		t.Values = append(t.Values, value)
 	}
 	return nil
 }
