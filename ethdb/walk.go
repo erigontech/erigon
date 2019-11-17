@@ -22,7 +22,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
@@ -80,7 +79,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 }
 
 func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
-	t := llrb.New()
+	var keys [][]byte
 	startCode := dbutils.EncodeTimestamp(starttimestamp)
 	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		timestamp, bucket := dbutils.DecodeTimestamp(k)
@@ -95,7 +94,7 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 			return false, err
 		}
 		err = d.Walk(func(k, v []byte) error {
-			t.ReplaceOrInsert(&PutItem{key: k, value: nil})
+			keys = append(keys, k)
 			return nil
 		})
 		if err != nil {
@@ -106,29 +105,20 @@ func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]comm
 	}); err != nil {
 		return nil, err
 	}
-	accounts := make([]common.Address, t.Len())
-	if t.Len() == 0 {
-		return accounts, nil
+
+	if len(keys) == 0 {
+		return nil, nil
 	}
+	accounts := make([]common.Address, len(keys))
 	idx := 0
-	var extErr error
-	min, _ := t.Min().(*PutItem)
-	if min == nil {
-		return accounts, nil
-	}
-	t.AscendGreaterOrEqual(min, func(i llrb.Item) bool {
-		item := i.(*PutItem)
-		value, err := db.Get(dbutils.PreimagePrefix, item.key)
+
+	for _, key := range keys {
+		value, err := db.Get(dbutils.PreimagePrefix, key)
 		if err != nil {
-			extErr = fmt.Errorf("Could not get preimage for key %x", item.key)
-			return false
+			return nil, fmt.Errorf("could not get preimage for key %x", key)
 		}
 		copy(accounts[idx][:], value)
 		idx++
-		return true
-	})
-	if extErr != nil {
-		return nil, extErr
 	}
 	return accounts, nil
 }
