@@ -81,16 +81,6 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 	return v, true
 }
 
-func (pb putsBucket) GetSortedKeys() []string {
-	keys := make([]string, 0, len(pb))
-	for key := range pb {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-
-	return keys
-}
-
 type mutation struct {
 	puts puts // Map buckets to map[key]value
 	//map[timestamp]map[hBucket]listOfChangedKeys
