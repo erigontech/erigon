@@ -92,9 +92,8 @@ type Resolver struct {
 	historical bool
 	blockNr    uint64
 	hb         *HashBuilder
-	fieldSet   uint32 // fieldSet for the next invocation of step2
+	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
 	rss        []*ResolveSet
-	prec       bytes.Buffer
 	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
 	value      OneBytesTape // Current value to be used as the value tape for the hash builder
@@ -110,7 +109,7 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		requests:   []*ResolveRequest{},
 		reqIndices: []int{},
 		blockNr:    blockNr,
-		hb:         NewHashBuilder(),
+		hb:         NewHashBuilder(false),
 	}
 	tr.hb.SetKeyTape(&tr.curr)
 	tr.hb.SetValueTape(NewRlpSerializableBytesTape(&tr.value))
@@ -213,14 +212,12 @@ func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 }
 
 func (tr *Resolver) finaliseRoot() error {
-	tr.prec.Reset()
-	tr.prec.Write(tr.curr.Bytes())
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -232,7 +229,11 @@ func (tr *Resolver) finaliseRoot() error {
 		if tr.currentReq.RequiresRLP {
 			hasher := newHasher(false)
 			defer returnHasherToPool(hasher)
-			tr.currentReq.NodeRLP = hasher.hashChildren(hbRoot, 0)
+			h, err := hasher.hashChildren(hbRoot, 0)
+			if err != nil {
+				return err
+			}
+			tr.currentReq.NodeRLP = h
 		}
 		var hookKey []byte
 		if tr.currentReq.contract == nil {
@@ -254,6 +255,11 @@ func (tr *Resolver) finaliseRoot() error {
 
 // Various values of the account field set
 const (
+	AccountFieldNonceOnly           uint32 = 0x01
+	AccountFieldBalanceOnly         uint32 = 0x02
+	AccountFieldRootOnly            uint32 = 0x04
+	AccountFieldCodeHashOnly        uint32 = 0x08
+	AccountFieldSSizeOnly           uint32 = 0x10
 	AccountFieldSetNotAccount       uint32 = 0x00
 	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
 	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
@@ -273,11 +279,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.currentReq = tr.requests[tr.reqIndices[keyIdx]]
 		tr.currentRs = tr.rss[keyIdx]
 		tr.curr.Reset()
-		tr.prec.Reset()
 	}
 	if len(v) > 0 {
-		tr.prec.Reset()
-		tr.prec.Write(tr.curr.Bytes())
 		tr.curr.Reset()
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
@@ -296,7 +299,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 			if err != nil {
 				return false, err
 			}
@@ -315,8 +318,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 					tr.fieldSet = AccountFieldSetContract
 				}
 				// Load hashes onto the stack of the hashbuilder
-				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
-				tr.hashes.hashes[1] = tr.a.Root     // this will end up on top of the stack
+				tr.hashes.hashes[0] = tr.a.Root     // this will be just beneath the top of the stack
+				tr.hashes.hashes[1] = tr.a.CodeHash // this will end up on top of the stack
 				tr.hashes.idx = 0                   // Reset the counter
 				// the first item ends up deepest on the stack, the seccond item - on the top
 				if err := tr.hb.hash(2); err != nil {

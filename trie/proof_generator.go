@@ -289,14 +289,14 @@ func (bwb *BlockWitnessBuilder) emptyRoot() error {
 
 // MakeBlockWitness constructs block witness from the given trie and the
 // list of keys that need to be accessible in such witness
-func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs, storageRs *ResolveSet, codeMap map[common.Hash][]byte) error {
+func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet, codeMap map[common.Hash][]byte) error {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
-	return bwb.makeBlockWitness(t.root, []byte{}, rs, storageRs, hr, true, codeMap)
+	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeMap)
 }
 
 func (bwb *BlockWitnessBuilder) makeBlockWitness(
-	nd node, hex []byte, rs, storageRs *ResolveSet, hr *hasher, force bool,
+	nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool,
 	codeMap map[common.Hash][]byte,
 ) error {
 	switch n := nd.(type) {
@@ -311,7 +311,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			h = h[:len(h)-1]
 		}
 		hexVal := concat(hex, h...)
-		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, storageRs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeMap); err != nil {
 			return err
 		}
 		switch v := n.Val.(type) {
@@ -359,10 +359,10 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		hex2 := make([]byte, len(hex)+1)
 		copy(hex2, hex)
 		hex2[len(hex)] = i2
-		if err := bwb.makeBlockWitness(n.child1, hex1, rs, storageRs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false, codeMap); err != nil {
 			return err
 		}
-		if err := bwb.makeBlockWitness(n.child2, hex2, rs, storageRs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.child2, hex2, rs, hr, false, codeMap); err != nil {
 			return err
 		}
 		return bwb.branch(n.mask)
@@ -379,7 +379,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		var set uint32
 		for i, child := range n.Children {
 			if child != nil {
-				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, storageRs, hr, false, codeMap); err != nil {
+				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false, codeMap); err != nil {
 					return err
 				}
 				set |= (uint32(1) << uint(i))
@@ -387,8 +387,17 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		}
 		return bwb.branch(set)
 	case *accountNode:
-		hashOnly := storageRs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
+			if n.storage == nil {
+				if err := bwb.emptyRoot(); err != nil {
+					return err
+				}
+			} else {
+				// Here we substitute rs parameter for storageRs, because it needs to become the default
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
+					return err
+				}
+			}
 			code, ok := codeMap[n.CodeHash]
 			if ok {
 				if err := bwb.supplyCode(code); err != nil {
@@ -405,25 +414,6 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 					return err
 				}
 			}
-			if hashOnly {
-				if err := bwb.supplyHash(n.Root); err != nil {
-					return err
-				}
-				if err := bwb.hash(1); err != nil {
-					return err
-				}
-			} else {
-				if n.storage == nil {
-					if err := bwb.emptyRoot(); err != nil {
-						return err
-					}
-				} else {
-					// Here we substitute rs parameter for storageRs, because it needs to become the default
-					if err := bwb.makeBlockWitness(n.storage, hex, storageRs, storageRs, hr, true, codeMap); err != nil {
-						return err
-					}
-				}
-			}
 		}
 		if err := bwb.supplyNonce(n.Nonce); err != nil {
 			return err
@@ -434,6 +424,11 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		return nil
 	case hashNode:
 		hashOnly := rs.HashOnly(hex)
+		if !hashOnly {
+			if c := rs.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
+				hashOnly = true
+			}
+		}
 		if hashOnly {
 			var hn common.Hash
 			copy(hn[:], []byte(n))
@@ -582,7 +577,7 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 	if err := decoder.Decode(&lens); err != nil {
 		return nil, nil, err
 	}
-	hb := NewHashBuilder()
+	hb := NewHashBuilder(false)
 	// It is important to read the tapes in the same order as they were written
 	startOffset := decoder.NumBytesRead()
 	endOffset := startOffset + lens[KeyTape]

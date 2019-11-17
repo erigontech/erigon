@@ -160,7 +160,7 @@ func TestMakeBlockWitness(t *testing.T) {
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
 	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	expected := common.FromHex("0x0601024704010402040304")
@@ -175,7 +175,7 @@ func TestSerialiseBlockWitness(t *testing.T) {
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
 	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	var b bytes.Buffer
