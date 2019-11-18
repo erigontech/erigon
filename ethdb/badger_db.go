@@ -298,7 +298,7 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 
 // TODO [Andrew] implement the full Database interface
 
-func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 
@@ -306,7 +306,7 @@ func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits u
 	panic("Not implemented")
 }
 
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 
@@ -346,7 +346,8 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 }
 
 func (db *BadgerDatabase) Size() int {
-	panic("Not implemented")
+	// TODO [Andrew] implement
+	return 0
 }
 
 func (db *BadgerDatabase) Keys() ([][]byte, error) {

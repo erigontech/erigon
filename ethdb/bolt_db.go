@@ -259,13 +259,13 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 	return err
 }
 
-func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
-	keyIdx := 0 // What is the current key we are extracting
-	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
-	startkey := startkeys[keyIdx]
+	rangeIdx := 0 // What is the current range we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
+	startkey := startkeys[rangeIdx]
 	if err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
@@ -274,7 +274,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 		c := b.Cursor()
 		k, v := c.Seek(startkey)
 		for k != nil {
-			// Adjust keyIdx if needed
+			// Adjust rangeIdx if needed
 			if fixedbytes > 0 {
 				cmp := int(-1)
 				for cmp != 0 {
@@ -294,18 +294,17 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 							return nil
 						}
 					} else if cmp > 0 {
-						keyIdx++
-						if keyIdx == len(startkeys) {
+						rangeIdx++
+						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
-						startkey = startkeys[keyIdx]
+						fixedbytes, mask = bytesmask(fixedbits[rangeIdx])
+						startkey = startkeys[rangeIdx]
 					}
 				}
 			}
 			if len(v) > 0 {
-				_, err := walker(keyIdx, k, v)
-				if err != nil {
+				if err := walker(rangeIdx, k, v); err != nil {
 					return err
 				}
 			}
@@ -396,7 +395,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 	return err
 }
 
-func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -500,10 +499,12 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			if cmp < 0 {
 				hK1, _ := hC1.Seek(k)
 				if bytes.HasPrefix(hK1, k) {
-					goOn, err = walker(keyIdx, k, v)
+					err = walker(keyIdx, k, v)
+					goOn = err == nil
 				}
 			} else {
-				goOn, err = walker(keyIdx, hK[:l], hV)
+				err = walker(keyIdx, hK[:l], hV)
+				goOn = err == nil
 			}
 			if goOn {
 				if cmp <= 0 {

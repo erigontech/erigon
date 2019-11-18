@@ -265,11 +265,11 @@ const (
 )
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
+func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
-			return false, err
+			return err
 		}
 		tr.hb.Reset()
 		tr.groups = nil
@@ -302,13 +302,13 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			var err error
 			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.prec.Bytes(), tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
 			if err != nil {
-				return false, err
+				return err
 			}
 		}
 		// Remember the current key and value
 		if tr.accounts {
 			if err := tr.a.DecodeForStorage(v); err != nil {
-				return false, err
+				return err
 			}
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.fieldSet = AccountFieldSetNotContract
@@ -324,7 +324,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 				tr.hashes.idx = 0                   // Reset the counter
 				// the first item ends up deepest on the stack, the seccond item - on the top
 				if err := tr.hb.hash(2); err != nil {
-					return false, err
+					return err
 				}
 			}
 		} else {
@@ -333,7 +333,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) (bool, error) {
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}
-	return true, nil
+	return nil
 }
 
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
