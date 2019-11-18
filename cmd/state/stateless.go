@@ -106,7 +106,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string, triesize int) {
+func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool) {
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -240,9 +240,27 @@ func stateless(chaindata string, statefile string, triesize int) {
 				finalRootFail = true
 			}
 		}
+		var preCalculatedRoot common.Hash
+		if tryPreRoot {
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 49018)
+			if err != nil {
+				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
+				return
+			}
+		}
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
+			return
+		}
+		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
+			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			f, err1 := os.Create(filename)
+			if err1 == nil {
+				defer f.Close()
+				tds.PrintTrie(f)
+			}
+			fmt.Printf("block %d, preCalculatedRoot %x != lastRoot %x\n", blockNum, preCalculatedRoot, tds.LastRoot())
 			return
 		}
 		if finalRootFail {
@@ -260,7 +278,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 			}
 		}
 		nextRoot := roots[len(roots)-1]
-		//fmt.Printf("Next root %x\n", nextRoot)
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}

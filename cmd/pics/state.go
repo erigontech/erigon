@@ -564,7 +564,6 @@ func initialState1() error {
 	}
 
 	rs := trie.NewResolveSet(0)
-	storageRs := trie.NewResolveSet(0)
 	touches, storageTouches := tds.ExtractTouches()
 	var touchQuads = make([][]byte, len(touches))
 	for _, touch := range touches {
@@ -574,14 +573,14 @@ func initialState1() error {
 	}
 	for _, touch := range storageTouches {
 		touchQuad := trie.KeyToQuad(touch)
-		storageRs.AddHex(touchQuad)
+		rs.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
 	bwb := trie.NewBlockWitnessBuilder(false)
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if err = bwb.MakeBlockWitness(quadTrie, rs, storageRs, codeMap); err != nil {
+	if err = bwb.MakeBlockWitness(quadTrie, rs, codeMap); err != nil {
 		return err
 	}
 	var witness bytes.Buffer

@@ -37,9 +37,10 @@ type structInfoReceiver interface {
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
-// `recursive` parameter is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf.
-// Recursive invocation is used to emit opcodes for non-leaf nodes.
-// `prec`, `curr`, `succ` are three full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
+// `isHashNode` parameter is set to true if `curr` key corresponds not to a leaf but to a hash node (which is "folded" respresentation
+// of a branch node).
+// `recursive` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
+// `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
@@ -49,16 +50,18 @@ type structInfoReceiver interface {
 func GenStructStep(
 	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
+	isHashOfNode bool,
 	recursive bool,
-	prec, curr, succ []byte,
+	curr, succ []byte,
 	e structInfoReceiver,
 	groups []uint16,
 ) ([]uint16, error) {
-	if !recursive && len(prec) == 0 {
-		prec = nil
-	}
+	var precExists = len(groups) > 0
 	// Calculate the prefix of the smallest prefix group containing curr
-	precLen := prefixLen(prec, curr)
+	var precLen int
+	if len(groups) > 0 {
+		precLen = len(groups) - 1
+	}
 	succLen := prefixLen(succ, curr)
 	var maxLen int
 	if precLen > succLen {
@@ -66,7 +69,7 @@ func GenStructStep(
 	} else {
 		maxLen = succLen
 	}
-	//fmt.Printf("prec: %x, curr: %x, succ: %x, maxLen %d, prefix: %x\n", prec, curr, succ, maxLen, prefix)
+	//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen)
 	// Add the digit immediately following the max common prefix and compute length of remainder length
 	extraDigit := curr[maxLen]
 	for maxLen >= len(groups) {
@@ -75,12 +78,14 @@ func GenStructStep(
 	groups[maxLen] |= (uint16(1) << extraDigit)
 	//fmt.Printf("groups[%d] is now %b, len(groups) %d, prefix %x\n", maxLen, groups[maxLen], len(groups), prefix)
 	remainderStart := maxLen
-	if len(succ) > 0 || prec != nil {
+	if len(succ) > 0 || precExists {
 		remainderStart++
 	}
 	remainderLen := len(curr) - remainderStart
-	// Emit LEAF or EXTENSION based on the remainder
-	if recursive {
+	if isHashOfNode {
+		if err := e.hash(1); err != nil {
+			return nil, err
+		}
 		if remainderLen > 0 {
 			if hashOnly(curr[:maxLen]) {
 				if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
@@ -93,24 +98,39 @@ func GenStructStep(
 			}
 		}
 	} else {
-		if hashOnly(curr[:maxLen]) {
-			if fieldSet == 0 {
-				if err := e.leafHash(remainderLen); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.accountLeafHash(remainderLen, fieldSet); err != nil {
-					return nil, err
+		// Emit LEAF or EXTENSION based on the remainder
+		if recursive {
+			if remainderLen > 0 {
+				if hashOnly(curr[:maxLen]) {
+					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
 				}
 			}
 		} else {
-			if fieldSet == 0 {
-				if err := e.leaf(remainderLen); err != nil {
-					return nil, err
+			if hashOnly(curr[:maxLen]) {
+				if fieldSet == 0 {
+					if err := e.leafHash(remainderLen); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.accountLeafHash(remainderLen, fieldSet); err != nil {
+						return nil, err
+					}
 				}
 			} else {
-				if err := e.accountLeaf(remainderLen, fieldSet); err != nil {
-					return nil, err
+				if fieldSet == 0 {
+					if err := e.leaf(remainderLen); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.accountLeaf(remainderLen, fieldSet); err != nil {
+						return nil, err
+					}
 				}
 			}
 		}
@@ -120,7 +140,7 @@ func GenStructStep(
 		return groups, nil
 	}
 	// Close the immediately encompassing prefix group, if needed
-	if len(succ) > 0 || prec != nil {
+	if len(succ) > 0 || precExists {
 		if hashOnly(curr[:maxLen]) {
 			if err := e.branchHash(groups[maxLen]); err != nil {
 				return nil, err
@@ -138,14 +158,10 @@ func GenStructStep(
 	}
 	// Identify preceding key for the recursive invocation
 	newCurr := curr[:precLen]
-	var newPrec []byte
 	for len(groups) > 0 && groups[len(groups)-1] == 0 {
 		groups = groups[:len(groups)-1]
 	}
-	if len(groups) >= 1 {
-		newPrec = curr[:len(groups)-1]
-	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, true, newPrec, newCurr, succ, e, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, groups)
 }

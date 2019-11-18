@@ -233,7 +233,7 @@ func (rds *RepairDbState) UpdateAccountData(_ context.Context, address common.Ad
 		if err != nil {
 			return err
 		}
-		hashes := make(Hashes, len(m))
+		hashes := make(common.Hashes, len(m))
 		i := 0
 		for keyHash := range m {
 			hashes[i] = keyHash
@@ -261,7 +261,7 @@ func (rds *RepairDbState) UpdateAccountData(_ context.Context, address common.Ad
 		if err != nil {
 			return err
 		}
-		hashes := make(Hashes, len(m))
+		hashes := make(common.Hashes, len(m))
 		i := 0
 		for keyHash := range m {
 			hashes[i] = keyHash
