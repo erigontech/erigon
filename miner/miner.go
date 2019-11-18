@@ -20,6 +20,7 @@ package miner
 import (
 	"fmt"
 	"math/big"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -55,12 +56,13 @@ type Config struct {
 
 // Miner creates blocks and searches for proof-of-work values.
 type Miner struct {
-	mux      *event.TypeMux
-	worker   *worker
-	coinbase common.Address
-	eth      Backend
-	engine   consensus.Engine
-	exitCh   chan struct{}
+	mux        *event.TypeMux
+	worker     *worker
+	coinbase   common.Address
+	coinbaseMu sync.RWMutex
+	eth        Backend
+	engine     consensus.Engine
+	exitCh     chan struct{}
 
 	canStart    int32 // can start indicates whether we can start the mining operation
 	shouldStart int32 // should start indicates whether we should start after sync
@@ -108,7 +110,7 @@ func (mnr *Miner) update() {
 				atomic.StoreInt32(&mnr.canStart, 1)
 				atomic.StoreInt32(&mnr.shouldStart, 0)
 				if shouldStart {
-					mnr.Start(mnr.coinbase)
+					mnr.Start(mnr.getCoinbase())
 				}
 				// stop immediately and ignore all further pending events
 				return
@@ -136,6 +138,7 @@ func (mnr *Miner) Stop() {
 }
 
 func (mnr *Miner) Close() {
+	mnr.worker.stop()
 	mnr.worker.close()
 	close(mnr.exitCh)
 }
@@ -179,6 +182,18 @@ func (mnr *Miner) PendingBlock() *types.Block {
 }
 
 func (mnr *Miner) SetEtherbase(addr common.Address) {
-	mnr.coinbase = addr
+	mnr.setCoinbase(addr)
 	mnr.worker.setEtherbase(addr)
+}
+
+func (mnr *Miner) getCoinbase() common.Address {
+	mnr.coinbaseMu.RLock()
+	defer mnr.coinbaseMu.RUnlock()
+	return mnr.coinbase
+}
+
+func (mnr *Miner) setCoinbase(addr common.Address) {
+	mnr.coinbaseMu.Lock()
+	mnr.coinbase = addr
+	mnr.coinbaseMu.Unlock()
 }

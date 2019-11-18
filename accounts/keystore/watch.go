@@ -19,10 +19,12 @@
 package keystore
 
 import (
+	"sync/atomic"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/rjeczalik/notify"
+
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type watcher struct {
@@ -32,6 +34,8 @@ type watcher struct {
 	ev       chan notify.EventInfo
 	quit     chan struct{}
 }
+
+var watcherCount = new(int32)
 
 func newWatcher(ac *accountCache) *watcher {
 	return &watcher{
@@ -57,6 +61,8 @@ func (w *watcher) close() {
 }
 
 func (w *watcher) loop() {
+	atomic.AddInt32(watcherCount, 1)
+
 	defer func() {
 		w.ac.mu.Lock()
 		w.running = false
@@ -69,7 +75,14 @@ func (w *watcher) loop() {
 		logger.Trace("Failed to watch keystore folder", "err", err)
 		return
 	}
-	defer notify.Stop(w.ev)
+
+	defer func() {
+		notify.Stop(w.ev)
+		if count := atomic.AddInt32(watcherCount, -1); count == 0 {
+			notify.Close()
+		}
+	}()
+
 	logger.Trace("Started watching keystore folder")
 	defer logger.Trace("Stopped watching keystore folder")
 

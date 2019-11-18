@@ -31,7 +31,6 @@ func NewMemDatabase() *BoltDatabase {
 		panic(err)
 	}
 	return &BoltDatabase{
-		fn:  "in-memory",
 		db:  db,
 		log: logger,
 	}
@@ -46,7 +45,6 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 		panic(err)
 	}
 	return &BoltDatabase{
-		fn:  "in-memory",
 		db:  db,
 		log: logger,
 	}, db
@@ -80,7 +78,6 @@ func (db *BoltDatabase) MemCopy() Database {
 		panic(err)
 	}
 	return &BoltDatabase{
-		fn:  "in-memory",
 		db:  mem,
 		log: logger,
 	}

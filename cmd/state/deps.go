@@ -52,9 +52,9 @@ func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 		if smap, ok := dt.storageWriteSetFrame[addr]; ok {
 			smap[loc] = struct{}{}
 		} else {
-			smap_dest := make(map[common.Hash]struct{})
-			smap_dest[loc] = struct{}{}
-			dt.storageWriteSetFrame[addr] = smap_dest
+			smapDest := make(map[common.Hash]struct{})
+			smapDest[loc] = struct{}{}
+			dt.storageWriteSetFrame[addr] = smapDest
 		}
 	} else if op == vm.SLOAD {
 		addr := contract.Address()
@@ -65,9 +65,9 @@ func (dt *DepTracer) CaptureState(env *vm.EVM, pc uint64, op vm.OpCode, gas, cos
 		if smap, ok := dt.storageReadSet[addr]; ok {
 			smap[loc] = struct{}{}
 		} else {
-			smap_dest := make(map[common.Hash]struct{})
-			smap_dest[loc] = struct{}{}
-			dt.storageReadSet[addr] = smap_dest
+			smapDest := make(map[common.Hash]struct{})
+			smapDest[loc] = struct{}{}
+			dt.storageReadSet[addr] = smapDest
 		}
 	}
 	return nil
@@ -84,9 +84,9 @@ func (dt *DepTracer) CaptureEnd(depth int, output []byte, gasUsed uint64, t time
 			dt.accountsWriteSet[addr] = struct{}{}
 		}
 		for addr, smap := range dt.storageWriteSetFrame {
-			if smap_dest, ok := dt.storageWriteSet[addr]; ok {
+			if smapDest, ok := dt.storageWriteSet[addr]; ok {
 				for loc := range smap {
-					smap_dest[loc] = struct{}{}
+					smapDest[loc] = struct{}{}
 				}
 			} else {
 				dt.storageWriteSet[addr] = smap

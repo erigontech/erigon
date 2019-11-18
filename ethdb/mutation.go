@@ -3,12 +3,12 @@ package ethdb
 import (
 	"bytes"
 	"errors"
-	"github.com/ledgerwatch/bolt"
+	"sync"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/petar/GoLLRB/llrb"
-	"sync"
 )
 
 type PutItem struct {
@@ -459,9 +459,4 @@ func (m *mutation) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *mutation) TruncateAncients(items uint64) error {
 	return errNotSupported
-}
-
-// Get bolt database instance
-func (m *mutation) DB() *bolt.DB {
-	return m.db.DB()
 }

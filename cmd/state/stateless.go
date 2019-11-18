@@ -106,7 +106,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string, triesize int) {
+func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool) {
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -133,6 +133,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 	check(err)
 	stateDb, err := ethdb.NewBoltDatabase(statefile)
 	check(err)
+	defer stateDb.Close()
 	db := stateDb.DB()
 	blockNum := uint64(*block)
 	var preRoot common.Hash
@@ -239,9 +240,27 @@ func stateless(chaindata string, statefile string, triesize int) {
 				finalRootFail = true
 			}
 		}
+		var preCalculatedRoot common.Hash
+		if tryPreRoot {
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 49018)
+			if err != nil {
+				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
+				return
+			}
+		}
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
+			return
+		}
+		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
+			filename := fmt.Sprintf("right_%d.txt", blockNum)
+			f, err1 := os.Create(filename)
+			if err1 == nil {
+				defer f.Close()
+				tds.PrintTrie(f)
+			}
+			fmt.Printf("block %d, preCalculatedRoot %x != lastRoot %x\n", blockNum, preCalculatedRoot, tds.LastRoot())
 			return
 		}
 		if finalRootFail {
@@ -259,7 +278,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 			}
 		}
 		nextRoot := roots[len(roots)-1]
-		//fmt.Printf("Next root %x\n", nextRoot)
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 		}
@@ -275,6 +293,7 @@ func stateless(chaindata string, statefile string, triesize int) {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}
+			tds.PruneTries(false)
 		}
 		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
 			// Snapshots of the state will be written to the same directory as the state file
@@ -283,7 +302,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 		preRoot = header.Root
 		blockNum++
 		if blockNum%1000 == 0 {
-			tds.PruneTries(false)
 			fmt.Printf("Processed %d blocks\n", blockNum)
 		}
 		// Check for interrupts
@@ -293,7 +311,6 @@ func stateless(chaindata string, statefile string, triesize int) {
 		default:
 		}
 	}
-	stateDb.Close()
 	fmt.Printf("Processed %d blocks\n", blockNum)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))

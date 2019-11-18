@@ -310,7 +310,7 @@ Analogously, the last item in any prefix group has the property that its common 
 immediately to the left is longer than its common prefix with the item immediately to the right.
 
 The algorithm proceeds in steps, one step for each key-value pair, in the lexicographic order of the keys. At each step,
-it observes three keys (sequences of digits) - current, preceding, and succeeding. Because the algorithm emits
+it observes two keys (sequences of digits) - current, and succeeding. Because the algorithm emits
 opcodes that manipulate the stack (technically, two stacks, but because they are always of the same lengths, we can
 just say "stack"), it keeps track of what is currently on the stack. Each prefix group which is currently being
 "assembled" by the algorithm, has some number of items on the stack. This is being tracked by an item in the `groups`
@@ -435,11 +435,11 @@ account nonce, field 1 means account balance, field 2 means contract storage, fi
  * If field 0 is present in the `field-set`, the opcode consumes one item from the nonce tape (tape 0), otherwise
 it assumes default nonce (zero). This becomes the nonce of the newly created account/contract node.
  * If field 1 is present in the `field-set`, the opcode consumes one item from the balance tape (tape 1), otherwise
- it assumes default balance (zero). This becomes the balance of the newly created account/contract node.
+it assumes default balance (zero). This becomes the balance of the newly created account/contract node.
  * If field 2 is present in the `field-set`, the opcode pops a node from the node stack and a hash from the hash stack.
 This node or hash (in this order of preference) becomes the storage of the newly created contract node.
 Storage root can be empty (that would introduced by `EMPTYROOT` opcode).
-* If field 3 is present in the `field-set`, the opcode pops a code node from the node stack and a hash from the hash stack.
+ * If field 3 is present in the `field-set`, the opcode pops a code node from the node stack and a hash from the hash stack.
 This node or hash (in the order of preference) becomes the code or code hash of the newly created contract node.
 
 Out of all the information collected through the tapes and the stacks (as directed by the `field-set`), an account leaf node

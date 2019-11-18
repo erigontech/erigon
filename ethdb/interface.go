@@ -16,33 +16,65 @@
 
 package ethdb
 
-// IdealBatchSize defines the size of the data batches should ideally add in one
-// write.
-import "github.com/ledgerwatch/bolt"
+import (
+	"errors"
+)
 
+// TODO [Andrew] Add some comments about historical buckets & ChangeSet.
+// https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
+
+// ErrKeyNotFound is returned when key isn't found in the database.
+var ErrKeyNotFound = errors.New("db: key not found")
+
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
 const IdealBatchSize = 100 * 1024
 
-// Putter wraps the database write operation supported by both batches and regular databases.
+// Putter wraps the database write operations.
 type Putter interface {
+	// Put inserts or updates a single entry.
 	Put(bucket, key, value []byte) error
-	PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error
-	DeleteTimestamp(timestamp uint64) error
+
+	// PutS adds a new entry to the historical buckets:
+	// hBucket (unless changeSetBucketOnly) and ChangeSet.
+	// timestamp == block number
+	PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error
 }
 
+// Getter wraps the database read operations.
 type Getter interface {
+	// Get returns the value for a given key if it's present.
 	Get(bucket, key []byte) ([]byte, error)
+
+	// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
+	// timestamp == block number
 	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
+
+	// GetAsOf returns the value valid as of a given timestamp.
+	// timestamp == block number
 	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)
+
+	// Has indicates whether a key exists in the database.
 	Has(bucket, key []byte) (bool, error)
+
+	// Walk iterates over entries with keys greater or equal to startkey.
+	// Only the keys whose first fixedbits match those of startkey are iterated over.
+	// walker is called for each eligible entry.
+	// If walker returns false or an error, the walk stops.
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
+
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
 	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error
 }
 
-// Deleter wraps the database delete operation supported by both batches and regular databases.
+// Deleter wraps the database delete operations.
 type Deleter interface {
+	// Delete removes a single entry.
 	Delete(bucket, key []byte) error
+
+	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+	// timestamp == block number
+	DeleteTimestamp(timestamp uint64) error
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.
@@ -57,11 +89,17 @@ type Database interface {
 	Size() int
 	Keys() ([][]byte, error)
 	MemCopy() Database
-	DB() *bolt.DB
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
 	Ancients() (uint64, error)
 	TruncateAncients(items uint64) error
+}
+
+// MinDatabase is a minimalistic version of the Database interface.
+type MinDatabase interface {
+	Get(bucket, key []byte) ([]byte, error)
+	Put(bucket, key, value []byte) error
+	Delete(bucket, key []byte) error
 }
 
 // DbWithPendingMutations is an extended version of the Database,

@@ -160,7 +160,7 @@ func TestMakeBlockWitness(t *testing.T) {
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
 	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	expected := common.FromHex("0x0601024704010402040304")
@@ -175,14 +175,15 @@ func TestSerialiseBlockWitness(t *testing.T) {
 	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
 	bwb := NewBlockWitnessBuilder(false)
 	rs := NewResolveSet(2)
-	if err := bwb.MakeBlockWitness(tr, rs, nil, nil); err != nil {
+	if err := bwb.MakeBlockWitness(tr, rs, nil); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	var b bytes.Buffer
 	if err := bwb.WriteTo(&b); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
-	expected := common.FromHex("0xa76862616c616e6365730065636f64657300666861736865731822646b65797300666e6f6e63657300697374727563747572650b6676616c75657300582023181a62d35fe01562158be610f84e047f99f5e74d896da21682d925964ece3a0601024704010402040304")
+
+	expected := common.FromHex("0xa76862616c616e6365730065636f64657300666861736865731822646b65797300666e6f6e63657300697374727563747572650b6676616c756573005820858f70a4b1e6aa71a7edc574d2ca946495a038aa37ce13dc7b7ed15661a6ff2f0601024704010402040304")
 	if !bytes.Equal(expected, b.Bytes()) {
 		t.Errorf("Expected %x, got: %x", expected, b.Bytes())
 	}

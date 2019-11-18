@@ -169,6 +169,8 @@ type Backend interface {
 	// Subscribe creates an async subscription to receive notifications when the
 	// backend detects the arrival or departure of a wallet.
 	Subscribe(sink chan<- WalletEvent) event.Subscription
+
+	Close()
 }
 
 // TextHash is a helper function that calculates a hash for the given message that can be

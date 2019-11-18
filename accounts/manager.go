@@ -70,7 +70,7 @@ func NewManager(config *Config, backends ...Backend) *Manager {
 		updaters: subs,
 		updates:  updates,
 		wallets:  wallets,
-		quit:     make(chan chan error),
+		quit:     make(chan chan error, 1),
 	}
 	for _, backend := range backends {
 		kind := reflect.TypeOf(backend)
@@ -85,6 +85,13 @@ func NewManager(config *Config, backends ...Backend) *Manager {
 func (am *Manager) Close() error {
 	errc := make(chan error)
 	am.quit <- errc
+
+	for _, backs := range am.backends {
+		for _, b := range backs {
+			b.Close()
+		}
+	}
+
 	return <-errc
 }
 
