@@ -62,6 +62,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/internal/build"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/cespare/cp"
 )
 
 var (
@@ -549,8 +550,9 @@ func doDebianSource(cmdline []string) {
 				log.Fatalf("Failed to rename Go source folder: %v", err)
 			}
 			// Add all dependency modules in compressed form
-			build.CopyFolder(filepath.Join(pkgdir, ".mod", "cache", "download"), filepath.Join(gobuild.Default.GOPATH, "pkg", "mod", "cache", "download"), 0755)
-
+			if err := cp.CopyAll(filepath.Join(pkgdir, ".mod", "cache", "download"), filepath.Join(gobuild.Default.GOPATH, "pkg", "mod", "cache", "download")); err != nil {
+				log.Fatalf("Failed to copy Go module dependencies: %v", err)
+			}
 			// Run the packaging and upload to the PPA
 			debuild := exec.Command("debuild", "-S", "-sa", "-us", "-uc", "-d", "-Zxz")
 			debuild.Dir = pkgdir
@@ -816,9 +818,12 @@ func doWindowsInstaller(cmdline []string) {
 	build.Render("build/nsis.uninstall.nsh", filepath.Join(*workdir, "uninstall.nsh"), 0644, allTools)
 	build.Render("build/nsis.pathupdate.nsh", filepath.Join(*workdir, "PathUpdate.nsh"), 0644, nil)
 	build.Render("build/nsis.envvarupdate.nsh", filepath.Join(*workdir, "EnvVarUpdate.nsh"), 0644, nil)
-	build.CopyFile(filepath.Join(*workdir, "SimpleFC.dll"), "build/nsis.simplefc.dll", 0755)
-	build.CopyFile(filepath.Join(*workdir, "COPYING"), "COPYING", 0755)
-
+	if err := cp.CopyFile(filepath.Join(*workdir, "SimpleFC.dll"), "build/nsis.simplefc.dll"); err != nil {
+		log.Fatal("Failed to copy SimpleFC.dll: %v", err)
+	}
+	if err := cp.CopyFile(filepath.Join(*workdir, "COPYING"), "COPYING"); err != nil {
+		log.Fatal("Failed to copy copyright note: %v", err)
+	}
 	// Build the installer. This assumes that all the needed files have been previously
 	// built (don't mix building and packaging to keep cross compilation complexity to a
 	// minimum).
@@ -835,7 +840,6 @@ func doWindowsInstaller(cmdline []string) {
 		"/DARCH="+*arch,
 		filepath.Join(*workdir, "geth.nsi"),
 	)
-
 	// Sign and publish installer.
 	if err := archiveUpload(installer, *upload, *signer); err != nil {
 		log.Fatal(err)
