@@ -5,8 +5,6 @@ import (
 	"reflect"
 	"sort"
 	"testing"
-
-	"github.com/davecgh/go-spew/spew"
 )
 
 /*
@@ -219,7 +217,7 @@ func Test3Tuple(t *testing.T) {
 			[][]byte{
 				[]byte("bucket"),
 				{},
-				{},
+				nil,
 			},
 		},
 		{
@@ -265,10 +263,10 @@ func Test3Tuple(t *testing.T) {
 				{2, 3, 4, 1},
 				[]byte("bucket"),
 				[]byte("0003"),
-				{3, 4, 1, 2},
+				{3, 4, 2, 1},
 				[]byte("bucket"),
 				[]byte("0004"),
-				{4, 1, 2, 3},
+				{4, 2, 1, 3},
 			},
 		},
 		{
@@ -300,10 +298,10 @@ func Test3Tuple(t *testing.T) {
 				{2, 3, 4, 1},
 				[]byte("bucket"),
 				[]byte("0003"),
-				{3, 4, 1, 2},
+				{3, 4, 2, 1},
 				[]byte("bucket"),
 				[]byte("0004"),
-				{4, 1, 2, 3},
+				{4, 2, 1, 3},
 			},
 		},
 		{
@@ -335,10 +333,10 @@ func Test3Tuple(t *testing.T) {
 				{2, 3, 4, 1},
 				[]byte("bucket"),
 				[]byte("0003"),
-				{3, 4, 1, 2},
+				{3, 4, 2, 1},
 				[]byte("bucket"),
 				[]byte("0004"),
-				{4, 1, 2, 3},
+				{4, 2, 1, 3},
 			},
 		},
 		{
@@ -371,10 +369,10 @@ func Test3Tuple(t *testing.T) {
 				{2, 3, 4, 1},
 				[]byte("bucket"),
 				[]byte("0003"),
-				{3, 4, 1, 2},
+				{3, 4, 2, 1},
 				[]byte("bucket"),
 				[]byte("0004"),
-				{4, 1, 2, 3},
+				{4, 2, 1, 3},
 			},
 		},
 	}
@@ -389,9 +387,12 @@ func Test3Tuple(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
+
 			sort.Sort(tuples)
 
-			spew.Dump(tuples.Values)
+			if !reflect.DeepEqual(tuples.Values, test.expected) {
+				t.Fatalf("expected %v\ngot %v", test.expected, tuples.Values)
+			}
 		})
 	}
 }
