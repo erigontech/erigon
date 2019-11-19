@@ -26,6 +26,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
@@ -181,7 +182,7 @@ func loadValue(br *bufio.Reader) (valueNode, error) {
 
 func Load(r io.Reader) (*Trie, error) {
 	br := bufio.NewReader(r)
-	t := new(Trie)
+	t := NewTestRLPTrie(common.Hash{})
 	var err error
 	t.root, err = loadNode(br)
 	return t, err
