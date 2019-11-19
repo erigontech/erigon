@@ -175,11 +175,10 @@ func stateless(chaindata string,
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = witnessThreshold
 	var witness []byte
 	for !interrupt {
 		trace := false // blockNum == 545080
-		tds.SetResolveReads(blockNum >= thresholdBlock)
+		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
@@ -222,7 +221,7 @@ func stateless(chaindata string,
 			return
 		}
 		witness = nil
-		if blockNum >= thresholdBlock {
+		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
 			witness, err = tds.ExtractWitness(trace)
 			if err != nil {
@@ -231,7 +230,7 @@ func stateless(chaindata string,
 			}
 		}
 		finalRootFail := false
-		if blockNum >= thresholdBlock && witness != nil { // witness == nil means the extraction fails
+		if blockNum >= witnessThreshold && witness != nil { // witness == nil means the extraction fails
 			var s *state.Stateless
 			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace)
 			if err != nil {
