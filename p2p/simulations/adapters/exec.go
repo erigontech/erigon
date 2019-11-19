@@ -19,7 +19,6 @@ package adapters
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -148,7 +147,6 @@ type ExecNode struct {
 	client  *rpc.Client
 	wsAddr  string
 	newCmd  func() *exec.Cmd
-	key     *ecdsa.PrivateKey
 }
 
 // Addr returns the node's enode URL
