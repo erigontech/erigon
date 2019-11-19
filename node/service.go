@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
@@ -49,6 +50,13 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 	if ctx.config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
+
+	if ctx.config.BadgerDB {
+		log.Info("Opening Database (Badger)")
+		return ethdb.NewBadgerDatabase(ctx.config.ResolvePath(name+"_badger"), false)
+	}
+
+	log.Info("Opening Database (Bolt)")
 	return ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
 	/*
 		if err != nil {
