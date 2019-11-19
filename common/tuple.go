@@ -3,6 +3,7 @@ package common
 import (
 	"bytes"
 	"errors"
+	"fmt"
 )
 
 // Tuple, eg [(index, bucket, key, value)]
@@ -45,6 +46,8 @@ func (t Tuple) Less(i, j int) bool {
 
 func (t Tuple) Swap(i, j int) {
 	for index := 0; index < t.N; index++ {
-		t.Values[i*t.N+index] = t.Values[j*t.N+index]
+		t.Values[i*t.N+index], t.Values[j*t.N+index] = t.Values[j*t.N+index], t.Values[i*t.N+index]
 	}
+
+	fmt.Println(t.Values)
 }
