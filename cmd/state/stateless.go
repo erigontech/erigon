@@ -106,7 +106,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool, interval uint64) {
+func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool, interval uint64, ignoreOlderThan uint64) {
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -289,7 +289,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 			return
 		}
 
-		willSnapshot := interval > 0 && blockNum > 0 && blockNum%interval == 0
+		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0
 
 		if batch.BatchSize() >= 100000 || willSnapshot {
 			if _, err := batch.Commit(); err != nil {
