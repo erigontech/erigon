@@ -108,7 +108,14 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 
 type CreateDbFunc func(string) (ethdb.Database, error)
 
-func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool, interval uint64, ignoreOlderThan uint64, createDb CreateDbFunc) {
+func stateless(chaindata string,
+	statefile string,
+	triesize int,
+	tryPreRoot bool,
+	interval uint64,
+	ignoreOlderThan uint64,
+	witnessThreshold uint64,
+	createDb CreateDbFunc) {
 
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
@@ -168,7 +175,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 1
+	var thresholdBlock uint64 = witnessThreshold
 	var witness []byte
 	for !interrupt {
 		trace := false // blockNum == 545080
