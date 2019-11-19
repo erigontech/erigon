@@ -1676,7 +1676,11 @@ func main() {
 	//nakedAccountChart()
 	//specExecChart1()
 	if *action == "stateless" {
-		stateless(*chaindata, *statefile, *triesize, *preroot, *snapshotInterval, *snapshotFrom)
+		createDb := func(path string) (ethdb.Database, error) {
+			return ethdb.NewBoltDatabase(path)
+		}
+
+		stateless(*chaindata, *statefile, *triesize, *preroot, *snapshotInterval, *snapshotFrom, createDb)
 	}
 	if *action == "stateless_chart" {
 		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)
