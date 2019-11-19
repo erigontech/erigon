@@ -62,6 +62,7 @@ type Getter interface {
 	// If walker returns false or an error, the walk stops.
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 
+	// MultiWalk is similar to multiple Walk calls folded into one.
 	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error
 
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error

@@ -266,7 +266,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	if err := db.db.View(func(tx *bolt.Tx) error {
+	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
@@ -311,10 +311,8 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 			k, v = c.Next()
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
+	return err
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {

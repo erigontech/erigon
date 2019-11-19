@@ -267,7 +267,7 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 	err := db.db.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		for it.Seek(prefix); ; it.Next() {
+		for it.Seek(prefix); it.Valid(); it.Next() {
 			item := it.Item()
 			k := keyWithoutBucket(item.Key(), bucket)
 			if k == nil {
@@ -296,11 +296,78 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 	return err
 }
 
-// TODO [Andrew] implement the full Database interface
-
+// MultiWalk is similar to multiple Walk calls folded into one.
 func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	panic("Not implemented")
+	if len(startkeys) == 0 {
+		return nil
+	}
+
+	rangeIdx := 0 // What is the current range we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
+	startkey := startkeys[rangeIdx]
+
+	err := db.db.View(func(tx *badger.Txn) error {
+		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(bucketKey(bucket, startkey)); it.Valid(); it.Next() {
+			item := it.Item()
+			k := keyWithoutBucket(item.Key(), bucket)
+			if k == nil {
+				return nil
+			}
+
+			// Adjust rangeIdx if needed
+			if fixedbytes > 0 {
+				cmp := int(-1)
+				for cmp != 0 {
+					cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+					if cmp == 0 {
+						k1 := k[fixedbytes-1] & mask
+						k2 := startkey[fixedbytes-1] & mask
+						if k1 < k2 {
+							cmp = -1
+						} else if k1 > k2 {
+							cmp = 1
+						}
+					}
+					if cmp < 0 {
+						it.Seek(bucketKey(bucket, startkey))
+						if !it.Valid() {
+							return nil
+						}
+						item = it.Item()
+						k = keyWithoutBucket(item.Key(), bucket)
+						if k == nil {
+							return nil
+						}
+					} else if cmp > 0 {
+						rangeIdx++
+						if rangeIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[rangeIdx])
+						startkey = startkeys[rangeIdx]
+					}
+				}
+			}
+
+			err := item.Value(func(v []byte) error {
+				if len(v) == 0 {
+					return nil
+				}
+				return walker(rangeIdx, k, v)
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return err
 }
+
+// TODO [Andrew] implement the full Database interface
 
 func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	panic("Not implemented")
