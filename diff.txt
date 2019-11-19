@@ -399,21 +399,3 @@ Author: Felix Lange <fjl@twurst.com>
 Date:   Tue Nov 19 17:14:00 2019 +0100
 
     whisper/whisperv6: fix staticcheck warnings (#20328)
-
-commit 3b0f3483c4c17cfc95fb27245f8db994d3341070
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Tue Nov 19 17:13:42 2019 +0100
-
-    .github: remove 'nonsense' from CODEOWNERS (#20329)
-
-commit 7f70a7010632b0982cc8b0ad1559148ab07da6e9
-Author: Felix Lange <fjl@twurst.com>
-Date:   Tue Nov 19 15:00:32 2019 +0100
-
-    event: remove unused field 'closed' (#20324)
-
-commit 94e825098351e4738e607ca62f7a7ac1228d148f
-Author: Felix Lange <fjl@twurst.com>
-Date:   Tue Nov 19 14:55:48 2019 +0100
-
-    cmd/wnode: remove uses of common.ToHex (#20327)
