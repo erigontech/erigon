@@ -58,7 +58,7 @@ func statelessDoKVChart(filename string, right []int, chartFileName string, star
 		}
 	}
 	var windowSums [22]float64
-	var window int = 1024
+	window := 1024
 	var movingAvgs [22][]float64
 	for i := 0; i < 22; i++ {
 		movingAvgs[i] = make([]float64, len(blocks)-(window-1))
@@ -103,9 +103,9 @@ func statelessDoKVChart(filename string, right []int, chartFileName string, star
 		"Hashes (total)",
 		"Code (total)",
 	}
-	var currentColor int = startColor
-	var series []chart.Series
-	for _, r := range right {
+	currentColor := startColor
+	series := make([]chart.Series, len(right))
+	for i, r := range right {
 		s := &chart.ContinuousSeries{
 			Name: seriesNames[r],
 			Style: chart.Style{
@@ -119,7 +119,7 @@ func statelessDoKVChart(filename string, right []int, chartFileName string, star
 			YValues: movingAvgs[r],
 		}
 		currentColor++
-		series = append(series, s)
+		series[i] = s
 	}
 
 	graph1 := chart.Chart{
