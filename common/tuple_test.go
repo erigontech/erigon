@@ -7,12 +7,8 @@ import (
 	"testing"
 )
 
-/*
-type puts map[string]putsBucket   //map[bucket]putsBucket
-type putsBucket map[string][]byte //map[key]value
-*/
-
 type value struct {
+	bucket string
 	key   string
 	value []byte
 }
@@ -21,14 +17,13 @@ func Test2Tuple(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		bucket     string
 		putsBucket []value
 		expected   [][]byte
 	}{
 		{
-			"bucket",
 			[]value{
 				{
+					"bucket",
 					"",
 					nil,
 				},
@@ -38,129 +33,142 @@ func Test2Tuple(t *testing.T) {
 				{},
 			},
 		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				[]byte("bucket"),
-				[]byte("0002"),
-				[]byte("bucket"),
-				[]byte("0003"),
-				[]byte("bucket"),
-				[]byte("0004"),
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				[]byte("bucket"),
-				[]byte("0002"),
-				[]byte("bucket"),
-				[]byte("0003"),
-				[]byte("bucket"),
-				[]byte("0004"),
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				[]byte("bucket"),
-				[]byte("0002"),
-				[]byte("bucket"),
-				[]byte("0003"),
-				[]byte("bucket"),
-				[]byte("0004"),
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
 
+		{
+			[]value{
 				{
-					"0003",
-					[]byte{3, 4, 2, 1},
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+			},
+		},
+
+		{
+			[]value{
+				{
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
 				},
 				{
+					"bucket",
 					"0002",
 					[]byte{2, 3, 4, 1},
 				},
 				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				[]byte("bucket"),
+				[]byte("0002"),
+				[]byte("bucket"),
+				[]byte("0003"),
+				[]byte("bucket"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				[]byte("bucket"),
+				[]byte("0002"),
+				[]byte("bucket"),
+				[]byte("0003"),
+				[]byte("bucket"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				[]byte("bucket"),
+				[]byte("0002"),
+				[]byte("bucket"),
+				[]byte("0003"),
+				[]byte("bucket"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
 					"0001",
 					[]byte{1, 2, 3, 4},
 				},
@@ -173,6 +181,144 @@ func Test2Tuple(t *testing.T) {
 				[]byte("bucket"),
 				[]byte("0003"),
 				[]byte("bucket"),
+				[]byte("0004"),
+			},
+		},
+
+
+		{
+			[]value{
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				[]byte("bucket2"),
+				[]byte("0002"),
+				[]byte("bucket3"),
+				[]byte("0003"),
+				[]byte("bucket4"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				[]byte("bucket2"),
+				[]byte("0002"),
+				[]byte("bucket3"),
+				[]byte("0003"),
+				[]byte("bucket4"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				[]byte("bucket2"),
+				[]byte("0002"),
+				[]byte("bucket3"),
+				[]byte("0003"),
+				[]byte("bucket4"),
+				[]byte("0004"),
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				[]byte("bucket2"),
+				[]byte("0002"),
+				[]byte("bucket3"),
+				[]byte("0003"),
+				[]byte("bucket4"),
 				[]byte("0004"),
 			},
 		},
@@ -182,9 +328,8 @@ func Test2Tuple(t *testing.T) {
 		test := test
 		t.Run(fmt.Sprintf("testcase %d", i), func(t *testing.T) {
 			tuples := NewTuples(len(test.putsBucket), 2, 1)
-			bucketB := []byte(test.bucket)
 			for _, value := range test.putsBucket {
-				if err := tuples.Append(bucketB, []byte(value.key)); err != nil {
+				if err := tuples.Append([]byte(value.bucket), []byte(value.key)); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -202,14 +347,13 @@ func Test3Tuple(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		bucket     string
 		putsBucket []value
 		expected   [][]byte
 	}{
 		{
-			"bucket",
 			[]value{
 				{
+					"bucket",
 					"",
 					nil,
 				},
@@ -221,9 +365,9 @@ func Test3Tuple(t *testing.T) {
 			},
 		},
 		{
-			"bucket",
 			[]value{
 				{
+					"bucket",
 					"0001",
 					[]byte{1, 2, 3, 4},
 				},
@@ -234,128 +378,140 @@ func Test3Tuple(t *testing.T) {
 				{1, 2, 3, 4},
 			},
 		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				{1, 2, 3, 4},
-				[]byte("bucket"),
-				[]byte("0002"),
-				{2, 3, 4, 1},
-				[]byte("bucket"),
-				[]byte("0003"),
-				{3, 4, 2, 1},
-				[]byte("bucket"),
-				[]byte("0004"),
-				{4, 2, 1, 3},
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				{1, 2, 3, 4},
-				[]byte("bucket"),
-				[]byte("0002"),
-				{2, 3, 4, 1},
-				[]byte("bucket"),
-				[]byte("0003"),
-				{3, 4, 2, 1},
-				[]byte("bucket"),
-				[]byte("0004"),
-				{4, 2, 1, 3},
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0002",
-					[]byte{2, 3, 4, 1},
-				},
-				{
-					"0003",
-					[]byte{3, 4, 2, 1},
-				},
-				{
-					"0001",
-					[]byte{1, 2, 3, 4},
-				},
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
-			},
-			[][]byte{
-				[]byte("bucket"),
-				[]byte("0001"),
-				{1, 2, 3, 4},
-				[]byte("bucket"),
-				[]byte("0002"),
-				{2, 3, 4, 1},
-				[]byte("bucket"),
-				[]byte("0003"),
-				{3, 4, 2, 1},
-				[]byte("bucket"),
-				[]byte("0004"),
-				{4, 2, 1, 3},
-			},
-		},
-		{
-			"bucket",
-			[]value{
-				{
-					"0004",
-					[]byte{4, 2, 1, 3},
-				},
 
+		{
+			[]value{
 				{
-					"0003",
-					[]byte{3, 4, 2, 1},
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
 				},
 				{
+					"bucket",
 					"0002",
 					[]byte{2, 3, 4, 1},
 				},
 				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+				{
+					"bucket",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket",
 					"0001",
 					[]byte{1, 2, 3, 4},
 				},
@@ -371,6 +527,159 @@ func Test3Tuple(t *testing.T) {
 				[]byte("0003"),
 				{3, 4, 2, 1},
 				[]byte("bucket"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+
+		{
+			[]value{
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket2"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket3"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket4"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket2"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket3"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket4"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket2"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket3"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket4"),
+				[]byte("0004"),
+				{4, 2, 1, 3},
+			},
+		},
+		{
+			[]value{
+				{
+					"bucket4",
+					"0004",
+					[]byte{4, 2, 1, 3},
+				},
+				{
+					"bucket3",
+					"0003",
+					[]byte{3, 4, 2, 1},
+				},
+				{
+					"bucket2",
+					"0002",
+					[]byte{2, 3, 4, 1},
+				},
+				{
+					"bucket1",
+					"0001",
+					[]byte{1, 2, 3, 4},
+				},
+			},
+			[][]byte{
+				[]byte("bucket1"),
+				[]byte("0001"),
+				{1, 2, 3, 4},
+				[]byte("bucket2"),
+				[]byte("0002"),
+				{2, 3, 4, 1},
+				[]byte("bucket3"),
+				[]byte("0003"),
+				{3, 4, 2, 1},
+				[]byte("bucket4"),
 				[]byte("0004"),
 				{4, 2, 1, 3},
 			},
@@ -381,9 +690,8 @@ func Test3Tuple(t *testing.T) {
 		test := test
 		t.Run(fmt.Sprintf("testcase %d", i), func(t *testing.T) {
 			tuples := NewTuples(len(test.putsBucket), 3, 1)
-			bucketB := []byte(test.bucket)
 			for _, value := range test.putsBucket {
-				if err := tuples.Append(bucketB, []byte(value.key), value.value); err != nil {
+				if err := tuples.Append([]byte(value.bucket), []byte(value.key), value.value); err != nil {
 					t.Fatal(err)
 				}
 			}

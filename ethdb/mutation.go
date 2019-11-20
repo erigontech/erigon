@@ -11,7 +11,6 @@ import (
 )
 
 type puts map[string]putsBucket   //map[bucket]putsBucket
-type putsBucket map[string][]byte //map[key]value
 
 func newPuts() puts {
 	return make(puts)
@@ -21,32 +20,28 @@ func (p puts) Set(bucket, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p[string(bucket)]; !ok {
-		p[string(bucket)] = make(putsBucket)
-		bucketPuts = p[string(bucket)]
+		bucketPuts = make(putsBucket)
+		p[string(bucket)] = bucketPuts
 	}
 	bucketPuts[string(key)] = value
 }
 
 func (p puts) Delete(bucket, key []byte) {
-	if bucketPuts, ok := p[string(bucket)]; ok {
-		delete(bucketPuts, string(bucket))
-	}
+	p.Set(bucket, key, nil)
 }
 
 func (p puts) SetStr(bucket string, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p[bucket]; !ok {
-		p[bucket] = make(putsBucket)
-		bucketPuts = p[bucket]
+		bucketPuts = make(putsBucket)
+		p[bucket] = bucketPuts
 	}
 	bucketPuts[string(key)] = value
 }
 
 func (p puts) DeleteStr(bucket string, key []byte) {
-	if bucketPuts, ok := p[bucket]; ok {
-		delete(bucketPuts, bucket)
-	}
+	p.SetStr(bucket, key, nil)
 }
 
 func (p puts) Size() int {
@@ -57,10 +52,16 @@ func (p puts) Size() int {
 	return size
 }
 
+type putsBucket map[string][]byte //map[key]value
+
 func (pb putsBucket) Get(key []byte) ([]byte, bool) {
 	value, ok := pb[string(key)]
-	if !ok || value == nil {
+	if !ok {
 		return nil, false
+	}
+
+	if value == nil {
+		return nil, true
 	}
 
 	v := make([]byte, len(value))
@@ -71,8 +72,12 @@ func (pb putsBucket) Get(key []byte) ([]byte, bool) {
 
 func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 	value, ok := pb[key]
-	if !ok || value == nil {
+	if !ok {
 		return nil, false
+	}
+
+	if value == nil {
+		return nil, true
 	}
 
 	v := make([]byte, len(value))
@@ -120,7 +125,7 @@ func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	if t, ok := m.puts[string(bucket)]; ok {
 		value, ok := t.Get(key)
-		if !ok {
+		if ok && value == nil {
 			return nil, ErrKeyNotFound
 		}
 		return value, nil
@@ -171,8 +176,8 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	var t putsBucket
 	var ok bool
 	if t, ok = m.puts[string(bb)]; !ok {
-		m.puts[string(bb)] = make(putsBucket)
-		t = m.puts[string(bb)]
+		t = make(putsBucket)
+		m.puts[string(bb)] = t
 	}
 	t[string(k)] = v
 	return nil
