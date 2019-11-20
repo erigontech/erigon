@@ -9,8 +9,8 @@ import (
 
 type value struct {
 	bucket string
-	key   string
-	value []byte
+	key    string
+	value  []byte
 }
 
 func Test2Tuple(t *testing.T) {
@@ -184,7 +184,6 @@ func Test2Tuple(t *testing.T) {
 				[]byte("0004"),
 			},
 		},
-
 
 		{
 			[]value{
