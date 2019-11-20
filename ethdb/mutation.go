@@ -10,7 +10,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-type puts map[string]putsBucket   //map[bucket]putsBucket
+type puts map[string]putsBucket //map[bucket]putsBucket
 
 func newPuts() puts {
 	return make(puts)
