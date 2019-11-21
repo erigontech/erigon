@@ -353,11 +353,11 @@ func (m *mutation) Commit() (uint64, error) {
 			}
 		}
 	}
-	var written uint64
-	var putErr error
 	sort.Sort(tuples)
-	if written, putErr = m.db.MultiPut(tuples.Values...); putErr != nil {
-		return 0, putErr
+
+	written, err := m.db.MultiPut(tuples.Values...)
+	if err != nil {
+		return 0, err
 	}
 	m.puts = make(puts)
 	return written, nil
