@@ -188,6 +188,9 @@ type Config struct {
 	// Logger is a custom logger to use with the p2p.Server.
 	Logger log.Logger `toml:",omitempty"`
 
+	/// Whether to use BadgerDB or BoltDB.
+	BadgerDB bool
+
 	staticNodesWarning     bool
 	trustedNodesWarning    bool
 	oldGethResourceWarning bool

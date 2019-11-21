@@ -112,6 +112,7 @@ var (
 		utils.DownloadOnlyFlag,
 		utils.NoHistory,
 		utils.ArchiveSyncInterval,
+		utils.BadgerFlag,
 		utils.ListenPortFlag,
 		utils.MaxPeersFlag,
 		utils.MaxPendingPeersFlag,
