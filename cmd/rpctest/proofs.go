@@ -87,7 +87,7 @@ func proofs(chaindata string, url string, block int) {
 	reqID := 0
 
 	level := 0
-	diffKeys := [][]byte{[]byte{}}
+	diffKeys := [][]byte{{}}
 	var newDiffKeys [][]byte
 
 	for len(diffKeys) > 0 && level < 6 {
