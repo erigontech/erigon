@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"path"
 	"sync"
 	"testing"
 	"time"
@@ -56,11 +55,8 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 	var db ethdb.Database
 
 	if useBadgerDB {
-		dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
-		if err != nil {
-			panic("failed to create test file: " + err.Error())
-		}
-		db, err = ethdb.NewBadgerDatabase(path.Join(dirname, "badger_db"), true)
+		var err error
+		db, err = ethdb.NewEphemeralBadger()
 		if err != nil {
 			panic("failed to create test database: " + err.Error())
 		}

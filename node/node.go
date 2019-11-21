@@ -623,7 +623,7 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 
 	if n.config.BadgerDB {
 		log.Info("Opening Database (Badger)")
-		return ethdb.NewBadgerDatabase(n.config.ResolvePath(name+"_badger"), false)
+		return ethdb.NewBadgerDatabase(n.config.ResolvePath(name + "_badger"))
 	}
 
 	log.Info("Opening Database (Bolt)")

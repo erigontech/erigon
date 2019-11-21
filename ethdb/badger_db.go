@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"io/ioutil"
 	"os"
-	"path"
 
 	"github.com/dgraph-io/badger"
 	"github.com/petar/GoLLRB/llrb"
@@ -38,8 +37,7 @@ type BadgerDatabase struct {
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
-// Set tmp to true if you want db.Close() to remove the directory.
-func NewBadgerDatabase(dir string, tmp bool) (*BadgerDatabase, error) {
+func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	logger := log.New("database", dir)
 
 	db, err := badger.Open(badger.DefaultOptions(dir))
@@ -47,18 +45,26 @@ func NewBadgerDatabase(dir string, tmp bool) (*BadgerDatabase, error) {
 		return nil, err
 	}
 
-	if tmp {
-		return &BadgerDatabase{
-			db:     db,
-			log:    logger,
-			tmpDir: dir,
-		}, nil
-	}
-
 	return &BadgerDatabase{
 		db:  db,
 		log: logger,
 	}, nil
+}
+
+// NewEphemeralBadger returns a new BadgerDB in a temporary directory.
+func NewEphemeralBadger() (*BadgerDatabase, error) {
+	tmpDir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := NewBadgerDatabase(tmpDir)
+	if err != nil {
+		return nil, err
+	}
+
+	db.tmpDir = tmpDir
+	return db, nil
 }
 
 // Close closes the database.
@@ -429,11 +435,7 @@ func (db *BadgerDatabase) Keys() ([][]byte, error) {
 // MemCopy creates a copy of the database in a temporary directory.
 // We don't do it in memory because BadgerDB doesn't support that.
 func (db *BadgerDatabase) MemCopy() Database {
-	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_")
-	if err != nil {
-		panic("failed to create tmp dir: " + err.Error())
-	}
-	newDb, err := NewBadgerDatabase(path.Join(dirname, "badger"), true)
+	newDb, err := NewEphemeralBadger()
 	if err != nil {
 		panic("failed to create tmp database: " + err.Error())
 	}

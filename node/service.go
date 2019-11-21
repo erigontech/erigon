@@ -53,7 +53,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 
 	if ctx.config.BadgerDB {
 		log.Info("Opening Database (Badger)")
-		return ethdb.NewBadgerDatabase(ctx.config.ResolvePath(name+"_badger"), false)
+		return ethdb.NewBadgerDatabase(ctx.config.ResolvePath(name + "_badger"))
 	}
 
 	log.Info("Opening Database (Bolt)")
