@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -114,7 +114,8 @@ func (tt TokenTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func makeTokens() {
+//nolint:deadcode,unused
+func makeTokens(blockNum uint64) {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -134,7 +135,6 @@ func makeTokens() {
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	if blockNum > 1 {
 		tokenFile, err := os.Open("/Volumes/tb41/turbo-geth/tokens.csv")
 		check(err)

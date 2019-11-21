@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bytes"
@@ -368,9 +368,8 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	fmt.Printf("Storage trie computation took %v\n", time.Since(startTime))
 }
 
-func stateSnapshot() error {
+func StateSnapshot(blockNum uint64) error {
 	startTime := time.Now()
-	var blockNum uint64 = uint64(*block)
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth-copy/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata1")
@@ -399,8 +398,7 @@ func stateSnapshot() error {
 	return nil
 }
 
-func verifySnapshot(chaindata string) {
-	blockNum := uint64(*block)
+func VerifySnapshot(blockNum uint64, chaindata string) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
