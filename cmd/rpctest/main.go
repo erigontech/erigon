@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,7 +15,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 )
+
+var action = flag.String("action", "", "action to execute")
+var url = flag.String("url", "", "URL to use for RPC requests")
+var block = flag.Int("block", 1, "specifies a block number for operation")
+var account = flag.String("account", "0x", "specifies account to investigate")
 
 type EthError struct {
 	Code    int    `json:"code"`
@@ -1034,5 +1043,23 @@ func bench6() {
 }
 
 func main() {
-	bench1()
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.Lvl(3)) // 3 == verbosity INFO
+
+	flag.Parse()
+	if *action == "proofs" {
+		proofs(*url, *block, common.HexToAddress(*account))
+	}
 }
