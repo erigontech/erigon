@@ -31,10 +31,7 @@ import (
 type WitnessTapeStats map[string]int
 
 func (s WitnessTapeStats) GetOrZero(key string) int {
-	if v, ok := s[key]; ok {
-		return v
-	}
-	return 0
+	return s[key]
 }
 
 // TapeBuilder stores the sequence of values that is getting serialised using CBOR into a byte buffer
