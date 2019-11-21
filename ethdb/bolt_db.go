@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/ledgerwatch/bolt"
-	"github.com/petar/GoLLRB/llrb"
 )
 
 var OpenFileLimit = 64
@@ -625,7 +624,7 @@ func (db *BoltDatabase) DB() *bolt.DB {
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:               db,
-		puts:             make(map[string]*llrb.LLRB),
+		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return m

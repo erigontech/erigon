@@ -21,11 +21,10 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/dgraph-io/badger"
-	"github.com/petar/GoLLRB/llrb"
-
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+
+	"github.com/dgraph-io/badger"
 )
 
 // BadgerDatabase is a wrapper over BadgerDb,
@@ -412,7 +411,7 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:               db,
-		puts:             make(map[string]*llrb.LLRB),
+		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return m
