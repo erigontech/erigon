@@ -44,7 +44,7 @@ func proofs(chaindata string, url string, block int) {
 	}
 	defer ethDb.Close()
 	var t *trie.Trie
-	if _, err := os.Stat(fileName); err != nil {
+	if _, err = os.Stat(fileName); err != nil {
 		if os.IsNotExist(err) {
 			// Resolve 6 top levels of the accounts trie
 			r := trie.NewResolver(6, true, uint64(block))
@@ -115,6 +115,10 @@ func proofs(chaindata string, url string, block int) {
 				}
 				return true, nil
 			})
+			if err != nil {
+				fmt.Printf("Error when looking for suitable account for diffKey %x\n", diffKey)
+				return
+			}
 			if !found {
 				fmt.Printf("Could not find suitable account for diffKey %x\n", diffKey)
 				return
