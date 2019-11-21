@@ -188,6 +188,11 @@ func (m *mutation) BatchSize() int {
 	return size
 }
 
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
+func (m *mutation) IdealBatchSize() int {
+	return m.db.IdealBatchSize()
+}
+
 func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db == nil {
 		panic("Not implemented")

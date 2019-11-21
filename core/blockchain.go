@@ -1152,7 +1152,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteTxLookupEntries(batch, block)
 
 			stats.processed++
-			if batch.Size() >= ethdb.IdealBatchSize {
+			if batch.Size() >= batch.IdealBatchSize() {
 				if _, err := batch.Commit(); err != nil {
 					return 0, err
 				}
@@ -1745,7 +1745,7 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
-	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= ethdb.IdealBatchSize {
+	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
 		*st = insertStats{startTime: now, lastIndex: index + 1}
 		return true
 	}

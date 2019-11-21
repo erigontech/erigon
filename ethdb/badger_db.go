@@ -412,6 +412,11 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	return m
 }
 
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
+func (db *BadgerDatabase) IdealBatchSize() int {
+	return 10 * 1024
+}
+
 func (db *BadgerDatabase) Size() int {
 	// TODO [Andrew] implement
 	return 0

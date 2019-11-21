@@ -26,9 +26,6 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-const IdealBatchSize = 100 * 1024
-
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
@@ -93,6 +90,10 @@ type Database interface {
 	RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error
 	Close()
 	NewBatch() DbWithPendingMutations
+
+	// IdealBatchSize defines the size of the data batches should ideally add in one write.
+	IdealBatchSize() int
+
 	Size() int
 	Keys() ([][]byte, error)
 
