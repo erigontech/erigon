@@ -1716,7 +1716,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if commitStats.needToCommit(chain, bc.db, i) {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
-				log.Error("Could not commit chainDb", err)
+				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
