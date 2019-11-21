@@ -288,6 +288,7 @@ func stateless(chaindata string,
 		nextRoot := roots[len(roots)-1]
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
+			return
 		}
 		tds.SetBlockNr(blockNum)
 
