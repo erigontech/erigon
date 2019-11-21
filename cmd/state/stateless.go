@@ -106,7 +106,17 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool, interval uint64, ignoreOlderThan uint64) {
+type CreateDbFunc func(string) (ethdb.Database, error)
+
+func stateless(chaindata string,
+	statefile string,
+	triesize int,
+	tryPreRoot bool,
+	interval uint64,
+	ignoreOlderThan uint64,
+	witnessThreshold uint64,
+	createDb CreateDbFunc) {
+
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -118,7 +128,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	ethDb, err := createDb(chaindata)
 	check(err)
 	defer ethDb.Close()
 	chainConfig := params.MainnetChainConfig
@@ -131,10 +141,9 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
-	stateDb, err := ethdb.NewBoltDatabase(statefile)
+	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
-	db := stateDb.DB()
 	blockNum := uint64(*block)
 	var preRoot common.Hash
 	if blockNum == 1 {
@@ -150,7 +159,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
-		checkRoots(stateDb, db, preRoot, blockNum-1)
+		checkRoots(stateDb, preRoot, blockNum-1)
 	}
 	batch := stateDb.NewBatch()
 	defer func() {
@@ -166,11 +175,10 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var thresholdBlock uint64 = 1
 	var witness []byte
 	for !interrupt {
 		trace := false // blockNum == 545080
-		tds.SetResolveReads(blockNum >= thresholdBlock)
+		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
@@ -213,7 +221,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 			return
 		}
 		witness = nil
-		if blockNum >= thresholdBlock {
+		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
 			witness, err = tds.ExtractWitness(trace)
 			if err != nil {
@@ -222,7 +230,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 			}
 		}
 		finalRootFail := false
-		if blockNum >= thresholdBlock && witness != nil { // witness == nil means the extraction fails
+		if blockNum >= witnessThreshold && witness != nil { // witness == nil means the extraction fails
 			var s *state.Stateless
 			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace)
 			if err != nil {
@@ -280,6 +288,7 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 		nextRoot := roots[len(roots)-1]
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
+			return
 		}
 		tds.SetBlockNr(blockNum)
 
@@ -302,7 +311,8 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 		if willSnapshot {
 			// Snapshots of the state will be written to the same directory as the state file
 			fmt.Printf("\nSaving snapshot at block %d, hash %x\n", blockNum, block.Root())
-			saveSnapshot(db, fmt.Sprintf("%s_%d", statefile, blockNum))
+
+			saveSnapshot(stateDb, fmt.Sprintf("%s_%d", statefile, blockNum), createDb)
 		}
 
 		preRoot = header.Root

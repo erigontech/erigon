@@ -110,88 +110,87 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	check(err)
 }
 
-func copyBucket(bucketName []byte, fromTx *bolt.Tx, toDB *bolt.DB) error {
-	toTx, err := toDB.Begin(true)
-	if err != nil {
-		return err
-	}
+type bucketWriter struct {
+	db      ethdb.Database
+	bucket  []byte
+	pending ethdb.DbWithPendingMutations
+	written uint64
+}
 
-	toBucket, err := toTx.CreateBucket(bucketName, true)
-	if err != nil {
-		return err
-	}
-
-	count := 0
-
-	printStats := func() {
-		fmt.Printf("\r -- commited %d records for bucket: '%s'...", count, string(bucketName))
-	}
-
-	if fromBucket := fromTx.Bucket(bucketName); fromBucket != nil {
-		defer printStats()
-
-		fromCursor := fromBucket.Cursor()
-
-		for k, v := fromCursor.First(); k != nil; k, v = fromCursor.Next() {
-			err = toBucket.Put(common.CopyBytes(k), common.CopyBytes(v))
-			if err != nil {
-				return err
-			}
-			count++
-
-			if count%100000 == 0 {
-				err = toTx.Commit()
-				if err != nil {
-					return err
-				}
-
-				printStats()
-
-				toTx, err = toDB.Begin(true)
-				if err != nil {
-					return err
-				}
-				toBucket = toTx.Bucket(bucketName)
-			}
-		}
+func (bw *bucketWriter) printStats() {
+	if bw.written == 0 {
+		fmt.Printf(" -- nothing to copy for bucket: '%s'...", string(bw.bucket))
 	} else {
-		fmt.Printf(" -- nothing to copy for the bucket name: '%s'...", string(bucketName))
+		fmt.Printf("\r -- commited %d records for bucket: '%s'...", bw.written, string(bw.bucket))
+	}
+}
+
+func (bw *bucketWriter) walker(k, v []byte) (bool, error) {
+	if bw.pending == nil {
+		bw.pending = bw.db.NewBatch()
 	}
 
-	return toTx.Commit()
+	if err := bw.pending.Put(bw.bucket, common.CopyBytes(k), common.CopyBytes(v)); err != nil {
+		return false, err
+	}
+	bw.written++
+
+	if bw.pending.BatchSize() >= 100000 {
+		if _, err := bw.pending.Commit(); err != nil {
+			return false, err
+		}
+
+		bw.printStats()
+
+		bw.pending = bw.db.NewBatch()
+	}
+
+	return true, nil
 }
 
-func copyDatabase(fromDB *bolt.DB, toDB *bolt.DB) error {
-	return fromDB.View(func(tx *bolt.Tx) error {
-		fmt.Printf(" - copying AccountsBucket...\n")
-		if err := copyBucket(dbutils.AccountsBucket, tx, toDB); err != nil {
-			fmt.Println("FAIL")
-			return err
-		}
-		fmt.Println("OK")
+func (bw *bucketWriter) commit() error {
+	defer bw.printStats()
 
-		fmt.Printf(" - copying StorageBucket...\n")
-		if err := copyBucket(dbutils.StorageBucket, tx, toDB); err != nil {
-			fmt.Println("FAIL")
-			return err
-		}
-		fmt.Println("OK")
+	if bw.pending != nil {
+		_, err := bw.pending.Commit()
+		return err
+	}
 
-		fmt.Printf(" - copying CodeBucket...\n")
-		if err := copyBucket(dbutils.CodeBucket, tx, toDB); err != nil {
-			fmt.Println("FAIL")
-			return err
-		}
-		fmt.Println("OK")
-
-		return nil
-	})
+	return nil
 }
 
-func saveSnapshot(db *bolt.DB, filename string) {
+func newBucketWriter(db ethdb.Database, bucket []byte) *bucketWriter {
+	return &bucketWriter{
+		db:      db,
+		bucket:  bucket,
+		pending: nil,
+		written: 0,
+	}
+}
+
+func copyDatabase(fromDB ethdb.Database, toDB ethdb.Database) error {
+	for _, bucket := range [][]byte{dbutils.AccountsBucket, dbutils.StorageBucket, dbutils.CodeBucket} {
+		fmt.Printf(" - copying bucket '%s'...\n", string(bucket))
+		writer := newBucketWriter(toDB, bucket)
+
+		if err := fromDB.Walk(bucket, nil, 0, writer.walker); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+
+		if err := writer.commit(); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+		fmt.Println("OK")
+	}
+	return nil
+}
+
+func saveSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	fmt.Printf("Saving snapshot to %s\n", filename)
 
-	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
+	diskDb, err := createDb(filename)
 	check(err)
 	defer diskDb.Close()
 
@@ -199,9 +198,10 @@ func saveSnapshot(db *bolt.DB, filename string) {
 	check(err)
 }
 
-func loadSnapshot(db *bolt.DB, filename string) {
+func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
-	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
+
+	diskDb, err := createDb(filename)
 	check(err)
 	defer diskDb.Close()
 
@@ -308,7 +308,7 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	check(err)
 }
 
-func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
+func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
 	r := trie.NewResolver(0, true, blockNum)
@@ -324,26 +324,24 @@ func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, block
 	startTime = time.Now()
 	var addrHash common.Hash
 	roots := make(map[common.Hash]common.Hash)
-	err = db.View(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(dbutils.StorageBucket)
-		b := tx.Bucket(dbutils.AccountsBucket)
-		c := sb.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			copy(addrHash[:], k[:32])
-			if _, ok := roots[addrHash]; !ok {
-				if enc, _ := b.Get(addrHash[:]); enc == nil {
-					roots[addrHash] = common.Hash{}
-				} else {
-					var account accounts.Account
-					if err = account.DecodeForStorage(enc); err != nil {
-						return err
-					}
-					roots[addrHash] = account.Root
+
+	err = stateDb.Walk(dbutils.StorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		copy(addrHash[:], k[:32])
+		if _, ok := roots[addrHash]; !ok {
+			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
+				roots[addrHash] = common.Hash{}
+			} else {
+				var account accounts.Account
+				if err = account.DecodeForStorage(enc); err != nil {
+					return false, err
 				}
+				roots[addrHash] = account.Root
 			}
 		}
-		return nil
+
+		return true, nil
 	})
+
 	if err != nil {
 		panic(err)
 	}
@@ -384,7 +382,9 @@ func stateSnapshot() error {
 	stateDb, db := ethdb.NewMemDatabase2()
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
-		loadSnapshot(db, "statedb0")
+		loadSnapshot(stateDb, "statedb0", func(path string) (ethdb.Database, error) {
+			return ethdb.NewBoltDatabase(path)
+		})
 		if err := loadCodes(db, ethDb); err != nil {
 			return err
 		}
@@ -398,7 +398,7 @@ func stateSnapshot() error {
 	block := bc.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
-	checkRoots(ethDb, ethDb.DB(), block.Root(), blockNum)
+	checkRoots(ethDb, block.Root(), blockNum)
 	return nil
 }
 
@@ -416,5 +416,5 @@ func verifySnapshot(chaindata string) {
 	fmt.Printf("Block number: %d\n", currentBlockNr)
 	fmt.Printf("Block root hash: %x\n", currentBlock.Root())
 	preRoot := currentBlock.Root()
-	checkRoots(ethDb, ethDb.DB(), preRoot, blockNum)
+	checkRoots(ethDb, preRoot, blockNum)
 }
