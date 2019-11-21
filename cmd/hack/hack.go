@@ -872,10 +872,12 @@ func testDifficulty() {
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
 }
 
+// Searches 1000 blocks from the given one to try to find the one with the given state root hash
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	for i := uint64(block); i < uint64(block+1000); i++ {
+	blocksToSearch := 1000
+	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, i)
 		header := rawdb.ReadHeader(ethDb, hash, i)
 		if header.Root == stateRoot || stateRoot == (common.Hash{}) {
