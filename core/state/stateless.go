@@ -161,6 +161,9 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 	}
 	s.accountUpdates[addrHash] = nil
 	s.deleted[addrHash] = struct{}{}
+	if s.trace {
+		fmt.Printf("Stateless: DeleteAccount %x hash %x\n", address, addrHash)
+	}
 	return nil
 }
 

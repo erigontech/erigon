@@ -318,8 +318,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					tr.fieldSet = AccountFieldSetContract
 				}
 				// Load hashes onto the stack of the hashbuilder
-				tr.hashes.hashes[0] = tr.a.Root     // this will be just beneath the top of the stack
-				tr.hashes.hashes[1] = tr.a.CodeHash // this will end up on top of the stack
+				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
+				tr.hashes.hashes[1] = tr.a.Root     // this will end up on top of the stack
 				tr.hashes.idx = 0                   // Reset the counter
 				// the first item ends up deepest on the stack, the seccond item - on the top
 				if err := tr.hb.hash(2); err != nil {

@@ -134,14 +134,15 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("accountNode %x\n", hex)
 		}
-		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
-			if n.storage != nil {
-				toStream(n.storage, hex[:len(hex)-1], false /*accounts*/, rs, hr, true /*force*/, s, trace)
-			}
-		}
 		s.hexes = append(s.hexes, hex)
 		s.aValues = append(s.aValues, &n.Account)
 		s.itemTypes = append(s.itemTypes, AccountStreamItem)
+		hashOnly := rs.HashOnly(hex)
+		if !n.IsEmptyRoot() && !hashOnly {
+			if n.storage != nil {
+				toStream(n.storage, hex, false /*accounts*/, rs, hr, true /*force*/, s, trace)
+			}
+		}
 	case hashNode:
 		if trace {
 			fmt.Printf("hashNode %x\n", hex)
@@ -171,7 +172,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 }
 
 // StreamHash computes the hash of a stream, as if it was a trie
-func StreamHash(s *Stream, trace bool) (common.Hash, error) {
+func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error) {
 	hb := NewHashBuilder(trace)
 	var succ bytes.Buffer
 	var curr OneBytesTape
@@ -198,12 +199,36 @@ func StreamHash(s *Stream, trace bool) (common.Hash, error) {
 		hex := s.hexes[ki]
 		newItemType := s.itemTypes[ki]
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
+			// If there was an open storage "sub-stream", close it and set the storage flag on
+			if succStorage.Len() > 0 {
+				currStorage.Reset()
+				currStorage.Write(succStorage.Bytes())
+				succStorage.Reset()
+				if currStorage.Len() > 0 {
+					hb.SetKeyTape(&currStorage)
+					var err error
+					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
+					if err != nil {
+						return common.Hash{}, err
+					}
+					currStorage.Reset()
+					fieldSet += AccountFieldRootOnly
+				}
+			} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
+				// Push the account root on the stack instead
+				hashes.hashes[0] = a.Root
+				hashes.idx = 0
+				if err := hb.hash(1); err != nil {
+					return common.Hash{}, err
+				}
+				fieldSet += AccountFieldRootOnly
+			}
 			curr.Reset()
 			curr.Write(succ.Bytes())
 			succ.Reset()
 			succ.Write(hex)
-			hb.SetKeyTape(&curr)
 			if curr.Len() > 0 {
+				hb.SetKeyTape(&curr)
 				var err error
 				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, groups)
 				if err != nil {
@@ -213,12 +238,12 @@ func StreamHash(s *Stream, trace bool) (common.Hash, error) {
 			itemType = newItemType
 			switch itemType {
 			case AccountStreamItem:
+				if s.aValues[ai] == nil {
+					return common.Hash{}, fmt.Errorf("s.aValues[%d] == nil", ai)
+				}
 				a.Copy(s.aValues[ai])
 				ai++
 				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
-				if !a.IsEmptyRoot() {
-					fieldSet += AccountFieldRootOnly
-				}
 				if a.HasStorageSize {
 					fieldSet += AccountFieldSSizeOnly
 				}
@@ -226,9 +251,7 @@ func StreamHash(s *Stream, trace bool) (common.Hash, error) {
 					fieldSet += AccountFieldCodeHashOnly
 					// Load hashes onto the stack of the hashbuilder
 					hashes.hashes[0] = a.CodeHash // this will be just beneath the top of the stack
-					//hashes.hashes[1] = a.Root     // this will end up on top of the stack
-					hashes.idx = 0 // Reset the counter
-					// the first item ends up deepest on the stack, the seccond item - on the top
+					hashes.idx = 0                // Reset the counter
 					if err := hb.hash(1); err != nil {
 						return common.Hash{}, err
 					}
@@ -243,9 +266,9 @@ func StreamHash(s *Stream, trace bool) (common.Hash, error) {
 			currStorage.Reset()
 			currStorage.Write(succStorage.Bytes())
 			succStorage.Reset()
-			succStorage.Write(hex)
-			hb.SetKeyTape(&currStorage)
-			if curr.Len() > 0 {
+			succStorage.Write(hex[2*storagePrefixLen+1:])
+			if currStorage.Len() > 0 {
+				hb.SetKeyTape(&currStorage)
 				var err error
 				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
 				if err != nil {
@@ -267,6 +290,30 @@ func StreamHash(s *Stream, trace bool) (common.Hash, error) {
 			}
 		}
 		ki++
+	}
+	// If there was an open storage "sub-stream", close it and set the storage flag on
+	if succStorage.Len() > 0 {
+		currStorage.Reset()
+		currStorage.Write(succStorage.Bytes())
+		succStorage.Reset()
+		if currStorage.Len() > 0 {
+			hb.SetKeyTape(&currStorage)
+			var err error
+			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
+			if err != nil {
+				return common.Hash{}, err
+			}
+			currStorage.Reset()
+			fieldSet += AccountFieldRootOnly
+		}
+	} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
+		// Push the account root on the stack instead
+		hashes.hashes[0] = a.Root
+		hashes.idx = 0
+		if err := hb.hash(1); err != nil {
+			return common.Hash{}, err
+		}
+		fieldSet += AccountFieldRootOnly
 	}
 	curr.Reset()
 	curr.Write(succ.Bytes())
@@ -294,6 +341,7 @@ func HashWithModifications(
 	t *Trie,
 	aKeys common.Hashes, aValues []*accounts.Account,
 	sKeys common.StorageKeys, sValues [][]byte,
+	storagePrefixLen int,
 	trace bool,
 ) (common.Hash, error) {
 	hr := newHasher(false)
@@ -316,7 +364,7 @@ func HashWithModifications(
 			ai++
 		}
 		if storageKeyHex == nil && si < len(sKeys) {
-			storageKeyHex = keybytesToHex(sKeys[si][:])
+			storageKeyHex = concat(keybytesToHex(sKeys[si][:storagePrefixLen]), keybytesToHex(sKeys[si][storagePrefixLen:])...)
 			si++
 		}
 		if accountKeyHex == nil {
@@ -377,16 +425,21 @@ func HashWithModifications(
 			ki++
 		}
 		if oldHex == nil {
-			newStream.hexes = append(newStream.hexes, hex)
 			switch itemType {
 			case AccountStreamItem:
-				newStream.aValues = append(newStream.aValues, stream.aValues[ai])
+				if stream.aValues[ai] != nil {
+					newStream.hexes = append(newStream.hexes, hex)
+					newStream.aValues = append(newStream.aValues, stream.aValues[ai])
+					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
+				}
 				ai++
-				newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
 			case StorageStreamItem:
-				newStream.sValues = append(newStream.sValues, stream.sValues[si])
+				if len(stream.sValues[si]) > 0 {
+					newStream.hexes = append(newStream.hexes, hex)
+					newStream.sValues = append(newStream.sValues, stream.sValues[si])
+					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
+				}
 				si++
-				newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 			default:
 				return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == nil): %d", itemType)
 			}
@@ -413,65 +466,84 @@ func HashWithModifications(
 			}
 			oldHex = nil // consumed
 		} else {
-			switch bytes.Compare(oldHex, hex) {
-			case -1:
-				newStream.hexes = append(newStream.hexes, oldHex)
+			// Special case - account gets deleted
+			if itemType == AccountStreamItem && stream.aValues[ai] == nil && bytes.HasPrefix(oldHex, hex) {
 				switch oldItemType {
 				case AccountStreamItem:
-					newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
 					oldAi++
-					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
 				case StorageStreamItem:
-					newStream.sValues = append(newStream.sValues, oldStream.sValues[oldSi])
 					oldSi++
-					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-				case AHashStreamItem:
-					newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
+				case AHashStreamItem, SHashStreamItem:
 					oldHi++
-					newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-				case SHashStreamItem:
-					newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-					oldHi++
-					newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
 				}
-				oldHex = nil // consumed
-			case 1:
-				newStream.hexes = append(newStream.hexes, hex)
-				switch itemType {
-				case AccountStreamItem:
-					newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-					ai++
-					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-				case StorageStreamItem:
-					newStream.sValues = append(newStream.sValues, stream.sValues[si])
-					si++
-					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-				default:
-					return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex > hex): %d", itemType)
-				}
-				hex = nil // consumed
-			case 0:
-				newStream.hexes = append(newStream.hexes, hex)
-				switch itemType {
-				case AccountStreamItem:
-					if stream.aValues[ai] != nil {
-						newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-						ai++
+				oldHex = nil
+			} else {
+				switch bytes.Compare(oldHex, hex) {
+				case -1:
+					newStream.hexes = append(newStream.hexes, oldHex)
+					switch oldItemType {
+					case AccountStreamItem:
+						newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
+						oldAi++
 						newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-					}
-					oldAi++ // Discard old values
-				case StorageStreamItem:
-					if stream.sValues[si] != nil {
-						newStream.sValues = append(newStream.sValues, stream.sValues[si])
-						si++
+					case StorageStreamItem:
+						newStream.sValues = append(newStream.sValues, oldStream.sValues[oldSi])
+						oldSi++
 						newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
+					case AHashStreamItem:
+						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
+						oldHi++
+						newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
+					case SHashStreamItem:
+						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
+						oldHi++
+						newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
 					}
-					oldSi++ // Discard old values
-				default:
-					return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == hex): %d", itemType)
+					oldHex = nil // consumed
+				case 1:
+					switch itemType {
+					case AccountStreamItem:
+						if stream.aValues[ai] != nil {
+							newStream.hexes = append(newStream.hexes, hex)
+							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
+							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
+						}
+						ai++
+					case StorageStreamItem:
+						if len(stream.sValues[si]) > 0 {
+							newStream.hexes = append(newStream.hexes, hex)
+							newStream.sValues = append(newStream.sValues, stream.sValues[si])
+							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
+						}
+						si++
+					default:
+						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex > hex): %d", itemType)
+					}
+					hex = nil // consumed
+				case 0:
+					switch itemType {
+					case AccountStreamItem:
+						if stream.aValues[ai] != nil {
+							newStream.hexes = append(newStream.hexes, hex)
+							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
+							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
+						}
+						ai++
+						oldAi++ // Discard old values
+					case StorageStreamItem:
+						if len(stream.sValues[si]) > 0 {
+							newStream.hexes = append(newStream.hexes, hex)
+							newStream.sValues = append(newStream.sValues, stream.sValues[si])
+							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
+						}
+						si++
+						oldSi++ // Discard old values
+					default:
+						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == hex): %d", itemType)
+					}
+					hex = nil    // consumed
+					oldHex = nil // consumed
 				}
-				hex = nil    // consumed
-				oldHex = nil // consumed
 			}
 		}
 	}
@@ -481,5 +553,5 @@ func HashWithModifications(
 			fmt.Printf("%x\n", hex)
 		}
 	}
-	return StreamHash(&newStream, trace)
+	return StreamHash(&newStream, storagePrefixLen, trace)
 }
