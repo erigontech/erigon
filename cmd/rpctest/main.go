@@ -23,7 +23,6 @@ import (
 var action = flag.String("action", "", "action to execute")
 var url = flag.String("url", "", "URL to use for RPC requests")
 var block = flag.Int("block", 1, "specifies a block number for operation")
-var account = flag.String("account", "0x", "specifies account to investigate")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
 
 type EthError struct {
@@ -1061,6 +1060,6 @@ func main() {
 
 	flag.Parse()
 	if *action == "proofs" {
-		proofs(*chaindata, *url, *block, common.HexToAddress(*account))
+		proofs(*chaindata, *url, *block)
 	}
 }

@@ -417,3 +417,63 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, ")")
 	}
 }
+
+func (t *Trie) HashOfHexKey(hexKey []byte) common.Hash {
+	nd := t.root
+	pos := 0
+	var account bool
+	for pos < len(hexKey) || account {
+		switch n := nd.(type) {
+		case nil:
+			return common.Hash{}
+		case *shortNode:
+			matchlen := prefixLen(hexKey[pos:], n.Key)
+			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
+				nd = n.Val
+				pos += matchlen
+				if _, ok := n.Val.(*accountNode); ok {
+					account = true
+				}
+			} else {
+				return common.Hash{}
+			}
+		case *duoNode:
+			i1, i2 := n.childrenIdx()
+			switch hexKey[pos] {
+			case i1:
+				nd = n.child1
+				pos++
+			case i2:
+				nd = n.child2
+				pos++
+			default:
+				return common.Hash{}
+			}
+		case *fullNode:
+			child := n.Children[hexKey[pos]]
+			if child == nil {
+				return common.Hash{}
+			}
+			nd = child
+			pos++
+		case valueNode:
+			return common.Hash{}
+		case *accountNode:
+			nd = n.storage
+			account = false
+		case hashNode:
+			return common.Hash{}
+		default:
+			panic(fmt.Sprintf("Unknown node: %T", n))
+		}
+	}
+	var hash common.Hash
+	if hn, ok := nd.(hashNode); ok {
+		copy(hash[:], hn[:])
+	} else {
+		h := t.newHasherFunc()
+		defer returnHasherToPool(h)
+		h.hash(nd, len(hexKey) == 0, hash[:])
+	}
+	return hash
+}
