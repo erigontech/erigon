@@ -106,7 +106,7 @@ func writeStats(w io.Writer, blockNum uint64, blockProof trie.BlockProof) {
 }
 */
 
-func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool) {
+func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool, interval uint64, ignoreOlderThan uint64) {
 	state.MaxTrieCacheGen = uint32(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -288,21 +288,32 @@ func stateless(chaindata string, statefile string, triesize int, tryPreRoot bool
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
 		}
-		if batch.BatchSize() >= 100000 {
+
+		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0
+
+		if batch.BatchSize() >= 100000 || willSnapshot {
 			if _, err := batch.Commit(); err != nil {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}
 			tds.PruneTries(false)
 		}
-		if (blockNum > 2000000 && blockNum%500000 == 0) || (blockNum > 4000000 && blockNum%100000 == 0) {
+
+		if willSnapshot {
 			// Snapshots of the state will be written to the same directory as the state file
-			save_snapshot(db, fmt.Sprintf("%s_%d", statefile, blockNum))
+			fmt.Printf("\nSaving snapshot at block %d, hash %x\n", blockNum, block.Root())
+			saveSnapshot(db, fmt.Sprintf("%s_%d", statefile, blockNum))
 		}
+
 		preRoot = header.Root
 		blockNum++
+
 		if blockNum%1000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			// overwrite terminal line, if no snapshot was made and not the first line
+			if blockNum > 0 && !willSnapshot {
+				fmt.Printf("\r")
+			}
+			fmt.Printf("Processed %d blocks", blockNum)
 		}
 		// Check for interrupts
 		select {

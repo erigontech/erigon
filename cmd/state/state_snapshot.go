@@ -110,121 +110,103 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	check(err)
 }
 
-func save_snapshot(db *bolt.DB, filename string) {
+func copyBucket(bucketName []byte, fromTx *bolt.Tx, toDB *bolt.DB) error {
+	toTx, err := toDB.Begin(true)
+	if err != nil {
+		return err
+	}
+
+	toBucket, err := toTx.CreateBucket(bucketName, true)
+	if err != nil {
+		return err
+	}
+
+	count := 0
+
+	printStats := func() {
+		fmt.Printf("\r -- commited %d records for bucket: '%s'...", count, string(bucketName))
+	}
+
+	if fromBucket := fromTx.Bucket(bucketName); fromBucket != nil {
+		defer printStats()
+
+		fromCursor := fromBucket.Cursor()
+
+		for k, v := fromCursor.First(); k != nil; k, v = fromCursor.Next() {
+			err = toBucket.Put(common.CopyBytes(k), common.CopyBytes(v))
+			if err != nil {
+				return err
+			}
+			count++
+
+			if count%100000 == 0 {
+				err = toTx.Commit()
+				if err != nil {
+					return err
+				}
+
+				printStats()
+
+				toTx, err = toDB.Begin(true)
+				if err != nil {
+					return err
+				}
+				toBucket = toTx.Bucket(bucketName)
+			}
+		}
+	} else {
+		fmt.Printf(" -- nothing to copy for the bucket name: '%s'...", string(bucketName))
+	}
+
+	return toTx.Commit()
+}
+
+func copyDatabase(fromDB *bolt.DB, toDB *bolt.DB) error {
+	return fromDB.View(func(tx *bolt.Tx) error {
+		fmt.Printf(" - copying AccountsBucket...\n")
+		if err := copyBucket(dbutils.AccountsBucket, tx, toDB); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+		fmt.Println("OK")
+
+		fmt.Printf(" - copying StorageBucket...\n")
+		if err := copyBucket(dbutils.StorageBucket, tx, toDB); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+		fmt.Println("OK")
+
+		fmt.Printf(" - copying CodeBucket...\n")
+		if err := copyBucket(dbutils.CodeBucket, tx, toDB); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+		fmt.Println("OK")
+
+		return nil
+	})
+}
+
+func saveSnapshot(db *bolt.DB, filename string) {
 	fmt.Printf("Saving snapshot to %s\n", filename)
+
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
 	check(err)
 	defer diskDb.Close()
-	diskTx, err := diskDb.Begin(true)
-	check(err)
-	bDisk, err := diskTx.CreateBucket(dbutils.AccountsBucket, true)
-	check(err)
-	sbDisk, err := diskTx.CreateBucket(dbutils.StorageBucket, true)
-	check(err)
-	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := bDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := diskTx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Commited %d records\n", count)
-				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
-				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		b = tx.Bucket(dbutils.StorageBucket)
-		c = b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := sbDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := diskTx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Commited %d records\n", count)
-				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
-				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		return nil
-	})
-	check(err)
-	err = diskTx.Commit()
+
+	err = copyDatabase(db, diskDb)
 	check(err)
 }
 
-func load_snapshot(db *bolt.DB, filename string) {
+func loadSnapshot(db *bolt.DB, filename string) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
 	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
 	check(err)
-	tx, err := db.Begin(true)
+	defer diskDb.Close()
+
+	err = copyDatabase(diskDb, db)
 	check(err)
-	b, err := tx.CreateBucket(dbutils.AccountsBucket, true)
-	check(err)
-	sb, err := tx.CreateBucket(dbutils.StorageBucket, true)
-	check(err)
-	count := 0
-	err = diskDb.View(func(txDisk *bolt.Tx) error {
-		bDisk := txDisk.Bucket(dbutils.AccountsBucket)
-		cDisk := bDisk.Cursor()
-		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-			if err := b.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Committed %d records\n", count)
-				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return err
-				}
-				b = tx.Bucket(dbutils.AccountsBucket)
-				sb = tx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		sbDisk := txDisk.Bucket(dbutils.StorageBucket)
-		count = 0
-		cDisk = sbDisk.Cursor()
-		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-			if err := sb.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Committed %d records\n", count)
-				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return err
-				}
-				b = tx.Bucket(dbutils.AccountsBucket)
-				sb = tx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		return nil
-	})
-	check(err)
-	err = tx.Commit()
-	check(err)
-	diskDb.Close()
 }
 
 func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
@@ -332,6 +314,7 @@ func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, block
 	r := trie.NewResolver(0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 	r.AddRequest(req)
 	var err error
 	if err = r.ResolveWithDb(stateDb, blockNum); err != nil {
@@ -401,7 +384,7 @@ func stateSnapshot() error {
 	stateDb, db := ethdb.NewMemDatabase2()
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
-		load_snapshot(db, "statedb0")
+		loadSnapshot(db, "statedb0")
 		if err := loadCodes(db, ethDb); err != nil {
 			return err
 		}
