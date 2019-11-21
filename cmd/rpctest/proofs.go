@@ -137,9 +137,13 @@ func proofs(chaindata string, url string, block int) {
 			p := proof.Result.AccountProof[len(diffKey)]
 			b := common.FromHex(p)
 			h := common.BytesToHash(crypto.Keccak256(b))
-			hE := t.HashOfHexKey(diffKey)
+			hE, err := t.HashOfHexKey(diffKey)
+			if err != nil {
+				fmt.Printf("Error computing partial hash for %x: %v\n", diffKey, err)
+				return
+			}
 			if h != hE {
-				fmt.Printf(":( key %x: %x %x adding nibbles: ", diffKey, h, hE)
+				fmt.Printf("key %x: %x %x adding nibbles: ", diffKey, h, hE)
 				var branch [17][]byte
 				err = rlp.DecodeBytes(b, &branch)
 				if err != nil {
@@ -152,7 +156,10 @@ func proofs(chaindata string, url string, block int) {
 					newDiff[len(diffKey)] = nibble
 					var proofHash common.Hash
 					copy(proofHash[:], branch[nibble])
-					newHash := t.HashOfHexKey(newDiff)
+					newHash, err := t.HashOfHexKey(newDiff)
+					if err != nil {
+						fmt.Printf("Error computing partial hash for %x: %v\n", newDiff, err)
+					}
 					if proofHash != newHash {
 						newDiffKeys = append(newDiffKeys, newDiff)
 						fmt.Printf("%x", nibble)
@@ -162,18 +169,6 @@ func proofs(chaindata string, url string, block int) {
 			} else {
 				fmt.Printf("MATCH key %x: %x %x\n", diffKey, h, hE)
 			}
-			/*
-				for _, p := range proof.Result.AccountProof {
-					var branch [17][]byte
-
-					err = rlp.DecodeBytes(b, &branch)
-					if err != nil {
-						fmt.Printf("Error decoding: %v\n", err)
-					}
-					h := crypto.Keccak256(b)
-					fmt.Printf("%x: %s\n", h, p)
-				}
-			*/
 		}
 		diffKeys = newDiffKeys
 		newDiffKeys = nil
