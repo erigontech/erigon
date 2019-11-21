@@ -179,7 +179,7 @@ func TestSerialiseBlockWitness(t *testing.T) {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 	var b bytes.Buffer
-	if err := bwb.WriteTo(&b); err != nil {
+	if _, err := bwb.WriteTo(&b); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 

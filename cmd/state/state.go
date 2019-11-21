@@ -58,6 +58,7 @@ var preroot = flag.Bool("preroot", false, "Attempt to compute hash of the trie w
 var snapshotInterval = flag.Uint64("snapshotInterval", 0, "how often to take snapshots (0 - never, 1 - every block, 1000 - every 1000th block, etc)")
 var snapshotFrom = flag.Uint64("snapshotFrom", 0, "from which block to start snapshots")
 var witnessInterval = flag.Uint64("witnessInterval", 1, "after which block to extract witness (put a large number like 10000000 to disable)")
+var statsfile = flag.String("statsfile", "stateless.csv", "path where to write the stats file")
 
 func check(e error) {
 	if e != nil {
@@ -1681,26 +1682,11 @@ func main() {
 			return ethdb.NewBoltDatabase(path)
 		}
 
-		stateless(*chaindata, *statefile, *triesize, *preroot, *snapshotInterval, *snapshotFrom, *witnessInterval, createDb)
+		stateless(*chaindata, *statefile, *triesize, *preroot, *snapshotInterval, *snapshotFrom, *witnessInterval, *statsfile, createDb)
 	}
 	if *action == "stateless_chart" {
-		stateless_chart_key_values("/Users/alexeyakhunov/mygit/go-ethereum/st_1/stateless.csv", []int{21, 20, 19, 18}, "breakdown.png", 2800000, 1)
+		statelessDoKVChart(*statsfile, []int{21, 20, 19, 18}, fmt.Sprintf("%s-chart.png", *statsfile), 2800000, 1)
 	}
-	//stateless_chart_key_values("stateless1.csv", []int{17}, "total.png", 1, 0)
-	//stateless_chart_key_values("stateless1_256.csv", []int{17}, "total256.png", 1, 0)
-	//stateless_chart_key_values([]int{17}, "total_2675000.png", 2675000, 0)
-	//stateless_chart_key_values("stateless1.csv", []int{12, 15, 16}, "breakdown.png", 1, 1)
-	//stateless_chart_key_values("stateless1_256.csv", []int{12, 15, 16}, "breakdown256.png", 1, 1)
-	//stateless_chart_key_values([]int{12, 15, 16}, "breakdown_2675000.png", 2675000, 1)
-	//stateless_chart_key_values("stateless1.csv", []int{13,14}, "key_vals.png", 1, 4)
-	//stateless_chart_key_values("stateless1_256.csv", []int{13,14}, "key_vals256.png", 1, 4)
-	//stateless_chart_key_values("stateless1.csv", []int{10,11}, "c_key_vals.png", 1, 4)
-	//stateless_chart_key_values("stateless1_256.csv", []int{10,11}, "c_key_vals256.png", 1, 4)
-	//stateless_chart_key_values("stateless1.csv", []int{6, 7}, "mask_hash.png", 1, 4)
-	//stateless_chart_key_values("stateless1_256.csv", []int{6, 7}, "mask_hash256.png", 1, 4)
-	//stateless_chart_key_values("stateless1.csv", []int{1, 2}, "c_mask_hash.png", 1, 4)
-	//stateless_chart_key_values("stateless1_256.csv", []int{1, 2}, "c_mask_hash256.png", 1, 4)
-	//stateless_chart_key_values([]int{12}, "codes_28m.png", 2800000)
 	if *action == "stateSnapshot" {
 		if err := stateSnapshot(); err != nil {
 			fmt.Printf("Error: %v\n", err)
