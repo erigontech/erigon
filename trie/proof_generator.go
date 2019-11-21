@@ -394,16 +394,6 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		return bwb.branch(set)
 	case *accountNode:
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
-			if n.storage == nil {
-				if err := bwb.emptyRoot(); err != nil {
-					return err
-				}
-			} else {
-				// Here we substitute rs parameter for storageRs, because it needs to become the default
-				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
-					return err
-				}
-			}
 			code, ok := codeMap[n.CodeHash]
 			if ok {
 				if err := bwb.supplyCode(code); err != nil {
@@ -417,6 +407,16 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 					return err
 				}
 				if err := bwb.hash(1); err != nil {
+					return err
+				}
+			}
+			if n.storage == nil {
+				if err := bwb.emptyRoot(); err != nil {
+					return err
+				}
+			} else {
+				// Here we substitute rs parameter for storageRs, because it needs to become the default
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
 					return err
 				}
 			}

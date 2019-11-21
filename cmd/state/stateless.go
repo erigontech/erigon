@@ -217,7 +217,7 @@ func stateless(chaindata string,
 		}
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 49018)
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
 			if err != nil {
 				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
 				return
