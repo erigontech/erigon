@@ -49,18 +49,13 @@ func newTestBoltDB() (*BoltDatabase, func()) {
 }
 
 func newTestBadgerDB() (*BadgerDatabase, func()) {
-	dirname, err := ioutil.TempDir(os.TempDir(), "ethdb_test_")
-	if err != nil {
-		panic("failed to create test file: " + err.Error())
-	}
-	db, err := NewBadgerDatabase(path.Join(dirname, "badger_db"))
+	db, err := NewEphemeralBadger()
 	if err != nil {
 		panic("failed to create test database: " + err.Error())
 	}
 
 	return db, func() {
 		db.Close()
-		os.RemoveAll(dirname)
 	}
 }
 

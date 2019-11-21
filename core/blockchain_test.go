@@ -43,16 +43,28 @@ import (
 var (
 	canonicalSeed = 1
 	forkSeed      = 2
+
+	// TODO [Andrew] run tests with BadgerDB as well
+	useBadgerDB = false
 )
 
 // newCanonical creates a chain database, and injects a deterministic canonical
 // chain. Depending on the full flag, if creates either a full block chain or a
 // header only chain.
 func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, ethdb.Database, *BlockChain, error) {
-	var (
-		db      = ethdb.NewMemDatabase()
-		genesis = new(Genesis).MustCommit(db)
-	)
+	var db ethdb.Database
+
+	if useBadgerDB {
+		var err error
+		db, err = ethdb.NewEphemeralBadger()
+		if err != nil {
+			panic("failed to create test database: " + err.Error())
+		}
+	} else {
+		db = ethdb.NewMemDatabase()
+	}
+
+	genesis := new(Genesis).MustCommit(db)
 
 	// Initialize a fresh chain with only a genesis block
 	cacheConfig := &CacheConfig{

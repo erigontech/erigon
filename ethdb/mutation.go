@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"errors"
 	"sort"
 	"sync"
 
@@ -226,6 +225,11 @@ func (m *mutation) BatchSize() int {
 	return m.puts.Size()
 }
 
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
+func (m *mutation) IdealBatchSize() int {
+	return m.db.IdealBatchSize()
+}
+
 func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	if m.db == nil {
 		panic("Not implemented")
@@ -242,12 +246,12 @@ func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]b
 	return m.db.Walk(bucket, startkey, fixedbits, walker)
 }
 
-func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	if m.db == nil {
 		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
 	}
@@ -262,7 +266,7 @@ func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, ti
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
-func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if m.db == nil {
 		panic("Not implemented")
 	}
@@ -402,8 +406,6 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 func (m *mutation) MemCopy() Database {
 	panic("Not implemented")
 }
-
-var errNotSupported = errors.New("not supported")
 
 // [TURBO-GETH] Freezer support (not implemented yet)
 // Ancients returns an error as we don't have a backing chain freezer.

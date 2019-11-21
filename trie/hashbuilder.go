@@ -108,7 +108,13 @@ func (hb *HashBuilder) leaf(length int) error {
 	}
 	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
-	return hb.leafHashWithKeyVal(key, val)
+	if err := hb.leafHashWithKeyVal(key, val); err != nil {
+		return err
+	}
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
+	return nil
 }
 
 // To be called internally
@@ -255,13 +261,9 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 		hb.acc.Balance.Set(balance)
 	}
 	popped := 0
-	if fieldSet&uint32(8) != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
-		popped++
-	}
 	var root node
 	if fieldSet&uint32(4) != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		if hb.acc.Root != EmptyRoot {
 			// Root is on top of the stack
 			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
@@ -269,6 +271,10 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 				root = hashNode(common.CopyBytes(hb.acc.Root[:]))
 			}
 		}
+		popped++
+	}
+	if fieldSet&uint32(8) != 0 {
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	}
 	if fieldSet&uint32(16) != 0 {
@@ -287,6 +293,9 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	}
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
 	return nil
 }
 
@@ -319,12 +328,12 @@ func (hb *HashBuilder) accountLeafHash(length int, fieldSet uint32) error {
 		hb.acc.Balance.Set(balance)
 	}
 	popped := 0
-	if fieldSet&uint32(8) != 0 {
-		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+	if fieldSet&uint32(4) != 0 {
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	}
-	if fieldSet&uint32(4) != 0 {
-		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*33-32:len(hb.hashStack)-popped*33])
+	if fieldSet&uint32(8) != 0 {
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	}
 	if fieldSet&uint32(16) != 0 {
@@ -338,7 +347,7 @@ func (hb *HashBuilder) accountLeafHash(length int, fieldSet uint32) error {
 
 // To be called internally
 func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
-	var hash [33]byte // RLP representation of hash (or un-hashes value)
+	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
 	var lenPrefix [4]byte
@@ -381,7 +390,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	}
 
 	if popped > 0 {
-		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*33]
+		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
 	}
 	hb.hashStack = append(hb.hashStack, hash[:]...)
@@ -404,7 +413,13 @@ func (hb *HashBuilder) extension(key []byte) error {
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
-	return hb.extensionHash(key)
+	if err := hb.extensionHash(key); err != nil {
+		return err
+	}
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
+	return nil
 }
 
 func (hb *HashBuilder) extensionHash(key []byte) error {
@@ -591,6 +606,9 @@ func (hb *HashBuilder) hash(number int) error {
 		hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
 		hb.hashStack = append(hb.hashStack, hash[:]...)
 		hb.nodeStack = append(hb.nodeStack, nil)
+	}
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 	return nil
 }

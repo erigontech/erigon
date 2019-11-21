@@ -26,9 +26,6 @@ import (
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
 
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-const IdealBatchSize = 100 * 1024
-
 // Putter wraps the database write operations.
 type Putter interface {
 	// Put inserts or updates a single entry.
@@ -62,9 +59,12 @@ type Getter interface {
 	// If walker returns false or an error, the walk stops.
 	Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error
 
-	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error
+	// MultiWalk is similar to multiple Walk calls folded into one.
+	MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error
+
 	WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error
-	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error
+
+	MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error
 }
 
 // Deleter wraps the database delete operations.
@@ -82,12 +82,22 @@ type Database interface {
 	Getter
 	Putter
 	Deleter
+
+	// MultiPut inserts or updates multiple entries.
+	// Entries are passed as an array:
+	// bucket0, key0, val0, bucket1, key1, val1, ...
 	MultiPut(tuples ...[]byte) (uint64, error)
 	RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error
 	Close()
 	NewBatch() DbWithPendingMutations
+
+	// IdealBatchSize defines the size of the data batches should ideally add in one write.
+	IdealBatchSize() int
+
 	Size() int
 	Keys() ([][]byte, error)
+
+	// MemCopy creates a copy of the database in memory.
 	MemCopy() Database
 	// [TURBO-GETH] Freezer support (minimum amount that is actually used)
 	// FIXME: implement support if needed
@@ -111,3 +121,5 @@ type DbWithPendingMutations interface {
 	Rollback()
 	BatchSize() int
 }
+
+var errNotSupported = errors.New("not supported")

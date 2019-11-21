@@ -275,6 +275,11 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 	storageTouches := common.StorageKeys{}
 	var values [][]byte
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
+		if withValues {
+			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
+				continue
+			}
+		}
 		for keyHash := range m {
 			var storageKey common.StorageKey
 			copy(storageKey[:], addrHash[:])
@@ -347,7 +352,12 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (common.Hashes, []*accounts.Account) {
 	accountTouches := common.Hashes{}
 	var aValues []*accounts.Account
-	for addrHash := range tds.aggregateBuffer.accountUpdates {
+	for addrHash, aValue := range tds.aggregateBuffer.accountUpdates {
+		if aValue != nil {
+			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
+				accountTouches = append(accountTouches, addrHash)
+			}
+		}
 		accountTouches = append(accountTouches, addrHash)
 	}
 	if withReads {
@@ -362,7 +372,20 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 		// We assume that if withValues == true, then withReads == false
 		aValues = make([]*accounts.Account, len(accountTouches))
 		for i, addrHash := range accountTouches {
-			aValues[i] = tds.aggregateBuffer.accountUpdates[addrHash]
+			if i < len(accountTouches)-1 && addrHash == accountTouches[i+1] {
+				aValues[i] = nil // Entry that would wipe out existing storage
+			} else {
+				a := tds.aggregateBuffer.accountUpdates[addrHash]
+				if a != nil {
+					if _, ok := tds.aggregateBuffer.storageUpdates[addrHash]; ok {
+						var ac accounts.Account
+						ac.Copy(a)
+						ac.Root = trie.EmptyRoot
+						a = &ac
+					}
+				}
+				aValues[i] = a
+			}
 		}
 	}
 	return accountTouches, aValues
@@ -454,7 +477,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
@@ -1131,7 +1154,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, error) {
+func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStats, error) {
 	bwb := trie.NewBlockWitnessBuilder(trace)
 	rs := trie.NewResolveSet(0)
 	touches, storageTouches := tds.pg.ExtractTouches()
@@ -1143,13 +1166,17 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, error) {
 	}
 	codeMap := tds.pg.ExtractCodeMap()
 	if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var b bytes.Buffer
-	if err := bwb.WriteTo(&b); err != nil {
-		return nil, err
+
+	stats, err := bwb.WriteTo(&b)
+
+	if err != nil {
+		return nil, nil, err
 	}
-	return b.Bytes(), nil
+
+	return b.Bytes(), stats, nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

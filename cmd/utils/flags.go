@@ -436,12 +436,16 @@ var (
 	}
 	NoHistory = cli.BoolTFlag{
 		Name:  "no-history",
-		Usage: "write the whole state history",
+		Usage: "Write the whole state history",
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
-		Usage: "when to switch from full to archive sync",
+		Usage: "When to switch from full to archive sync",
 		Value: 1024,
+	}
+	BadgerFlag = cli.BoolFlag{
+		Name:  "badger",
+		Usage: "Use BadgerDB rather than BoltDB",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -1221,6 +1225,8 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	if ctx.GlobalIsSet(InsecureUnlockAllowedFlag.Name) {
 		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
 	}
+
+	cfg.BadgerDB = ctx.GlobalBool(BadgerFlag.Name)
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {

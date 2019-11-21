@@ -584,7 +584,7 @@ func initialState1() error {
 		return err
 	}
 	var witness bytes.Buffer
-	if err = bwb.WriteTo(&witness); err != nil {
+	if _, err = bwb.WriteTo(&witness); err != nil {
 		return err
 	}
 	var witnessTrie *trie.Trie
