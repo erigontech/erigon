@@ -130,7 +130,7 @@ func (bw *bucketWriter) walker(k, v []byte) (bool, error) {
 		bw.pending = bw.db.NewBatch()
 	}
 
-	if err := bw.pending.Put(bw.bucket, k, v); err != nil {
+	if err := bw.pending.Put(bw.bucket, common.CopyBytes(k), common.CopyBytes(v)); err != nil {
 		return false, err
 	}
 	bw.written++
