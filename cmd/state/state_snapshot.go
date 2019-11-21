@@ -110,121 +110,103 @@ func constructSnapshot(ethDb ethdb.Database, blockNum uint64) {
 	check(err)
 }
 
-func save_snapshot(db *bolt.DB, filename string) {
+type bucketWriter struct {
+	db      ethdb.Database
+	bucket  []byte
+	pending ethdb.DbWithPendingMutations
+	written uint64
+}
+
+func (bw *bucketWriter) printStats() {
+	if bw.written == 0 {
+		fmt.Printf(" -- nothing to copy for bucket: '%s'...", string(bw.bucket))
+	} else {
+		fmt.Printf("\r -- commited %d records for bucket: '%s'...", bw.written, string(bw.bucket))
+	}
+}
+
+func (bw *bucketWriter) walker(k, v []byte) (bool, error) {
+	if bw.pending == nil {
+		bw.pending = bw.db.NewBatch()
+	}
+
+	if err := bw.pending.Put(bw.bucket, common.CopyBytes(k), common.CopyBytes(v)); err != nil {
+		return false, err
+	}
+	bw.written++
+
+	if bw.pending.BatchSize() >= 100000 {
+		if _, err := bw.pending.Commit(); err != nil {
+			return false, err
+		}
+
+		bw.printStats()
+
+		bw.pending = bw.db.NewBatch()
+	}
+
+	return true, nil
+}
+
+func (bw *bucketWriter) commit() error {
+	defer bw.printStats()
+
+	if bw.pending != nil {
+		_, err := bw.pending.Commit()
+		return err
+	}
+
+	return nil
+}
+
+func newBucketWriter(db ethdb.Database, bucket []byte) *bucketWriter {
+	return &bucketWriter{
+		db:      db,
+		bucket:  bucket,
+		pending: nil,
+		written: 0,
+	}
+}
+
+func copyDatabase(fromDB ethdb.Database, toDB ethdb.Database) error {
+	for _, bucket := range [][]byte{dbutils.AccountsBucket, dbutils.StorageBucket, dbutils.CodeBucket} {
+		fmt.Printf(" - copying bucket '%s'...\n", string(bucket))
+		writer := newBucketWriter(toDB, bucket)
+
+		if err := fromDB.Walk(bucket, nil, 0, writer.walker); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+
+		if err := writer.commit(); err != nil {
+			fmt.Println("FAIL")
+			return err
+		}
+		fmt.Println("OK")
+	}
+	return nil
+}
+
+func saveSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	fmt.Printf("Saving snapshot to %s\n", filename)
-	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
+
+	diskDb, err := createDb(filename)
 	check(err)
 	defer diskDb.Close()
-	diskTx, err := diskDb.Begin(true)
-	check(err)
-	bDisk, err := diskTx.CreateBucket(dbutils.AccountsBucket, true)
-	check(err)
-	sbDisk, err := diskTx.CreateBucket(dbutils.StorageBucket, true)
-	check(err)
-	count := 0
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
-		c := b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := bDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := diskTx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Commited %d records\n", count)
-				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
-				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		b = tx.Bucket(dbutils.StorageBucket)
-		c = b.Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if err := sbDisk.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := diskTx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Commited %d records\n", count)
-				diskTx, err = diskDb.Begin(true)
-				bDisk = diskTx.Bucket(dbutils.AccountsBucket)
-				sbDisk = diskTx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		return nil
-	})
-	check(err)
-	err = diskTx.Commit()
+
+	err = copyDatabase(db, diskDb)
 	check(err)
 }
 
-func load_snapshot(db *bolt.DB, filename string) {
+func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	fmt.Printf("Loading snapshot from %s\n", filename)
-	diskDb, err := bolt.Open(filename, 0600, &bolt.Options{})
+
+	diskDb, err := createDb(filename)
 	check(err)
-	tx, err := db.Begin(true)
+	defer diskDb.Close()
+
+	err = copyDatabase(diskDb, db)
 	check(err)
-	b, err := tx.CreateBucket(dbutils.AccountsBucket, true)
-	check(err)
-	sb, err := tx.CreateBucket(dbutils.StorageBucket, true)
-	check(err)
-	count := 0
-	err = diskDb.View(func(txDisk *bolt.Tx) error {
-		bDisk := txDisk.Bucket(dbutils.AccountsBucket)
-		cDisk := bDisk.Cursor()
-		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-			if err := b.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Committed %d records\n", count)
-				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return err
-				}
-				b = tx.Bucket(dbutils.AccountsBucket)
-				sb = tx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		sbDisk := txDisk.Bucket(dbutils.StorageBucket)
-		count = 0
-		cDisk = sbDisk.Cursor()
-		for k, v := cDisk.First(); k != nil; k, v = cDisk.Next() {
-			if err := sb.Put(common.CopyBytes(k), common.CopyBytes(v)); err != nil {
-				return err
-			}
-			count++
-			if count%100000 == 0 {
-				if err := tx.Commit(); err != nil {
-					return err
-				}
-				fmt.Printf("Committed %d records\n", count)
-				var err error
-				tx, err = db.Begin(true)
-				if err != nil {
-					return err
-				}
-				b = tx.Bucket(dbutils.AccountsBucket)
-				sb = tx.Bucket(dbutils.StorageBucket)
-			}
-		}
-		return nil
-	})
-	check(err)
-	err = tx.Commit()
-	check(err)
-	diskDb.Close()
 }
 
 func loadCodes(db *bolt.DB, codeDb ethdb.Database) error {
@@ -326,12 +308,13 @@ func compare_snapshot(stateDb ethdb.Database, db *bolt.DB, filename string) {
 	check(err)
 }
 
-func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, blockNum uint64) {
+func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	startTime := time.Now()
 	t := trie.New(rootHash)
 	r := trie.NewResolver(0, true, blockNum)
 	key := []byte{}
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
+	fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 	r.AddRequest(req)
 	var err error
 	if err = r.ResolveWithDb(stateDb, blockNum); err != nil {
@@ -341,26 +324,24 @@ func checkRoots(stateDb ethdb.Database, db *bolt.DB, rootHash common.Hash, block
 	startTime = time.Now()
 	var addrHash common.Hash
 	roots := make(map[common.Hash]common.Hash)
-	err = db.View(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(dbutils.StorageBucket)
-		b := tx.Bucket(dbutils.AccountsBucket)
-		c := sb.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			copy(addrHash[:], k[:32])
-			if _, ok := roots[addrHash]; !ok {
-				if enc, _ := b.Get(addrHash[:]); enc == nil {
-					roots[addrHash] = common.Hash{}
-				} else {
-					var account accounts.Account
-					if err = account.DecodeForStorage(enc); err != nil {
-						return err
-					}
-					roots[addrHash] = account.Root
+
+	err = stateDb.Walk(dbutils.StorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		copy(addrHash[:], k[:32])
+		if _, ok := roots[addrHash]; !ok {
+			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
+				roots[addrHash] = common.Hash{}
+			} else {
+				var account accounts.Account
+				if err = account.DecodeForStorage(enc); err != nil {
+					return false, err
 				}
+				roots[addrHash] = account.Root
 			}
 		}
-		return nil
+
+		return true, nil
 	})
+
 	if err != nil {
 		panic(err)
 	}
@@ -401,7 +382,9 @@ func stateSnapshot() error {
 	stateDb, db := ethdb.NewMemDatabase2()
 	defer stateDb.Close()
 	if _, err := os.Stat("statedb0"); err == nil {
-		load_snapshot(db, "statedb0")
+		loadSnapshot(stateDb, "statedb0", func(path string) (ethdb.Database, error) {
+			return ethdb.NewBoltDatabase(path)
+		})
 		if err := loadCodes(db, ethDb); err != nil {
 			return err
 		}
@@ -415,7 +398,7 @@ func stateSnapshot() error {
 	block := bc.GetBlockByNumber(blockNum)
 	fmt.Printf("Block number: %d\n", blockNum)
 	fmt.Printf("Block root hash: %x\n", block.Root())
-	checkRoots(ethDb, ethDb.DB(), block.Root(), blockNum)
+	checkRoots(ethDb, block.Root(), blockNum)
 	return nil
 }
 
@@ -433,5 +416,5 @@ func verifySnapshot(chaindata string) {
 	fmt.Printf("Block number: %d\n", currentBlockNr)
 	fmt.Printf("Block root hash: %x\n", currentBlock.Root())
 	preRoot := currentBlock.Root()
-	checkRoots(ethDb, ethDb.DB(), preRoot, blockNum)
+	checkRoots(ethDb, preRoot, blockNum)
 }
