@@ -34,7 +34,7 @@ import (
 const minGoMaxProcs = 128
 
 // https://github.com/dgraph-io/badger#garbage-collection
-const gcPeriod = 5 * time.Minute
+const gcPeriod = 35 * time.Minute
 
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
@@ -55,7 +55,9 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 	}
 
-	db, err := badger.Open(badger.DefaultOptions(dir))
+	options := badger.DefaultOptions(dir).WithMaxTableSize(512 << 20)
+
+	db, err := badger.Open(options)
 	if err != nil {
 		return nil, err
 	}
@@ -456,7 +458,7 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BadgerDatabase) IdealBatchSize() int {
-	return 10 * 1024
+	return 100 * 1024
 }
 
 // DiskSize returns the total disk size of the database in bytes.
