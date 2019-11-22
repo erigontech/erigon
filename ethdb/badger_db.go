@@ -21,6 +21,7 @@ import (
 	"io/ioutil"
 	"os"
 	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -32,12 +33,16 @@ import (
 // https://groups.google.com/forum/#!topic/golang-nuts/jPb_h3TvlKE/discussion
 const minGoMaxProcs = 128
 
+// https://github.com/dgraph-io/badger#garbage-collection
+const gcPeriod = 5 * time.Minute
+
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
 type BadgerDatabase struct {
-	db     *badger.DB // BadgerDB instance
-	log    log.Logger // Contextual logger tracking the database path
-	tmpDir string     // Temporary data directory
+	db       *badger.DB   // BadgerDB instance
+	log      log.Logger   // Contextual logger tracking the database path
+	tmpDir   string       // Temporary data directory
+	gcTicker *time.Ticker // Garbage Collector
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
@@ -55,9 +60,15 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		return nil, err
 	}
 
+	ticker := time.NewTicker(gcPeriod)
+	for range ticker.C {
+		db.RunValueLogGC(0.5)
+	}
+
 	return &BadgerDatabase{
-		db:  db,
-		log: logger,
+		db:       db,
+		log:      logger,
+		gcTicker: ticker,
 	}, nil
 }
 
@@ -79,6 +90,8 @@ func NewEphemeralBadger() (*BadgerDatabase, error) {
 
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
+	db.gcTicker.Stop()
+
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 		if len(db.tmpDir) > 0 {
