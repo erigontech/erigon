@@ -75,23 +75,30 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 
 // NewEphemeralBadger returns a new BadgerDB in a temporary directory.
 func NewEphemeralBadger() (*BadgerDatabase, error) {
-	tmpDir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
+	dir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := NewBadgerDatabase(tmpDir)
+	logger := log.New("database", dir)
+
+	db, err := badger.Open(badger.DefaultOptions(dir))
 	if err != nil {
 		return nil, err
 	}
 
-	db.tmpDir = tmpDir
-	return db, nil
+	return &BadgerDatabase{
+		db:     db,
+		log:    logger,
+		tmpDir: dir,
+	}, nil
 }
 
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
-	db.gcTicker.Stop()
+	if db.gcTicker != nil {
+		db.gcTicker.Stop()
+	}
 
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
