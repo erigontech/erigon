@@ -322,7 +322,7 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	}
 	// Load any existing snapshot, regenerating it if loading failed
 	head := bc.CurrentBlock()
-	if bc.snaps, err = snapshot.New(bc.db, "snapshot.rlp", head.NumberU64(), head.Root()); err != nil {
+	if bc.snaps, err = snapshot.New(bc.db, "snapshot.rlp", head.Root()); err != nil {
 		return nil, err
 	}
 	// Take ownership of this particular state
