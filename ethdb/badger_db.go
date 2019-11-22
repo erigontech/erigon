@@ -20,12 +20,17 @@ import (
 	"bytes"
 	"io/ioutil"
 	"os"
+	"runtime"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 
 	"github.com/dgraph-io/badger"
 )
+
+// https://github.com/dgraph-io/badger#frequently-asked-questions
+// https://groups.google.com/forum/#!topic/golang-nuts/jPb_h3TvlKE/discussion
+const minGoMaxProcs = 128
 
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
@@ -38,6 +43,12 @@ type BadgerDatabase struct {
 // NewBadgerDatabase returns a BadgerDB wrapper.
 func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	logger := log.New("database", dir)
+
+	oldMaxProcs := runtime.GOMAXPROCS(0)
+	if oldMaxProcs < minGoMaxProcs {
+		runtime.GOMAXPROCS(minGoMaxProcs)
+		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+	}
 
 	db, err := badger.Open(badger.DefaultOptions(dir))
 	if err != nil {
