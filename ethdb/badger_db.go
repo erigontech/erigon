@@ -61,12 +61,15 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	}
 
 	ticker := time.NewTicker(gcPeriod)
-	for range ticker.C {
-		err := db.RunValueLogGC(0.5)
-		if err != badger.ErrNoRewrite {
-			logger.Info("Badger GC run", "err", err)
+	// Start GC in backround
+	go func() {
+		for range ticker.C {
+			err := db.RunValueLogGC(0.5)
+			if err != badger.ErrNoRewrite {
+				logger.Info("Badger GC run", "err", err)
+			}
 		}
-	}
+	}()
 
 	return &BadgerDatabase{
 		db:       db,
