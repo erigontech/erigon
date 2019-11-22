@@ -1152,16 +1152,16 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteTxLookupEntries(batch, block)
 
 			stats.processed++
-			if batch.Size() >= batch.IdealBatchSize() {
+			if batch.BatchSize() >= batch.IdealBatchSize() {
 				if _, err := batch.Commit(); err != nil {
 					return 0, err
 				}
-				size += batch.Size()
+				size += batch.BatchSize()
 				batch = bc.db.NewBatch()
 			}
 		}
-		if batch.Size() > 0 {
-			size += batch.Size()
+		if batch.BatchSize() > 0 {
+			size += batch.BatchSize()
 			if _, err := batch.Commit(); err != nil {
 				return 0, err
 			}
@@ -1724,7 +1724,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if bc.trieDbState != nil {
 				bc.trieDbState.PruneTries(false)
 			}
-			log.Info("Database", "size", bc.db.Size(), "written", written)
+			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
 		}
 	}
 

@@ -155,11 +155,11 @@ func (m *mutation) Has(bucket, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) Size() int {
+func (m *mutation) DiskSize() int64 {
 	if m.db == nil {
 		return 0
 	}
-	return m.db.Size()
+	return m.db.DiskSize()
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {

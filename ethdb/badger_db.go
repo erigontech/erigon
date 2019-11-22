@@ -433,9 +433,10 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 	return 10 * 1024
 }
 
-func (db *BadgerDatabase) Size() int {
-	// TODO [Andrew] implement
-	return 0
+// DiskSize returns the total disk size of the database in bytes.
+func (db *BadgerDatabase) DiskSize() int64 {
+	lsm, vlog := db.db.Size()
+	return lsm + vlog
 }
 
 func (db *BadgerDatabase) Keys() ([][]byte, error) {
