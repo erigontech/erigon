@@ -90,7 +90,7 @@ func proofs(chaindata string, url string, block int) {
 	diffKeys := [][]byte{{}}
 	var newDiffKeys [][]byte
 
-	for len(diffKeys) > 0 && level < 6 {
+	for len(diffKeys) > 0 && level < 7 {
 
 		fmt.Printf("================================================\n")
 		fmt.Printf("LEVEL %d, diffKeys: %d\n", level, len(diffKeys))
@@ -152,6 +152,7 @@ func proofs(chaindata string, url string, block int) {
 				err = rlp.DecodeBytes(b, &branch)
 				if err != nil {
 					fmt.Printf("Error decoding: %v\n", err)
+					fmt.Printf("%s\n", p)
 				}
 				// Expand keys further
 				for nibble := byte(0); nibble < 16; nibble++ {
@@ -160,13 +161,15 @@ func proofs(chaindata string, url string, block int) {
 					newDiff[len(diffKey)] = nibble
 					var proofHash common.Hash
 					copy(proofHash[:], branch[nibble])
-					newHash, err := t.HashOfHexKey(newDiff)
-					if err != nil {
-						fmt.Printf("Error computing partial hash for %x: %v\n", newDiff, err)
-					}
-					if proofHash != newHash {
-						newDiffKeys = append(newDiffKeys, newDiff)
-						fmt.Printf("%x", nibble)
+					if proofHash != (common.Hash{}) || err != nil {
+						newHash, err := t.HashOfHexKey(newDiff)
+						if err != nil {
+							fmt.Printf("Error computing partial hash for %x: %v\n", newDiff, err)
+						}
+						if proofHash != newHash {
+							newDiffKeys = append(newDiffKeys, newDiff)
+							fmt.Printf("%x", nibble)
+						}
 					}
 				}
 				fmt.Printf("\n")

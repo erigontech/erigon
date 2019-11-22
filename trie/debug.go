@@ -435,7 +435,7 @@ func (t *Trie) HashOfHexKey(hexKey []byte) (common.Hash, error) {
 					account = true
 				}
 			} else {
-				return common.Hash{}, fmt.Errorf("too long shortNode key: pos %d, hexKey %x", pos, hexKey)
+				return common.Hash{}, fmt.Errorf("too long shortNode key: pos %d, hexKey %x: %s", pos, hexKey, n.fstring(""))
 			}
 		case *duoNode:
 			i1, i2 := n.childrenIdx()
