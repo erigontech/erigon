@@ -307,9 +307,6 @@ func (hb *HashBuilder) accountLeafHash(length int, fieldSet uint32) error {
 	if err != nil {
 		return err
 	}
-	if length < 0 || length > len(hex) {
-		return fmt.Errorf("accountLeaftHash length %d, hex: %x", length, hex)
-	}
 	key := hex[len(hex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
