@@ -346,7 +346,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		panic(err)
 	}
 	for addrHash, root := range roots {
-		if root != (common.Hash{}) && root != trie.EmptyRoot {
+		if root != (common.Hash{}) {
 			st := trie.New(root)
 			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}

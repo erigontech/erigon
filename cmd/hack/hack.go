@@ -1093,11 +1093,10 @@ func printBranches(block uint64) {
 	}
 }
 
-func readAccount() {
-	ethDb, err := ethdb.NewBoltDatabase("statedb")
+func readAccount(chaindata string, account common.Address) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	accountBytes := common.FromHex(*account)
-	secKey := crypto.Keccak256(accountBytes)
+	secKey := crypto.Keccak256(account[:])
 	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
 	fmt.Printf("%x:%x\n", secKey, v)
 }
@@ -1230,7 +1229,9 @@ func main() {
 	//execToBlock(*block)
 	//extractTrie(*block)
 	//repair()
-	//readAccount()
+	if *action == "readAccount" {
+		readAccount(*chaindata, common.HexToAddress(*account))
+	}
 	//repairCurrent()
 	//testMemBolt()
 	//fmt.Printf("\u00b3\n")
