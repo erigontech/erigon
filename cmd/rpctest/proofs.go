@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -214,15 +217,40 @@ func fixState(chaindata string, url string) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	err = stateDb.Walk(dbutils.AccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+
+	err = stateDb.Walk(dbutils.StorageBucket, nil, 0, func(k, v []byte) (bool, error) {
 		var addrHash common.Hash
-		var account accounts.Account
-		if err = account.DecodeForStorage(v); err != nil {
-			return false, err
-		}
 		copy(addrHash[:], k[:32])
-		if account.Root != trie.EmptyRoot && account.IsEmptyCodeHash() {
-			if _, ok := roots[addrHash]; !ok {
+		if _, ok := roots[addrHash]; !ok {
+			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
+				roots[addrHash] = nil
+			} else {
+				var account accounts.Account
+				if err = account.DecodeForStorage(enc); err != nil {
+					return false, err
+				}
+				roots[addrHash] = &account
+			}
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		panic(err)
+	}
+	for addrHash, account := range roots {
+		if account != nil && account.Root != trie.EmptyRoot {
+			st := trie.New(account.Root)
+			sr := trie.NewResolver(32, false, blockNum)
+			key := []byte{}
+			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+			copy(contractPrefix, addrHash[:])
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation^^uint64(0))
+			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
+			sr.AddRequest(streq)
+			err = sr.ResolveWithDb(stateDb, blockNum)
+			if err != nil {
+				fmt.Printf("%x: %v\n", addrHash, err)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
 				template := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
 				sm := make(map[common.Hash]storageEntry)
@@ -232,7 +260,7 @@ func fixState(chaindata string, url string) {
 					var sr DebugStorageRange
 					if err = post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
 						fmt.Printf("Could not get storageRange: %v\n", err)
-						return false, err
+						return
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -244,20 +272,20 @@ func fixState(chaindata string, url string) {
 						}
 					}
 				}
-				if len(sm) == 0 {
-					fmt.Printf("Repairing address %x addrHash %x\n", address, addrHash)
-					account.Root = trie.EmptyRoot
-					l := account.EncodingLengthForStorage()
-					b := make([]byte, l)
-					account.EncodeForStorage(b)
-					if err = stateDb.Put(dbutils.AccountsBucket, addrHash[:], b); err != nil {
-						fmt.Printf("Could not repair: %v\n", err)
+				for key, entry := range sm {
+					var cKey [common.HashLength + state.IncarnationLength + common.HashLength]byte
+					copy(cKey[:], addrHash[:])
+					binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation^^uint64(0))
+					copy(cKey[common.HashLength+state.IncarnationLength:], key[:])
+					dbValue, _ := stateDb.Get(dbutils.StorageBucket, cKey[:])
+					value := bytes.TrimLeft(entry.Value[:], "\x00")
+					if !bytes.Equal(dbValue, value) {
+						fmt.Printf("Key: %x, value: %x, dbValue: %x\n", key, value, dbValue)
 					}
 				}
 			}
 		}
-		return true, nil
-	})
+	}
 	if err != nil {
 		panic(err)
 	}
