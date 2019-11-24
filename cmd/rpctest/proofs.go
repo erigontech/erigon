@@ -230,7 +230,7 @@ func fixState(chaindata string, url string) {
 				for nextKey != nil {
 					reqID++
 					var sr DebugStorageRange
-					if err := post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
+					if err = post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
 						fmt.Printf("Could not get storageRange: %v\n", err)
 						return false, err
 					}
@@ -250,7 +250,7 @@ func fixState(chaindata string, url string) {
 					l := account.EncodingLengthForStorage()
 					b := make([]byte, l)
 					account.EncodeForStorage(b)
-					if err := stateDb.Put(dbutils.AccountsBucket, addrHash[:], b); err != nil {
+					if err = stateDb.Put(dbutils.AccountsBucket, addrHash[:], b); err != nil {
 						fmt.Printf("Could not repair: %v\n", err)
 					}
 				}
