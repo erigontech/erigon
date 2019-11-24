@@ -162,7 +162,11 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 			var tx *bolt.Tx
 			tx, lastError = db.Begin(false)
 			if lastError == nil {
-				defer tx.Rollback()
+				defer func() {
+					if err := tx.Rollback(); err != nil {
+						log.Error("could not rollback transaction", "error", err)
+					}
+				}()
 				lastHandle++
 				txHandle = lastHandle
 				transactions[txHandle] = tx

@@ -205,9 +205,16 @@ func TestCmdGet(t *testing.T) {
 	var name = []byte("testbucket")
 	if err = db.Update(func(tx *bolt.Tx) error {
 		b, err := tx.CreateBucket(name, false)
-		b.Put([]byte("key1"), []byte("value1"))
-		b.Put([]byte("key2"), []byte("value2"))
-		return err
+		if err != nil {
+			return err
+		}
+		if err = b.Put([]byte("key1"), []byte("value1")); err != nil {
+			return err
+		}
+		if err = b.Put([]byte("key2"), []byte("value2")); err != nil {
+			return err
+		}
+		return nil
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
