@@ -1062,4 +1062,7 @@ func main() {
 	if *action == "proofs" {
 		proofs(*chaindata, *url, *block)
 	}
+	if *action == "fixState" {
+		fixState(*chaindata, *url)
+	}
 }

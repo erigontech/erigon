@@ -9,8 +9,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -90,7 +95,7 @@ func proofs(chaindata string, url string, block int) {
 	diffKeys := [][]byte{{}}
 	var newDiffKeys [][]byte
 
-	for len(diffKeys) > 0 && level < 7 {
+	for len(diffKeys) > 0 && level < 6 {
 
 		fmt.Printf("================================================\n")
 		fmt.Printf("LEVEL %d, diffKeys: %d\n", level, len(diffKeys))
@@ -184,5 +189,76 @@ func proofs(chaindata string, url string, block int) {
 	fmt.Printf("\n\nRESULT:\n")
 	for _, diffKey := range diffKeys {
 		fmt.Printf("%x\n", diffKey)
+	}
+}
+
+func fixState(chaindata string, url string) {
+	stateDb, err := ethdb.NewBoltDatabase(chaindata)
+	if err != nil {
+		panic(err)
+	}
+	defer stateDb.Close()
+	engine := ethash.NewFullFaker()
+	chainConfig := params.MainnetChainConfig
+	bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
+	if err != nil {
+		panic(err)
+	}
+	currentBlock := bc.CurrentBlock()
+	blockNum := currentBlock.NumberU64()
+	blockHash := currentBlock.Hash()
+	fmt.Printf("Block number: %d\n", blockNum)
+	fmt.Printf("Block root hash: %x\n", currentBlock.Root())
+	reqID := 0
+	roots := make(map[common.Hash]*accounts.Account)
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+	err = stateDb.Walk(dbutils.AccountsBucket, nil, 0, func(k, v []byte) (bool, error) {
+		var addrHash common.Hash
+		var account accounts.Account
+		if err = account.DecodeForStorage(v); err != nil {
+			return false, err
+		}
+		copy(addrHash[:], k[:32])
+		if account.Root != trie.EmptyRoot && account.IsEmptyCodeHash() {
+			if _, ok := roots[addrHash]; !ok {
+				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])
+				template := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
+				sm := make(map[common.Hash]storageEntry)
+				nextKey := &common.Hash{}
+				for nextKey != nil {
+					reqID++
+					var sr DebugStorageRange
+					if err := post(client, url, fmt.Sprintf(template, blockHash, 0, address, *nextKey, 1024, reqID), &sr); err != nil {
+						fmt.Printf("Could not get storageRange: %v\n", err)
+						return false, err
+					}
+					if sr.Error != nil {
+						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+						break
+					} else {
+						nextKey = sr.Result.NextKey
+						for k, v := range sr.Result.Storage {
+							sm[k] = v
+						}
+					}
+				}
+				if len(sm) == 0 {
+					fmt.Printf("Repairing address %x addrHash %x\n", address, addrHash)
+					account.Root = trie.EmptyRoot
+					l := account.EncodingLengthForStorage()
+					b := make([]byte, l)
+					account.EncodeForStorage(b)
+					if err := stateDb.Put(dbutils.AccountsBucket, addrHash[:], b); err != nil {
+						fmt.Printf("Could not repair: %v\n", err)
+					}
+				}
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		panic(err)
 	}
 }

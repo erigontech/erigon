@@ -322,39 +322,36 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 	}
 	fmt.Printf("Trie computation took %v\n", time.Since(startTime))
 	startTime = time.Now()
-	var addrHash common.Hash
-	roots := make(map[common.Hash]common.Hash)
-
+	roots := make(map[common.Hash]*accounts.Account)
 	err = stateDb.Walk(dbutils.StorageBucket, nil, 0, func(k, v []byte) (bool, error) {
+		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
 			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
-				roots[addrHash] = common.Hash{}
+				roots[addrHash] = nil
 			} else {
 				var account accounts.Account
 				if err = account.DecodeForStorage(enc); err != nil {
 					return false, err
 				}
-				roots[addrHash] = account.Root
+				roots[addrHash] = &account
 			}
 		}
 
 		return true, nil
 	})
-
 	if err != nil {
 		panic(err)
 	}
-	for addrHash, root := range roots {
-		if root != (common.Hash{}) {
-			st := trie.New(root)
+	for addrHash, account := range roots {
+		if account != nil {
+			st := trie.New(account.Root)
 			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
-			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
-			// TODO Issue 99 [Boris] support incarnations
-			streq := st.NewResolveRequest(contractPrefix, key, 0, root[:])
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation^^uint64(0))
+			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)
 			if err != nil {
