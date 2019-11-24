@@ -60,8 +60,6 @@ const (
 	CmdSeek
 )
 
-var cborHandle codec.CborHandle
-
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)
 
