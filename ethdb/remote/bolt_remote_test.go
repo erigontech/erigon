@@ -145,8 +145,8 @@ func TestCmdBucket(t *testing.T) {
 	// Create a bucket
 	var name = []byte("testbucket")
 	if err = db.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucket(name, false)
-		return err
+		_, err1 := tx.CreateBucket(name, false)
+		return err1
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
@@ -204,15 +204,15 @@ func TestCmdGet(t *testing.T) {
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
 	if err = db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucket(name, false)
-		if err != nil {
-			return err
+		b, err1 := tx.CreateBucket(name, false)
+		if err1 != nil {
+			return err1
 		}
-		if err = b.Put([]byte("key1"), []byte("value1")); err != nil {
-			return err
+		if err1 = b.Put([]byte("key1"), []byte("value1")); err1 != nil {
+			return err1
 		}
-		if err = b.Put([]byte("key2"), []byte("value2")); err != nil {
-			return err
+		if err1 = b.Put([]byte("key2"), []byte("value2")); err1 != nil {
+			return err1
 		}
 		return nil
 	}); err != nil {
