@@ -75,15 +75,20 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 // PutS adds a new entry to the historical buckets:
 // hBucket (unless changeSetBucketOnly) and ChangeSet.
 func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
-	changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
+	changeSetKey := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if !changeSetBucketOnly {
 			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
 			if err != nil {
 				return err
 			}
-			if err = hb.Put(composite, []byte{}); err != nil {
+			b,_:=hb.Get(key)
+			b,err = AppendChangedOnIndex(b, timestamp)
+			if err!=nil {
+				log.Error("PutS AppendChangedOnIndex err", "err", err)
+				return err
+			}
+			if err = hb.Put(key, b); err != nil {
 				return err
 			}
 		}
@@ -94,15 +99,15 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 		}
 
 		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.DecodeChangeset(dat)
+		sh, err := dbutils.DecodeChangeSet(dat)
 		if err != nil {
-			log.Error("PutS DecodeChangeset changeSet err", "err", err)
+			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
 		sh = sh.Add(key, value)
-		dat, err = dbutils.Encode(sh)
+		dat, err = dbutils.EncodeСhangeSet(sh)
 		if err != nil {
-			log.Error("PutS DecodeChangeset changeSet err", "err", err)
+			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
 
@@ -184,28 +189,54 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 // GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	return db.Get(hBucket, composite)
+	chs, err:=db.GetChangeSetByBlock(hBucket, timestamp)
+	if err!=nil {
+		return nil, err
+	}
+	var res []byte
+	err=chs.Walk(func(k, v []byte) error {
+		if bytes.Equal(k, key) {
+			res = v
+		}
+		return nil
+	})
+	return res, err
+}
+
+// GetChangeSetByBlock returns changeset by block and bucket
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (dbutils.ChangeSet, error) {
+	key:=dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.ChangeSetBucket)
+		if b == nil {
+			return nil
+		}
+
+		v, _ := b.Get(key)
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if err!=nil {
+		return dbutils.ChangeSet{}, err
+	}
+	return dbutils.DecodeChangeSet(dat)
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		{
-			//check
-			hB := tx.Bucket(hBucket)
-			if hB == nil {
-				return ErrKeyNotFound
-			}
-			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-			hC := hB.Cursor()
-			hK, hV := hC.Seek(composite)
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
-				return nil
-			}
+		v, err:=BoltDBFindByHistory(tx, hBucket, key, timestamp)
+		if err==nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
+		} else {
+			log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
 		}
 		{
 			b := tx.Bucket(bucket)
@@ -560,7 +591,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts, err := dbutils.DecodeChangeset(v)
+			changedAccounts, err := dbutils.DecodeChangeSet(v)
 			if err != nil {
 				return err
 			}

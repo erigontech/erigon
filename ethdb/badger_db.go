@@ -128,7 +128,7 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 		if err == nil {
 			err = changeSetItem.Value(func(val []byte) error {
 				var err2 error
-				sh, err2 = dbutils.Decode(val)
+				sh, err2 = dbutils.DecodeChangeSet(val)
 				if err2 != nil {
 					log.Error("PutS Decode suffix err", "err", err2)
 					return err2
@@ -141,7 +141,7 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 		}
 
 		sh = sh.Add(key, value)
-		dat, err := dbutils.Encode(sh)
+		dat, err := dbutils.EncodeСhangeSet(sh)
 		if err != nil {
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
@@ -166,7 +166,7 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 			var changedAccounts dbutils.ChangeSet
 			err := item.Value(func(v []byte) error {
 				var err2 error
-				changedAccounts, err2 = dbutils.Decode(v)
+				changedAccounts, err2 = dbutils.DecodeChangeSet(v)
 				return err2
 			})
 			if err != nil {

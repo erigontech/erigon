@@ -39,7 +39,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			return false, nil
 		}
 
-		changedAccounts, err := dbutils.DecodeChangeset(v)
+		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}
@@ -91,7 +91,7 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
-		d, err := dbutils.DecodeChangeset(v)
+		d, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}

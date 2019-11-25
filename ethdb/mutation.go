@@ -302,7 +302,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
 		hBucket := k[len(encodedTS):]
-		changedAccounts, err := dbutils.DecodeChangeset(v)
+		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}
@@ -355,15 +355,15 @@ func (m *mutation) Commit() (uint64, error) {
 					return 0, err
 				}
 
-				changedAccounts, err := dbutils.DecodeChangeset(dat)
+				changedAccounts, err := dbutils.DecodeChangeSet(dat)
 				if err != nil {
-					log.Error("DecodeChangeset changedAccounts error on commit", "err", err)
+					log.Error("DecodeChangeSet changedAccounts error on commit", "err", err)
 				}
 
 				changedAccounts = changedAccounts.MultiAdd(changes)
-				changedRLP, err := dbutils.Encode(changedAccounts)
+				changedRLP, err := dbutils.EncodeСhangeSet(changedAccounts)
 				if err != nil {
-					log.Error("Encode changedAccounts error on commit", "err", err)
+					log.Error("EncodeСhangeSet changedAccounts error on commit", "err", err)
 					return 0, err
 				}
 

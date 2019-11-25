@@ -648,7 +648,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
-		changedAccounts, err := dbutils.DecodeChangeset(v)
+		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}

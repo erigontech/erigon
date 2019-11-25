@@ -6,7 +6,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-func DecodeChangeset(b []byte) (ChangeSet, error) {
+func DecodeChangeSet(b []byte) (ChangeSet, error) {
 	if len(b) == 0 {
 		return ChangeSet{
 			Changes: make([]Change, 0),
@@ -21,7 +21,7 @@ func DecodeChangeset(b []byte) (ChangeSet, error) {
 	return h, nil
 }
 
-func Encode(sh ChangeSet) ([]byte, error) {
+func EncodeСhangeSet(sh ChangeSet) ([]byte, error) {
 	buf := new(bytes.Buffer)
 	err := rlp.Encode(buf, sh)
 	if err != nil {
