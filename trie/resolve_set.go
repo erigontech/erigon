@@ -78,11 +78,24 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 	for !gtAdjusted && rs.lteIndex > 0 && bytes.Compare(rs.hexes[rs.lteIndex], prefix) > 0 {
 		rs.lteIndex--
 	}
-	if rs.lteIndex < len(rs.hexes) && bytes.HasPrefix(rs.hexes[rs.lteIndex], prefix) {
-		return false
+	if rs.lteIndex < len(rs.hexes) {
+		h := rs.hexes[rs.lteIndex]
+		if len(h) > 0 && h[len(h)-1] == 16 {
+			h = h[:len(h)-1]
+		}
+		if bytes.HasPrefix(h, prefix) {
+			return false
+		}
 	}
-	if rs.lteIndex < len(rs.hexes)-1 && bytes.HasPrefix(rs.hexes[rs.lteIndex+1], prefix) {
-		return false
+
+	if rs.lteIndex < len(rs.hexes)-1 {
+		h := rs.hexes[rs.lteIndex+1]
+		if len(h) > 0 && h[len(h)-1] == 16 {
+			h = h[:len(h)-1]
+		}
+		if bytes.HasPrefix(h, prefix) {
+			return false
+		}
 	}
 	return true
 }

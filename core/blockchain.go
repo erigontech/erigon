@@ -992,7 +992,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	// We don't require the chainMu here since we want to maximize the
 	// concurrency of header insertion and receipt insertion.
 	if err := bc.addJob(); err != nil {
-		return 0, nil
+		return 0, err
 	}
 	defer bc.doneJob()
 
@@ -1152,7 +1152,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteTxLookupEntries(batch, block)
 
 			stats.processed++
-			if batch.Size() >= ethdb.IdealBatchSize {
+			if batch.Size() >= batch.IdealBatchSize() {
 				if _, err := batch.Commit(); err != nil {
 					return 0, err
 				}
@@ -1206,24 +1206,24 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 // but does not write any state. This is used to construct competing side forks
 // up to the point where they exceed the canonical total difficulty.
 func (bc *BlockChain) writeBlockWithoutState(block *types.Block, td *big.Int) (err error) {
-	if err := bc.addJob(); err != nil {
-		return nil
+	if err = bc.addJob(); err != nil {
+		return
 	}
 	defer bc.doneJob()
 
-	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), td); err != nil {
-		return err
+	if err = bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), td); err != nil {
+		return
 	}
 	rawdb.WriteBlock(bc.db, block)
 
-	return nil
+	return
 }
 
 // writeKnownBlock updates the head block flag with a known block
 // and introduces chain reorg if necessary.
 func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
 	if err := bc.addJob(); err != nil {
-		return nil
+		return err
 	}
 	defer bc.doneJob()
 
@@ -1253,7 +1253,7 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 // but is expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, stateDb *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
-		return NonStatTy, nil
+		return NonStatTy, err
 	}
 	defer bc.doneJob()
 
@@ -1382,13 +1382,13 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	// Only insert if the difficulty of the inserted chain is bigger than existing chain
 	// Pre-checks passed, start the full block imports
 	if err := bc.addJob(); err != nil {
-		return 0, nil
+		return 0, err
 	}
-	defer bc.doneJob()
 	ctx := bc.WithContext(context.Background(), chain[0].Number())
 	bc.chainmu.Lock()
 	n, events, logs, err := bc.insertChain(ctx, chain, true)
 	bc.chainmu.Unlock()
+	bc.doneJob()
 
 	bc.PostChainEvents(events, logs)
 	return n, err
@@ -1716,7 +1716,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if commitStats.needToCommit(chain, bc.db, i) {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
-				log.Error("Could not commit chainDb", err)
+				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
@@ -1745,7 +1745,7 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
-	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= ethdb.IdealBatchSize {
+	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
 		*st = insertStats{startTime: now, lastIndex: index + 1}
 		return true
 	}
@@ -2047,7 +2047,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	defer bc.chainmu.Unlock()
 
 	if err := bc.addJob(); err != nil {
-		return 0, nil
+		return 0, err
 	}
 	defer bc.doneJob()
 

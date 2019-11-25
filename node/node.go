@@ -438,17 +438,6 @@ func (n *Node) Stop() error {
 	n.stopWS()
 	n.stopHTTP()
 	n.stopIPC()
-
-	type closer interface {
-		Close()
-	}
-
-	for _, api := range n.rpcAPIs {
-		if closeAPI, ok := api.Service.(closer); ok {
-			closeAPI.Close()
-		}
-	}
-
 	n.rpcAPIs = nil
 	failure := &StopError{
 		Services: make(map[reflect.Type]error),
@@ -474,6 +463,16 @@ func (n *Node) Stop() error {
 	close(n.stop)
 
 	// Remove the keystore if it was created ephemerally.
+	type closer interface {
+		Close()
+	}
+
+	for _, api := range n.rpcAPIs {
+		if closeAPI, ok := api.Service.(closer); ok {
+			closeAPI.Close()
+		}
+	}
+
 	var keystoreErr error
 	if n.ephemeralKeystore != "" {
 		keystoreErr = os.RemoveAll(n.ephemeralKeystore)
@@ -620,6 +619,13 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	if n.config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
+
+	if n.config.BadgerDB {
+		log.Info("Opening Database (Badger)")
+		return ethdb.NewBadgerDatabase(n.config.ResolvePath(name + "_badger"))
+	}
+
+	log.Info("Opening Database (Bolt)")
 	return ethdb.NewBoltDatabase(n.config.ResolvePath(name))
 }
 

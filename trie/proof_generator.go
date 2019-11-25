@@ -28,6 +28,12 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
+type WitnessTapeStats map[string]int
+
+func (s WitnessTapeStats) GetOrZero(key string) int {
+	return s[key]
+}
+
 // TapeBuilder stores the sequence of values that is getting serialised using CBOR into a byte buffer
 type TapeBuilder struct {
 	buffer  bytes.Buffer     // Byte buffer where the CBOR-encoded values end up being written
@@ -388,16 +394,6 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		return bwb.branch(set)
 	case *accountNode:
 		if !n.IsEmptyRoot() || !n.IsEmptyCodeHash() {
-			if n.storage == nil {
-				if err := bwb.emptyRoot(); err != nil {
-					return err
-				}
-			} else {
-				// Here we substitute rs parameter for storageRs, because it needs to become the default
-				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
-					return err
-				}
-			}
 			code, ok := codeMap[n.CodeHash]
 			if ok {
 				if err := bwb.supplyCode(code); err != nil {
@@ -411,6 +407,16 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 					return err
 				}
 				if err := bwb.hash(1); err != nil {
+					return err
+				}
+			}
+			if n.storage == nil {
+				if err := bwb.emptyRoot(); err != nil {
+					return err
+				}
+			} else {
+				// Here we substitute rs parameter for storageRs, because it needs to become the default
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
 					return err
 				}
 			}
@@ -445,7 +451,8 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 
 // WriteTo creates serialised representation of the block witness
 // and writes it into the given writer
-func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
+// returns stats (tape lengths) and stuff
+func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) (WitnessTapeStats, error) {
 	// Calculate the lengths of all the tapes and write them as an array
 	var lens = map[string]int{
 		KeyTape:       bwb.Keys.buffer.Len(),
@@ -460,30 +467,30 @@ func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) error {
 	handle.EncodeOptions.Canonical = true
 	encoder := codec.NewEncoder(w, &handle)
 	if err := encoder.Encode(&lens); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Keys.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Values.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Nonces.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Balances.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Hashes.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Codes.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := bwb.Structure.buffer.WriteTo(w); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	return WitnessTapeStats(lens), nil
 }
 
 // CborBytesTape implements BytesTape and takes values from CBOR-encoded slice of bytes

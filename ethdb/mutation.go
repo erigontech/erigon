@@ -1,27 +1,92 @@
 package ethdb
 
 import (
-	"bytes"
-	"errors"
+	"sort"
 	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/petar/GoLLRB/llrb"
 )
 
-type PutItem struct {
-	key, value []byte
+type puts map[string]putsBucket //map[bucket]putsBucket
+
+func newPuts() puts {
+	return make(puts)
 }
 
-func (a *PutItem) Less(b llrb.Item) bool {
-	bi := b.(*PutItem)
-	return bytes.Compare(a.key, bi.key) < 0
+func (p puts) Set(bucket, key, value []byte) {
+	var bucketPuts putsBucket
+	var ok bool
+	if bucketPuts, ok = p[string(bucket)]; !ok {
+		bucketPuts = make(putsBucket)
+		p[string(bucket)] = bucketPuts
+	}
+	bucketPuts[string(key)] = value
+}
+
+func (p puts) Delete(bucket, key []byte) {
+	p.Set(bucket, key, nil)
+}
+
+func (p puts) SetStr(bucket string, key, value []byte) {
+	var bucketPuts putsBucket
+	var ok bool
+	if bucketPuts, ok = p[bucket]; !ok {
+		bucketPuts = make(putsBucket)
+		p[bucket] = bucketPuts
+	}
+	bucketPuts[string(key)] = value
+}
+
+func (p puts) DeleteStr(bucket string, key []byte) {
+	p.SetStr(bucket, key, nil)
+}
+
+func (p puts) Size() int {
+	var size int
+	for _, put := range p {
+		size += len(put)
+	}
+	return size
+}
+
+type putsBucket map[string][]byte //map[key]value
+
+func (pb putsBucket) Get(key []byte) ([]byte, bool) {
+	value, ok := pb[string(key)]
+	if !ok {
+		return nil, false
+	}
+
+	if value == nil {
+		return nil, true
+	}
+
+	v := make([]byte, len(value))
+	copy(v, value)
+
+	return v, true
+}
+
+func (pb putsBucket) GetStr(key string) ([]byte, bool) {
+	value, ok := pb[key]
+	if !ok {
+		return nil, false
+	}
+
+	if value == nil {
+		return nil, true
+	}
+
+	v := make([]byte, len(value))
+	copy(v, value)
+
+	return v, true
 }
 
 type mutation struct {
-	puts map[string]*llrb.LLRB // Map buckets to RB tree containing items
+	puts puts // Map buckets to map[key]value
 	//map[timestamp]map[hBucket]listOfChangedKeys
 	changeSetByBlock map[uint64]map[string][]dbutils.Change
 	mu               sync.RWMutex
@@ -32,19 +97,7 @@ func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if t, ok := m.puts[string(bucket)]; ok {
-		i := t.Get(&PutItem{key: key})
-		if i == nil {
-			return nil, false
-		}
-		if item, ok := i.(*PutItem); ok {
-			if item.value == nil {
-				return nil, true
-			}
-			v := make([]byte, len(item.value))
-			copy(v, item.value)
-			return v, true
-		}
-		return nil, false
+		return t.Get(key)
 	}
 	return nil, false
 }
@@ -70,15 +123,11 @@ func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	if t, ok := m.puts[string(bucket)]; ok {
-		i := t.Get(&PutItem{key: key})
-		if i != nil {
-			if item, ok := i.(*PutItem); ok {
-				if item.value == nil {
-					return nil, ErrKeyNotFound
-				}
-				return common.CopyBytes(item.value), nil
-			}
+		value, ok := t.Get(key)
+		if ok && value == nil {
+			return nil, ErrKeyNotFound
 		}
+		return value, nil
 	}
 	if m.db != nil {
 		return m.db.Get(bucket, key)
@@ -90,7 +139,8 @@ func (m *mutation) hasMem(bucket, key []byte) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if t, ok := m.puts[string(bucket)]; ok {
-		return t.Has(&PutItem{key: key})
+		_, ok = t.Get(key)
+		return ok
 	}
 	return false
 }
@@ -121,13 +171,14 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	copy(v, value)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var t *llrb.LLRB
+
+	var t putsBucket
 	var ok bool
 	if t, ok = m.puts[string(bb)]; !ok {
-		t = llrb.New()
+		t = make(putsBucket)
 		m.puts[string(bb)] = t
 	}
-	t.ReplaceOrInsert(&PutItem{key: k, value: v})
+	t[string(k)] = v
 	return nil
 }
 
@@ -154,12 +205,7 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var ht *llrb.LLRB
-	if ht, ok = m.puts[string(hBucket)]; !ok {
-		ht = llrb.New()
-		m.puts[string(hBucket)] = ht
-	}
-	ht.ReplaceOrInsert(&PutItem{key: composite, value: []byte{}})
+	m.puts.Set(hBucket, composite, value)
 	return nil
 }
 
@@ -168,13 +214,7 @@ func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	defer m.mu.Unlock()
 	l := len(tuples)
 	for i := 0; i < l; i += 3 {
-		var t *llrb.LLRB
-		var ok bool
-		if t, ok = m.puts[string(tuples[i])]; !ok {
-			t = llrb.New()
-			m.puts[string(tuples[i])] = t
-		}
-		t.ReplaceOrInsert(&PutItem{key: tuples[i+1], value: tuples[i+2]})
+		m.puts.Set(tuples[i], tuples[i+1], tuples[i+2])
 	}
 	return 0, nil
 }
@@ -182,11 +222,12 @@ func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 func (m *mutation) BatchSize() int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	return size
+	return m.puts.Size()
+}
+
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
+func (m *mutation) IdealBatchSize() int {
+	return m.db.IdealBatchSize()
 }
 
 func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
@@ -197,55 +238,20 @@ func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byt
 	}
 }
 
-func (m *mutation) walkMem(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
-	fixedbytes, mask := bytesmask(fixedbits)
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(bucket)]; !ok {
-		return nil
-	}
-	for nextkey := startkey; nextkey != nil; {
-		from := nextkey
-		nextkey = nil
-		var extErr error
-		t.AscendGreaterOrEqual(&PutItem{key: from}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			if item.value == nil {
-				return true
-			}
-			if fixedbits > 0 && (!bytes.Equal(item.key[:fixedbytes-1], startkey[:fixedbytes-1]) || (item.key[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask)) {
-				return true
-			}
-			goOn, err := walker(item.key, item.value)
-			if err != nil {
-				extErr = err
-				return false
-			}
-			return goOn
-		})
-		if extErr != nil {
-			return extErr
-		}
-	}
-	return nil
-}
-
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
 	if m.db == nil {
-		return m.walkMem(bucket, startkey, fixedbits, walker)
+		panic("not implemented")
 	}
 	return m.db.Walk(bucket, startkey, fixedbits, walker)
 }
 
-func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 
 // WARNING: Merged mem/DB walk is not implemented
-func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	if m.db == nil {
 		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
 	}
@@ -260,7 +266,7 @@ func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, ti
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
-func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if m.db == nil {
 		panic("Not implemented")
 	}
@@ -274,17 +280,7 @@ func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket
 func (m *mutation) Delete(bucket, key []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	bb := make([]byte, len(bucket))
-	copy(bb, bucket)
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(bb)]; !ok {
-		t = llrb.New()
-		m.puts[string(bb)] = t
-	}
-	k := make([]byte, len(key))
-	copy(k, key)
-	t.ReplaceOrInsert(&PutItem{key: k, value: nil})
+	m.puts.Delete(bucket, key)
 	return nil
 }
 
@@ -293,40 +289,22 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var t *llrb.LLRB
-	var ok bool
-	if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
-		t = llrb.New()
-		m.puts[string(dbutils.ChangeSetBucket)] = t
-	}
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
-		hBucket := k[len(encodedTS):]
+		hBucketStr := string(k[len(encodedTS):])
 		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}
 
-		keycount := changedAccounts.KeyCount()
-		var ht *llrb.LLRB
-		var ok bool
-		if keycount > 0 {
-			hBucketStr := string(common.CopyBytes(hBucket))
-			if ht, ok = m.puts[hBucketStr]; !ok {
-				ht = llrb.New()
-				m.puts[hBucketStr] = ht
-			}
-		}
-
 		err = changedAccounts.Walk(func(kk, _ []byte) error {
-			kk = append(kk, encodedTS...)
-			ht.ReplaceOrInsert(&PutItem{key: kk, value: nil})
+			m.puts.DeleteStr(hBucketStr, kk)
 			return nil
 		})
 		if err != nil {
 			return false, err
 		}
-		t.ReplaceOrInsert(&PutItem{key: common.CopyBytes(k), value: nil})
+		m.puts.DeleteStr(hBucketStr, k)
 		return true, nil
 	})
 	return err
@@ -338,13 +316,8 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var t *llrb.LLRB
-	var ok bool
 	if len(m.changeSetByBlock) > 0 {
-		if t, ok = m.puts[string(dbutils.ChangeSetBucket)]; !ok {
-			t = llrb.New()
-			m.puts[string(dbutils.ChangeSetBucket)] = t
-		}
+		changeSetStr := string(dbutils.ChangeSetBucket)
 		for timestamp, changesByBucket := range m.changeSetByBlock {
 			encodedTS := dbutils.EncodeTimestamp(timestamp)
 			for bucketStr, changes := range changesByBucket {
@@ -367,37 +340,30 @@ func (m *mutation) Commit() (uint64, error) {
 					return 0, err
 				}
 
-				t.ReplaceOrInsert(&PutItem{key: changeSetKey, value: changedRLP})
+				m.puts.SetStr(changeSetStr, changeSetKey, changedRLP)
 			}
 		}
 	}
 
 	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	tuples := make([][]byte, size*3)
-	var index int
+
+	tuples := common.NewTuples(m.puts.Size(), 3, 1)
 	for bucketStr, bt := range m.puts {
 		bucketB := []byte(bucketStr)
-		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			tuples[index] = bucketB
-			index++
-			tuples[index] = item.key
-			index++
-			tuples[index] = item.value
-			index++
-			return true
-		})
+		for key := range bt {
+			value, _ := bt.GetStr(key)
+			if err := tuples.Append(bucketB, []byte(key), value); err != nil {
+				return 0, err
+			}
+		}
 	}
-	var written uint64
-	var putErr error
-	if written, putErr = m.db.MultiPut(tuples...); putErr != nil {
-		return 0, putErr
+	sort.Sort(tuples)
+
+	written, err := m.db.MultiPut(tuples.Values...)
+	if err != nil {
+		return 0, err
 	}
-	m.puts = make(map[string]*llrb.LLRB)
+	m.puts = make(puts)
 	return written, nil
 }
 
@@ -405,30 +371,23 @@ func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
-	m.puts = make(map[string]*llrb.LLRB)
+	m.puts = make(puts)
 }
 
 func (m *mutation) Keys() ([][]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	size := 0
-	for _, t := range m.puts {
-		size += t.Len()
-	}
-	pairs := make([][]byte, 2*size)
-	idx := 0
+	tuples := common.NewTuples(m.puts.Size(), 2, 1)
 	for bucketStr, bt := range m.puts {
 		bucketB := []byte(bucketStr)
-		bt.AscendGreaterOrEqual(&PutItem{}, func(i llrb.Item) bool {
-			item := i.(*PutItem)
-			pairs[idx] = bucketB
-			idx++
-			pairs[idx] = item.key
-			idx++
-			return true
-		})
+		for key := range bt {
+			if err := tuples.Append(bucketB, []byte(key)); err != nil {
+				return nil, err
+			}
+		}
 	}
-	return pairs, nil
+	sort.Sort(tuples)
+	return tuples.Values, nil
 }
 
 func (m *mutation) Close() {
@@ -438,7 +397,7 @@ func (m *mutation) Close() {
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:               m,
-		puts:             make(map[string]*llrb.LLRB),
+		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
 	}
 	return mm
@@ -447,8 +406,6 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 func (m *mutation) MemCopy() Database {
 	panic("Not implemented")
 }
-
-var errNotSupported = errors.New("not supported")
 
 // [TURBO-GETH] Freezer support (not implemented yet)
 // Ancients returns an error as we don't have a backing chain freezer.

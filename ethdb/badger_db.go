@@ -18,19 +18,21 @@ package ethdb
 
 import (
 	"bytes"
-
-	"github.com/dgraph-io/badger"
+	"io/ioutil"
+	"os"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
+
+	"github.com/dgraph-io/badger"
 )
 
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
 type BadgerDatabase struct {
-	db *badger.DB // BadgerDB instance
-
-	log log.Logger // Contextual logger tracking the database path
+	db     *badger.DB // BadgerDB instance
+	log    log.Logger // Contextual logger tracking the database path
+	tmpDir string     // Temporary data directory
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
@@ -48,10 +50,29 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	}, nil
 }
 
+// NewEphemeralBadger returns a new BadgerDB in a temporary directory.
+func NewEphemeralBadger() (*BadgerDatabase, error) {
+	tmpDir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
+	if err != nil {
+		return nil, err
+	}
+
+	db, err := NewBadgerDatabase(tmpDir)
+	if err != nil {
+		return nil, err
+	}
+
+	db.tmpDir = tmpDir
+	return db, nil
+}
+
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
+		if len(db.tmpDir) > 0 {
+			os.RemoveAll(db.tmpDir)
+		}
 	} else {
 		db.log.Error("Failed to close database", "err", err)
 	}
@@ -251,7 +272,7 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 	err := db.db.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		for it.Seek(prefix); ; it.Next() {
+		for it.Seek(prefix); it.Valid(); it.Next() {
 			item := it.Item()
 			k := keyWithoutBucket(item.Key(), bucket)
 			if k == nil {
@@ -280,22 +301,107 @@ func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker f
 	return err
 }
 
-// TODO [Andrew] implement the full Database interface
+// MultiWalk is similar to multiple Walk calls folded into one.
+func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+	if len(startkeys) == 0 {
+		return nil
+	}
 
-func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) (bool, error)) error {
-	panic("Not implemented")
+	rangeIdx := 0 // What is the current range we are extracting
+	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
+	startkey := startkeys[rangeIdx]
+
+	err := db.db.View(func(tx *badger.Txn) error {
+		it := tx.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		for it.Seek(bucketKey(bucket, startkey)); it.Valid(); it.Next() {
+			item := it.Item()
+			k := keyWithoutBucket(item.Key(), bucket)
+			if k == nil {
+				return nil
+			}
+
+			// Adjust rangeIdx if needed
+			if fixedbytes > 0 {
+				cmp := int(-1)
+				for cmp != 0 {
+					cmp = bytes.Compare(k[:fixedbytes-1], startkey[:fixedbytes-1])
+					if cmp == 0 {
+						k1 := k[fixedbytes-1] & mask
+						k2 := startkey[fixedbytes-1] & mask
+						if k1 < k2 {
+							cmp = -1
+						} else if k1 > k2 {
+							cmp = 1
+						}
+					}
+					if cmp < 0 {
+						it.Seek(bucketKey(bucket, startkey))
+						if !it.Valid() {
+							return nil
+						}
+						item = it.Item()
+						k = keyWithoutBucket(item.Key(), bucket)
+						if k == nil {
+							return nil
+						}
+					} else if cmp > 0 {
+						rangeIdx++
+						if rangeIdx == len(startkeys) {
+							return nil
+						}
+						fixedbytes, mask = bytesmask(fixedbits[rangeIdx])
+						startkey = startkeys[rangeIdx]
+					}
+				}
+			}
+
+			err := item.Value(func(v []byte) error {
+				if len(v) == 0 {
+					return nil
+				}
+				return walker(rangeIdx, k, v)
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+
+	return err
 }
+
+// TODO [Andrew] implement the full Database interface
 
 func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	panic("Not implemented")
 }
 
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) (bool, error)) error {
+func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 
-func (db *BadgerDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	panic("Not implemented")
+// MultiPut inserts or updates multiple entries.
+// Entries are passed as an array:
+// bucket0, key0, val0, bucket1, key1, val1, ...
+func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
+	l := len(triplets)
+	err := db.db.Update(func(tx *badger.Txn) error {
+		for i := 0; i < l; i += 3 {
+			bucket := triplets[i]
+			key := triplets[i+1]
+			val := triplets[i+2]
+			if err := tx.Set(bucketKey(bucket, key), val); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return uint64(l / 3), err
 }
 
 func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
@@ -303,25 +409,66 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 }
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
-	panic("Not implemented")
+	m := &mutation{
+		db:               db,
+		puts:             newPuts(),
+		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+	}
+	return m
+}
+
+// IdealBatchSize defines the size of the data batches should ideally add in one write.
+func (db *BadgerDatabase) IdealBatchSize() int {
+	return 10 * 1024
 }
 
 func (db *BadgerDatabase) Size() int {
-	panic("Not implemented")
+	// TODO [Andrew] implement
+	return 0
 }
 
 func (db *BadgerDatabase) Keys() ([][]byte, error) {
 	panic("Not implemented")
 }
 
+// MemCopy creates a copy of the database in a temporary directory.
+// We don't do it in memory because BadgerDB doesn't support that.
 func (db *BadgerDatabase) MemCopy() Database {
-	panic("Not implemented")
+	newDb, err := NewEphemeralBadger()
+	if err != nil {
+		panic("failed to create tmp database: " + err.Error())
+	}
+
+	err = db.db.View(func(readTx *badger.Txn) error {
+		return newDb.db.Update(func(writeTx *badger.Txn) error {
+			it := readTx.NewIterator(badger.DefaultIteratorOptions)
+			defer it.Close()
+
+			for it.Rewind(); it.Valid(); it.Next() {
+				item := it.Item()
+				k := item.Key()
+				err2 := item.Value(func(v []byte) error {
+					return writeTx.Set(k, v)
+				})
+				if err2 != nil {
+					return err2
+				}
+			}
+			return nil
+		})
+	})
+
+	if err != nil {
+		panic(err)
+	}
+
+	return newDb
 }
 
 func (db *BadgerDatabase) Ancients() (uint64, error) {
-	panic("Not implemented")
+	return 0, errNotSupported
 }
 
 func (db *BadgerDatabase) TruncateAncients(items uint64) error {
-	panic("Not implemented")
+	return errNotSupported
 }

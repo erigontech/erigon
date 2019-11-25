@@ -26,6 +26,7 @@ import (
 	"io"
 	"strconv"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
@@ -181,7 +182,7 @@ func loadValue(br *bufio.Reader) (valueNode, error) {
 
 func Load(r io.Reader) (*Trie, error) {
 	br := bufio.NewReader(r)
-	t := new(Trie)
+	t := NewTestRLPTrie(common.Hash{})
 	var err error
 	t.root, err = loadNode(br)
 	return t, err
@@ -326,6 +327,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 	}
 	if n2 != nil && bytes.Equal(n1.hash(), n2.hash()) {
 		fmt.Fprintf(w, "hash(%x)", []byte(n1.hash()))
+		if len(n1.hash()) == 0 {
+			fmt.Fprintf(w, "%s/%s", n1.fstring(""), n2.fstring(""))
+		}
 		return
 	}
 	switch n1 := n1.(type) {
