@@ -319,6 +319,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	curr.Write(succ.Bytes())
 	succ.Reset()
 	if curr.Len() > 0 {
+		hb.SetKeyTape(&curr)
 		var err error
 		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, groups)
 		if err != nil {
