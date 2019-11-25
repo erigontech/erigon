@@ -5,7 +5,6 @@ go 1.13
 require (
 	github.com/Azure/azure-storage-blob-go v0.8.0
 	github.com/Azure/go-autorest/autorest/adal v0.8.0 // indirect
-	github.com/Bowery/prompt v0.0.0-20190916142128-fa8279994f75 // indirect
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/allegro/bigcache v0.0.0-20181022200625-bff00e20c68d
 	github.com/apilayer/freegeoip v3.5.0+incompatible
@@ -39,15 +38,11 @@ require (
 	github.com/julienschmidt/httprouter v1.2.0
 	github.com/karalabe/usb v0.0.0-20190919080040-51dc0efba356
 	github.com/kylelemons/godebug v1.1.0 // indirect
-	github.com/labstack/gommon v0.3.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.1
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
 	github.com/mattn/go-isatty v0.0.9
-	github.com/mitchellh/cli v1.0.0
-	github.com/mkideal/cli v0.0.3
 	github.com/mkideal/log v0.1.0
-	github.com/mkideal/pkg v0.0.0-20170503154153-3e188c9e7ecc // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.0.0-20170918210437-9fafd6967416
