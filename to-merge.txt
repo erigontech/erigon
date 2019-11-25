@@ -1032,39 +1032,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Tue Nov 26 09:48:29 2019 +0200
 
     core/rawdb, core/state/snapshot: runtime snapshot generation
-
-commit f300c0df01dde6b23f5fec4f1b2f91bc75f32c2f
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Nov 25 15:30:29 2019 +0100
-
-    core/state/snapshot: replace bigcache with fastcache
-
-commit d754091a87703278b744815ccdcc499df66c9c1e
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Fri Nov 22 13:23:49 2019 +0200
-
-    core/state/snapshot: unlink snapshots from blocks, quad->linear cleanup
-
-commit cdf3f016dfc19b0f5a6471f2b649519b7256d68d
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Wed Oct 23 15:19:02 2019 +0200
-
-    snapshot: iteration and buffering optimizations
-
-commit d7d81d7c1255d613400e833d634579129c73f8de
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Oct 17 18:30:31 2019 +0300
-
-    core/state/snapshot: extract and split cap method, cover corners
-
-commit e146fbe4e739e5912aadcceb77f9aff803b4a052
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Fri Oct 4 15:24:01 2019 +0200
-
-    core/state: lazy sorting, snapshot invalidation
-
-commit 542df8898ef6d718647058c129069804bc463ea5
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Aug 6 13:40:28 2019 +0300
-
-    core: initial version of state snapshots

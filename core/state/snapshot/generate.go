@@ -22,14 +22,14 @@ import (
 	"math/big"
 	"time"
 
-	"github.com/allegro/bigcache"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/rawdb"
-	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/VictoriaMetrics/fastcache"
+	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/rawdb"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethdb"
+	"github.com/ethereum/go-ethereum/log"
+	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ethereum/go-ethereum/trie"
 )
 
 var (
@@ -196,13 +196,7 @@ func generateSnapshot(db ethdb.KeyValueStore, journal string, root common.Hash) 
 		return nil, err
 	}
 	// New snapshot generated, construct a brand new base layer
-	cache, _ := bigcache.NewBigCache(bigcache.Config{ // TODO(karalabe): dedup
-		Shards:             1024,
-		LifeWindow:         time.Hour,
-		MaxEntriesInWindow: 512 * 1024,
-		MaxEntrySize:       512,
-		HardMaxCacheSize:   512,
-	})
+	cache := fastcache.New(512 * 1024 * 1024)
 	return &diskLayer{
 		journal: journal,
 		db:      db,
