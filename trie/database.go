@@ -30,6 +30,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/VictoriaMetrics/fastcache"
 )
 
 var (
@@ -81,7 +82,7 @@ type DatabaseReader interface {
 type Database struct {
 	diskdb ethdb.Database // Persistent storage for matured trie nodes
 
-	cleans  *bigcache.BigCache          // GC friendly memory cache of clean node RLPs
+	cleans  *fastcache.Cache            // GC friendly memory cache of clean node RLPs
 	dirties map[common.Hash]*cachedNode // Data and references relationships of dirty nodes
 	oldest  common.Hash                 // Oldest tracked node, flush-list head
 	newest  common.Hash                 // Newest tracked node, flush-list tail
@@ -226,16 +227,9 @@ func NewDatabase(diskdb ethdb.Database) *Database {
 // before its written out to disk or garbage collected. It also acts as a read cache
 // for nodes loaded from disk.
 func NewDatabaseWithCache(diskdb ethdb.Database, cache int) *Database {
-	var cleans *bigcache.BigCache
+	var cleans *fastcache.Cache
 	if cache > 0 {
-		cleans, _ = bigcache.NewBigCache(bigcache.Config{
-			Shards:             1024,
-			LifeWindow:         time.Hour,
-			MaxEntriesInWindow: cache * 1024,
-			MaxEntrySize:       512,
-			HardMaxCacheSize:   cache,
-			Hasher:             trienodeHasher{},
-		})
+		cleans = fastcache.New(cache * 1024 * 1024)
 	}
 	return &Database{
 		diskdb: diskdb,
@@ -314,6 +308,30 @@ func (db *Database) node(hash common.Hash, cachegen uint16) node {
 // cached, the method queries the persistent database for the content.
 func (db *Database) Node(hash common.Hash) ([]byte, error) {
 	return db.diskdb.Get(nil, hash[:])
+}
+
+// preimage retrieves a cached trie node pre-image from memory. If it cannot be
+// found cached, the method queries the persistent database for the content.
+func (db *Database) preimage(hash common.Hash) ([]byte, error) {
+	// Retrieve the node from cache if available
+	db.lock.RLock()
+	preimage := db.preimages[hash]
+	db.lock.RUnlock()
+
+	if preimage != nil {
+		return preimage, nil
+	}
+	// Content unavailable in memory, attempt to retrieve from disk
+	return db.diskdb.Get(db.secureKey(hash[:]))
+}
+
+// secureKey returns the database key for the preimage of key, as an ephemeral
+// buffer. The caller must not hold onto the return value because it will become
+// invalid on the next call.
+func (db *Database) secureKey(key []byte) []byte {
+	buf := append(db.seckeybuf[:0], secureKeyPrefix...)
+	buf = append(buf, key...)
+	return buf
 }
 
 // Nodes retrieves the hashes of all the nodes cached within the memory database.
@@ -498,7 +516,7 @@ func (c *cleaner) Put(key []byte, rlp []byte) error {
 	}
 	// Move the flushed node into the clean cache to prevent insta-reloads
 	if c.db.cleans != nil {
-		c.db.cleans.Set(string(hash[:]), rlp)
+		c.db.cleans.Set(hash[:], rlp)
 	}
 	return nil
 }
