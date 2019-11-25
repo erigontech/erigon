@@ -588,7 +588,7 @@ func (t *Trie) hook(hex []byte, n node) {
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	if _, ok := nd.(hashNode); !ok {
+	if _, ok := nd.(hashNode); !ok && nd != nil {
 		return
 	}
 	t.touchAll(n, hex, false)
