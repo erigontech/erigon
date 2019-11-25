@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -16,7 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
-func feemarket() {
+//nolint:deadcode,unused
+func feemarket(blockNum uint64) {
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -41,7 +42,6 @@ func feemarket() {
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	txCount := 0
 	MinFeeMaxChangeDenominator := big.NewInt(8)

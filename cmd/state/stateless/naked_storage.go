@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -98,7 +98,8 @@ func (st *StorageTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func storageReadWrites() {
+//nolint:deadcode,unused
+func storageReadWrites(blockNum uint64) {
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -122,7 +123,6 @@ func storageReadWrites() {
 	vmConfig := vm.Config{Tracer: st, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	totalSstores := 0
 	nakedSstores := 0

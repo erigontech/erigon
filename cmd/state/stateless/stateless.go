@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"context"
@@ -70,9 +70,11 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 
 type CreateDbFunc func(string) (ethdb.Database, error)
 
-func stateless(chaindata string,
+func Stateless(
+	blockNum uint64,
+	chaindata string,
 	statefile string,
-	triesize int,
+	triesize uint32,
 	tryPreRoot bool,
 	interval uint64,
 	ignoreOlderThan uint64,
@@ -80,7 +82,7 @@ func stateless(chaindata string,
 	statsfile string,
 	createDb CreateDbFunc) {
 
-	state.MaxTrieCacheGen = uint32(triesize)
+	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -107,7 +109,6 @@ func stateless(chaindata string,
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
-	blockNum := uint64(*block)
 	var preRoot common.Hash
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())

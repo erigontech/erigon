@@ -1,18 +1,15 @@
-package main
+package stateless
 
 import (
 	"bufio"
 	"bytes"
 	"encoding/csv"
-	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
 	"os"
 	"os/signal"
-	"runtime"
-	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
@@ -31,34 +28,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
-	colorable "github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 	"github.com/wcharczuk/go-chart/util"
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
-
-var action = flag.String("action", "", "action to execute")
-var cpuprofile = flag.String("cpuprofile", "", "write cpu profile `file`")
-var memprofile = flag.String("memprofile", "", "write mem profile `file`")
-var reset = flag.Int("reset", -1, "reset to given block number")
-var rewind = flag.Int("rewind", 1, "rewind to given number of blocks")
-var block = flag.Int("block", 1, "specifies a block number for operation")
-var account = flag.String("account", "0x", "specifies account to investigate")
-var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata file used as input to analysis")
-var statefile = flag.String("statefile", "state", "path to the file where the state will be periodically written during the analysis")
-var start = flag.Int("start", 0, "number of data points to skip when making a chart")
-var window = flag.Int("window", 1024, "size of the window for moving average")
-var triesize = flag.Int("triesize", 1024*1024, "maximum number of nodes in the state trie")
-var preroot = flag.Bool("preroot", false, "Attempt to compute hash of the trie without modifying it")
-var snapshotInterval = flag.Uint64("snapshotInterval", 0, "how often to take snapshots (0 - never, 1 - every block, 1000 - every 1000th block, etc)")
-var snapshotFrom = flag.Uint64("snapshotFrom", 0, "from which block to start snapshots")
-var witnessInterval = flag.Uint64("witnessInterval", 1, "after which block to extract witness (put a large number like 10000000 to disable)")
-var statsfile = flag.String("statsfile", "stateless.csv", "path where to write the stats file")
 
 func check(e error) {
 	if e != nil {
@@ -121,7 +97,7 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-func stateGrowth1(chaindata string) {
+func StateGrowth1(chaindata string) {
 	startTime := time.Now()
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
@@ -216,7 +192,7 @@ func stateGrowth1(chaindata string) {
 	}
 }
 
-func stateGrowth2(chaindata string) {
+func StateGrowth2(chaindata string) {
 	startTime := time.Now()
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
@@ -339,7 +315,7 @@ func stateGrowth2(chaindata string) {
 	}
 }
 
-func gasLimits(chaindata string) {
+func GasLimits(chaindata string) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
@@ -440,7 +416,7 @@ func movingAverage(axis, data []float64, window float64) []float64 {
 	return movingAvgs
 }
 
-func stateGrowthChart1(start int, window int) {
+func StateGrowthChart1(start int, window int) {
 	blocks, accounts, err := readData("accounts_growth.csv")
 	check(err)
 	accounts = movingAverage(blocks, accounts, float64(window))
@@ -544,7 +520,7 @@ func storageMillions() []chart.GridLine {
 	}
 }
 
-func stateGrowthChart2(start, window int) {
+func StateGrowthChart2(start, window int) {
 	blocks, accounts, err := readData("storage_growth.csv")
 	check(err)
 	accounts = movingAverage(blocks, accounts, float64(window))
@@ -949,7 +925,8 @@ func (ct CreationTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func makeCreators() {
+//nolint:deadcode,unused
+func makeCreators(blockNum uint64) {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -974,7 +951,6 @@ func makeCreators() {
 	vmConfig := vm.Config{Tracer: ct, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
@@ -1514,7 +1490,8 @@ func dustChartEOA() {
 	check(err)
 }
 
-func makeSha3Preimages() {
+//nolint:deadcode,unused
+func makeSha3Preimages(blockNum uint64) {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -1537,7 +1514,6 @@ func makeSha3Preimages() {
 	vmConfig := vm.Config{EnablePreimageRecording: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	tx, err := f.Begin(true)
 	if err != nil {
@@ -1604,113 +1580,4 @@ func makeSha3Preimages() {
 		panic(err)
 	}
 	fmt.Printf("Next time specify -block %d\n", blockNum)
-}
-
-func main() {
-	var (
-		ostream log.Handler
-		glogger *log.GlogHandler
-	)
-
-	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
-	output := io.Writer(os.Stderr)
-	if usecolor {
-		output = colorable.NewColorableStderr()
-	}
-	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
-	glogger = log.NewGlogHandler(ostream)
-	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.Lvl(3)) // 3 == verbosity INFO
-
-	flag.Parse()
-	if *cpuprofile != "" {
-		f, err := os.Create(*cpuprofile)
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return
-		}
-		defer f.Close()
-		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return
-		}
-		defer pprof.StopCPUProfile()
-	}
-	if *action == "stateGrowth" {
-		stateGrowth1(*chaindata)
-		stateGrowth2(*chaindata)
-	}
-	if *action == "gasLimits" {
-		gasLimits(*chaindata)
-	}
-	if *action == "stateGrowthChart1" {
-		stateGrowthChart1(*start, *window)
-	}
-	if *action == "stateGrowthChart2" {
-		stateGrowthChart2(*start, *window)
-	}
-	//stateGrowth1()
-	//stateGrowthChart1()
-	//stateGrowth2()
-	//stateGrowthChart2()
-	//stateGrowthChart3()
-	//makeCreators()
-	//stateGrowthChart4()
-	//stateGrowthChart5()
-	//storageUsage()
-	//oldStorage()
-	//dustEOA()
-	//dustChartEOA()
-	//makeSha3Preimages()
-	//makeTokens()
-	//tokenUsage()
-	//nonTokenUsage()
-	//makeTokenBalances()
-	//tokenBalances()
-	//makeTokenAllowances()
-	//countDepths()
-	//countStorageDepths()
-	//storageReadWrites()
-	//accountsReadWrites()
-	//speculativeExecution()
-	//nakedSstoreChart()
-	//nakedSloadChart()
-	//nakedAccountChart()
-	//specExecChart1()
-	if *action == "stateless" {
-		createDb := func(path string) (ethdb.Database, error) {
-			return ethdb.NewBoltDatabase(path)
-		}
-
-		stateless(*chaindata, *statefile, *triesize, *preroot, *snapshotInterval, *snapshotFrom, *witnessInterval, *statsfile, createDb)
-	}
-	if *action == "stateless_chart" {
-		statelessDoKVChart(*statsfile, []int{21, 20, 19, 18}, fmt.Sprintf("%s-chart.png", *statsfile), 2800000, 1)
-	}
-	if *action == "stateSnapshot" {
-		if err := stateSnapshot(); err != nil {
-			fmt.Printf("Error: %v\n", err)
-		}
-	}
-	//estimate()
-	if *action == "verifySnapshot" {
-		verifySnapshot(*chaindata)
-	}
-	//feemarket()
-	//transaction_stats()
-	//naked_storage_vs_blockproof()
-	//visual()
-	if *memprofile != "" {
-		f, err := os.Create(*memprofile)
-		if err != nil {
-			log.Error("could not create mem profile", "error", err)
-			return
-		}
-		defer f.Close()
-		runtime.GC() // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Error("could not write memory profile", "error", err)
-			return
-		}
-	}
 }

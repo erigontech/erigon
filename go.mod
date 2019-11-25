@@ -20,7 +20,7 @@ require (
 	github.com/docker/docker v0.0.0-20180625184442-8e610b2b55bf
 	github.com/edsrzf/mmap-go v0.0.0-20160512033002-935e0e8a636c
 	github.com/elastic/gosigar v0.0.0-20180330100440-37f05ff46ffa
-	github.com/fatih/color v1.3.0
+	github.com/fatih/color v1.7.0
 	github.com/fjl/memsize v0.0.0-20180418122429-ca190fb6ffbc
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
 	github.com/go-ole/go-ole v1.2.4 // indirect
@@ -40,8 +40,9 @@ require (
 	github.com/kylelemons/godebug v1.1.0 // indirect
 	github.com/ledgerwatch/bolt v1.4.1
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
-	github.com/mattn/go-colorable v0.1.0
-	github.com/mattn/go-isatty v0.0.0-20180830101745-3fb116b82035
+	github.com/mattn/go-colorable v0.1.2
+	github.com/mattn/go-isatty v0.0.9
+	github.com/mkideal/log v0.1.0
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.0.0-20170918210437-9fafd6967416
@@ -55,6 +56,7 @@ require (
 	github.com/robertkrimen/otto v0.0.0-20170205013659-6a77b7cbc37d
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
 	github.com/rs/xhandler v0.0.0-20170707052532-1eb70cf1520d // indirect
+	github.com/spf13/cobra v0.0.5
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
 	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect
