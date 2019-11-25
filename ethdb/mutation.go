@@ -231,45 +231,29 @@ func (m *mutation) IdealBatchSize() int {
 }
 
 func (m *mutation) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if m.db == nil {
-		panic("Not implemented")
-	} else {
-		return m.db.GetAsOf(bucket, hBucket, key, timestamp)
-	}
+	m.panicOnEmptyDB()
+	return m.db.GetAsOf(bucket, hBucket, key, timestamp)
 }
 
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		panic("not implemented")
-	}
+	m.panicOnEmptyDB()
 	return m.db.Walk(bucket, startkey, fixedbits, walker)
-}
-
-func (m *mutation) multiWalkMem(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	panic("Not implemented")
 }
 
 // WARNING: Merged mem/DB walk is not implemented
 func (m *mutation) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	if m.db == nil {
-		return m.multiWalkMem(bucket, startkeys, fixedbits, walker)
-	}
+	m.panicOnEmptyDB()
 	return m.db.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
 
 func (m *mutation) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	if m.db == nil {
-		panic("Not implemented")
-	}
-
+	m.panicOnEmptyDB()
 	return m.db.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 
 func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	if m.db == nil {
-		panic("Not implemented")
-	}
+	m.panicOnEmptyDB()
 	return m.db.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
 }
 
@@ -403,8 +387,15 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
+func (m *mutation) panicOnEmptyDB()  {
+	if m.db == nil {
+		panic("Not implemented")
+	}
+}
+
 func (m *mutation) MemCopy() Database {
-	panic("Not implemented")
+	m.panicOnEmptyDB()
+	return m.db
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
