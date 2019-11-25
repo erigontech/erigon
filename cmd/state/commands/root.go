@@ -7,8 +7,9 @@ import (
 	"runtime"
 	"runtime/pprof"
 
-	"github.com/mkideal/log"
 	"github.com/spf13/cobra"
+
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var (
