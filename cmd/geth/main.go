@@ -111,6 +111,8 @@ var (
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
 		utils.RemoteDbListenAddress,
+		utils.CacheSnapshotFlag,
+		utils.CacheNoPrefetchFlag,
 		utils.ListenPortFlag,
 		utils.MaxPeersFlag,
 		utils.MaxPendingPeersFlag,

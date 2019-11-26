@@ -63,8 +63,8 @@ var (
 	storageUpdateTimer = metrics.NewRegisteredTimer("chain/storage/updates", nil)
 	storageCommitTimer = metrics.NewRegisteredTimer("chain/storage/commits", nil)
 
-	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/accountreads", nil)
-	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storagereads", nil)
+	snapshotAccountReadTimer = metrics.NewRegisteredTimer("chain/snapshot/account/reads", nil)
+	snapshotStorageReadTimer = metrics.NewRegisteredTimer("chain/snapshot/storage/reads", nil)
 	snapshotCommitTimer      = metrics.NewRegisteredTimer("chain/snapshot/commits", nil)
 
 	blockInsertTimer     = metrics.NewRegisteredTimer("chain/inserts", nil)
@@ -321,10 +321,8 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		}
 	}
 	// Load any existing snapshot, regenerating it if loading failed
-	head := bc.CurrentBlock()
-	if bc.snaps, err = snapshot.New(bc.db, "snapshot.rlp", head.Root()); err != nil {
-		return nil, err
-	}
+	bc.snaps = snapshot.New(bc.db, bc.stateCache.TrieDB(), "snapshot.rlp", bc.cacheConfig.SnapshotLimit, bc.CurrentBlock().Root())
+
 	// Take ownership of this particular state
 	go bc.update()
 	if !cacheConfig.Disabled {
@@ -563,6 +561,9 @@ func (bc *BlockChain) FastSyncCommitHead(hash common.Hash) error {
 	bc.currentBlock.Store(block)
 	headBlockGauge.Update(int64(block.NumberU64()))
 	bc.chainmu.Unlock()
+
+	// Destroy any existing state snapshot and regenerate it in the background
+	bc.snaps.Rebuild(block.Root())
 
 	log.Info("Committed new head block", "number", block.Number(), "hash", hash)
 	return nil
