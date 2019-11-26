@@ -445,7 +445,7 @@ var (
 	}
 	DatabaseFlag = cli.StringFlag{
 		Name:  "database",
-		Usage: "Which database software to use? Currently supported values: badger & bolt (default)",
+		Usage: "Which database software to use? Currently supported values: badger & bolt",
 		Value: "bolt",
 	}
 	// Miner settings
