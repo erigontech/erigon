@@ -411,16 +411,6 @@ func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 	return err
 }
 
-// TODO [Andrew] implement the full Database interface
-
-func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	panic("Not implemented")
-}
-
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	panic("Not implemented")
-}
-
 // MultiPut inserts or updates multiple entries.
 // Entries are passed as an array:
 // bucket0, key0, val0, bucket1, key1, val1, ...
@@ -444,7 +434,7 @@ func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
 }
 
 func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
-	panic("Not implemented")
+	return rewindData(db, timestampSrc, timestampDst, df)
 }
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
@@ -465,10 +455,6 @@ func (db *BadgerDatabase) IdealBatchSize() int {
 func (db *BadgerDatabase) DiskSize() int64 {
 	lsm, vlog := db.db.Size()
 	return lsm + vlog
-}
-
-func (db *BadgerDatabase) Keys() ([][]byte, error) {
-	panic("Not implemented")
 }
 
 // MemCopy creates a copy of the database in a temporary directory.
@@ -503,6 +489,20 @@ func (db *BadgerDatabase) MemCopy() Database {
 	}
 
 	return newDb
+}
+
+// TODO [Issue 144] Implement the methods
+
+func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	panic("Not implemented")
+}
+
+func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+	panic("Not implemented")
+}
+
+func (db *BadgerDatabase) Keys() ([][]byte, error) {
+	panic("Not implemented")
 }
 
 func (db *BadgerDatabase) Ancients() (uint64, error) {
