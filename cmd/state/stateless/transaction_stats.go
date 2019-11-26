@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -155,7 +155,8 @@ func (tt *TxTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func transaction_stats() {
+//nolint:deadcode,unused
+func transactionStats(blockNum uint64) {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -195,7 +196,6 @@ func transaction_stats() {
 	vmConfig := vm.Config{Tracer: tt, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)

@@ -1,10 +1,11 @@
-package main
+package stateless
 
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 
 	"github.com/ledgerwatch/bolt"
 

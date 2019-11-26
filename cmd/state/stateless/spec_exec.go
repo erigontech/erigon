@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -145,7 +145,8 @@ func (ct *CombTracer) CaptureAccountWrite(account common.Address) error {
 	return nil
 }
 
-func speculativeExecution() {
+//nolint:deadcode,unused
+func speculativeExecution(blockNum uint64) {
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -173,7 +174,6 @@ func speculativeExecution() {
 	vmConfig3 := vm.Config{Tracer: ct3, Debug: true}
 	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, ethash.NewFaker(), vmConfig1, nil)
 	check(err)
-	blockNum := uint64(*block)
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)

@@ -1,4 +1,4 @@
-package main
+package stateless
 
 import (
 	"bufio"
@@ -11,7 +11,7 @@ import (
 	chart "github.com/wcharczuk/go-chart"
 )
 
-func statelessDoKVChart(filename string, right []int, chartFileName string, start int, startColor int) {
+func DoKVChart(filename string, right []int, chartFileName string, start int, startColor int) {
 	file, err := os.Open(filename)
 	check(err)
 	defer file.Close()

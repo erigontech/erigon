@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -674,11 +675,8 @@ func extractTrie(block int) {
 	}
 }
 
-func testRewind(block, rewind int) {
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("statedb")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth//chaindata")
+func testRewind(chaindata string, block, rewind int) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -1093,13 +1091,16 @@ func printBranches(block uint64) {
 	}
 }
 
-func readAccount() {
-	ethDb, err := ethdb.NewBoltDatabase("statedb")
+func readAccount(chaindata string, account common.Address) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	accountBytes := common.FromHex(*account)
-	secKey := crypto.Keccak256(accountBytes)
+	secKey := crypto.Keccak256(account[:])
 	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
-	fmt.Printf("%x:%x\n", secKey, v)
+	var a accounts.Account
+	if err = a.DecodeForStorage(v); err != nil {
+		panic(err)
+	}
+	fmt.Printf("%x:%x\n%x\n", secKey, v, a.Root)
 }
 
 func repairCurrent() {
@@ -1194,7 +1195,7 @@ func main() {
 	//mychart()
 	//testRebuild()
 	if *action == "testRewind" {
-		testRewind(*block, *rewind)
+		testRewind(*chaindata, *block, *rewind)
 	}
 	//hashFile()
 	//buildHashFromFile()
@@ -1230,7 +1231,9 @@ func main() {
 	//execToBlock(*block)
 	//extractTrie(*block)
 	//repair()
-	//readAccount()
+	if *action == "readAccount" {
+		readAccount(*chaindata, common.HexToAddress(*account))
+	}
 	//repairCurrent()
 	//testMemBolt()
 	//fmt.Printf("\u00b3\n")
