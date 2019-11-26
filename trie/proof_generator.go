@@ -30,10 +30,6 @@ import (
 
 type WitnessTapeStats map[string]int
 
-func (s WitnessTapeStats) GetOrZero(key string) int {
-	return s[key]
-}
-
 // TapeBuilder stores the sequence of values that is getting serialised using CBOR into a byte buffer
 type TapeBuilder struct {
 	buffer  bytes.Buffer     // Byte buffer where the CBOR-encoded values end up being written
@@ -490,6 +486,7 @@ func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) (WitnessTapeStats, error) {
 	if _, err := bwb.Structure.buffer.WriteTo(w); err != nil {
 		return nil, err
 	}
+
 	return WitnessTapeStats(lens), nil
 }
 

@@ -6,7 +6,7 @@ import (
 )
 
 func init() {
-	withBlock(stateSnapshotCmd)
+	withBlock(verifySnapshotCmd)
 	withChaindata(verifySnapshotCmd)
 	rootCmd.AddCommand(verifySnapshotCmd)
 }
