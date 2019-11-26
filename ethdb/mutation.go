@@ -88,7 +88,7 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 type mutation struct {
 	puts puts // Map buckets to map[key]value
 	//map[timestamp]map[hBucket]listOfChangedKeys
-	changeSetByBlock map[uint64]map[string][]dbutils.Change
+	changeSetByBlock map[uint64]map[string]*dbutils.ChangeSet
 	mu               sync.RWMutex
 	db               Database
 }
@@ -116,9 +116,28 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
+func (m *mutation) GetChangeSetByBlock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+	bucketMap, ok:=m.changeSetByBlock[timestamp]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	changeSet,ok:=bucketMap[string(bucket)]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+
+	return changeSet, nil
+}
+
 func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	return m.Get(hBucket, composite)
+	chs, err:=m.GetChangeSetByBlock(hBucket, timestamp)
+	if err!=nil {
+		if m.db!=nil {
+			return m.db.GetS(hBucket,key,timestamp)
+		}
+		return nil, err
+	}
+	return chs.FindLast(key)
 }
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
@@ -172,40 +191,32 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var t putsBucket
-	var ok bool
-	if t, ok = m.puts[string(bb)]; !ok {
-		t = make(putsBucket)
-		m.puts[string(bb)] = t
-	}
-	t[string(k)] = v
+	m.puts.Set(bb, key, value)
 	return nil
 }
 
 // Assumes that bucket, key, and value won't be modified
 func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
 	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	hBuckeStr :=string(hBucket)
 	changesByBucket, ok := m.changeSetByBlock[timestamp]
 	if !ok {
-		changesByBucket = make(map[string][]dbutils.Change)
+		changesByBucket = make(map[string]*dbutils.ChangeSet)
 		m.changeSetByBlock[timestamp] = changesByBucket
 	}
-	changes, ok := changesByBucket[string(hBucket)]
+	changeSet, ok := changesByBucket[string(hBucket)]
 	if !ok {
-		changes = make([]dbutils.Change, 0)
+		changeSet = dbutils.NewChangeSet()
 	}
-	changes = append(changes, dbutils.Change{
-		Key:   key,
-		Value: value,
-	})
-	changesByBucket[string(hBucket)] = changes
+
+	changesByBucket[hBuckeStr] = changeSet.Add(key,value)
 	if noHistory {
 		return nil
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.puts.Set(hBucket, composite, value)
+
 	return nil
 }
 
@@ -304,8 +315,8 @@ func (m *mutation) Commit() (uint64, error) {
 		changeSetStr := string(dbutils.ChangeSetBucket)
 		for timestamp, changesByBucket := range m.changeSetByBlock {
 			encodedTS := dbutils.EncodeTimestamp(timestamp)
-			for bucketStr, changes := range changesByBucket {
-				hBucket := []byte(bucketStr)
+			for hBucketStr, changes := range changesByBucket {
+				hBucket := []byte(hBucketStr)
 				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
 				dat, err := m.getNoLock(dbutils.ChangeSetBucket, changeSetKey)
 				if err != nil && err != ErrKeyNotFound {
@@ -317,19 +328,31 @@ func (m *mutation) Commit() (uint64, error) {
 					log.Error("DecodeChangeSet changedAccounts error on commit", "err", err)
 				}
 
-				changedAccounts = changedAccounts.MultiAdd(changes)
-				changedRLP, err := dbutils.EncodeСhangeSet(changedAccounts)
+				changedAccounts = changedAccounts.MultiAdd(changes.Changes)
+				changedRLP, err := dbutils.EncodeChangeSet(changedAccounts)
 				if err != nil {
-					log.Error("EncodeСhangeSet changedAccounts error on commit", "err", err)
+					log.Error("EncodeChangeSet changedAccounts error on commit", "err", err)
 					return 0, err
 				}
-
+				changedKeys:=changedAccounts.ChangedKeys()
+				for k:=range changedKeys {
+					b, err:=m.Get([]byte(hBucketStr), []byte(k))
+					if err!=nil {
+						log.Error("mutation, get index", "err", err)
+					}
+					v,err:=AppendChangedOnIndex(b, timestamp)
+					if err!=nil {
+						log.Error("mutation, append index", "err", err)
+						continue
+					}
+					m.puts.SetStr(hBucketStr, []byte(k), v)
+				}
 				m.puts.SetStr(changeSetStr, changeSetKey, changedRLP)
 			}
 		}
 	}
 
-	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
+	m.changeSetByBlock = make(map[uint64]map[string]*dbutils.ChangeSet)
 
 	tuples := common.NewTuples(m.puts.Size(), 3, 1)
 	for bucketStr, bt := range m.puts {
@@ -354,7 +377,7 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.changeSetByBlock = make(map[uint64]map[string][]dbutils.Change)
+	m.changeSetByBlock = make(map[uint64]map[string]*dbutils.ChangeSet)
 	m.puts = make(puts)
 }
 
@@ -382,7 +405,7 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:               m,
 		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
 	return mm
 }

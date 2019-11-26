@@ -104,7 +104,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			return err
 		}
 		sh = sh.Add(key, value)
-		dat, err = dbutils.EncodeСhangeSet(sh)
+		dat, err = dbutils.EncodeChangeSet(sh)
 		if err != nil {
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
@@ -192,18 +192,15 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 	if err!=nil {
 		return nil, err
 	}
-	var res []byte
-	err=chs.Walk(func(k, v []byte) error {
-		if bytes.Equal(k, key) {
-			res = v
-		}
-		return nil
-	})
-	return res, err
+	res,err:=chs.FindLast(key)
+	if err!=nil {
+		return nil, err
+	}
+	return res, nil
 }
 
 // GetChangeSetByBlock returns changeset by block and bucket
-func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (dbutils.ChangeSet, error) {
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
 	key:=dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -220,7 +217,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (d
 		return nil
 	})
 	if err!=nil {
-		return dbutils.ChangeSet{}, err
+		return nil, err
 	}
 	return dbutils.DecodeChangeSet(dat)
 }
@@ -347,7 +344,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	fixedbytes, mask := bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
@@ -362,13 +359,16 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
-		k, v := c.Seek(startkey)
-		hK, hV := hC.Seek(startkey)
+		//for state
+		mainCursor := b.Cursor()
+		//for historic data
+		historyCursor := hB.Cursor()
+		k, v := mainCursor.Seek(startkey)
+		hK, hV := historyCursor.Seek(startkey)
 		goOn := true
 		var err error
 		for goOn {
+			//exit or next conditions
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
 				k = nil
 			}
@@ -387,7 +387,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
-				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				hK, hV = historyCursor.SeekTo(keyBuffer[:sl])
 				continue
 			}
 
@@ -411,12 +411,12 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], EndSuffix)
-					hK, hV = hC.SeekTo(keyBuffer)
+					hK, hV = historyCursor.SeekTo(keyBuffer)
 				}
 			}
 		}
@@ -658,7 +658,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:               db,
 		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
 	return m
 }

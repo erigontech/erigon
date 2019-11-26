@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"bytes"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -87,22 +86,11 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		return nil, err
 	}
 
-	var found bool
 	var data []byte
-	err=cs.Walk(func(k, v []byte) error {
-		if bytes.Equal(k, key) {
-			copy(data, v)
-			found=true
-		}
-		return nil
-	})
+	data, err =cs.FindLast(key)
 	if err!=nil {
-		return nil, err
-	}
-	if !found {
 		return nil, ErrKeyNotFound
 	}
-
 	return data, nil
 
 }
