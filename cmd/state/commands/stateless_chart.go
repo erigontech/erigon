@@ -14,12 +14,18 @@ var (
 
 func init() {
 	withStatsfile(statelessChartCmd)
-	statelessChartCmd.MarkFlagRequired("statsfile")
+	if err := statelessChartCmd.MarkFlagRequired("statsfile"); err != nil {
+		panic(err)
+	}
 
 	statelessChartCmd.Flags().StringVarP(&output, "output", "o", "chart.png",
 		"Where to save the output file to")
-	statelessChartCmd.MarkFlagFilename("output", "png")
-	statelessChartCmd.MarkFlagRequired("output")
+	if err := statelessChartCmd.MarkFlagFilename("output", "png"); err != nil {
+		panic(err)
+	}
+	if err := statelessChartCmd.MarkFlagRequired("output"); err != nil {
+		panic(err)
+	}
 
 	statelessChartCmd.Flags().IntSliceVar(&filter, "filter", nil,
 		"Show only the specified columns")

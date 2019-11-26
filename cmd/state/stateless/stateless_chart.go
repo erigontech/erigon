@@ -113,7 +113,8 @@ func readCsv(r io.Reader, from uint64) (header []string, data [][]float64, err e
 			data[i] = append(data[i], r)
 		}
 	}
-	return
+
+	return header, data, err
 }
 
 func makeChart(xValues []float64, yValues [][]float64, columnNames []string, startColor int, filter []int) chart.Chart {
