@@ -44,7 +44,7 @@ var (
 	canonicalSeed = 1
 	forkSeed      = 2
 
-	// TODO [Andrew] run tests with BadgerDB as well
+	// TODO [Issue 144] run tests with BadgerDB as well
 	useBadgerDB = false
 )
 
