@@ -434,7 +434,7 @@ var (
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
 	}
-	NoHistory = cli.BoolTFlag{
+	NoHistory = cli.BoolFlag{
 		Name:  "no-history",
 		Usage: "Write the whole state history",
 	}
