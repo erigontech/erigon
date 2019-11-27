@@ -94,8 +94,6 @@ type mutation struct {
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
 	if t, ok := m.puts[string(bucket)]; ok {
 		return t.Get(key)
 	}
@@ -104,6 +102,9 @@ func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 
 // Can only be called from the worker thread
 func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if value, ok := m.getMem(bucket, key); ok {
 		if value == nil {
 			return nil, ErrKeyNotFound
@@ -332,15 +333,21 @@ func (m *mutation) Commit() (uint64, error) {
 				changedRLP, err := dbutils.EncodeChangeSet(changedAccounts)
 				if err != nil {
 					log.Error("EncodeChangeSet changedAccounts error on commit", "err", err)
-					return 0, err
 				}
 				changedKeys:=changedAccounts.ChangedKeys()
 				for k:=range changedKeys {
-					b, err:=m.Get([]byte(hBucketStr), []byte(k))
+					value, ok := m.getMem(hBucket, []byte(k))
+					if !ok {
+						if m.db != nil {
+							value,_ =m.db.Get(hBucket, []byte(k))
+						}
+					}
+
 					if err!=nil {
 						log.Error("mutation, get index", "err", err)
+						continue
 					}
-					v,err:=AppendChangedOnIndex(b, timestamp)
+					v,err:=AppendChangedOnIndex(value, timestamp)
 					if err!=nil {
 						log.Error("mutation, append index", "err", err)
 						continue
