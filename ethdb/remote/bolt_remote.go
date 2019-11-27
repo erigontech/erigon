@@ -58,6 +58,10 @@ const (
 	// CmdSeek (cursorHandle, seekKey): (key, value)
 	// Moves given cursor to the seekKey, or to the next key after seekKey
 	CmdSeek
+	// CmdNext (cursorHandle, number of keys): [(key, value)]
+	// Moves given cursor over the next given number of keys and streams back the (key, value) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdNext
 )
 
 // Pool of decoders
@@ -286,7 +290,7 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 				lastError = fmt.Errorf("bucket not found")
 			}
 			if err := encoder.Encode(&cursorHandle); err != nil {
-				log.Error("could not encode value in response to CmdCursor", "error", err)
+				log.Error("could not cursor handle in response to CmdCursor", "error", err)
 				return err
 			}
 		case CmdSeek:
@@ -299,6 +303,52 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 			if err := decoder.Decode(&seekKey); err != nil {
 				log.Error("could not decode seekKey for CmdSeek")
 				return err
+			}
+			var key, value []byte
+			if cursor, ok := cursors[cursorHandle]; ok {
+				key, value = cursor.Seek(seekKey)
+				lastError = nil
+			} else {
+				lastError = fmt.Errorf("cursor not found")
+			}
+			if err := encoder.Encode(&key); err != nil {
+				log.Error("could not encode key in response to CmdSeek", "error", err)
+				return err
+			}
+			if err := encoder.Encode(&value); err != nil {
+				log.Error("could not encode value in response to CmdSeek", "error", err)
+				return err
+			}
+		case CmdNext:
+			var cursorHandle uint64
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				log.Error("could not decode cursorHandle for CmdNext")
+				return err
+			}
+			var numberOfKeys uint64
+			if err := decoder.Decode(&numberOfKeys); err != nil {
+				log.Error("could not decode numberOfKeys for CmdNext")
+			}
+			var key, value []byte
+			if cursor, ok := cursors[cursorHandle]; ok {
+				for numberOfKeys > 0 {
+					key, value = cursor.Next()
+					if err := encoder.Encode(&key); err != nil {
+						log.Error("could not encode key in response to CmdNext", "error", err)
+						return err
+					}
+					if err := encoder.Encode(&value); err != nil {
+						log.Error("could not encode value in response to CmdNext", "error", err)
+						return err
+					}
+					numberOfKeys--
+					if key == nil {
+						break
+					}
+				}
+				lastError = nil
+			} else {
+				lastError = fmt.Errorf("cursor not found")
 			}
 		default:
 			log.Error("unknown", "command", c)
