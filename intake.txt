@@ -166,19 +166,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Wed Nov 27 14:41:47 2019 +0200
 
     core/rawdb: fix reinit regression caused by the hash check PR
-
-commit 7b189d6f1f7eedf46c6607901af291855b81112b
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Wed Nov 27 09:50:30 2019 +0100
-
-    core: fix staticcheck warnings (#20384)
-    
-    * core: fix staticcheck warnings
-    
-    * fix goimports
-
-commit c4844e9ee211f34d8023b0de8221d03a63817395
-Author: Guillaume Ballet <gballet@gmail.com>
-Date:   Wed Nov 27 09:49:41 2019 +0100
-
-    les: fix staticcheck warnings (#20371)
