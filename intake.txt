@@ -160,9 +160,3 @@ Author: Martin Holst Swende <martin@swende.se>
 Date:   Wed Nov 27 13:46:07 2019 +0100
 
     deps: update fastcache to 1.5.3
-
-commit 717f8a4e8f768e2c3a34067f4a55f9c8e3267f3f
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Wed Nov 27 14:41:47 2019 +0200
-
-    core/rawdb: fix reinit regression caused by the hash check PR
