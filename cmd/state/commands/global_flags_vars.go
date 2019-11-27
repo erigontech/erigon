@@ -14,8 +14,14 @@ func withBlock(cmd *cobra.Command) {
 
 func withChaindata(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chaindata, "chaindata", "chaindata", "path to the chaindata file used as input to analysis")
+	if err := cmd.MarkFlagFilename("chaindata", ""); err != nil {
+		panic(err)
+	}
 }
 
 func withStatsfile(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&statsfile, "statsfile", "stateless.csv", "path where to write the stats file")
+	if err := cmd.MarkFlagFilename("statsfile", "csv"); err != nil {
+		panic(err)
+	}
 }

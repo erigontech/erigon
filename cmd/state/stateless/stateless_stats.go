@@ -6,10 +6,23 @@ import (
 	"io"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 )
 
-var keys = []string{"balances", "codes", "hashes", "keys", "nonces", "structure", "values"}
+type statsColumn struct {
+	name   string
+	getter func(*state.BlockWitnessStats) uint64
+}
+
+var columns = []statsColumn{
+	{"BlockNumber", func(s *state.BlockWitnessStats) uint64 { return s.BlockNumber() }},
+	{"BlockWitnessSize", func(s *state.BlockWitnessStats) uint64 { return s.BlockWitnessSize() }},
+	{"CodesSize", func(s *state.BlockWitnessStats) uint64 { return s.CodesSize() }},
+	{"LeafKeysSize", func(s *state.BlockWitnessStats) uint64 { return s.LeafKeysSize() }},
+	{"LeafValuesSize", func(s *state.BlockWitnessStats) uint64 { return s.LeafValuesSize() }},
+	{"MasksSize", func(s *state.BlockWitnessStats) uint64 { return s.MasksSize() }},
+	{"HashesSize", func(s *state.BlockWitnessStats) uint64 { return s.HashesSize() }},
+}
 
 type StatsFile struct {
 	file      io.WriteCloser
@@ -30,12 +43,16 @@ func NewStatsFile(path string) (*StatsFile, error) {
 }
 
 func (s *StatsFile) writeHeader() error {
-	return s.buffer.Write(
-		append([]string{"block-number", "witness"}, keys...),
-	)
+	header := make([]string, len(columns))
+
+	for i, col := range columns {
+		header[i] = col.name
+	}
+
+	return s.buffer.Write(header)
 }
 
-func (s *StatsFile) AddRow(blockNum uint64, witness []byte, tapeStats trie.WitnessTapeStats) error {
+func (s *StatsFile) AddRow(row *state.BlockWitnessStats) error {
 	if !s.hasHeader {
 		fmt.Println("writing header")
 		if err := s.writeHeader(); err != nil {
@@ -43,18 +60,11 @@ func (s *StatsFile) AddRow(blockNum uint64, witness []byte, tapeStats trie.Witne
 		}
 		s.hasHeader = true
 	}
-	fields := make([]string, 2+len(keys))
-	fieldIndex := 0
 
-	fields[fieldIndex] = stringify(blockNum)
-	fieldIndex++
+	fields := make([]string, len(columns))
 
-	fields[fieldIndex] = stringify(uint64(len(witness)))
-	fieldIndex++
-
-	for _, key := range keys {
-		fields[fieldIndex] = stringify(uint64(tapeStats.GetOrZero(key)))
-		fieldIndex++
+	for i, col := range columns {
+		fields[i] = stringify(col.getter(row))
 	}
 
 	return s.buffer.Write(fields)

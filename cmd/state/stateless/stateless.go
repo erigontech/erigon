@@ -20,7 +20,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var chartColors = []drawing.Color{
@@ -187,14 +186,14 @@ func Stateless(
 		witness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
-			var tapeStats trie.WitnessTapeStats
+			var tapeStats *state.BlockWitnessStats
 			witness, tapeStats, err = tds.ExtractWitness(trace)
 			if err != nil {
 				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
 				return
 			}
 
-			err = stats.AddRow(blockNum, witness, tapeStats)
+			err = stats.AddRow(tapeStats)
 			check(err)
 		}
 		finalRootFail := false

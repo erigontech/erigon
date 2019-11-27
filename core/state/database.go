@@ -1154,7 +1154,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStats, error) {
+func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, *BlockWitnessStats, error) {
 	bwb := trie.NewBlockWitnessBuilder(trace)
 	rs := trie.NewResolveSet(0)
 	touches, storageTouches := tds.pg.ExtractTouches()
@@ -1176,7 +1176,7 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStat
 		return nil, nil, err
 	}
 
-	return b.Bytes(), stats, nil
+	return b.Bytes(), NewBlockWitnessStats(tds.blockNr, uint64(b.Len()), stats), nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
