@@ -28,6 +28,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto/blake2b"
 	"github.com/ledgerwatch/turbo-geth/crypto/bn256"
 	"github.com/ledgerwatch/turbo-geth/params"
+
+	//lint:ignore SA1019 Needed for precompile
 	"golang.org/x/crypto/ripemd160"
 )
 
