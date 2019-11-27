@@ -346,6 +346,7 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 			log.Error("Creation aborted", "error", err)
 			return nil, err
 		}
+		bc.trieDbState.SetNoHistory(bc.NoHistory())
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
 			log.Error("Rebuiling aborted", "error", err)

@@ -363,35 +363,21 @@ func printBuckets(db *bolt.DB) {
 	}
 }
 
-func bucketStats(db *bolt.DB) {
+func bucketStats(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
 	bucketList := allBuckets(db)
-	storageStats := new(bolt.BucketStats)
-	hStorageStats := new(bolt.BucketStats)
 	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 	db.View(func(tx *bolt.Tx) error {
 		for _, bucket := range bucketList {
 			b := tx.Bucket(bucket)
 			bs := b.Stats()
-			if len(bucket) == 20 {
-				storageStats.Add(bs)
-			} else if len(bucket) == 21 {
-				hStorageStats.Add(bs)
-			} else {
-				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-			}
+			fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
+				bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
+				bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 		}
 		return nil
 	})
-	bs := *storageStats
-	fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", "Contract Storage",
-		bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-	bs = *hStorageStats
-	fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", "Contract hStorage",
-		bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -1191,7 +1177,9 @@ func main() {
 	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	//check(err)
 	//defer db.Close()
-	//bucketStats(db)
+	if *action == "bucketStats" {
+		bucketStats(*chaindata)
+	}
 	//mychart()
 	//testRebuild()
 	if *action == "testRewind" {

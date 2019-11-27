@@ -213,7 +213,7 @@ var (
 	GCModeFlag = cli.StringFlag{
 		Name:  "gcmode",
 		Usage: `Blockchain garbage collection mode ("full", "archive")`,
-		Value: "full",
+		Value: "archive",
 	}
 	GCModeLimitFlag = cli.Uint64Flag{
 		Name:  "gcmode.stop_limit",
@@ -434,7 +434,7 @@ var (
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
 	}
-	NoHistory = cli.BoolTFlag{
+	NoHistory = cli.BoolFlag{
 		Name:  "no-history",
 		Usage: "Write the whole state history",
 	}
