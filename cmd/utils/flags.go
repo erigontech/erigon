@@ -213,7 +213,7 @@ var (
 	GCModeFlag = cli.StringFlag{
 		Name:  "gcmode",
 		Usage: `Blockchain garbage collection mode ("full", "archive")`,
-		Value: "full",
+		Value: "archive",
 	}
 	GCModeLimitFlag = cli.Uint64Flag{
 		Name:  "gcmode.stop_limit",
