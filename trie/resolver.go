@@ -23,7 +23,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	}
 	n, ok := t.root.(hashNode)
 	if !ok {
-		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
+		return nil
 	}
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
 		return err

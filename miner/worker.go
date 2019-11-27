@@ -627,14 +627,20 @@ func (w *worker) resultLoop() {
 
 // makeCurrent creates a new environment for the current cycle.
 func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
-	state, _, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
+	stateV, _, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
+
+	tds, err := state.NewTrieDbState(parent.Root(), w.chain.ChainDb(), parent.NumberU64())
+	if err != nil {
+		return err
+	}
+
 	env := &environment{
 		signer:    types.NewEIP155Signer(w.chainConfig.ChainID),
-		state:     state,
-		tds:       nil,
+		state:     stateV,
+		tds:       tds,
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -708,6 +714,7 @@ func (w *worker) updateSnapshot() {
 	// FIXME: fix miner code
 	// https://github.com/ledgerwatch/turbo-geth/issues/131
 	w.snapshotState = w.current.state
+	w.snapshotTds = w.current.tds.Copy()
 }
 
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
@@ -977,10 +984,10 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		receipts[i] = new(types.Receipt)
 		*receipts[i] = *l
 	}
-	// FIXME: fix miner code
-	// https://github.com/ledgerwatch/turbo-geth/issues/131
+
 	s := w.current.state
-	tds := w.current.tds.Copy()
+	w.current.tds = w.current.tds.WithNewBuffer()
+
 	block, err := w.engine.FinalizeAndAssemble(w.chainConfig, w.current.header, s, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
 		return err
@@ -1002,7 +1009,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 			interval()
 		}
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, tds: tds, block: block, createdAt: time.Now()}:
+		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 
 			feesWei := new(big.Int)

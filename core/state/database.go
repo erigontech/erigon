@@ -22,9 +22,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"reflect"
 	"runtime"
 	"sort"
+	"sync"
 
+	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -167,7 +170,35 @@ type TrieDbState struct {
 	tp              *trie.TriePruning
 }
 
+var trieObj = make(map[uintptr]*TrieDbState)
+var trieObjMu sync.RWMutex
+
+func getTrieDBState(db ethdb.Database) (*TrieDbState, uintptr) {
+	dbV := reflect.ValueOf(db).Elem()
+	dbAddr := dbV.UnsafeAddr()
+
+	trieObjMu.RLock()
+	tr := trieObj[dbAddr]
+	trieObjMu.RUnlock()
+
+	return tr, dbAddr
+}
+
+func setTrieDBState(dbAddr uintptr, tds *TrieDbState) {
+	trieObjMu.Lock()
+	trieObj[dbAddr] = tds
+	trieObjMu.Unlock()
+}
+
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+	tr, dbAddr := getTrieDBState(db)
+	fmt.Printf("\n************* NEW %v\n", dbAddr)
+	if tr != nil {
+		if tr.blockNr == blockNr && tr.LastRoot() == root {
+			return tr, nil
+		}
+	}
+
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -191,6 +222,9 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})
+
+	setTrieDBState(dbAddr, &tds)
+
 	return &tds, nil
 }
 
@@ -242,6 +276,33 @@ func (tds *TrieDbState) StartNewBuffer() {
 	tds.buffers = append(tds.buffers, tds.currentBuffer)
 }
 
+func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
+	fmt.Println("=== WithNewBuffer")
+	aggregateBuffer := &Buffer{}
+	aggregateBuffer.initialise()
+
+	currentBuffer := &Buffer{}
+	currentBuffer.initialise()
+
+	buffers := []*Buffer{tds.currentBuffer}
+
+	return &TrieDbState{
+		t:               tds.t,
+		db:              tds.db,
+		blockNr:         tds.blockNr,
+		buffers:         buffers,
+		aggregateBuffer: aggregateBuffer,
+		currentBuffer:   currentBuffer,
+		codeCache:       tds.codeCache,
+		codeSizeCache:   tds.codeSizeCache,
+		historical:      tds.historical,
+		noHistory:       tds.noHistory,
+		resolveReads:    tds.resolveReads,
+		pg:              tds.pg,
+		tp:              tds.tp,
+	}
+}
+
 func (tds *TrieDbState) LastRoot() common.Hash {
 	return tds.t.Hash()
 }
@@ -258,6 +319,7 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 // UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
+	fmt.Println("UpdateStateTrie")
 	roots, err := tds.updateTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
@@ -490,6 +552,8 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
+
+		spew.Dump("buffers", b==nil)
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
@@ -628,6 +692,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 }
 
 func (tds *TrieDbState) clearUpdates() {
+	fmt.Println("!!!!!!!!!!!!!!! clearUpdates")
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
@@ -709,6 +774,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			return err
 		}
 	}
+	fmt.Println("UnwindTo")
 	tds.clearUpdates()
 	tds.blockNr = blockNr
 	return nil
@@ -1013,6 +1079,11 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	if err != nil {
 		return err
 	}
+
+	fmt.Println(1, tsw == nil)
+	fmt.Println(2, tsw.tds == nil)
+	fmt.Println(3, tsw.tds.currentBuffer == nil)
+	fmt.Println(4, tsw.tds.currentBuffer.accountUpdates == nil)
 
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	return nil
