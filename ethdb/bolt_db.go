@@ -156,8 +156,8 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *BoltDatabase) Size() int {
-	return db.db.Size()
+func (db *BoltDatabase) DiskSize() int64 {
+	return int64(db.db.Size())
 }
 
 // Get returns the value for a given key if it's present.

@@ -443,9 +443,10 @@ var (
 		Usage: "When to switch from full to archive sync",
 		Value: 1024,
 	}
-	BadgerFlag = cli.BoolFlag{
-		Name:  "badger",
-		Usage: "Use BadgerDB rather than BoltDB",
+	DatabaseFlag = cli.StringFlag{
+		Name:  "database",
+		Usage: "Which database software to use? Currently supported values: badger & bolt",
+		Value: "bolt",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -1226,7 +1227,8 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
 	}
 
-	cfg.BadgerDB = ctx.GlobalBool(BadgerFlag.Name)
+	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
+	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
