@@ -1,0 +1,184 @@
+commit 017449971e1e9e220efcd97d3313a0e27f47003b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Fri Dec 6 11:51:37 2019 +0200
+
+    params: release Geth v1.9.9
+
+commit bc01593afbb2f0bdbf7f21adc790f161b2a8b41d
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Dec 6 10:36:40 2019 +0100
+
+    consensus/ethash, params: eip-2384: bump difficulty bomb (#20347)
+    
+    * consensus/ethash, params: implement eip-2384: bump difficulty bomb
+    
+    * params: EIP 2384 compat checks
+    
+    * consensus, params: add Muir Glacier block number (mainnet,ropsten) + official name
+    
+    * core/forkid: forkid tests for muir glacier
+    
+    * params/config: address review concerns
+    
+    * params, core/forkid: review nitpicks
+    
+    * cmd/geth,eth,les: add override option for muir glacier
+    
+    * params: nit fix
+
+commit c9dce0bfd769808f75aedbe119caa5f67be26b76
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Thu Dec 5 22:16:35 2019 +0100
+
+    p2p/enode: remove data race in sliceIter (#20421)
+
+commit e78f631dfc51bddd02bfc2b05ae088fc028b1ae7
+Merge: c2d65d34d 6b6882f08
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Dec 5 11:38:41 2019 +0200
+
+    Merge pull request #20428 from karalabe/cht-1.9.9
+    
+    params: update CHTs for v1.9.9 release
+
+commit 6b6882f08b4b230fc6f740700d73b8cef049d6cb
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Dec 5 11:01:40 2019 +0200
+
+    params: update CHTs for v1.9.9 release
+
+commit c2d65d34d5c6f27b8d1a52280964023a3eefd66e
+Merge: 7ce7c3967 13ccf6016
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Dec 2 12:51:00 2019 +0200
+
+    Merge pull request #20415 from karalabe/trie-dirty-cache-metrics
+    
+    trie: track dirty cache metrics, track clean writes on commit
+
+commit 13ccf6016e8b71a6a80ff7e78ae84aad6ed08326
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Dec 2 12:14:44 2019 +0200
+
+    trie: track dirty cache metrics, track clean writes on commit
+
+commit 7ce7c3967cf2c8ebf921fd90891a5105909e752c
+Author: Marius van der Wijden <m.vanderwijden@live.de>
+Date:   Mon Dec 2 10:29:25 2019 +0100
+
+    accounts/abi/bind: fix destructive packing of *big.Int (#20412)
+
+commit fc7e0fe6c75f5c0015935eb49bde677a53be52be
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Fri Nov 29 21:22:08 2019 +0800
+
+    core, miner: remove PostChainEvents (#19396)
+    
+    This change:
+    
+    - removes the PostChainEvents method on core.BlockChain.
+    - sorts 'removed log' events by block number.
+    - fire the NewChainHead event if we inject a canonical block into the chain
+      even if the entire insertion is not successful.
+    - guarantees correct event ordering in all cases.
+
+commit 5cc6e7a71e6d7677f4c075e5cc98e3d86a8cca08
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 29 11:47:14 2019 +0100
+
+    accounts/usbwallet: fix staticcheck warnings (#20372)
+
+commit d556d39a2cef8406de4c6deb5e558761c0b5af5d
+Author: xinluyin <31590468+xinluyin@users.noreply.github.com>
+Date:   Fri Nov 29 18:46:12 2019 +0800
+
+    internal/web3ext: add debug_accountRange (#20410)
+
+commit 54d332e1db268803223c2d8ea594b719a820f1a4
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 29 11:42:53 2019 +0100
+
+    accounts/scwallet: fix staticcheck warnings (#20370)
+
+commit e0bf5f0ccbeed89de6fe7611045787e072b1ab32
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 29 11:40:02 2019 +0100
+
+    internal: fix staticcheck warnings (#20380)
+
+commit 1ff3d7c2d48d2625c5c96a6e785332ce5fdeea60
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 29 11:38:34 2019 +0100
+
+    cmd/faucet, cmd/geth: fix staticcheck warnings (#20374)
+
+commit 08611cfd75b503d8489e0640780637d49d2be7eb
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Thu Nov 28 18:47:35 2019 +0800
+
+    trie: remove dead code (#20405)
+
+commit 9a529d64d14f8ebf677e69cf1b5de836ca215049
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Thu Nov 28 10:53:06 2019 +0100
+
+    log: fix staticcheck warnings (#20388)
+
+commit a91b704b013aaabb3bfc796f5a3d8c940dfb7f05
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 28 10:51:57 2019 +0100
+
+    consensus/ethash: refactor remote sealer (#20335)
+    
+    The original idea behind this change was to remove a use of the
+    deprecated CancelRequest method. Simply removing it would've been an
+    option, but I couldn't resist and did a bit of a refactoring instead.
+    
+    All remote sealing code was contained in a single giant function. Remote
+    sealing is now extracted into its own object, remoteSealer.
+
+commit c9f28ca8e5aff171d1602725a78fe47b2fa27bb1
+Merge: 58e33d9e5 7800ba978
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 27 15:08:34 2019 +0200
+
+    go: update fastcache to 1.5.3 (#20404)
+    
+    deps: update fastcache to 1.5.3
+
+commit 58e33d9e5ae25de30cd6be7a40372f1ba05db9ba
+Merge: 7b189d6f1 717f8a4e8
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 27 15:05:58 2019 +0200
+
+    Merge pull request #20403 from karalabe/fix-freezer-reinit
+    
+    core/rawdb: fix reinit regression caused by the hash check PR
+
+commit 7800ba978d4ba71422755ed3e30d12a4aef33381
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Nov 27 13:46:07 2019 +0100
+
+    deps: update fastcache to 1.5.3
+
+commit 717f8a4e8f768e2c3a34067f4a55f9c8e3267f3f
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 27 14:41:47 2019 +0200
+
+    core/rawdb: fix reinit regression caused by the hash check PR
+
+commit 7b189d6f1f7eedf46c6607901af291855b81112b
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Wed Nov 27 09:50:30 2019 +0100
+
+    core: fix staticcheck warnings (#20384)
+    
+    * core: fix staticcheck warnings
+    
+    * fix goimports
+
+commit c4844e9ee211f34d8023b0de8221d03a63817395
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Wed Nov 27 09:49:41 2019 +0100
+
+    les: fix staticcheck warnings (#20371)
