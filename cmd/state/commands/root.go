@@ -34,6 +34,10 @@ var rootCmd = &cobra.Command{
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		stopProfilingIfNeeded()
 	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		stateless.GasLimits(chaindata)
+		return nil
+	},
 }
 
 func Execute() {
