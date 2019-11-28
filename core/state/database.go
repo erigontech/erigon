@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/dgraph-io/badger"
 	"io"
 	"runtime"
 	"sort"
@@ -1067,6 +1068,20 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
+	/*
+		if !original.IsEmptyCodeHash() {
+			count,err:=dsw.tds.ChangeContractCounter(original.CodeHash.Bytes(), false)
+			if err!=nil {
+				return err
+			}
+			if count==0 {
+				if err:=dsw.tds.db.Delete(dbutils.CodeBucket, original.CodeHash.Bytes()); err!=nil {
+					return err
+				}
+			}
+		}
+	*/
+
 	_, noHistory := params.GetNoHistory(ctx)
 	noHistory = dsw.tds.noHistory || noHistory
 
@@ -1090,7 +1105,15 @@ func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte)
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
+	// increase contract counter
+	counter, err := dsw.tds.ChangeContractCounter(codeHash.Bytes(), true)
+	if err != nil {
+		return err
+	}
+	if counter == 1 {
+		return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
+	}
+	return nil
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -1194,4 +1217,48 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 
 func (tds *TrieDbState) TriePruningDebugDump() string {
 	return tds.tp.DebugDump()
+}
+
+func (tds *TrieDbState) ChangeContractCounter(codeHash []byte, increase bool) (uint64, error) {
+	currentSizeBin, err := tds.db.Get(dbutils.CodeCounterBucket, codeHash)
+	if !isNotExistError(err) {
+		fmt.Println("ChangeContractCounter err", err)
+		return 0, err
+	}
+	var currentSize uint64
+	if len(currentSizeBin) == 8 {
+		currentSize = binary.LittleEndian.Uint64(currentSizeBin)
+	} else {
+		currentSize = 0
+		currentSizeBin = make([]byte, 8)
+	}
+	if currentSize == 0 && !increase {
+		panic("not correct behaviour")
+	}
+
+	if increase {
+		currentSize++
+	} else {
+		currentSize--
+	}
+	if currentSize == 0 && !increase {
+		err = tds.db.Delete(dbutils.CodeCounterBucket, codeHash)
+	}
+	binary.LittleEndian.PutUint64(currentSizeBin, currentSize)
+	err = tds.db.Put(dbutils.CodeCounterBucket, codeHash, currentSizeBin)
+	if err != nil {
+		return 0, err
+	}
+	return currentSize, nil
+}
+
+func isNotExistError(err error) bool {
+	switch err {
+	case ethdb.ErrKeyNotFound:
+		return true
+	case badger.ErrKeyNotFound:
+		return true
+	default:
+		return false
+	}
 }

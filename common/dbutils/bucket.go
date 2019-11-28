@@ -6,7 +6,7 @@ import "github.com/ledgerwatch/turbo-geth/metrics"
 var (
 	// key - address hash
 	// value - account encoded for storage
-	AccountsBucket        = []byte("AT")
+	AccountsBucket = []byte("AT")
 
 	//key - key + encoded timestamp(block number)
 	//value - account for storage(old/original value)
@@ -14,15 +14,21 @@ var (
 
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	StorageBucket         = []byte("ST")
+	StorageBucket = []byte("ST")
 
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
-	StorageHistoryBucket  = []byte("hST")
+	StorageHistoryBucket = []byte("hST")
 
 	//key - contract code hash
 	//value - contract code
-	CodeBucket            = []byte("CODE")
+	CodeBucket = []byte("CODE")
+
+	//addressHash+incarnation -> code hash
+	CodeCounterBucket = []byte("codeCounter")
+
+	//contractCode -> count of usages
+	ContractCodeBucket = []byte("contractCode")
 
 	// key - encoded timestamp(block number) + history bucket
 	// value - rlp encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
