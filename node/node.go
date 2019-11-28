@@ -28,6 +28,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -626,7 +627,14 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	}
 
 	log.Info("Opening Database (Bolt)")
-	return ethdb.NewBoltDatabase(n.config.ResolvePath(name))
+	boltDb, err := ethdb.NewBoltDatabase(n.config.ResolvePath(name))
+	if err != nil {
+		return nil, err
+	}
+	if n.config.RemoteDbListenAddress != "" {
+		go remote.Listener(boltDb.DB(), n.config.RemoteDbListenAddress, nil)
+	}
+	return boltDb, nil
 }
 
 // ResolvePath returns the absolute path of a resource in the instance directory.

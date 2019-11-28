@@ -448,6 +448,11 @@ var (
 		Usage: "Which database software to use? Currently supported values: badger & bolt",
 		Value: "bolt",
 	}
+	RemoteDbListenAddress = cli.StringFlag{
+		Name:  "remote-db-listen-addr",
+		Usage: "network address (for example, localhost:9999) to start remote database server on",
+		Value: "",
+	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
 		Name:  "mine",
@@ -995,6 +1000,12 @@ func setWS(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
+// setRemoteDb populates configuration fields related to the remote
+// read-only interface to the databae
+func setRemoteDb(ctx *cli.Context, cfg *node.Config) {
+	cfg.RemoteDbListenAddress = ctx.GlobalString(RemoteDbListenAddress.Name)
+}
+
 // setIPC creates an IPC path configuration from the set command line flags,
 // returning an empty string if IPC was explicitly disabled, or the set path.
 func setIPC(ctx *cli.Context, cfg *node.Config) {
@@ -1206,6 +1217,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setHTTP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
+	setRemoteDb(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)

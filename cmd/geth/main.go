@@ -113,6 +113,7 @@ var (
 		utils.NoHistory,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
+		utils.RemoteDbListenAddress,
 		utils.ListenPortFlag,
 		utils.MaxPeersFlag,
 		utils.MaxPendingPeersFlag,

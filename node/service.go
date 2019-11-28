@@ -21,6 +21,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -57,7 +58,14 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 	}
 
 	log.Info("Opening Database (Bolt)")
-	return ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
+	boltDb, err := ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
+	if err != nil {
+		return nil, err
+	}
+	if ctx.config.RemoteDbListenAddress != "" {
+		go remote.Listener(boltDb.DB(), ctx.config.RemoteDbListenAddress, nil)
+	}
+	return boltDb, nil
 	/*
 		if err != nil {
 			return nil, err

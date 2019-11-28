@@ -19,6 +19,7 @@ package remote
 import (
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -118,7 +119,12 @@ func returnEncoderToPool(e *codec.Encoder) {
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
+func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
+	defer func() {
+		if err1 := closer.Close(); err1 != nil {
+			log.Error("Could not close connection", "error", err1)
+		}
+	}()
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -355,5 +361,118 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 			return fmt.Errorf("unknown command %d", c)
 		}
 	}
+	return nil
+}
+
+// Listener starts listener that for each incoming connection
+// spawn a go-routine invoking Server
+func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Error("Could not create listener", "address", address, "error", err)
+		return
+	}
+	log.Info("Remote DB interface listening on", "address", address)
+	for {
+		conn, err1 := ln.Accept()
+		if err1 != nil {
+			log.Error("Could not accept connection", "err", err1)
+			continue
+		}
+		go Server(db, conn, conn, conn)
+		if interruptCh != nil {
+			select {
+			case <-interruptCh:
+				log.Info("remoteDb listener interrupted")
+				break
+			default:
+			}
+		}
+	}
+	if err = ln.Close(); err != nil {
+		log.Error("Could not close listener", "error", err)
+	}
+}
+
+// DB mimicks the interface of the bolt.DB,
+// but it works via a pair (Reader, Writer)
+type DB struct {
+	in  io.Reader
+	out io.Writer
+}
+
+// NewDB creates a new instance of DB
+func NewDB(in io.Reader, out io.Writer) (*DB, error) {
+	decoder := newDecoder(in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(out)
+	defer returnEncoderToPool(encoder)
+	// Check version
+	var c = CmdVersion
+	if err := encoder.Encode(&c); err != nil {
+		return nil, err
+	}
+	var v uint64
+	if err := decoder.Decode(&v); err != nil {
+		return nil, err
+	}
+	if v != Version {
+		return nil, fmt.Errorf("returned version %d, expected %d", v, Version)
+	}
+	return &DB{in: in, out: out}, nil
+}
+
+// Tx mimicks the interface of bolt.Tx
+type Tx struct {
+	db       *DB
+	txHandle uint64
+}
+
+// View performs read-only transaction on the remote database
+// NOTE: not thread-safe
+func (db *DB) View(f func(tx *Tx) error) error {
+	decoder := newDecoder(db.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(db.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdBeginTx
+	if err := encoder.Encode(&c); err != nil {
+		return err
+	}
+	var txHandle uint64
+	if err := decoder.Decode(&txHandle); err != nil {
+		return err
+	}
+	if txHandle == 0 {
+		// Retrieve the error
+		c = CmdLastError
+		if err := encoder.Encode(&c); err != nil {
+			return err
+		}
+		var lastErrorStr string
+		if err := decoder.Decode(&lastErrorStr); err != nil {
+			return err
+		}
+		return fmt.Errorf("%v", lastErrorStr)
+	}
+	tx := &Tx{db: db, txHandle: txHandle}
+	opErr := f(tx)
+	c = CmdEndTx
+	if err := encoder.Encode(&c); err != nil {
+		return err
+	}
+	if err := encoder.Encode(&txHandle); err != nil {
+		return err
+	}
+	return opErr
+}
+
+// Bucket mimicks the interface of bolt.Bucket
+type Bucket struct {
+	bucketHandle uint64
+}
+
+// Bucket returns the handle to the bucket in remote DB
+func (tx *Tx) Bucket(name []byte) *Bucket {
 	return nil
 }
