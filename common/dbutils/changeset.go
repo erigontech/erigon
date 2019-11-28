@@ -104,7 +104,7 @@ func Decode(b []byte) (ChangeSet, error) {
 	}
 
 	if len(b) < 8 {
-		return h, fmt.Errorf("Decode: input too short (%d bytes)", len(b))
+		return h, fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
 	n := binary.BigEndian.Uint32(b[0:4])
@@ -118,12 +118,12 @@ func Decode(b []byte) (ChangeSet, error) {
 
 	valOffset := 8 + n*m + 4*n
 	if uint32(len(b)) < valOffset {
-		return h, fmt.Errorf("Decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
+		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
 	}
 
 	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
 	if uint32(len(b)) < valOffset+totalValLength {
-		return h, fmt.Errorf("Decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
+		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
 	}
 
 	for i := uint32(0); i < n; i++ {
@@ -154,7 +154,7 @@ func (s *ChangeSet) checkKeySize(key []byte) error {
 		return nil
 	}
 
-	return fmt.Errorf("Wrong key size in ChangeSet: expected %d, actual %d", s.KeySize(), len(key))
+	return fmt.Errorf("wrong key size in ChangeSet: expected %d, actual %d", s.KeySize(), len(key))
 }
 
 // Add adds a new entry to the ChangeSet.
