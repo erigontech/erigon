@@ -333,8 +333,10 @@ func (m *mutation) Commit() (uint64, error) {
 					log.Error("Decode changedAccounts error on commit", "err", err)
 				}
 
-				changedAccounts = changedAccounts.MultiAdd(changes)
-				changedRLP, err := dbutils.Encode(changedAccounts)
+				if err = changedAccounts.MultiAdd(changes); err != nil {
+					return 0, err
+				}
+				changedRLP, err := changedAccounts.Encode()
 				if err != nil {
 					log.Error("Encode changedAccounts error on commit", "err", err)
 					return 0, err

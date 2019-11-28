@@ -42,7 +42,7 @@ func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			return false, err
 		}
 
-		if ca.KeyCount() > 0 {
+		if ca.Len() > 0 {
 			bucketStr := string(common.CopyBytes(bucket))
 			var t map[string][]byte
 			var ok bool

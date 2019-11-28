@@ -678,13 +678,13 @@ func getStat(db ethdb.Database) (stateStats, error) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple account suffix records")
 			}
-			stat.AccountSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+			stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
 		}
 		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
 			if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple storage suffix records")
 			}
-			stat.StorageSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+			stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
 		}
 
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
