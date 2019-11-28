@@ -200,7 +200,8 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			}
 		}
 
-		if err := sh.Add(key, value); err != nil {
+		err = sh.Add(key, value)
+		if err != nil {
 			return err
 		}
 		dat, err := sh.Encode()
