@@ -958,7 +958,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
-					// TODO Issue99 [Boris] support incarnations
+					// TODO [Issue 99] support incarnations
 					storagePrefix := req.Prefixes[i]
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
 					rr.RequiresRLP = true
