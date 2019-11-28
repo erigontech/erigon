@@ -346,6 +346,7 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 			log.Error("Creation aborted", "error", err)
 			return nil, err
 		}
+		bc.trieDbState.SetNoHistory(bc.NoHistory())
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
 			log.Error("Rebuiling aborted", "error", err)
@@ -1202,47 +1203,13 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	return 0, nil
 }
 
-// writeBlockWithoutState writes only the block and its metadata to the database,
-// but does not write any state. This is used to construct competing side forks
-// up to the point where they exceed the canonical total difficulty.
-func (bc *BlockChain) writeBlockWithoutState(block *types.Block, td *big.Int) (err error) {
-	if err = bc.addJob(); err != nil {
-		return
-	}
-	defer bc.doneJob()
-
-	if err = bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), td); err != nil {
-		return
-	}
-	rawdb.WriteBlock(bc.db, block)
-
-	return
-}
-
-// writeKnownBlock updates the head block flag with a known block
-// and introduces chain reorg if necessary.
-func (bc *BlockChain) writeKnownBlock(block *types.Block) error {
-	if err := bc.addJob(); err != nil {
-		return err
-	}
-	defer bc.doneJob()
-
-	current := bc.CurrentBlock()
-	if block.ParentHash() != current.Hash() {
-		if err := bc.reorg(current, block); err != nil {
-			return err
-		}
-	}
-	// Write the positional metadata for transaction/receipt lookups.
-	// Preimages here is empty, ignore it.
-	rawdb.WriteTxLookupEntries(bc.db, block)
-
-	bc.insert(block)
-	return nil
-}
-
 // WriteBlockWithState writes the block and all associated state to the database.
 func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
+	if err = bc.addJob(); err != nil {
+		return NonStatTy, err
+	}
+	defer bc.doneJob()
+
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
@@ -1252,11 +1219,6 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, stateDb *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
-	if err = bc.addJob(); err != nil {
-		return NonStatTy, err
-	}
-	defer bc.doneJob()
-
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
@@ -2211,6 +2173,7 @@ type Pruner interface {
 	Stop()
 }
 
+// addJob should be called only for public methods
 func (bc *BlockChain) addJob() error {
 	bc.quitMu.RLock()
 	defer bc.quitMu.RUnlock()

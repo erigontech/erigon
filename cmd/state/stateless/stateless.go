@@ -79,6 +79,7 @@ func Stateless(
 	ignoreOlderThan uint64,
 	witnessThreshold uint64,
 	statsfile string,
+	verifySnapshot bool,
 	createDb CreateDbFunc) {
 
 	state.MaxTrieCacheGen = triesize
@@ -116,13 +117,16 @@ func Stateless(
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
-		//load_snapshot(db, fmt.Sprintf("/Volumes/tb4/turbo-geth-copy/state_%d", blockNum-1))
-		//loadCodes(db, ethDb)
 		block := bcb.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
-		checkRoots(stateDb, preRoot, blockNum-1)
+
+		if verifySnapshot {
+			fmt.Println("Verifying snapshot..")
+			checkRoots(stateDb, preRoot, blockNum-1)
+			fmt.Println("Verifying snapshot... OK")
+		}
 	}
 	batch := stateDb.NewBatch()
 	defer func() {

@@ -13,6 +13,7 @@ var (
 	snapshotInterval uint64
 	snapshotFrom     uint64
 	witnessInterval  uint64
+	noverify         bool
 )
 
 func init() {
@@ -26,6 +27,7 @@ func init() {
 	statelessCmd.Flags().Uint64Var(&snapshotInterval, "snapshotInterval", 0, "how often to take snapshots (0 - never, 1 - every block, 1000 - every 1000th block, etc)")
 	statelessCmd.Flags().Uint64Var(&snapshotFrom, "snapshotFrom", 0, "from which block to start snapshots")
 	statelessCmd.Flags().Uint64Var(&witnessInterval, "witnessInterval", 1, "after which block to extract witness (put a large number like 10000000 to disable)")
+	statelessCmd.Flags().BoolVar(&noverify, "noVerify", false, "skip snapshot verification on loading")
 
 	rootCmd.AddCommand(statelessCmd)
 
@@ -40,7 +42,19 @@ var statelessCmd = &cobra.Command{
 			return ethdb.NewBoltDatabase(path)
 		}
 
-		stateless.Stateless(block, chaindata, statefile, triesize, preroot, snapshotInterval, snapshotFrom, witnessInterval, statsfile, createDb)
+		stateless.Stateless(
+			block,
+			chaindata,
+			statefile,
+			triesize,
+			preroot,
+			snapshotInterval,
+			snapshotFrom,
+			witnessInterval,
+			statsfile,
+			!noverify,
+			createDb,
+		)
 
 		return nil
 	},
