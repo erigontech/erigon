@@ -170,7 +170,7 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			var tx *bolt.Tx
 			tx, lastError = db.Begin(false)
 			if lastError == nil {
-				// nolint: checkerr
+				// nolint:errcheck
 				defer tx.Rollback()
 				lastHandle++
 				txHandle = lastHandle
