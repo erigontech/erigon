@@ -17,9 +17,6 @@
 package trie
 
 import (
-	"encoding/binary"
-	"errors"
-	"fmt"
 	"io"
 	"reflect"
 	"sync"
