@@ -23,6 +23,22 @@ import (
 	"github.com/ledgerwatch/bolt"
 )
 
+type closerType struct {
+}
+
+func (c closerType) Close() error {
+	return nil
+}
+
+var closer closerType
+
+const (
+	key1   = "key1"
+	value1 = "value1"
+	key2   = "key2"
+	value2 = "value2"
+)
+
 func TestCmdVersion(t *testing.T) {
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
@@ -42,7 +58,7 @@ func TestCmdVersion(t *testing.T) {
 	if err = encoder.Encode(&c); err != nil {
 		t.Errorf("Could not encode CmdVersion: %v", err)
 	}
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	var v uint64
@@ -105,7 +121,7 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -167,7 +183,7 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -208,10 +224,10 @@ func TestCmdGet(t *testing.T) {
 		if err1 != nil {
 			return err1
 		}
-		if err1 = b.Put([]byte("key1"), []byte("value1")); err1 != nil {
+		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
-		if err1 = b.Put([]byte("key2"), []byte("value2")); err1 != nil {
+		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
 			return err1
 		}
 		return nil
@@ -260,7 +276,7 @@ func TestCmdGet(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -294,13 +310,6 @@ func TestCmdGet(t *testing.T) {
 		t.Errorf("Wrong value from CmdGet, expected: %x, got %x", "value1", value)
 	}
 }
-
-const (
-	key1   = "key1"
-	value1 = "value1"
-	key2   = "key2"
-	value2 = "value2"
-)
 
 func TestCmdSeek(t *testing.T) {
 	// ---------- Start of boilerplate code
@@ -371,7 +380,7 @@ func TestCmdSeek(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -492,7 +501,7 @@ func TestCmdNext(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf); err != nil {
+	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results

@@ -474,5 +474,43 @@ type Bucket struct {
 
 // Bucket returns the handle to the bucket in remote DB
 func (tx *Tx) Bucket(name []byte) *Bucket {
-	return nil
+	decoder := newDecoder(tx.db.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(tx.db.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdBucket
+	if err := encoder.Encode(&c); err != nil {
+		log.Error("Could not encode CmdBucket", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&tx.txHandle); err != nil {
+		log.Error("Could not encode txHandle for CmdBucket", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&name); err != nil {
+		log.Error("Could not encode name for CmdBucket", "error", err)
+		return nil
+	}
+	var bucketHandle uint64
+	if err := decoder.Decode(&bucketHandle); err != nil {
+		log.Error("Could not decode bucketHandle from CmdBucket result", "error", err)
+		return nil
+	}
+	if bucketHandle == 0 {
+		// Retrieve the error
+		c = CmdLastError
+		if err := encoder.Encode(&c); err != nil {
+			log.Error("Could not encode CmdLastError to get error of CmdBucket", "error", err)
+			return nil
+		}
+		var lastErrorStr string
+		if err := decoder.Decode(&lastErrorStr); err != nil {
+			log.Error("Could not decode lastErrorStr from get error of CmdBicket", "error", err)
+			return nil
+		}
+		log.Error("Retrieved from CmdBucket", "error", lastErrorStr)
+		return nil
+	}
+	bucket := &Bucket{bucketHandle: bucketHandle}
+	return bucket
 }
