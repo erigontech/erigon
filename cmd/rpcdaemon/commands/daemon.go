@@ -36,7 +36,7 @@ func (api *EthAPIImpl) BlockNumber(ctx context.Context) (uint64, error) {
 	return 0, nil
 }
 
-func daemon(config Config) {
+func daemon(cfg Config) {
 	vhosts := splitAndTrim(cfg.rpcVirtualHost)
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
