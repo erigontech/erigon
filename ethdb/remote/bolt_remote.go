@@ -170,11 +170,8 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			var tx *bolt.Tx
 			tx, lastError = db.Begin(false)
 			if lastError == nil {
-				defer func() {
-					if err := tx.Rollback(); err != nil {
-						log.Error("could not rollback transaction", "error", err)
-					}
-				}()
+				// nolint: checkerr
+				defer tx.Rollback()
 				lastHandle++
 				txHandle = lastHandle
 				transactions[txHandle] = tx
@@ -399,12 +396,13 @@ func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	in  io.Reader
-	out io.Writer
+	in     io.Reader
+	out    io.Writer
+	closer io.Closer
 }
 
 // NewDB creates a new instance of DB
-func NewDB(in io.Reader, out io.Writer) (*DB, error) {
+func NewDB(in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -421,12 +419,22 @@ func NewDB(in io.Reader, out io.Writer) (*DB, error) {
 	if v != Version {
 		return nil, fmt.Errorf("returned version %d, expected %d", v, Version)
 	}
-	return &DB{in: in, out: out}, nil
+	return &DB{in: in, out: out, closer: closer}, nil
+}
+
+// Close closes DB by using the closer field
+func (db *DB) Close() {
+	if db.closer != nil {
+		if err := db.closer.Close(); err != nil {
+			log.Error("Could not close remote DB", "error", err)
+		}
+	}
 }
 
 // Tx mimicks the interface of bolt.Tx
 type Tx struct {
-	db       *DB
+	in       io.Reader
+	out      io.Writer
 	txHandle uint64
 }
 
@@ -457,7 +465,7 @@ func (db *DB) View(f func(tx *Tx) error) error {
 		}
 		return fmt.Errorf("%v", lastErrorStr)
 	}
-	tx := &Tx{db: db, txHandle: txHandle}
+	tx := &Tx{in: db.in, out: db.out, txHandle: txHandle}
 	opErr := f(tx)
 	c = CmdEndTx
 	if err := encoder.Encode(&c); err != nil {
@@ -471,14 +479,16 @@ func (db *DB) View(f func(tx *Tx) error) error {
 
 // Bucket mimicks the interface of bolt.Bucket
 type Bucket struct {
+	in           io.Reader
+	out          io.Writer
 	bucketHandle uint64
 }
 
 // Bucket returns the handle to the bucket in remote DB
 func (tx *Tx) Bucket(name []byte) *Bucket {
-	decoder := newDecoder(tx.db.in)
+	decoder := newDecoder(tx.in)
 	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(tx.db.out)
+	encoder := newEncoder(tx.out)
 	defer returnEncoderToPool(encoder)
 	var c = CmdBucket
 	if err := encoder.Encode(&c); err != nil {
@@ -515,4 +525,31 @@ func (tx *Tx) Bucket(name []byte) *Bucket {
 	}
 	bucket := &Bucket{bucketHandle: bucketHandle}
 	return bucket
+}
+
+// Get reads a value corresponding to the given key, from the bucket
+// return nil if they key is not present
+func (b *Bucket) Get(key []byte) []byte {
+	decoder := newDecoder(b.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(b.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdGet
+	if err := encoder.Encode(&c); err != nil {
+		log.Error("Could not encode CmdGet", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&b.bucketHandle); err != nil {
+		log.Error("Could not encode bucketHandle for CmdGet", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&key); err != nil {
+		log.Error("Could not encode key for CmdGet", "error", err)
+		return nil
+	}
+	var value []byte
+	if err := decoder.Decode(&value); err != nil {
+		log.Error("Could not decode value from CmdGet result", "error", err)
+	}
+	return value
 }
