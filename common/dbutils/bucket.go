@@ -25,9 +25,6 @@ var (
 	CodeBucket = []byte("CODE")
 
 	//addressHash+incarnation -> code hash
-	CodeCounterBucket = []byte("codeCounter")
-
-	//contractCode -> count of usages
 	ContractCodeBucket = []byte("contractCode")
 
 	// key - encoded timestamp(block number) + history bucket

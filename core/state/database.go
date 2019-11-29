@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -555,7 +554,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 			}
-				if forward {
+
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
@@ -576,29 +575,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						account.Root = trie.EmptyRoot
 					}
 				}
-			} else {
-				// Simply comparing the correctness of the storageRoot computations
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
-				}
-			}
 		}
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
@@ -741,6 +717,14 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var a accounts.Account
 	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, err
+	}
+	if tds.historical&&a.Incarnation>0 {
+		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+		if err!=nil {
+			a.CodeHash = common.BytesToHash(codeHash)
+		} else {
+			log.Error("Get code hash is incorrect")
+		}
 	}
 	return &a, nil
 }
@@ -969,9 +953,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	}
 }
 
-type DbStateWriter struct {
-	tds *TrieDbState
-}
 
 func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
@@ -1019,35 +1000,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	dataLen := account.EncodingLengthForStorage()
-	data := make([]byte, dataLen)
-	account.EncodeForStorage(data)
-
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
-	if err != nil {
-		return err
-	}
-	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
-		return err
-	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
-
-	// Don't write historical record if the account did not change
-	if accountsEqual(original, account) {
-		return nil
-	}
-	var originalData []byte
-	if !original.Initialised {
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
-}
 
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
@@ -1060,36 +1012,6 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
-	if err != nil {
-		return err
-	}
-	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
-		return err
-	}
-
-	if !original.IsEmptyCodeHash() {
-		_,err:=dsw.tds.ChangeContractCounter(original.CodeHash.Bytes(), false)
-		if err!=nil {
-			return err
-		}
-	}
-
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
-
-	var originalData []byte
-	if !original.Initialised {
-		// Account has been created and deleted in the same block
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
-}
 
 func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
@@ -1098,17 +1020,6 @@ func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation 
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
-	// increase contract counter
-	counter, err := dsw.tds.ChangeContractCounter(codeHash.Bytes(), true)
-	if err != nil {
-		return err
-	}
-	if counter == 1 {
-		return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
-	}
-	return nil
-}
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
@@ -1135,40 +1046,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 	return nil
 }
 
-func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
-	if *original == *value {
-		return nil
-	}
-	seckey, err := dsw.tds.HashKey(key, true /*save*/)
-	if err != nil {
-		return err
-	}
-	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
 
-	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
-	if err != nil {
-		return err
-	}
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
-	if len(v) == 0 {
-		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
-	} else {
-		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
-	}
-	//fmt.Printf("WriteAccountStorage (db) %x %d %x: %x\n", address, incarnation, key, value)
-	if err != nil {
-		return err
-	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
-	o := bytes.TrimLeft(original[:], "\x00")
-	originalValue := make([]byte, len(o))
-	copy(originalValue, o)
-	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, originalValue, dsw.tds.blockNr, noHistory)
-}
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
 func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStats, error) {
@@ -1205,46 +1083,11 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 	return nil
 }
 
-func (dsw *DbStateWriter) CreateContract(address common.Address) error {
-	return nil
-}
-
 func (tds *TrieDbState) TriePruningDebugDump() string {
 	return tds.tp.DebugDump()
 }
 
-func (tds *TrieDbState) ChangeContractCounter(codeHash []byte, increase bool) (uint64, error) {
-	currentSizeBin, err := tds.db.Get(dbutils.CodeCounterBucket, codeHash)
-	if !isNotExistError(err) {
-		fmt.Println("ChangeContractCounter err", err)
-		return 0, err
-	}
-	var currentSize uint64
-	if len(currentSizeBin) == 8 {
-		currentSize = binary.LittleEndian.Uint64(currentSizeBin)
-	} else {
-		currentSize = 0
-		currentSizeBin = make([]byte, 8)
-	}
-	if currentSize == 0 && !increase {
-		panic("not correct behaviour")
-	}
 
-	if increase {
-		currentSize++
-	} else {
-		currentSize--
-	}
-	if currentSize == 0 && !increase {
-		err = tds.db.Delete(dbutils.CodeCounterBucket, codeHash)
-	}
-	binary.LittleEndian.PutUint64(currentSizeBin, currentSize)
-	err = tds.db.Put(dbutils.CodeCounterBucket, codeHash, currentSizeBin)
-	if err != nil {
-		return 0, err
-	}
-	return currentSize, nil
-}
 
 func isNotExistError(err error) bool {
 	switch err {
