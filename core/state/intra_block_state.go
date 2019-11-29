@@ -739,7 +739,11 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 		} else {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
-				if err := stateWriter.UpdateAccountCode(common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+				addrHash,err:=common.HashData(addr.Bytes())
+				if err!=nil {
+					return err
+				}
+				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation,common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 					return err
 				}
 			}
@@ -780,7 +784,12 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		} else if isDirty {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
-				if err := stateWriter.UpdateAccountCode(common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+				addrHash,err:=common.HashData(stateObject.Address().Bytes())
+				if err!=nil {
+					log.Error("incorrect hash addr", "err", err)
+					return err
+				}
+				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 					return err
 				}
 			}

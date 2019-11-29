@@ -50,7 +50,7 @@ type StateReader interface {
 
 type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
-	UpdateAccountCode(codeHash common.Hash, code []byte) error
+	UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
 	CreateContract(address common.Address) error
@@ -71,7 +71,7 @@ func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, o
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
@@ -555,7 +555,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 			}
-			if forward {
+				if forward {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
@@ -1068,19 +1068,13 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
-	/*
-		if !original.IsEmptyCodeHash() {
-			count,err:=dsw.tds.ChangeContractCounter(original.CodeHash.Bytes(), false)
-			if err!=nil {
-				return err
-			}
-			if count==0 {
-				if err:=dsw.tds.db.Delete(dbutils.CodeBucket, original.CodeHash.Bytes()); err!=nil {
-					return err
-				}
-			}
+
+	if !original.IsEmptyCodeHash() {
+		_,err:=dsw.tds.ChangeContractCounter(original.CodeHash.Bytes(), false)
+		if err!=nil {
+			return err
 		}
-	*/
+	}
 
 	_, noHistory := params.GetNoHistory(ctx)
 	noHistory = dsw.tds.noHistory || noHistory
@@ -1097,14 +1091,14 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
 
-func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.pg.CreateCode(codeHash, code)
 	}
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	// increase contract counter
 	counter, err := dsw.tds.ChangeContractCounter(codeHash.Bytes(), true)
 	if err != nil {
