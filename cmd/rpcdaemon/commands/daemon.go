@@ -128,7 +128,7 @@ func daemon(cfg Config) {
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
 
-	abortChan := make(chan os.Signal)
+	abortChan := make(chan os.Signal, 1)
 	signal.Notify(abortChan, os.Interrupt)
 
 	sig := <-abortChan
