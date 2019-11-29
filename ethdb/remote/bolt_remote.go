@@ -379,6 +379,7 @@ func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
 			log.Error("Could not accept connection", "err", err1)
 			continue
 		}
+		//nolint:errcheck
 		go Server(db, conn, conn, conn)
 		if interruptCh != nil {
 			select {
