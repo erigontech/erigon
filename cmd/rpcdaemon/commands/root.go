@@ -33,7 +33,7 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
-	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
+	rootCmd.PersistentFlags().StringVar(&cpuprofile, "memprofile", "", "write memory profile `file`")
 	rootCmd.Flags().StringVar(&cfg.remoteDbAdddress, "remote-db-addr", "localhost:9999", "address of remote DB listener of a turbo-geth node")
 	rootCmd.Flags().StringVar(&cfg.rpcListenAddress, "rpcaddr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
 	rootCmd.Flags().IntVar(&cfg.rpcPort, "rpcport", node.DefaultHTTPPort, "HTTP-RPC server listening port")
