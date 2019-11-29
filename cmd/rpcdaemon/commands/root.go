@@ -6,33 +6,55 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
 )
+
+type Config struct {
+	remoteDbAdddress string
+	rpcListenAddress string
+	rpcPort          int
+	rpcCORSDomain    string
+	rpcVirtualHost   string
+	rpcAPI           string
+}
 
 var (
 	cpuprofile     string
 	cpuProfileFile io.WriteCloser
 
 	memprofile string
+	cfg        Config
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "memprofile", "", "write memory profile `file`")
+	rootCmd.Flags().StringVar(&cfg.remoteDbAdddress, "remote-db-addr", "localhost:9999", "address of remote DB listener of a turbo-geth node")
+	rootCmd.Flags().StringVar(&cfg.rpcListenAddress, "rpcaddr", node.DefaultHTTPHost, "HTTP-RPC server listening interface")
+	rootCmd.Flags().IntVar(&cfg.rpcPort, "rpcport", node.DefaultHTTPPort, "HTTP-RPC server listening port")
+	rootCmd.Flags().StringVar(&cfg.rpcCORSDomain, "rpccorsdomain", "", "Comma separated list of domains from which to accept cross origin requests (browser enforced)")
+	rootCmd.Flags().StringVar(&cfg.rpcVirtualHost, "rpcvhosts", strings.Join(node.DefaultConfig.HTTPVirtualHosts, ","), "Comma separated list of virtual hostnames from which to accept requests (server enforced). Accepts '*' wildcard.")
+	rootCmd.Flags().StringVar(&cfg.rpcAPI, "rpcapi", "", "API's offered over the HTTP-RPC interface")
 }
 
 var rootCmd = &cobra.Command{
-	Use:   "state",
-	Short: "state is a utility for Stateless ethereum clients",
+	Use:   "rpcdaemon",
+	Short: "rpcdaemon is JSON RPC server that connects to turbo-geth node for remote DB access",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		startProfilingIfNeeded()
 
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		stopProfilingIfNeeded()
+	},
+	RunE: func(cmd *cobra.Command, args []string) error {
+		daemon(cfg)
+		return nil
 	},
 }
 
