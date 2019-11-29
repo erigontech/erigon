@@ -373,7 +373,8 @@ func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
 		return
 	}
 	log.Info("Remote DB interface listening on", "address", address)
-	for {
+	var interrupted = false
+	for !interrupted {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
 			log.Error("Could not accept connection", "err", err1)
@@ -385,7 +386,7 @@ func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
 			select {
 			case <-interruptCh:
 				log.Info("remoteDb listener interrupted")
-				break
+				interrupted = true
 			default:
 			}
 		}
