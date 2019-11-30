@@ -21,7 +21,7 @@ var (
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
-	rootCmd.PersistentFlags().StringVar(&cpuprofile, "memprofile", "", "write memory profile `file`")
+	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
 }
 
 var rootCmd = &cobra.Command{
