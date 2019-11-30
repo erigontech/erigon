@@ -109,6 +109,25 @@ func keyTape(t *trie.Trie, number int) error {
 	return nil
 }
 
+var bucketLabels = map[string]string{
+	string(dbutils.PreimagePrefix):        "Preimages",
+	string(dbutils.BlockReceiptsPrefix):   "Receips",
+	string(dbutils.AccountsHistoryBucket): "History of Accounts",
+	string(dbutils.HeaderPrefix):          "Headers",
+	string(dbutils.ConfigPrefix):          "Config",
+	string(dbutils.BlockBodyPrefix):       "Block Bodies",
+	string(dbutils.HeadHeaderKey):         "Last Header",
+	string(dbutils.HeadFastBlockKey):      "Last Fast",
+	string(dbutils.HeadBlockKey):          "Last Block",
+	string(dbutils.HeaderNumberPrefix):    "Header Numbers",
+	string(dbutils.ChangeSetBucket):       "Change Sets",
+	string(dbutils.AccountsBucket):        "Accounts",
+	string(dbutils.TxLookupPrefix):        "Transaction Index",
+	string(dbutils.StorageHistoryBucket):  "History of Storage",
+	string(dbutils.StorageBucket):         "Storage",
+	string(dbutils.CodeBucket):            "Code of Contracts",
+}
+
 func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
@@ -117,133 +136,79 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 	}
 	i := 0
 	visual.StartGraph(f, true)
-	m := make(map[string]string)
+	m := make(map[string][]int)
+	noValues := make(map[int]struct{})
 
-	if err := first.View(func(readTx *bolt.Tx) error {
-		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			return b.ForEach(func(k, v []byte) error {
-				m[fmt.Sprintf("%x_%x", name, k)] = string(v)
-				return nil
+	if err := second.View(func(readTx *bolt.Tx) error {
+		return first.View(func(firstTx *bolt.Tx) error {
+			return readTx.ForEach(func(bucketName []byte, b *bolt.Bucket) error {
+				firstB := firstTx.Bucket(bucketName)
+				return b.ForEach(func(k, v []byte) error {
+					if firstB != nil {
+						if firstV, _ := firstB.Get(k); bytes.Equal(v, firstV) {
+							// Skip the record that is the same as in the first Db
+							return nil
+						}
+					}
+					// Produce pair of nodes
+					keyKeyBytes := &trie.Keybytes{
+						Data:        k,
+						Odd:         false,
+						Terminating: false,
+					}
+					valKeyBytes := &trie.Keybytes{
+						Data:        v,
+						Odd:         false,
+						Terminating: false,
+					}
+					val := valKeyBytes.ToHex()
+					key := keyKeyBytes.ToHex()
+					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
+					if len(val) > 0 {
+						if len(val) > 32 {
+							//shortenedVal := val[:32]
+							compression := len(val) - 32
+							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, compression)
+						} else {
+							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
+						}
+						// Produce edge
+						fmt.Fprintf(f, "k_%d -> v_%d;\n", i, i)
+					} else {
+						noValues[i] = struct{}{}
+					}
+					lst := m[string(bucketName)]
+					lst = append(lst, i)
+					m[string(common.CopyBytes(bucketName))] = lst
+					i++
+					return nil
+				})
 			})
 		})
 	}); err != nil {
-		panic(err)
+		return err
 	}
-
-	if err := second.View(func(readTx *bolt.Tx) error {
-		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			visual.StartCluster(f, i, string(name))
-			if err := b.ForEach(func(k, v []byte) error {
-				keyKeyBytes := &trie.Keybytes{
-					Data:        k,
-					Odd:         false,
-					Terminating: false,
-				}
-				valKeyBytes := &trie.Keybytes{
-					Data:        v,
-					Odd:         false,
-					Terminating: false,
-				}
-				val := valKeyBytes.ToHex()
-				key := keyKeyBytes.ToHex()
-				if m[fmt.Sprintf("%x_%x", name, k)] != string(v) {
-					fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
-					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-					if len(val) > 0 {
-						if len(val) > 32 {
-							shortenedVal := val[:32]
-							visual.Horizontal(f, shortenedVal, 99999, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
-						} else {
-							visual.Horizontal(f, val, 99999, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-						}
-					} else {
-						visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
-					}
-				} else {
-					fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
-					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-					if len(val) > 0 {
-						if len(val) > 32 {
-							shortenedVal := val[:32]
-							visual.Horizontal(f, shortenedVal, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
-						} else {
-							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-						}
-					} else {
-						visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
-					}
-				}
-				i++
-				return nil
-			}); err != nil {
-				return err
+	n := 0
+	for prefix, lst := range m {
+		var clusterLabel string
+		var ok bool
+		if clusterLabel, ok = bucketLabels[prefix]; !ok {
+			clusterLabel = prefix
+		}
+		if len(lst) == 0 {
+			continue
+		}
+		visual.StartCluster(f, n, clusterLabel)
+		for _, item := range lst {
+			if _, ok1 := noValues[item]; ok1 {
+				fmt.Fprintf(f, "k_%d;", item)
+			} else {
+				fmt.Fprintf(f, "k_%d;v_%d;", item, item)
 			}
-			visual.EndCluster(f)
-			return nil
-		})
-	}); err != nil {
-		return err
-	}
-	visual.EndGraph(f)
-	if err := f.Close(); err != nil {
-		return err
-	}
-	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("error: %v, output: %s\n", err, output)
-	}
-	return nil
-}
-
-func stateDatabaseMap(db *bolt.DB, number int) error {
-	filename := fmt.Sprintf("state_%d.dot", number)
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	i := 0
-	visual.StartGraph(f, true)
-
-	if err := db.View(func(readTx *bolt.Tx) error {
-		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
-
-			visual.StartCluster(f, i, string(name))
-
-			if err := b.ForEach(func(k, v []byte) error {
-				fmt.Fprintf(f, `k_%d -> v_%d`, i, i)
-				keyKeyBytes := &trie.Keybytes{
-					Data:        k,
-					Odd:         false,
-					Terminating: false,
-				}
-				valKeyBytes := &trie.Keybytes{
-					Data:        v,
-					Odd:         false,
-					Terminating: false,
-				}
-				key := keyKeyBytes.ToHex()
-				val := valKeyBytes.ToHex()
-				visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-				if len(val) > 0 {
-					if len(val) > 32 {
-						shortenedVal := val[:32]
-						visual.Horizontal(f, shortenedVal, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 100)
-					} else {
-						visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 110)
-					}
-				} else {
-					visual.Circle(f, fmt.Sprintf("v_%d", i), "...", false)
-				}
-				i++
-				return nil
-			}); err != nil {
-				return err
-			}
-			visual.EndCluster(f)
-			return nil
-		})
-	}); err != nil {
-		panic(err)
+		}
+		fmt.Fprintf(f, "\n")
+		visual.EndCluster(f)
+		n++
 	}
 	visual.EndGraph(f)
 	if err := f.Close(); err != nil {
@@ -283,11 +248,12 @@ func initialState1() error {
 				address2: {Balance: big.NewInt(300000000000000000)},
 			},
 		}
-		genesis   = gspec.MustCommit(db)
-		genesisDb = db.MemCopy()
 		// this code generates a log
 		signer = types.HomesteadSigner{}
 	)
+	snapshotDb := db.MemCopy().(*ethdb.BoltDatabase).DB()
+	genesis := gspec.MustCommit(db)
+	genesisDb := db.MemCopy()
 
 	engine := ethash.NewFaker()
 	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
@@ -301,7 +267,6 @@ func initialState1() error {
 		return err
 	}
 	t := tds.Trie()
-	snapshotDb := db.MemCopy().(*ethdb.BoltDatabase).DB()
 	var codeMap map[common.Hash][]byte
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
@@ -605,7 +570,7 @@ func initialState1() error {
 		return err
 	}
 
-	if err = stateDatabaseMap(dbBolt, 16); err != nil {
+	if err = stateDatabaseComparison(ethdb.NewMemDatabase().DB(), dbBolt, 9); err != nil {
 		return err
 	}
 	return nil

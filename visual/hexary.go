@@ -91,10 +91,13 @@ func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColo
 	%s [label=<
 	<table border="0" color="#000000" cellborder="1" cellspacing="0">
 	<tr>`, name)
-	if hex[len(hex)-1] == 16 {
+	if len(hex) > 0 && hex[len(hex)-1] == 16 {
 		hex = hex[:len(hex)-1]
 	} else {
-		compression = 0 // No compression for non-terminal keys
+		//compression = 0 // No compression for non-terminal keys
+	}
+	if len(hex) == 0 {
+		fmt.Fprintf(w, "<td></td>")
 	}
 	for i, h := range hex {
 		if i < len(hex)-compression-2 || i > len(hex)-3 {
@@ -109,7 +112,7 @@ func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColo
 			}
 		} else if compression > 0 && i == len(hex)-3 {
 			fmt.Fprintf(w,
-				`		<td border="0">-</td>
+				`		<td border="0"><font point-size="1">-----------</font></td>
 			`)
 		}
 	}
