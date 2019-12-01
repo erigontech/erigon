@@ -93,8 +93,6 @@ func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColo
 	<tr>`, name)
 	if len(hex) > 0 && hex[len(hex)-1] == 16 {
 		hex = hex[:len(hex)-1]
-	} else {
-		//compression = 0 // No compression for non-terminal keys
 	}
 	if len(hex) == 0 {
 		fmt.Fprintf(w, "<td></td>")

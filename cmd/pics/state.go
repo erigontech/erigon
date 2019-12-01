@@ -128,6 +128,26 @@ var bucketLabels = map[string]string{
 	string(dbutils.CodeBucket):            "Code of Contracts",
 }
 
+func hexPalette() error {
+	filename := "hex_palette.dot"
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	visual.StartGraph(f, true)
+	p := common.FromHex("0x000102030405060708090a0b0c0d0e0f")
+	visual.Horizontal(f, p, len(p), "p", visual.HexIndexColors, visual.HexFontColors, 0)
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	cmd := exec.Command("dot", "-Tpng:gd", "-O", filename)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("error: %v, output: %s\n", err, output)
+	}
+	return nil
+}
+
 func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error {
 	filename := fmt.Sprintf("changes_%d.dot", number)
 	f, err := os.Create(filename)
@@ -138,6 +158,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 	visual.StartGraph(f, true)
 	m := make(map[string][]int)
 	noValues := make(map[int]struct{})
+	perBucketFiles := make(map[string]*os.File)
 
 	if err := second.View(func(readTx *bolt.Tx) error {
 		return first.View(func(firstTx *bolt.Tx) error {
@@ -163,11 +184,39 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 					}
 					val := valKeyBytes.ToHex()
 					key := keyKeyBytes.ToHex()
+					var f1 *os.File
+					var ok bool
+					if f1, ok = perBucketFiles[string(bucketName)]; !ok {
+						f1, err = os.Create(fmt.Sprintf("changes_%d_%s_%d.dot", number, bucketName, len(perBucketFiles)))
+						if err != nil {
+							return err
+						}
+						visual.StartGraph(f1, true)
+						var clusterLabel string
+						var ok bool
+						if clusterLabel, ok = bucketLabels[string(bucketName)]; !ok {
+							clusterLabel = string(bucketName)
+						}
+						visual.StartCluster(f1, 0, clusterLabel)
+						perBucketFiles[string(common.CopyBytes(bucketName))] = f1
+					}
+					visual.Horizontal(f1, key, len(key), fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
+					if len(val) > 0 {
+						if len(val) > 64 {
+							compression := len(val) - 64
+							visual.Horizontal(f1, val, len(val), fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, compression)
+						} else {
+							visual.Horizontal(f1, val, len(val), fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
+						}
+						// Produce edge
+						fmt.Fprintf(f1, "k_%d -> v_%d;\n", i, i)
+					} else {
+						noValues[i] = struct{}{}
+					}
 					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 					if len(val) > 0 {
-						if len(val) > 32 {
-							//shortenedVal := val[:32]
-							compression := len(val) - 32
+						if len(val) > 64 {
+							compression := len(val) - 64
 							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, compression)
 						} else {
 							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
@@ -218,6 +267,18 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 	if output, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("error: %v, output: %s\n", err, output)
 	}
+	for _, f1 := range perBucketFiles {
+		fmt.Fprintf(f1, "\n")
+		visual.EndCluster(f1)
+		visual.EndGraph(f1)
+		if err := f1.Close(); err != nil {
+			return err
+		}
+		cmd := exec.Command("dot", "-Tpng:gd", "-O", f1.Name())
+		if output, err := cmd.CombinedOutput(); err != nil {
+			fmt.Printf("error: %v, output: %s\n", err, output)
+		}
+	}
 	return nil
 }
 
@@ -261,6 +322,10 @@ func initialState1() error {
 		return err
 	}
 	blockchain.EnableReceipts(true)
+
+	if err = hexPalette(); err != nil {
+		return err
+	}
 
 	tds, err := blockchain.GetTrieDbState()
 	if err != nil {
