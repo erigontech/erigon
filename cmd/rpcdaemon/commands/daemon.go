@@ -111,7 +111,6 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 		api.db = nil
 		return nil, err
 	}
-	fmt.Printf("Debug: %#v %#v %#v\n", block.Number(), block.Hash(), block.Size())
 
 	if block != nil {
 		response, err := api.rpcMarshalBlock(block, true, fullTx)
