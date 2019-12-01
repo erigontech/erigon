@@ -160,7 +160,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 	noValues := make(map[int]struct{})
 	perBucketFiles := make(map[string]*os.File)
 
-	if err := second.View(func(readTx *bolt.Tx) error {
+	if err = second.View(func(readTx *bolt.Tx) error {
 		return first.View(func(firstTx *bolt.Tx) error {
 			return readTx.ForEach(func(bucketName []byte, b *bolt.Bucket) error {
 				firstB := firstTx.Bucket(bucketName)
