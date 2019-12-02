@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math/big"
 	"net"
 	"os"
 	"os/signal"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
@@ -102,9 +104,11 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	var block *types.Block
+	additionalFields := make(map[string]interface{})
 
 	if err := api.db.View(func(tx *remote.Tx) error {
 		block = GetBlockByNumber(tx, uint64(number.Int64()))
+		additionalFields["totalDifficulty"] = ReadTd(tx, block.Hash(), uint64(number.Int64()))
 		return nil
 	}); err != nil {
 		api.db.Close()
@@ -113,7 +117,8 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 
 	if block != nil {
-		response, err := api.rpcMarshalBlock(block, true, fullTx)
+		response, err := api.rpcMarshalBlock(block, true, fullTx, additionalFields)
+
 		if err == nil && number == rpc.PendingBlockNumber {
 			// Pending blocks need to nil out a few fields
 			for _, field := range []string{"hash", "nonce", "miner"} {
@@ -126,14 +131,36 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
-func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool) (map[string]interface{}, error) {
+func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
 	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
 	if err != nil {
 		return nil, err
 	}
-	// TODO: implement .GetTd method and uncomment next line
-	//fields["totalDifficulty"] = (*hexutil.Big)(s.b.GetTd(b.Hash()))
+
+	for k, v := range additional {
+		fields[k] = v
+	}
+
 	return fields, err
+}
+
+// ReadTd reimplemented rawdb.ReadTd
+func ReadTd(tx *remote.Tx, hash common.Hash, number uint64) *hexutil.Big {
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
+	if bucket == nil {
+		return nil
+	}
+
+	data := bucket.Get(dbutils.HeaderTDKey(number, hash))
+	if len(data) == 0 {
+		return nil
+	}
+	td := new(big.Int)
+	if err := rlp.Decode(bytes.NewReader(data), td); err != nil {
+		log.Error("Invalid block total difficulty RLP", "hash", hash, "err", err)
+		return nil
+	}
+	return (*hexutil.Big)(td)
 }
 
 // ReadCanonicalHash reimplementation of rawdb.ReadCanonicalHash
