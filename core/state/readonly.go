@@ -172,14 +172,14 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
-	if acc.Incarnation>0 {
-		codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
-		if err!=nil {
-			acc.CodeHash = common.BytesToHash(codeHash)
-		} else {
-			log.Error("ReadAccountData Get code hash is incorrect")
-		}
+
+	codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+	if err!=nil {
+		acc.CodeHash = common.BytesToHash(codeHash)
+	} else {
+		log.Error("ReadAccountData Get code hash is incorrect")
 	}
+
 	return &acc, nil
 }
 

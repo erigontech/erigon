@@ -18,6 +18,7 @@ package state_test
 
 import (
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -202,6 +203,9 @@ func TestCreate2Revive(t *testing.T) {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
 }
+
+
+
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -336,6 +340,137 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
 }
+
+
+func TestReorgOverStateChange(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				ConstantinopleBlock: big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+	)
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var selfDestruct *contracts.Selfdestruct
+
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 2, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			tx, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+		fmt.Println("commited i=",i)
+	})
+
+	panic(123)
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger := bind.NewKeyedTransactor(key)
+	transactOptsLonger.GasLimit = 1000000
+	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 3, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			_, tx, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackendLonger.Commit()
+	})
+
+	st, _, _ := blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+	}
+
+	// BLOCK 1
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, _ = blockchain.State()
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+	}
+
+	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+	correctValueX := st.GetState(contractAddress, common.Hash{})
+
+	fmt.Printf("Insert block 2")
+	// BLOCK 2
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Printf("Insert long blocks 2,3")
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
+	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ = blockchain.State()
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+	}
+
+	// Reload blockchain from the database
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _, _ = blockchain.State()
+	valueX := st.GetState(contractAddress, common.Hash{})
+	if valueX != correctValueX {
+		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
+	}
+}
+
+
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (

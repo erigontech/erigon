@@ -36,16 +36,17 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if !original.Initialised {
 		originalData = []byte{}
 	} else {
-		if original.Incarnation>0 {
-			// we can reduce storage size for history there
-			// because we have accountHash+incarnation -> codehash of contract in separate bucket
-			// and we don't need root in history requests
-			original.CodeHash=common.Hash{}
-			original.Root=common.Hash{}
-		}
-		originalDataLen := original.EncodingLengthForStorage()
+		// we can reduce storage size for history there
+		// because we have accountHash+incarnation -> codehash of contract in separate bucket
+		// and we don't need root in history requests
+		testAcc:=new(accounts.Account)
+		testAcc.Copy(original)
+		//testAcc.CodeHash=common.Hash{}
+		//testAcc.Root=emptyState
+
+		originalDataLen := testAcc.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
+		testAcc.EncodeForStorage(originalData)
 	}
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
@@ -64,10 +65,6 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		// Account has been created and deleted in the same block
 		originalData = []byte{}
 	} else {
-		if original.Incarnation>0 {
-			original.CodeHash=common.Hash{}
-			//we can't drop root there, because we need it for unwind
-		}
 		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)

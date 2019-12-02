@@ -450,6 +450,37 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 	if err := tds.resolveAccountTouches(accountTouches); err != nil {
 		return err
 	}
+
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Hash]struct{})
+	for _, b := range tds.buffers {
+		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
+		// that might be remaining in the trie and figure out the next incarnations
+		for addrHash := range b.created {
+			// Prevent repeated storage clearouts
+			if _, ok := alreadyCreated[addrHash]; ok {
+				continue
+			}
+			alreadyCreated[addrHash] = struct{}{}
+			incarnation, err := tds.nextIncarnation(addrHash)
+			fmt.Println("Next incarnation for", addrHash.String(), incarnation)
+			if err != nil {
+				return err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				b.accountUpdates[addrHash].SetIncarnation(incarnation)
+				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
+			}
+			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
+				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
+				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
+			}
+			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+		}
+	}
+
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
 	}
@@ -484,36 +515,12 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	accountUpdates := tds.aggregateBuffer.accountUpdates
-	// The following map is to prevent repeated clearouts of the storage
-	alreadyCreated := make(map[common.Hash]struct{})
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
+	fmt.Println("updateTrieRoots")
+
 	for i, b := range tds.buffers {
-		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-		// that might be remaining in the trie and figure out the next incarnations
-		for addrHash := range b.created {
-			// Prevent repeated storage clearouts
-			if _, ok := alreadyCreated[addrHash]; ok {
-				continue
-			}
-			alreadyCreated[addrHash] = struct{}{}
-			incarnation, err := tds.nextIncarnation(addrHash)
-			if err != nil {
-				return nil, err
-			}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
-			}
-			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
-			}
-			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
-		}
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				tds.t.UpdateAccount(addrHash[:], account)
@@ -576,6 +583,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 		}
+
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
 			if _, ok := b.created[addrHash]; ok {
@@ -629,6 +637,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
+	fmt.Println("-------------------------------------------------------------")
+	fmt.Println("--------------Unwind---------------------")
+	fmt.Println("-------------------------------------------------------------")
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
 		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
@@ -718,12 +729,14 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
-	if tds.historical&&a.Incarnation>0 {
+
+	if tds.historical {
 		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
-		if err!=nil {
-			a.CodeHash = common.BytesToHash(codeHash)
+		if err==nil {
+			//a.CodeHash = common.BytesToHash(codeHash)
+			_=codeHash
 		} else {
-			log.Error("Get code hash is incorrect")
+			log.Error("Get code hash is incorrect", "err", err)
 		}
 	}
 	return &a, nil
@@ -739,7 +752,11 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
 	}
-	return tds.readAccountDataByHash(addrHash)
+	acc,err:= tds.readAccountDataByHash(addrHash)
+	if err==nil && acc!=nil {
+		fmt.Println("ReadAccountData", addrHash.String(), acc.Incarnation)
+	}
+	return acc, err
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -924,7 +941,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	if found {
 		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
-	return 0, nil
+	return 1, nil
 }
 
 var prevMemStats runtime.MemStats

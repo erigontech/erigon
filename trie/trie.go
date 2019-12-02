@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -216,6 +215,8 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	//make account copy. There are some pointer into big.Int
 	value := new(accounts.Account)
 	value.Copy(acc)
+
+	fmt.Println("Save Account node ",common.BytesToHash(key).String(), value.Incarnation )
 	hex := keybytesToHex(key)
 	if t.root == nil {
 		var newnode node
@@ -314,6 +315,7 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 				return false, nil
 			}
 			nd = n.storage
+			fmt.Println("SetIncarnation in resolve", incarnation, n.Incarnation)
 			incarnation = n.Incarnation
 		case hashNode:
 			if contract == nil {

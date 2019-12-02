@@ -621,14 +621,15 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj, prev *stateObject) {
 	//fmt.Printf("CREATE %x\n", addr[:])
 	prev = previous
-	var account *accounts.Account
-	var original *accounts.Account
+	account:=new(accounts.Account)
+	original:=new(accounts.Account)
 	if previous == nil {
 		account = &accounts.Account{}
 		account.Root.SetBytes(trie.EmptyRoot[:])
 		original = &accounts.Account{}
 	} else {
-		account = &previous.data
+		account.Copy(&previous.data)
+		account.Incarnation=0
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
