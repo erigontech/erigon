@@ -47,6 +47,11 @@ pics:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/pics\" to launch pics."
 
+rpcdaemon:
+	build/env.sh go run build/ci.go install ./cmd/rpcdaemon
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
+
 all:
 	build/env.sh go run build/ci.go install -procs=1
 

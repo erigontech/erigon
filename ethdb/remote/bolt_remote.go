@@ -19,6 +19,7 @@ package remote
 import (
 	"fmt"
 	"io"
+	"net"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -58,6 +59,10 @@ const (
 	// CmdSeek (cursorHandle, seekKey): (key, value)
 	// Moves given cursor to the seekKey, or to the next key after seekKey
 	CmdSeek
+	// CmdNext (cursorHandle, number of keys): [(key, value)]
+	// Moves given cursor over the next given number of keys and streams back the (key, value) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdNext
 )
 
 // Pool of decoders
@@ -114,7 +119,12 @@ func returnEncoderToPool(e *codec.Encoder) {
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
+func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
+	defer func() {
+		if err1 := closer.Close(); err1 != nil {
+			log.Error("Could not close connection", "error", err1)
+		}
+	}()
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -160,11 +170,10 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 			var tx *bolt.Tx
 			tx, lastError = db.Begin(false)
 			if lastError == nil {
-				defer func() {
-					if err := tx.Rollback(); err != nil {
-						log.Error("could not rollback transaction", "error", err)
-					}
-				}()
+				// We do Rollback and never Commit, because the remote transactions are always read-only, and must never change
+				// anything
+				// nolint:errcheck
+				defer tx.Rollback()
 				lastHandle++
 				txHandle = lastHandle
 				transactions[txHandle] = tx
@@ -286,7 +295,7 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 				lastError = fmt.Errorf("bucket not found")
 			}
 			if err := encoder.Encode(&cursorHandle); err != nil {
-				log.Error("could not encode value in response to CmdCursor", "error", err)
+				log.Error("could not cursor handle in response to CmdCursor", "error", err)
 				return err
 			}
 		case CmdSeek:
@@ -300,10 +309,249 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer) error {
 				log.Error("could not decode seekKey for CmdSeek")
 				return err
 			}
+			var key, value []byte
+			if cursor, ok := cursors[cursorHandle]; ok {
+				key, value = cursor.Seek(seekKey)
+				lastError = nil
+			} else {
+				lastError = fmt.Errorf("cursor not found")
+			}
+			if err := encoder.Encode(&key); err != nil {
+				log.Error("could not encode key in response to CmdSeek", "error", err)
+				return err
+			}
+			if err := encoder.Encode(&value); err != nil {
+				log.Error("could not encode value in response to CmdSeek", "error", err)
+				return err
+			}
+		case CmdNext:
+			var cursorHandle uint64
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				log.Error("could not decode cursorHandle for CmdNext")
+				return err
+			}
+			var numberOfKeys uint64
+			if err := decoder.Decode(&numberOfKeys); err != nil {
+				log.Error("could not decode numberOfKeys for CmdNext")
+			}
+			var key, value []byte
+			if cursor, ok := cursors[cursorHandle]; ok {
+				for numberOfKeys > 0 {
+					key, value = cursor.Next()
+					if err := encoder.Encode(&key); err != nil {
+						log.Error("could not encode key in response to CmdNext", "error", err)
+						return err
+					}
+					if err := encoder.Encode(&value); err != nil {
+						log.Error("could not encode value in response to CmdNext", "error", err)
+						return err
+					}
+					numberOfKeys--
+					if key == nil {
+						break
+					}
+				}
+				lastError = nil
+			} else {
+				lastError = fmt.Errorf("cursor not found")
+			}
 		default:
 			log.Error("unknown", "command", c)
 			return fmt.Errorf("unknown command %d", c)
 		}
 	}
 	return nil
+}
+
+// Listener starts listener that for each incoming connection
+// spawn a go-routine invoking Server
+func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
+	ln, err := net.Listen("tcp", address)
+	if err != nil {
+		log.Error("Could not create listener", "address", address, "error", err)
+		return
+	}
+	log.Info("Remote DB interface listening on", "address", address)
+	var interrupted = false
+	for !interrupted {
+		conn, err1 := ln.Accept()
+		if err1 != nil {
+			log.Error("Could not accept connection", "err", err1)
+			continue
+		}
+		//nolint:errcheck
+		go Server(db, conn, conn, conn)
+		if interruptCh != nil {
+			select {
+			case <-interruptCh:
+				log.Info("remoteDb listener interrupted")
+				interrupted = true
+			default:
+			}
+		}
+	}
+	if err = ln.Close(); err != nil {
+		log.Error("Could not close listener", "error", err)
+	}
+}
+
+// DB mimicks the interface of the bolt.DB,
+// but it works via a pair (Reader, Writer)
+type DB struct {
+	in     io.Reader
+	out    io.Writer
+	closer io.Closer
+}
+
+// NewDB creates a new instance of DB
+func NewDB(in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
+	decoder := newDecoder(in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(out)
+	defer returnEncoderToPool(encoder)
+	// Check version
+	var c = CmdVersion
+	if err := encoder.Encode(&c); err != nil {
+		return nil, err
+	}
+	var v uint64
+	if err := decoder.Decode(&v); err != nil {
+		return nil, err
+	}
+	if v != Version {
+		return nil, fmt.Errorf("returned version %d, expected %d", v, Version)
+	}
+	return &DB{in: in, out: out, closer: closer}, nil
+}
+
+// Close closes DB by using the closer field
+func (db *DB) Close() {
+	if db.closer != nil {
+		if err := db.closer.Close(); err != nil {
+			log.Error("Could not close remote DB", "error", err)
+		}
+	}
+}
+
+// Tx mimicks the interface of bolt.Tx
+type Tx struct {
+	in       io.Reader
+	out      io.Writer
+	txHandle uint64
+}
+
+// View performs read-only transaction on the remote database
+// NOTE: not thread-safe
+func (db *DB) View(f func(tx *Tx) error) error {
+	decoder := newDecoder(db.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(db.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdBeginTx
+	if err := encoder.Encode(&c); err != nil {
+		return err
+	}
+	var txHandle uint64
+	if err := decoder.Decode(&txHandle); err != nil {
+		return err
+	}
+	if txHandle == 0 {
+		// Retrieve the error
+		c = CmdLastError
+		if err := encoder.Encode(&c); err != nil {
+			return err
+		}
+		var lastErrorStr string
+		if err := decoder.Decode(&lastErrorStr); err != nil {
+			return err
+		}
+		return fmt.Errorf("%v", lastErrorStr)
+	}
+	tx := &Tx{in: db.in, out: db.out, txHandle: txHandle}
+	opErr := f(tx)
+	c = CmdEndTx
+	if err := encoder.Encode(&c); err != nil {
+		return err
+	}
+	if err := encoder.Encode(&txHandle); err != nil {
+		return err
+	}
+	return opErr
+}
+
+// Bucket mimicks the interface of bolt.Bucket
+type Bucket struct {
+	in           io.Reader
+	out          io.Writer
+	bucketHandle uint64
+}
+
+// Bucket returns the handle to the bucket in remote DB
+func (tx *Tx) Bucket(name []byte) *Bucket {
+	decoder := newDecoder(tx.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(tx.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdBucket
+	if err := encoder.Encode(&c); err != nil {
+		log.Error("Could not encode CmdBucket", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&tx.txHandle); err != nil {
+		log.Error("Could not encode txHandle for CmdBucket", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&name); err != nil {
+		log.Error("Could not encode name for CmdBucket", "error", err)
+		return nil
+	}
+	var bucketHandle uint64
+	if err := decoder.Decode(&bucketHandle); err != nil {
+		log.Error("Could not decode bucketHandle from CmdBucket result", "error", err)
+		return nil
+	}
+	if bucketHandle == 0 {
+		// Retrieve the error
+		c = CmdLastError
+		if err := encoder.Encode(&c); err != nil {
+			log.Error("Could not encode CmdLastError to get error of CmdBucket", "error", err)
+			return nil
+		}
+		var lastErrorStr string
+		if err := decoder.Decode(&lastErrorStr); err != nil {
+			log.Error("Could not decode lastErrorStr from get error of CmdBicket", "error", err)
+			return nil
+		}
+		log.Error("Retrieved from CmdBucket", "error", lastErrorStr)
+		return nil
+	}
+	bucket := &Bucket{bucketHandle: bucketHandle}
+	return bucket
+}
+
+// Get reads a value corresponding to the given key, from the bucket
+// return nil if they key is not present
+func (b *Bucket) Get(key []byte) []byte {
+	decoder := newDecoder(b.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(b.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdGet
+	if err := encoder.Encode(&c); err != nil {
+		log.Error("Could not encode CmdGet", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&b.bucketHandle); err != nil {
+		log.Error("Could not encode bucketHandle for CmdGet", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&key); err != nil {
+		log.Error("Could not encode key for CmdGet", "error", err)
+		return nil
+	}
+	var value []byte
+	if err := decoder.Decode(&value); err != nil {
+		log.Error("Could not decode value from CmdGet result", "error", err)
+	}
+	return value
 }
