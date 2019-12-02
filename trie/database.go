@@ -36,6 +36,11 @@ var (
 	memcacheCleanReadMeter  = metrics.NewRegisteredMeter("trie/memcache/clean/read", nil)
 	memcacheCleanWriteMeter = metrics.NewRegisteredMeter("trie/memcache/clean/write", nil)
 
+	memcacheDirtyHitMeter   = metrics.NewRegisteredMeter("trie/memcache/dirty/hit", nil)   //nolint:deadcode,varcheck,unused
+	memcacheDirtyMissMeter  = metrics.NewRegisteredMeter("trie/memcache/dirty/miss", nil)  //nolint:deadcode,varcheck,unused
+	memcacheDirtyReadMeter  = metrics.NewRegisteredMeter("trie/memcache/dirty/read", nil)  //nolint:deadcode,varcheck,unused
+	memcacheDirtyWriteMeter = metrics.NewRegisteredMeter("trie/memcache/dirty/write", nil) //nolint:deadcode,varcheck,unused
+
 	memcacheFlushTimeTimer  = metrics.NewRegisteredResettingTimer("trie/memcache/flush/time", nil)
 	memcacheFlushNodesMeter = metrics.NewRegisteredMeter("trie/memcache/flush/nodes", nil)
 	memcacheFlushSizeMeter  = metrics.NewRegisteredMeter("trie/memcache/flush/size", nil)
@@ -247,6 +252,8 @@ func (db *Database) insert(hash common.Hash, blob []byte, node node) {
 	if _, ok := db.dirties[hash]; ok {
 		return
 	}
+	memcacheDirtyWriteMeter.Mark(int64(len(blob)))
+
 	// Create the cached entry for this node
 	entry := &cachedNode{
 		node:      simplifyNode(node),
@@ -279,13 +286,6 @@ func (db *Database) insertPreimage(hash common.Hash, preimage []byte) {
 	}
 	db.preimages[hash] = common.CopyBytes(preimage)
 	db.preimagesSize += common.StorageSize(common.HashLength + len(preimage))
-}
-
-// node retrieves a cached trie node from memory, or returns nil if none can be
-// found in the memory cache.
-func (db *Database) node(hash common.Hash, cachegen uint16) node {
-	// FIXME: Intentionally? does nothing in TurboGeth
-	return nil
 }
 
 // Node retrieves an encoded cached trie node from memory. If it cannot be found
@@ -477,6 +477,7 @@ func (c *cleaner) Put(key []byte, rlp []byte) error {
 	// Move the flushed node into the clean cache to prevent insta-reloads
 	if c.db.cleans != nil {
 		c.db.cleans.Set(hash[:], rlp)
+		memcacheCleanWriteMeter.Mark(int64(len(rlp)))
 	}
 	return nil
 }
