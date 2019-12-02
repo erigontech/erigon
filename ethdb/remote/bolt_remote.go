@@ -170,6 +170,8 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			var tx *bolt.Tx
 			tx, lastError = db.Begin(false)
 			if lastError == nil {
+				// We do Rollback and never Commit, because the remote transactions are always read-only, and must never change
+				// anything
 				// nolint:errcheck
 				defer tx.Rollback()
 				lastHandle++
