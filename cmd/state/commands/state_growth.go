@@ -15,7 +15,7 @@ func init() {
 				return err
 			}
 
-			//reporter.StateGrowth1(chaindata)
+			reporter.StateGrowth1(chaindata)
 			reporter.StateGrowth2(chaindata)
 			return nil
 		},

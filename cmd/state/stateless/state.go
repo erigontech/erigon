@@ -242,7 +242,7 @@ func (r *Reporter) StateGrowth2(chaindata string) {
 	var hash common.Hash
 	// Go through the history of account first
 	if err = r.db.View(func(tx *remote.Tx) error {
-		b := tx.Bucket(dbutils.AccountsHistoryBucket)
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
 		}
