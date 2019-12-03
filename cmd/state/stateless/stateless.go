@@ -61,8 +61,11 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	if err := statedb.CommitBlock(ctx, dbstate); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
-	if err := dbstate.CheckRoot(header.Root); err != nil {
-		return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
+	if checkRoot {
+		if err := dbstate.CheckRoot(header.Root); err != nil {
+			fmt.Printf("block hash = %x\n", block.Hash())
+			return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
+		}
 	}
 	return nil
 }
@@ -80,6 +83,7 @@ func Stateless(
 	witnessThreshold uint64,
 	statsfile string,
 	verifySnapshot bool,
+	binary bool,
 	createDb CreateDbFunc) {
 
 	state.MaxTrieCacheGen = triesize
@@ -143,6 +147,10 @@ func Stateless(
 	tds.SetNoHistory(true)
 	interrupt := false
 	var witness []byte
+
+	processed := 0
+	blockProcessingStartTime := time.Now()
+
 	for !interrupt {
 		trace := false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
@@ -191,19 +199,18 @@ func Stateless(
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
 			var tapeStats *state.BlockWitnessStats
-			witness, tapeStats, err = tds.ExtractWitness(trace)
+			witness, tapeStats, err = tds.ExtractWitness(trace, binary /* is binary */)
 			if err != nil {
-				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
+				fmt.Printf("error extracting BIN witness for block %d: %v\n", blockNum, err)
 				return
 			}
-
 			err = stats.AddRow(tapeStats)
 			check(err)
 		}
 		finalRootFail := false
 		if blockNum >= witnessThreshold && witness != nil { // witness == nil means the extraction fails
 			var s *state.Stateless
-			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace)
+			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace, binary /* is binary */)
 			if err != nil {
 				fmt.Printf("Error making stateless2 for block %d: %v\n", blockNum, err)
 				filename := fmt.Sprintf("right_%d.txt", blockNum-1)
@@ -214,11 +221,12 @@ func Stateless(
 				}
 				return
 			}
-			if err := runBlock(s, chainConfig, bcb, header, block, trace, true); err != nil {
+			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			}
 		}
+
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
 			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
@@ -288,13 +296,21 @@ func Stateless(
 
 		preRoot = header.Root
 		blockNum++
+		processed++
 
-		if blockNum%1000 == 0 {
+		if blockNum%10 == 0 {
 			// overwrite terminal line, if no snapshot was made and not the first line
 			if blockNum > 0 && !willSnapshot {
 				fmt.Printf("\r")
 			}
-			fmt.Printf("Processed %d blocks", blockNum)
+
+			secondsSinceStart := time.Since(blockProcessingStartTime) / time.Second
+			if secondsSinceStart < 1 {
+				secondsSinceStart = 1
+			}
+			blocksPerSecond := float64(processed) / float64(secondsSinceStart)
+
+			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
 		// Check for interrupts
 		select {
