@@ -3,9 +3,10 @@ package commands
 import "github.com/spf13/cobra"
 
 var (
-	chaindata string
-	statsfile string
-	block     uint64
+	chaindata        string
+	statsfile        string
+	block            uint64
+	remoteDbAdddress string
 )
 
 func withBlock(cmd *cobra.Command) {
@@ -24,4 +25,8 @@ func withStatsfile(cmd *cobra.Command) {
 	if err := cmd.MarkFlagFilename("statsfile", "csv"); err != nil {
 		panic(err)
 	}
+}
+
+func withRemoteDb(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&remoteDbAdddress, "remote-db-addr", "", "remote db rpc address")
 }

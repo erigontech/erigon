@@ -6,16 +6,24 @@ import (
 )
 
 func init() {
-	withChaindata(stateGrowthCmd)
-	rootCmd.AddCommand(stateGrowthCmd)
-}
+	stateGrowthCmd := &cobra.Command{
+		Use:   "stateGrowth",
+		Short: "stateGrowth",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			reporter, err := stateless.NewReporter(remoteDbAdddress)
+			if err != nil {
+				return err
+			}
 
-var stateGrowthCmd = &cobra.Command{
-	Use:   "stateGrowth",
-	Short: "stateGrowth",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		stateless.StateGrowth1(chaindata)
-		stateless.StateGrowth2(chaindata)
-		return nil
-	},
+			reporter.StateGrowth1(chaindata)
+			reporter.StateGrowth2(chaindata)
+			return nil
+		},
+	}
+
+	withChaindata(stateGrowthCmd)
+
+	withRemoteDb(stateGrowthCmd)
+
+	rootCmd.AddCommand(stateGrowthCmd)
 }

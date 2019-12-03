@@ -17,11 +17,13 @@
 package remote
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
@@ -29,6 +31,8 @@ import (
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
 // this constant needs to be increased
 const Version uint64 = 1
+
+const DefaultCursorCacheSize uint64 = 100 * 1000
 
 // Command is the type of command in the boltdb remote protocol
 type Command uint8
@@ -56,13 +60,17 @@ const (
 	// CmdCursor (bucketHandle): cursorHandle
 	// request creating a cursor for the given bucket. It returns cursor's handle (uint64)
 	CmdCursor
-	// CmdSeek (cursorHandle, seekKey): (key, value)
+	// CmdCursorSeek (cursorHandle, seekKey): (key, value)
 	// Moves given cursor to the seekKey, or to the next key after seekKey
-	CmdSeek
-	// CmdNext (cursorHandle, number of keys): [(key, value)]
+	CmdCursorSeek
+	// CmdCursorNext (cursorHandle, number of keys): [(key, value)]
 	// Moves given cursor over the next given number of keys and streams back the (key, value) pairs
 	// Pair with key == nil signifies the end of the stream
-	CmdNext
+	CmdCursorNext
+	// CmdCursorFirst (cursorHandle, number of keys): [(key, value)]
+	// Moves given cursor to bucket start and streams back the (key, value) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdCursorFirst
 )
 
 // Pool of decoders
@@ -188,29 +196,32 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 				log.Error("could not decode txHandle for CmdEndTx")
 				return err
 			}
-			if tx, ok := transactions[txHandle]; ok {
-				// Remove all the buckets
-				if bucketHandles, ok1 := bucketsByTx[txHandle]; ok1 {
-					for _, bucketHandle := range bucketHandles {
-						if cursorHandles, ok2 := cursorsByBucket[bucketHandle]; ok2 {
-							for _, cursorHandle := range cursorHandles {
-								delete(cursors, cursorHandle)
-							}
-							delete(cursorsByBucket, bucketHandle)
-						}
-						delete(buckets, bucketHandle)
-					}
-					delete(bucketsByTx, txHandle)
-				}
-				if err := tx.Rollback(); err != nil {
-					log.Error("could not end transaction", "handle", txHandle, "error", err)
-					return err
-				}
-				delete(transactions, txHandle)
-				lastError = nil
-			} else {
+			tx, ok := transactions[txHandle]
+			if !ok {
 				lastError = fmt.Errorf("transaction not found")
+				return nil
 			}
+
+			// Remove all the buckets
+			if bucketHandles, ok1 := bucketsByTx[txHandle]; ok1 {
+				for _, bucketHandle := range bucketHandles {
+					if cursorHandles, ok2 := cursorsByBucket[bucketHandle]; ok2 {
+						for _, cursorHandle := range cursorHandles {
+							delete(cursors, cursorHandle)
+						}
+						delete(cursorsByBucket, bucketHandle)
+					}
+					delete(buckets, bucketHandle)
+				}
+				delete(bucketsByTx, txHandle)
+			}
+			if err := tx.Rollback(); err != nil {
+				log.Error("could not end transaction", "handle", txHandle, "error", err)
+				return err
+			}
+			delete(transactions, txHandle)
+			lastError = nil
+
 		case CmdBucket:
 			// Read the txHandle
 			var txHandle uint64
@@ -298,15 +309,15 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 				log.Error("could not cursor handle in response to CmdCursor", "error", err)
 				return err
 			}
-		case CmdSeek:
+		case CmdCursorSeek:
 			var cursorHandle uint64
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdSeek")
+				log.Error("could not decode cursorHandle for CmdCursorSeek")
 				return err
 			}
 			var seekKey []byte
 			if err := decoder.Decode(&seekKey); err != nil {
-				log.Error("could not decode seekKey for CmdSeek")
+				log.Error("could not decode seekKey for CmdCursorSeek")
 				return err
 			}
 			var key, value []byte
@@ -317,44 +328,102 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 				lastError = fmt.Errorf("cursor not found")
 			}
 			if err := encoder.Encode(&key); err != nil {
-				log.Error("could not encode key in response to CmdSeek", "error", err)
+				log.Error("could not encode key in response to CmdCursorSeek", "error", err)
 				return err
 			}
 			if err := encoder.Encode(&value); err != nil {
-				log.Error("could not encode value in response to CmdSeek", "error", err)
+				log.Error("could not encode value in response to CmdCursorSeek", "error", err)
 				return err
 			}
-		case CmdNext:
+		case CmdCursorNext:
 			var cursorHandle uint64
+			var err error
+
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdNext")
+				log.Error("could not decode cursorHandle for CmdCursorNext")
 				return err
 			}
 			var numberOfKeys uint64
 			if err := decoder.Decode(&numberOfKeys); err != nil {
-				log.Error("could not decode numberOfKeys for CmdNext")
+				log.Error("could not decode numberOfKeys for CmdCursorNext")
 			}
 			var key, value []byte
-			if cursor, ok := cursors[cursorHandle]; ok {
-				for numberOfKeys > 0 {
-					key, value = cursor.Next()
-					if err := encoder.Encode(&key); err != nil {
-						log.Error("could not encode key in response to CmdNext", "error", err)
-						return err
-					}
-					if err := encoder.Encode(&value); err != nil {
-						log.Error("could not encode value in response to CmdNext", "error", err)
-						return err
-					}
-					numberOfKeys--
-					if key == nil {
-						break
-					}
-				}
-				lastError = nil
-			} else {
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
 				lastError = fmt.Errorf("cursor not found")
+				return nil
 			}
+
+			for numberOfKeys > 0 {
+				key, value = cursor.Next()
+				err = encoder.Encode(&key)
+				if err != nil {
+					log.Error("could not encode key in response to CmdCursorNext", "error", err)
+					return err
+				}
+
+				err = encoder.Encode(&value)
+				if err != nil {
+					log.Error("could not encode value in response to CmdCursorNext", "error", err)
+					return err
+				}
+				numberOfKeys--
+				if key == nil {
+					break
+				}
+			}
+			lastError = nil
+		case CmdCursorFirst:
+			var cursorHandle uint64
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				log.Error("could not decode cursorHandle for CmdCursorFirst")
+				return err
+			}
+			var numberOfKeys uint64
+			if err := decoder.Decode(&numberOfKeys); err != nil {
+				log.Error("could not decode numberOfKeys for CmdCursorFirst")
+			}
+			var key, value []byte
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				lastError = fmt.Errorf("cursor not found")
+				return nil
+			}
+
+			key, value = cursor.First()
+			var addrHash common.Hash
+			copy(addrHash[:], key[:32])
+			fmt.Println(addrHash.String())
+
+			if err := encoder.Encode(&key); err != nil {
+				log.Error("could not encode key in response to CmdCursorFirst", "error", err)
+				return err
+			}
+			if err := encoder.Encode(&value); err != nil {
+				log.Error("could not encode value in response to CmdCursorFirst", "error", err)
+				return err
+			}
+			numberOfKeys--
+			if key == nil {
+				break
+			}
+
+			for numberOfKeys > 0 {
+				key, value = cursor.Next()
+				if err := encoder.Encode(&key); err != nil {
+					log.Error("could not encode key in response to CmdCursorFirst", "error", err)
+					return err
+				}
+				if err := encoder.Encode(&value); err != nil {
+					log.Error("could not encode value in response to CmdCursorFirst", "error", err)
+					return err
+				}
+				numberOfKeys--
+				if key == nil {
+					break
+				}
+			}
+			lastError = nil
 		default:
 			log.Error("unknown", "command", c)
 			return fmt.Errorf("unknown command %d", c)
@@ -365,8 +434,9 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
-	ln, err := net.Listen("tcp", address)
+func Listener(ctx context.Context, db *bolt.DB, address string) {
+	var lc net.ListenConfig
+	ln, err := lc.Listen(ctx, "tcp", address)
 	if err != nil {
 		log.Error("Could not create listener", "address", address, "error", err)
 		return
@@ -381,13 +451,11 @@ func Listener(db *bolt.DB, address string, interruptCh chan struct{}) {
 		}
 		//nolint:errcheck
 		go Server(db, conn, conn, conn)
-		if interruptCh != nil {
-			select {
-			case <-interruptCh:
-				log.Info("remoteDb listener interrupted")
-				interrupted = true
-			default:
-			}
+		select {
+		case <-ctx.Done():
+			log.Info("remoteDb listener interrupted")
+			interrupted = true
+		default:
 		}
 	}
 	if err = ln.Close(); err != nil {
@@ -486,6 +554,18 @@ type Bucket struct {
 	bucketHandle uint64
 }
 
+type Cursor struct {
+	in  io.Reader
+	out io.Writer
+
+	cursorHandle uint64
+
+	cacheKeys    [][]byte
+	cacheValues  [][]byte
+	cacheLastIdx uint64
+	cacheIdx     uint64
+}
+
 // Bucket returns the handle to the bucket in remote DB
 func (tx *Tx) Bucket(name []byte) *Bucket {
 	decoder := newDecoder(tx.in)
@@ -554,4 +634,168 @@ func (b *Bucket) Get(key []byte) []byte {
 		log.Error("Could not decode value from CmdGet result", "error", err)
 	}
 	return value
+}
+
+// Cursor iterating over bucket keys
+func (b *Bucket) Cursor() *Cursor {
+	decoder := newDecoder(b.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(b.out)
+	defer returnEncoderToPool(encoder)
+	var c = CmdCursor
+	if err := encoder.Encode(&c); err != nil {
+		log.Error("Could not encode CmdCursor", "error", err)
+		return nil
+	}
+	if err := encoder.Encode(&b.bucketHandle); err != nil {
+		log.Error("Could not encode bucketHandle for CmdCursor", "error", err)
+		return nil
+	}
+
+	var cursorHandle uint64
+	if err := decoder.Decode(&cursorHandle); err != nil {
+		log.Error("Could not decode cursorHandle from CmdCursor result", "error", err)
+		return nil
+	}
+
+	if cursorHandle == 0 { // Retrieve the error
+		lastErrorStr, retrieveError := lastError(encoder, decoder)
+		if retrieveError != nil {
+			log.Error("Could not encode CmdLastError to get error of CmdCursor", "error", retrieveError)
+			return nil
+		}
+		log.Error("Retrieved from CmdCursor", "error", lastErrorStr)
+		return nil
+	}
+
+	cursor := &Cursor{
+		in:           b.in,
+		out:          b.out,
+		cursorHandle: cursorHandle,
+
+		cacheKeys:   make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
+		cacheValues: make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
+	}
+	for i := 0; i < len(cursor.cacheKeys); i++ {
+		cursor.cacheKeys[i] = make([]byte, 2*common.HashLength)
+		cursor.cacheValues[i] = make([]byte, 2*common.HashLength)
+	}
+	return cursor
+}
+
+func lastError(encoder *codec.Encoder, decoder *codec.Decoder) (lastErrorStr string, retrieveError error) {
+	// Retrieve the error
+	c := CmdLastError
+	if err := encoder.Encode(&c); err != nil {
+		return "", err
+	}
+
+	if err := decoder.Decode(&lastErrorStr); err != nil {
+		return "", fmt.Errorf("could not decode lastErrorStr %w", err)
+	}
+
+	return lastErrorStr, nil
+}
+
+func (c *Cursor) First() (key []byte, value []byte) {
+	c.fetchPage(CmdCursorFirst, DefaultCursorCacheSize)
+	c.cacheIdx = 0
+
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
+
+	c.cacheIdx++
+
+	return k, v
+
+}
+
+func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
+	decoder := newDecoder(c.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(c.out)
+	defer returnEncoderToPool(encoder)
+	var cmd = CmdCursorSeek
+	if err := encoder.Encode(&cmd); err != nil {
+		log.Error("Could not encode CmdCursorSeek", "error", err)
+		return nil, nil
+	}
+	if err := encoder.Encode(&c.cursorHandle); err != nil {
+		log.Error("Could not encode cursorHandle for CmdCursorSeek", "error", err)
+		return nil, nil
+	}
+	if err := encoder.Encode(&seek); err != nil {
+		log.Error("Could not encode seek key for CmdCursorSeek", "error", err)
+		return nil, nil
+	}
+
+	if err := decoder.Decode(&key); err != nil {
+		log.Error("Could not decode key for CmdCursorSeek", "error", err)
+		return nil, nil
+	}
+
+	if err := decoder.Decode(&value); err != nil {
+		log.Error("Could not decode value from CmdCursorSeek result", "error", err)
+	}
+
+	return key, value
+}
+
+func (c *Cursor) needFetchNextPage() bool {
+	return c.cacheLastIdx == 0 || // cache is empty
+		c.cacheIdx == c.cacheLastIdx // all cache read
+}
+
+func (c *Cursor) Next() (keys []byte, values []byte) {
+	if c.needFetchNextPage() {
+		c.fetchPage(CmdCursorNext, DefaultCursorCacheSize)
+		c.cacheIdx = 0
+	}
+
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
+	c.cacheIdx++
+
+	return k, v
+}
+
+func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
+	decoder := newDecoder(c.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(c.out)
+	defer returnEncoderToPool(encoder)
+
+	if err := encoder.Encode(&cmd); err != nil {
+		log.Error("Could not encode command", "error", err, "command", cmd)
+		return
+	}
+	if err := encoder.Encode(&c.cursorHandle); err != nil {
+		log.Error("Could not encode cursorHandle", "error", err, "command", cmd)
+		return
+	}
+
+	if err := encoder.Encode(&numberOfKeys); err != nil {
+		log.Error("Could not encode numberOfKeys", "error", err, "command", cmd)
+		return
+	}
+
+	var err error
+
+	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < numberOfKeys; c.cacheLastIdx++ {
+		err = decoder.Decode(c.cacheKeys[c.cacheLastIdx])
+		if err != nil {
+			log.Error("could not decode key in response to CmdCursorNext", "error", err)
+			return
+		}
+
+		err = decoder.Decode(c.cacheValues[c.cacheLastIdx])
+		if err != nil {
+			log.Error("could not decode value in response to CmdCursorNext", "error", err)
+			return
+		}
+
+		if c.cacheKeys[c.cacheLastIdx] == nil {
+			break
+		}
+	}
+
+	return
 }

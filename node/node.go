@@ -17,6 +17,7 @@
 package node
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -632,7 +633,12 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 		return nil, err
 	}
 	if n.config.RemoteDbListenAddress != "" {
-		go remote.Listener(boltDb.DB(), n.config.RemoteDbListenAddress, nil)
+		ctx, cancel := context.WithCancel(context.Background())
+		go remote.Listener(ctx, boltDb.DB(), n.config.RemoteDbListenAddress)
+
+		// TODO: cancel context by OS signal. See: https://gist.github.com/prantoran/69d14842f0a350007ff35fbb540252d8#file-main-go
+		_ = cancel
+
 	}
 	return boltDb, nil
 }

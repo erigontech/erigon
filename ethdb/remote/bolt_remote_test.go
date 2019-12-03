@@ -366,17 +366,17 @@ func TestCmdSeek(t *testing.T) {
 	if err = encoder.Encode(&bucketHandle); err != nil {
 		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
 	}
-	c = CmdSeek
+	c = CmdCursorSeek
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdSeek: %v", err)
+		t.Errorf("Could not encode CmdCursorSeek: %v", err)
 	}
 	var cursorHandle uint64 = 3
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdSeek: %v", err)
+		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
 	}
 	var seekKey = []byte("key15") // Should find key2
 	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdSeek: %v", err)
+		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -405,16 +405,16 @@ func TestCmdSeek(t *testing.T) {
 	if cursorHandle != 3 {
 		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
 	}
-	// Results of CmdSeek
+	// Results of CmdCursorSeek
 	var key, value []byte
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(key) != key2 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(value) != value2 {
 		t.Errorf("Unexpected value: %s", key)
@@ -476,24 +476,24 @@ func TestCmdNext(t *testing.T) {
 	if err = encoder.Encode(&bucketHandle); err != nil {
 		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
 	}
-	c = CmdSeek
+	c = CmdCursorSeek
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdSeek: %v", err)
+		t.Errorf("Could not encode CmdCursorSeek: %v", err)
 	}
 	var cursorHandle uint64 = 3
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdSeek: %v", err)
+		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
 	}
 	var seekKey = []byte("key1") // Should find key1
 	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdSeek: %v", err)
+		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
 	}
-	c = CmdNext
+	c = CmdCursorNext
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdNext: %v", err)
+		t.Errorf("Could not encode CmdCursorNext: %v", err)
 	}
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandler for CmdNext: %v", err)
+		t.Errorf("Could not encode cursorHandler for CmdCursorNext: %v", err)
 	}
 	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
 	if err = encoder.Encode(&numberOfKeys); err != nil {
@@ -526,41 +526,41 @@ func TestCmdNext(t *testing.T) {
 	if cursorHandle != 3 {
 		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
 	}
-	// Results of CmdSeek
+	// Results of CmdCursorSeek
 	var key, value []byte
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(key) != key1 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(value) != value1 {
 		t.Errorf("Unexpected value: %s", value)
 	}
-	// Results of CmdNext
+	// Results of CmdCursorNext
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if string(key) != key2 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if string(value) != value2 {
 		t.Errorf("Unexpected value: %s", value)
 	}
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if key != nil {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if value != nil {
 		t.Errorf("Unexpected value: %s", value)

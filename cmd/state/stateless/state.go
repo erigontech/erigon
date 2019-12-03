@@ -8,6 +8,7 @@ import (
 	"io"
 	"io/ioutil"
 	"math/big"
+	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -97,11 +99,35 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-func StateGrowth1(chaindata string) {
+type Reporter struct {
+	remoteDbAdddress string
+	db               *remote.DB
+}
+
+func NewReporter(remoteDbAdddress string) (*Reporter, error) {
+	return &Reporter{remoteDbAdddress: remoteDbAdddress}, nil
+}
+
+func (r *Reporter) ensureConnected() error {
+	if r.db == nil {
+		conn, err := net.Dial("tcp", r.remoteDbAdddress)
+		if err != nil {
+			return err
+		}
+		r.db, err = remote.NewDB(conn, conn, conn)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *Reporter) StateGrowth1(chaindata string) {
 	startTime := time.Now()
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+
+	err := r.ensureConnected()
 	check(err)
-	defer db.Close()
+
 	var count int
 	var maxTimestamp uint64
 	// For each address hash, when was it last accounted
@@ -110,12 +136,13 @@ func StateGrowth1(chaindata string) {
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 	// Go through the history of account first
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := r.db.View(func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
+
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// First 32 bytes is the hash of the address, then timestamp encoding
 			copy(addrHash[:], k[:32])
@@ -136,10 +163,14 @@ func StateGrowth1(chaindata string) {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		r.db.Close()
+		r.db = nil
+		check(err)
+	}
+
 	// Go through the current state
-	err = db.View(func(tx *bolt.Tx) error {
+	if err := r.db.View(func(tx *remote.Tx) error {
 		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
@@ -149,7 +180,7 @@ func StateGrowth1(chaindata string) {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _ := c.Seek([]byte("0xx")); k != nil; k, _ = c.Next() {
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], k[:32])
 			lastTimestamps[addrHash] = maxTimestamp
@@ -159,8 +190,12 @@ func StateGrowth1(chaindata string) {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		r.db.Close()
+		r.db = nil
+		check(err)
+	}
+
 	for _, lt := range lastTimestamps {
 		if lt < maxTimestamp {
 			creationsByBlock[lt]--
@@ -192,11 +227,11 @@ func StateGrowth1(chaindata string) {
 	}
 }
 
-func StateGrowth2(chaindata string) {
-	startTime := time.Now()
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+func (r *Reporter) StateGrowth2(chaindata string) {
+	err := r.ensureConnected()
 	check(err)
-	defer db.Close()
+
+	startTime := time.Now()
 	var count int
 	var maxTimestamp uint64
 	// For each address hash, when was it last accounted
@@ -206,12 +241,13 @@ func StateGrowth2(chaindata string) {
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
-	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageHistoryBucket)
+	if err = r.db.View(func(tx *remote.Tx) error {
+		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
+
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			// First 20 bytes is the address
 			copy(addrHash[:], k[:32])
@@ -248,10 +284,14 @@ func StateGrowth2(chaindata string) {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		r.db.Close()
+		r.db = nil
+		check(err)
+	}
+
 	// Go through the current state
-	err = db.View(func(tx *bolt.Tx) error {
+	if err = r.db.View(func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
@@ -272,8 +312,12 @@ func StateGrowth2(chaindata string) {
 			}
 		}
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		r.db.Close()
+		r.db = nil
+		check(err)
+	}
+
 	for address, l := range lastTimestamps {
 		for _, lt := range l {
 			if lt < maxTimestamp {
@@ -330,6 +374,7 @@ func GasLimits(chaindata string) {
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	var blockNum uint64 = 5346726
+
 	for {
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
