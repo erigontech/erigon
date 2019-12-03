@@ -285,6 +285,11 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
+	fmt.Println("trie/hashbuilder.go:288 account leaf ",hb.acc.Incarnation, accCopy.Incarnation)
+	//fixme
+	if accCopy.Root!=EmptyRoot && accCopy.CodeHash!=emptyHash {
+		accCopy.Incarnation=1
+	}
 	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack

@@ -272,6 +272,18 @@ func (a *Account) Copy(image *Account) {
 	a.StorageSize = image.StorageSize
 	a.Incarnation = image.Incarnation
 }
+func (a *Account) SelfCopy() *Account {
+	newAcc:=NewAccount()
+	newAcc.Initialised = a.Initialised
+	newAcc.Nonce = a.Nonce
+	newAcc.Balance.Set(&a.Balance)
+	newAcc.Root = a.Root
+	newAcc.CodeHash = a.CodeHash
+	newAcc.HasStorageSize = a.HasStorageSize
+	newAcc.StorageSize = a.StorageSize
+	newAcc.Incarnation = a.Incarnation
+	return &newAcc
+}
 
 // Decodes length and determines whether it corresponds to a structure of a byte array
 func decodeLength(buffer []byte, pos int) (length int, structure bool, newPos int) {

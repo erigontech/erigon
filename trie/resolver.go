@@ -3,6 +3,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"runtime/debug"
 	"sort"
@@ -268,7 +269,7 @@ const (
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
-	fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
+	fmt.Printf("trie/resolver.go:272 keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -309,6 +310,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return err
 			}
+			spew.Dump(tr.a)
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.fieldSet = AccountFieldSetNotContract
 			} else {

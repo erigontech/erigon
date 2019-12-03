@@ -402,7 +402,6 @@ func TestReorgOverStateChange(t *testing.T) {
 		fmt.Println("commited i=",i)
 	})
 
-	panic(123)
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)

@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/dgraph-io/badger"
 	"io"
 	"runtime"
@@ -107,9 +108,7 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
-			var c accounts.Account
-			c.Copy(account)
-			b.accountUpdates[addrHash] = &c
+			b.accountUpdates[addrHash] = account.SelfCopy()
 		}
 	}
 }
@@ -249,6 +248,10 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
+	v, got:=tds.t.GetAccount(common.HexToHash("0x1cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b").Bytes())
+	fmt.Println("before resolve trie", got)
+	spew.Dump(v)
+	fmt.Println("------ResolveStateTrie------------")
 	if err := tds.ResolveStateTrie(); err != nil {
 		return nil, err
 	}
@@ -259,6 +262,9 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 	roots, err := tds.updateTrieRoots(true)
+	v, got:=tds.t.GetAccount(common.HexToHash("0x1cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b").Bytes())
+	fmt.Println("after UpdateStateTrie", got)
+	spew.Dump(v)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -451,6 +457,25 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		return err
 	}
 
+	if err:=tds.setNewIncarnationsAndCleanOldStorage(); err != nil {
+		return err
+	}
+
+	if tds.resolveReads {
+		tds.populateAccountBlockProof(accountTouches)
+	}
+
+	if err := tds.resolveStorageTouches(storageTouches); err != nil {
+		return err
+	}
+	if tds.resolveReads {
+		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+func (tds *TrieDbState) setNewIncarnationsAndCleanOldStorage() error {
 	// The following map is to prevent repeated clearouts of the storage
 	alreadyCreated := make(map[common.Hash]struct{})
 	for _, b := range tds.buffers {
@@ -469,7 +494,7 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 				b.accountUpdates[addrHash].SetIncarnation(incarnation)
-				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
+				b.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
 			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
 				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
@@ -478,19 +503,6 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
-		}
-	}
-
-	if tds.resolveReads {
-		tds.populateAccountBlockProof(accountTouches)
-	}
-
-	if err := tds.resolveStorageTouches(storageTouches); err != nil {
-		return err
-	}
-	if tds.resolveReads {
-		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
-			return err
 		}
 	}
 	return nil
@@ -518,7 +530,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
-	fmt.Println("updateTrieRoots")
+	fmt.Println("updateTrieRoots", tds.blockNr)
 
 	for i, b := range tds.buffers {
 		for addrHash, account := range b.accountUpdates {
@@ -733,8 +745,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	if tds.historical {
 		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err==nil {
-			//a.CodeHash = common.BytesToHash(codeHash)
-			_=codeHash
+			a.CodeHash = common.BytesToHash(codeHash)
 		} else {
 			log.Error("Get code hash is incorrect", "err", err)
 		}
@@ -754,7 +765,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 	}
 	acc,err:= tds.readAccountDataByHash(addrHash)
 	if err==nil && acc!=nil {
-		fmt.Println("ReadAccountData", addrHash.String(), acc.Incarnation)
+		fmt.Println("core/state/database.go:757 ReadAccountData", addrHash.String(), "incarnation - ", acc.Incarnation, " balance -", acc.Balance.Uint64(), acc.Root.String(), tds.blockNr)
 	}
 	return acc, err
 }
@@ -941,7 +952,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	if found {
 		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
-	return 0, nil
+	return 1, nil
 }
 
 var prevMemStats runtime.MemStats
