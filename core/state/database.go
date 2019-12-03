@@ -941,7 +941,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	if found {
 		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
-	return 1, nil
+	return 0, nil
 }
 
 var prevMemStats runtime.MemStats

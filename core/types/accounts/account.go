@@ -77,7 +77,7 @@ func (a *Account) encodingLength(forStorage bool) uint {
 		structLength += uint(storageSizeBytes + 1)
 	}
 
-	if a.Incarnation>0 {
+	if forStorage {
 		var incarnationsBytes int
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationsBytes = 0
@@ -131,7 +131,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 	}
 
 	var incarnationBytes int
-	if a.Incarnation>0 {
+	if forStorage {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			incarnationBytes = 0
 		} else {
@@ -202,7 +202,7 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 		pos += balanceBytes
 	}
 
-	if a.Incarnation>0 {
+	if forStorage {
 		if a.Incarnation < 128 && a.Incarnation != 0 {
 			buffer[pos] = byte(a.Incarnation)
 		} else {
@@ -246,8 +246,8 @@ func (a *Account) encode(buffer []byte, forStorage bool) {
 }
 
 func (a *Account) EncodeRLP(w io.Writer) error {
-	ln := a.encodingLength(false)
-	buffer := pool.GetBuffer(ln)
+	len := a.encodingLength(false)
+	buffer := pool.GetBuffer(len)
 	a.encode(buffer.Bytes(), false)
 	_, err := w.Write(buffer.Bytes())
 	pool.PutBuffer(buffer)
