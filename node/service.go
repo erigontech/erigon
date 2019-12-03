@@ -17,6 +17,7 @@
 package node
 
 import (
+	"context"
 	"reflect"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -63,7 +64,11 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 		return nil, err
 	}
 	if ctx.config.RemoteDbListenAddress != "" {
-		go remote.Listener(boltDb.DB(), ctx.config.RemoteDbListenAddress, nil)
+		tcpCtx, cancel := context.WithCancel(context.Background())
+		go remote.Listener(tcpCtx, boltDb.DB(), ctx.config.RemoteDbListenAddress)
+
+		// TODO: call cancel when OS sent signal.
+		_ = cancel
 	}
 	return boltDb, nil
 	/*

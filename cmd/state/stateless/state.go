@@ -180,7 +180,7 @@ func (r *Reporter) StateGrowth1(chaindata string) {
 			return nil
 		}
 		c := b.Cursor()
-		for k, _ := c.Seek([]byte("0xx")); k != nil; k, _ = c.Next() {
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], k[:32])
 			lastTimestamps[addrHash] = maxTimestamp

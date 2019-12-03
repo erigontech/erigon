@@ -23,7 +23,6 @@ import (
 	"net"
 
 	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
@@ -348,6 +347,7 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 				log.Error("could not decode numberOfKeys for CmdCursorNext")
 			}
 			var key, value []byte
+
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				lastError = fmt.Errorf("cursor not found")
@@ -391,10 +391,6 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			}
 
 			key, value = cursor.First()
-			var addrHash common.Hash
-			copy(addrHash[:], key[:32])
-			fmt.Println(addrHash.String())
-
 			if err := encoder.Encode(&key); err != nil {
 				log.Error("could not encode key in response to CmdCursorFirst", "error", err)
 				return err
@@ -676,10 +672,7 @@ func (b *Bucket) Cursor() *Cursor {
 		cacheKeys:   make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
 		cacheValues: make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
 	}
-	for i := 0; i < len(cursor.cacheKeys); i++ {
-		cursor.cacheKeys[i] = make([]byte, 2*common.HashLength)
-		cursor.cacheValues[i] = make([]byte, 2*common.HashLength)
-	}
+
 	return cursor
 }
 
@@ -780,13 +773,13 @@ func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
 	var err error
 
 	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < numberOfKeys; c.cacheLastIdx++ {
-		err = decoder.Decode(c.cacheKeys[c.cacheLastIdx])
+		err = decoder.Decode(&c.cacheKeys[c.cacheLastIdx])
 		if err != nil {
 			log.Error("could not decode key in response to CmdCursorNext", "error", err)
 			return
 		}
 
-		err = decoder.Decode(c.cacheValues[c.cacheLastIdx])
+		err = decoder.Decode(&c.cacheValues[c.cacheLastIdx])
 		if err != nil {
 			log.Error("could not decode value in response to CmdCursorNext", "error", err)
 			return
