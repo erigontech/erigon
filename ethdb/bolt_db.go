@@ -98,8 +98,11 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			log.Error("PutS Decode changeSet err", "err", err)
 			return err
 		}
-		sh = sh.Add(key, value)
-		dat, err = dbutils.Encode(sh)
+		err = sh.Add(key, value)
+		if err != nil {
+			return err
+		}
+		dat, err = sh.Encode()
 		if err != nil {
 			log.Error("PutS Decode changeSet err", "err", err)
 			return err

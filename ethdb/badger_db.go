@@ -200,8 +200,11 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			}
 		}
 
-		sh = sh.Add(key, value)
-		dat, err := dbutils.Encode(sh)
+		err = sh.Add(key, value)
+		if err != nil {
+			return err
+		}
+		dat, err := sh.Encode()
 		if err != nil {
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
