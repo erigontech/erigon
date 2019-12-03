@@ -67,49 +67,6 @@ func Visual(t *Trie, w io.Writer, opts *VisualOpts) {
 	}
 }
 
-func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
-	columns := 32
-	fmt.Fprintf(w,
-		`
-	c_%x [label=<
-	<table border="0" color="#000000" cellborder="1" cellspacing="0">
-	`, hex)
-	rows := (len(code) + columns - 1) / columns
-	row := 0
-	for rowStart := 0; rowStart < len(code); rowStart += columns {
-		if rows < 6 || !compressed || row < 2 || row > rows-3 {
-			fmt.Fprintf(w, "		<tr>")
-			col := 0
-			for ; rowStart+col < len(code) && col < columns; col++ {
-				if columns < 6 || !compressed || col < 2 || col > columns-3 {
-					h := code[rowStart+col]
-					fmt.Fprintf(w, `<td bgcolor="%s"></td>`, visual.HexIndexColors[h])
-				}
-				if compressed && columns >= 6 && col == 2 && (row == 0 || row == rows-2) {
-					fmt.Fprintf(w, `<td rowspan="2" border="0"></td>`)
-				}
-			}
-			if col < columns {
-				fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns-col)
-			}
-			fmt.Fprintf(w, `</tr>
-		`)
-		}
-		if compressed && rows >= 6 && row == 2 {
-			fmt.Fprintf(w, "		<tr>")
-			fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns)
-			fmt.Fprintf(w, `</tr>
-		`)
-		}
-		row++
-	}
-	fmt.Fprintf(w,
-		`
-	</table>
-	>];
-	`)
-}
-
 func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *VisualOpts,
 	leaves map[string]struct{}, hashes map[string]struct{}) {
 	switch n := nd.(type) {
@@ -150,7 +107,7 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 			if !a.IsEmptyCodeHash() {
 				codeHex := keybytesToHex(opts.CodeMap[a.CodeHash])
 				codeHex = codeHex[:len(codeHex)-1]
-				visualCode(w, accountHex, codeHex, opts.CodeCompressed)
+				visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)
 				fmt.Fprintf(w,
 					`e_%x -> c_%x;
 				`, accountHex, accountHex)

@@ -120,3 +120,51 @@ func Horizontal(w io.Writer, hex []byte, highlighted int, name string, indexColo
 	>];
 	`)
 }
+
+func HexBox(w io.Writer, name string, code []byte, columns int, compressed bool, highlighted bool) {
+	fmt.Fprintf(w,
+		`
+	%s [label=<
+	<table border="0" color="#000000" cellborder="1" cellspacing="0">
+	`, name)
+	rows := (len(code) + columns - 1) / columns
+	row := 0
+	for rowStart := 0; rowStart < len(code); rowStart += columns {
+		if rows < 6 || !compressed || row < 2 || row > rows-3 {
+			fmt.Fprintf(w, "		<tr>")
+			col := 0
+			for ; rowStart+col < len(code) && col < columns; col++ {
+				if columns < 6 || !compressed || col < 2 || col > columns-3 {
+					h := code[rowStart+col]
+					if highlighted {
+						fmt.Fprintf(w,
+							`		<td bgcolor="%s"><font color="%s">%s</font></td>
+				`, HexIndexColors[h], HexFontColors[h], hexIndices[h])
+					} else {
+						fmt.Fprintf(w, `<td bgcolor="%s"></td>`, HexIndexColors[h])
+					}
+				}
+				if compressed && columns >= 6 && col == 2 && (row == 0 || row == rows-2) {
+					fmt.Fprintf(w, `<td rowspan="2" border="0"></td>`)
+				}
+			}
+			if col < columns {
+				fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns-col)
+			}
+			fmt.Fprintf(w, `</tr>
+		`)
+		}
+		if compressed && rows >= 6 && row == 2 {
+			fmt.Fprintf(w, "		<tr>")
+			fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns)
+			fmt.Fprintf(w, `</tr>
+		`)
+		}
+		row++
+	}
+	fmt.Fprintf(w,
+		`
+	</table>
+	>];
+	`)
+}
