@@ -1,0 +1,1202 @@
+commit d62e9b285777c036c108b89fac0c78f7855ba314
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Nov 26 12:20:22 2019 +0200
+
+    params: release go-ethereum v1.9.8
+
+commit 878e35bfde7c1911857622ed7fd19ad9827114f9
+Author: Felföldi Zsolt <zsfelfoldi@gmail.com>
+Date:   Tue Nov 26 11:17:15 2019 +0100
+
+    les: fix clientInfo deadlock (#20395)
+
+commit 2e98706a997f09dff7d63d79ae860c256f56ba42
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 26 11:14:43 2019 +0100
+
+    p2p/discover: slow down lookups on empty table (#20389)
+    
+    * p2p/discover: slow down lookups on empty table
+    
+    * p2p/discover: wake from slowdown sleep when table is closed
+
+commit 8c1e8de839fc0ee10376e2b476bfa90aad4caf6b
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Mon Nov 25 14:39:55 2019 +0100
+
+    accounts/keystore: fix staticcheck warnings (#20373)
+    
+    * accounts/keystore: fix staticcheck warnings
+    
+    * review feedback
+
+commit b26eedf9e9ff0ca414d35372b29d37874c208eca
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Mon Nov 25 21:03:22 2019 +0800
+
+    accounts/abi/bind: avoid reclaring structs (#20381)
+
+commit 44b41641f8220fe79e43461356c147cc3cc72380
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Nov 25 13:41:53 2019 +0100
+
+    rlp: fix staticcheck warnings (#20368)
+    
+    * rlp: fix staticcheck warnings
+    
+    * rlp: fix ExampleDecode test
+
+commit 9ef90dbf30dbf2f1ff935496e3577e4acd49b09a
+Merge: 9d67222f4 d9d2a4eef
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 25 13:51:22 2019 +0200
+
+    Merge pull request #20385 from etclabscore/fix/version-cmd-networkid
+    
+    cmd/geth: remove network id from version cmd
+
+commit d9d2a4eef929b9f0e15ccbfd0850dd46c9bf9b66
+Author: meows <b5c6@protonmail.com>
+Date:   Mon Nov 25 06:17:45 2019 -0500
+
+    cmd/geth: remove network id from version cmd
+    
+    It was reflective only of the Default setting,
+    and not chain aware.
+
+commit 9d67222f4ead6273ffbfbcef2d7711132fcf50e2
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Mon Nov 25 16:58:15 2019 +0800
+
+    trie: replace bigcache with fastcache (#19971)
+
+commit f5a68a40bfba218d4be252488826e1d46778fd01
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Sun Nov 24 21:06:06 2019 +0100
+
+    eth/tracers: fix staticcheck warnings (#20379)
+
+commit f06ae5ca6a9fd275fc53eeb3de75388d55b4a479
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Sun Nov 24 20:46:34 2019 +0100
+
+    miner: fix staticcheck warnings (#20375)
+
+commit 3a0480e07d4eca0adcc9e2e989e969f14aaf917c
+Author: Michael Forney <mforney@mforney.org>
+Date:   Sat Nov 23 03:52:17 2019 -0800
+
+    core/asm: allow numbers in labels (#20362)
+    
+    Numbers were already allowed when creating labels, just not when
+    referencing them.
+
+commit 5d21667587c4bc2479d36a13e2b15dd5c6eb8672
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Sat Nov 23 12:51:37 2019 +0100
+
+    tests, signer: remove staticcheck warnings (#20364)
+
+commit fdff182f1150a58fbe59fc26e3cb479531fbc67c
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Nov 22 17:02:13 2019 +0100
+
+    p2p/discv5: add deprecation warning and remove unused code (#20367)
+    
+    * p2p/discv5: add deprecation warning and remove unused code
+    
+    * p2p/discv5: remove unused variables
+
+commit 0abcf03fde4508d5ee1be2df2ef4235aafd637d9
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Nov 22 16:24:48 2019 +0100
+
+    trie: remove unused code (#20366)
+
+commit 58f2ce8671fcc5121fc696b6962ba826fcf8a7f0
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 22 16:04:35 2019 +0100
+
+    metrics: fix issues reported by staticcheck (#20365)
+
+commit dd21f079e83710795bc9731a5a9eac41a8858004
+Author: Felix Lange <fjl@twurst.com>
+Date:   Fri Nov 22 15:56:05 2019 +0100
+
+    core/state: fix staticcheck warnings (#20357)
+    
+    Also remove dependency on gopkg.in/check.v1 in tests.
+
+commit 36a684ca1efe15efbfefc2f0b22abeb4c0039e5a
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 22:22:47 2019 +0100
+
+    accounts/abi: fix staticcheck warnings (#20358)
+    
+    * accounts/abi: fix staticcheck warnings
+    
+    * accounts/abi: restore unused field for test
+
+commit bcc12347783826771756ade39c697fa551f5ea0f
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 19:30:28 2019 +0100
+
+    accounts/abi/bind/backends: remove unused assignment (#20359)
+
+commit c1db636fb3e382a62188d7b1247c48c4d4892c38
+Merge: b6d4f6b66 5b558ad93
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 18:56:10 2019 +0200
+
+    Merge pull request #20360 from karalabe/ppa-fix-cigo-clean
+    
+    build: skip go clean on PPA, messes with the module trick
+
+commit 5b558ad936c00e468851b2fc46b136b059495675
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 18:18:59 2019 +0200
+
+    build: skip go clean on PPA, messes with the module trick
+
+commit b6d4f6b66e99c08f419e6a469259cbde1c8b0582
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 15:35:22 2019 +0100
+
+    core/types: remove BlockBy sorting code (#20355)
+
+commit 0ec5ab417559ac3399a73f76219fce043dfc0ef9
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 15:34:28 2019 +0100
+
+    common: improve GraphQL error messages (#20354)
+
+commit 07541004649cdb209b4d72376b087984a4af60ad
+Merge: 89ab8a74c 475ae8bd9
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 16:24:07 2019 +0200
+
+    Merge pull request #20356 from karalabe/ppa-fix-cigo
+    
+    build: pull in ci.go dependencies for the PPA builder
+
+commit 475ae8bd93ccc9189241b6300c535aa162245dbe
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 16:14:31 2019 +0200
+
+    build: pull in ci.go dependencies for the PPA builder
+
+commit 89ab8a74c0910f50fba34c5c49cec3b07654e4ec
+Merge: 72e62efc7 75e029db8
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 14:51:53 2019 +0100
+
+    go.mod: switch to Go modules (#20311)
+    
+    * go.mod, vendor: switch to Go modules
+    
+    * travis: explicitly enable go modules in Go 1.11 and 1.12
+    
+    * accounts/abi/bind: switch binding test to go modules
+    
+    * travis, build: aggregate and upload go mod dependencies for PPA
+    
+    * go.mod: tidy up the modules to avoid xgo writes to go.sum
+    
+    * build, internal/build: drop own file/folder copier
+    
+    * travis: fake build ppa only for go module dependencies
+    
+    * mobile: fix CopyFile switch to package cp
+    
+    * build, travis: use ephemeral debsrc GOPATH to get mod deps
+
+commit 72e62efc76fd4d69d376ea244a409261b6983edc
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 21 14:51:25 2019 +0100
+
+    common/hexutil: improve GraphQL error messages (#20353)
+
+commit f56f969dd3d6bda9ed80fdb028cec8b2092d6020
+Merge: 7be89a7a0 216ff5a95
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 15:08:10 2019 +0200
+
+    Merge pull request #20350 from holiman/puppeth_ssh
+    
+    cmd/puppeth: make ssh prompt more user-friendly
+
+commit 216ff5a9522536f637c4e12edf458120eb83cfd0
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Nov 21 11:04:31 2019 +0100
+
+    cmd/puppeth: make ssh prompt more user-friendly
+
+commit 7be89a7a01ea0aab3293ba7ebfa8280b02331717
+Merge: c5b46a79c 59177bc8c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 21 13:34:33 2019 +0200
+
+    Merge pull request #20339 from etclabscore/fix/cmd-puppeth-blocknonce-type
+    
+    cmd/puppeth: x-spec nonce data type, use types.BlockNonce
+
+commit 59177bc8c09f60772b2445ad4fc28a30ce6ab80d
+Author: meows <b5c6@protonmail.com>
+Date:   Wed Nov 20 10:26:31 2019 -0500
+
+    cmd/puppeth: x-spec nonce data type, use types.BlockNonce
+    
+    Refactors to use existing BlockNonce type instead of
+    hand-rolled bytes logic.
+
+commit c5b46a79c169dfd24575ab75479eac471b6fbc82
+Merge: b4bc3b3c3 b8ced9e00
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 20 16:24:03 2019 +0200
+
+    Merge pull request #20338 from etclabscore/feat/statetests-dedupe-walk-refactor
+    
+    tests: refactor TestState to dedupe walk callback
+
+commit b4bc3b3c3586de69267b766d18b4ee2c762bcdc0
+Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
+Date:   Wed Nov 20 09:08:07 2019 -0500
+
+    tests: enable TransactionTests Istanbul case (#20337)
+
+commit 75e029db8b18f3ef020110e7947a5f42e417c35b
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 20 14:56:07 2019 +0200
+
+    build, travis: use ephemeral debsrc GOPATH to get mod deps
+
+commit b8ced9e00be1e0f7f774b154f19b58643b04df3c
+Author: meows <b5c6@protonmail.com>
+Date:   Wed Nov 20 07:54:18 2019 -0500
+
+    tests: refactor TestState to dedupe walk callback
+    
+    Minor refactoring.
+
+commit f8790b94826f4ae649434b5f5f2806d336bd4651
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 22:06:28 2019 +0200
+
+    mobile: fix CopyFile switch to package cp
+
+commit 8bd5bb891874d02027aea8e87c88481e11adc718
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 20:39:25 2019 +0200
+
+    travis: fake build ppa only for go module dependencies
+
+commit a7dfaa0bda37a97d5a6286be1e08ef54ee90a833
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 20:29:01 2019 +0200
+
+    build, internal/build: drop own file/folder copier
+
+commit e1dcea8bf03bf206df1cbbf00778e40d333ff13c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 19:54:13 2019 +0200
+
+    go.mod: tidy up the modules to avoid xgo writes to go.sum
+
+commit b3d6304f1e1ad7ee1d0917c8b208fd067bc3ffb6
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 19:18:50 2019 +0200
+
+    travis, build: aggregate and upload go mod dependencies for PPA
+
+commit f4ec85486a1532594c5009e3c0b9903cbb93e844
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 15:39:39 2019 +0200
+
+    accounts/abi/bind: switch binding test to go modules
+
+commit dfdb204b48bae669a6afd0fd76bd4e67eef86de1
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 14:47:17 2019 +0200
+
+    travis: explicitly enable go modules in Go 1.11 and 1.12
+
+commit 15fb780de68acde58417224943aaff9367ecdd0c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 18 14:22:36 2019 +0200
+
+    go.mod, vendor: switch to Go modules
+
+commit 3a4a3d080bd6c80d7186e7a32030322eb8d0b138
+Merge: b7ba944e8 51c3290be
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 20 12:49:13 2019 +0200
+
+    Merge pull request #20261 from holiman/less_querying
+    
+    internal/ethapi: don't query wallets at every execution of gas estimation
+
+commit b7ba944e8879583a40771446dccb6b988f72fa31
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Wed Nov 20 18:46:35 2019 +0800
+
+    cmd/puppeth: update chain spec of parity (#20241)
+
+commit 9b59c75405282d5628d4f416160b8984cd76a168
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Wed Nov 20 18:36:41 2019 +0800
+
+    miner: fix data race in tests (#20310)
+    
+    * miner: fix data race in tests
+    
+    miner: fix linter
+    
+    * miner: address comment
+
+commit f71e85b8e267641cc4f7b9ce7305726403e78385
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 20 09:53:01 2019 +0100
+
+    core: fix staticcheck warnings (#20323)
+
+commit 8008c5b1fa99c8582791afbdedaf4a54eb59260d
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Nov 20 09:06:21 2019 +0100
+
+    rpc: remove 'exported or builtin' restriction for parameters (#20332)
+    
+    * rpc: remove 'exported or builtin' restriction for parameters
+    
+    There is no technial reason for this restriction because package reflect
+    can create values of any type. Requiring parameters and return values to
+    be exported causes a lot of noise in package exports.
+    
+    * rpc: fix staticcheck warnings
+
+commit 9c6cf960b46fc71d62ebb5c2d7a1b32634afc2e4
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 18:22:04 2019 +0100
+
+    internal/web3ext, les: update clique JS and make it work with the light client (#20318)
+    
+    Also fix the input formatter on clique_getSnapshot and clique_getSigners
+    so that integers as well as hex number strings are accepted.
+
+commit df206d25138078ffda04764412b248eaf4c4e9ba
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 17:16:42 2019 +0100
+
+    p2p/simulations: fix staticcheck warnings (#20322)
+
+commit 9e8cc00b733a505c2815b58d94315298371579cb
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 17:16:08 2019 +0100
+
+    p2p: remove unused code (#20325)
+
+commit ac5e28ea382f46bf5744b62c3cc73436c8176850
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 17:14:00 2019 +0100
+
+    whisper/whisperv6: fix staticcheck warnings (#20328)
+
+commit 3b0f3483c4c17cfc95fb27245f8db994d3341070
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Nov 19 17:13:42 2019 +0100
+
+    .github: remove 'nonsense' from CODEOWNERS (#20329)
+
+commit 7f70a7010632b0982cc8b0ad1559148ab07da6e9
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 15:00:32 2019 +0100
+
+    event: remove unused field 'closed' (#20324)
+
+commit 94e825098351e4738e607ca62f7a7ac1228d148f
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 14:55:48 2019 +0100
+
+    cmd/wnode: remove uses of common.ToHex (#20327)
+
+commit c013192ba7683741b33ad3f713c0b83d0a619b31
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 14:53:26 2019 +0100
+
+    ethclient: remove use of common.ToHex (#20326)
+
+commit 0b6338321f0198cc32734ec2e14cbd2f0f1238fd
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Tue Nov 19 13:57:05 2019 +0100
+
+    travis: deactivate arm build during push (#20321)
+
+commit b9c90c5581934454aa71af5b4b668c37b67d92fc
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Tue Nov 19 18:32:57 2019 +0800
+
+    core/rawdb: check hash before return data from ancient db (#20195)
+    
+    * core/rawdb: check hash before return data from ancient db
+    
+    * core/rawdb: fix lint
+    
+    * core/rawdb: calculate the hash in the fly
+
+commit 5fefe39ba5797538d3001cf9045ad730425eb5ca
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 10:17:41 2019 +0100
+
+    p2p/netutil: fix staticcheck warning (#20315)
+
+commit dfe891270a7edc1733af53eb7c35ec7e5b8ae36a
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Nov 19 10:16:34 2019 +0100
+
+    cmd/ethkey: fix file permissions in changepassword command (#20313)
+    
+    Found by staticcheck.
+
+commit c5c5e0dbe8802b6e8dbb7307af98a209cbbdea87
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Nov 18 18:14:59 2019 +0100
+
+    consensus/clique: fix struct tags for status API (#20316)
+    
+    Also unexport the status struct.
+
+commit 3f4a875bf6a74defd6e5e5a9cf121a5adc6e6c86
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Nov 18 17:03:57 2019 +0100
+
+    consensus/clique: add clique_status API method (#20103)
+    
+    This PR introduces clique_status which gives info about the health of
+    the clique network.
+    
+    It's currently a bit PITA to find out how a clique network is
+    performing, and it can easily happen that sealers drop off -- and
+    everything is 'fine' until one more signer drops off, and the network
+    suddenly halts.
+    
+    The new method provides the following stats:
+    
+    - Which signers are currently active, and have signed blocks in the last
+      N (set to 64) blocks?
+    - How many blocks has each signer signed?
+    - What is the difficulty in the last N blocks, compared to the
+      theoretical maximum?
+
+commit a3d263dd3aa5e2fa80948bc0a1de2f0e4c57084e
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Nov 18 16:38:54 2019 +0100
+
+    cmd/clef: fix staticcheck warnings (#20314)
+
+commit 190fb8180a62c2372db60e2ffe70363f079b41d6
+Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
+Date:   Mon Nov 18 09:48:20 2019 -0500
+
+    build: add test cmd flag -v for verbose logs (#20298)
+    
+    Adds flags akin to -coverage flag enabling the test runner
+    to use go test's -v flag, signaling verbose test log output.
+
+commit b02afb6b3d1befaba28b84c64c9c6f7f62ffdc74
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Mon Nov 18 15:34:17 2019 +0100
+
+    travis: use travis_wait for both install and build (#20309)
+
+commit 422604b4383ddc59f2fe610a75b0f9c40e38f3fa
+Author: Felföldi Zsolt <zsfelfoldi@gmail.com>
+Date:   Mon Nov 18 12:42:49 2019 +0100
+
+    les: rename UpdateBalance to AddBalance and simplify return format (#20304)
+
+commit 57d697629de6f982d69f2b33c9e169bdc12109b9
+Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
+Date:   Mon Nov 18 04:41:49 2019 -0500
+
+    core: s/isEIP155/isHomestead/g (fix IntrinsicGas signature var name) (#20300)
+    
+    * core: s/isEIP155/isEIP2/ (fix)
+    
+    This signature variable name reflects a spec'd change
+    in gas cost for creating contracts as documented in EIP2 (Homestead HF).
+    
+    https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2.md#specification
+    
+    * core: s/isEIP2/sIsHomestead/g
+    
+    Use isHomestead since Homestead is what the caller
+    and rest of the code uses.
+
+commit 11d09fd3baaf0a967521afd16a186cd31aef9fcb
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Mon Nov 18 09:52:12 2019 +0100
+
+    travis: remove traces and use travis_wait in ARM build (#20296)
+    
+    * travis: remove debug traces
+    
+    * travis: Add travis_wait to the test run
+    
+    * travis: increase travis_wait time
+
+commit 689486449d0d3af3257139046aec810572e1604d
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Nov 18 09:49:18 2019 +0100
+
+    build: use golangci-lint (#20295)
+    
+    * build: use golangci-lint
+    
+    This changes build/ci.go to download and run golangci-lint instead
+    of gometalinter.
+    
+    * core/state: fix unnecessary conversion
+    
+    * p2p/simulations: fix lock copying (found by go vet)
+    
+    * signer/core: fix unnecessary conversions
+    
+    * crypto/ecies: remove unused function cmpPublic
+    
+    * core/rawdb: remove unused function print
+    
+    * core/state: remove unused function xTestFuzzCutter
+    
+    * core/vm: disable TestWriteExpectedValues in a different way
+    
+    * core/forkid: remove unused function checksum
+    
+    * les: remove unused type proofsData
+    
+    * cmd/utils: remove unused functions prefixedNames, prefixFor
+    
+    * crypto/bn256: run goimports
+    
+    * p2p/nat: fix goimports lint issue
+    
+    * cmd/clef: avoid using unkeyed struct fields
+    
+    * les: cancel context in testRequest
+    
+    * rlp: delete unreachable code
+    
+    * core: gofmt
+    
+    * internal/build: simplify DownloadFile for Go 1.11 compatibility
+    
+    * build: remove go test --short flag
+    
+    * .travis.yml: disable build cache
+    
+    * whisper/whisperv6: fix ineffectual assignment in TestWhisperIdentityManagement
+    
+    * .golangci.yml: enable goconst and ineffassign linters
+    
+    * build: print message when there are no lint issues
+    
+    * internal/build: refactor download a bit
+
+commit 7c4a4eb58a3d36e7bcef450308017925322525ca
+Author: Felix Lange <fjl@twurst.com>
+Date:   Mon Nov 18 09:40:59 2019 +0100
+
+    rpc, p2p/simulations: use github.com/gorilla/websocket (#20289)
+    
+    * rpc: improve codec abstraction
+    
+    rpc.ServerCodec is an opaque interface. There was only one way to get a
+    codec using existing APIs: rpc.NewJSONCodec. This change exports
+    newCodec (as NewFuncCodec) and NewJSONCodec (as NewCodec). It also makes
+    all codec methods non-public to avoid showing internals in godoc.
+    
+    While here, remove codec options in tests because they are not
+    supported anymore.
+    
+    * p2p/simulations: use github.com/gorilla/websocket
+    
+    This package was the last remaining user of golang.org/x/net/websocket.
+    Migrating to the new library wasn't straightforward because it is no
+    longer possible to treat WebSocket connections as a net.Conn.
+    
+    * vendor: delete golang.org/x/net/websocket
+    
+    * rpc: fix godoc comments and run gofmt
+
+commit 9e71f55bfab91a26f5cfc06f0a4e48839b25f249
+Author: Michael Forney <mforney@mforney.org>
+Date:   Sun Nov 17 06:45:54 2019 -0800
+
+    cmd/evm: Allow loading input from file (#20273)
+    
+    Make it possible to load input from a file. Simlar to `--code` / `--codefile`, have `--input`/`--inputfile`.
+
+commit 51c3290beedac6b66b2e6f41cde9336c6a292a15
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Nov 11 12:12:19 2019 +0100
+
+    internal/ethapi: don't query wallets at every execution of gas estimation
+
+commit 738b51ae31c48a598b7c5bad37c054976a41025f
+Author: nebojsa94 <nebojsa94@users.noreply.github.com>
+Date:   Fri Nov 15 09:52:33 2019 +0100
+
+    core/vm: fix tracer interface parameter name (#20294)
+
+commit f03b2db7db123a569672b0caed5c1cd735c72ba7
+Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
+Date:   Thu Nov 14 16:05:32 2019 -0500
+
+    params: finish sentence in comment (#20291)
+
+commit 49d1a032da98ac5c61cd42d6e2d3de2145b2f67d
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Thu Nov 14 14:42:23 2019 +0100
+
+    build: gather info to investigate why builds fail on ARM (#20281)
+
+commit 765fe446cf392f721cf9b962b3b7b811c5aa23d1
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Thu Nov 14 10:09:16 2019 +0100
+
+    whisper/whisperv6: fix staticcheck issues (#20288)
+
+commit afe0b65405e9e0ad2dadc2ed6e35cd46d41686d5
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 14 10:04:16 2019 +0100
+
+    dashboard: remove the dashboard (#20279)
+    
+    This removes the dashboard project. The dashboard was an experimental
+    browser UI for geth which displayed metrics and chain information in
+    real time. We are removing it because it has marginal utility and nobody
+    on the team can maintain it.
+    
+    Removing the dashboard removes a lot of dependency code and shaves
+    6 MB off the geth binary size.
+
+commit 987648b0ade10a2e64f18fae616a2277eef2a3c2
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 14 09:05:17 2019 +0100
+
+    cmd/faucet: use github.com/gorilla/websocket (#20283)
+    
+    golang.org/x/net/websocket is unmaintained, and we have already
+    switched to using github.com/gorilla/websocket for package rpc.
+
+commit 9504c5c360f5aa443f20008f7e9da7528caab8bf
+Author: Jorropo <jorropo.pgm@gmail.com>
+Date:   Thu Nov 14 09:03:41 2019 +0100
+
+    rpc: fix typo example code (#20284)
+
+commit f8a95d996fbe66e460747c963bf30c59eb49021c
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Thu Nov 14 15:26:10 2019 +0800
+
+    accounts/abi/bind, cmd/abigen: implement alias for abigen (#20244)
+    
+    * accounts/abi/bind, cmd/abigen: implement alias for abigen
+    
+    * accounts/abi/bind: minor fixes
+    
+    * accounts/abi/bind: address comments
+    
+    * cmd/abigen: address comments
+    
+    * accounts/abi/bind: print error log when identifier collision
+    
+    * accounts/abi/bind: address comments
+    
+    * accounts/abi/bind: address comment
+
+commit bf5c6b29faa2ed863ef48903321b2ce362ed6f83
+Author: Felföldi Zsolt <zsfelfoldi@gmail.com>
+Date:   Wed Nov 13 23:47:03 2019 +0100
+
+    les: implement server priority API (#20070)
+    
+    This PR implements the LES server RPC API. Methods for server
+    capacity, client balance and client priority management are provided.
+
+commit 22e3bbbf0aa711fcab3876ac1a34b8cdff8a0ccd
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Wed Nov 13 12:40:50 2019 +0100
+
+     miner: increase worker test timeout (#20268)
+    
+    TestEmptyWork* occasionally fails due to timeout. Increase the timeout.
+
+commit 4ea9b62b5ce396c5609c100b8b2c05f11d1d7fac
+Author: Kurkó Mihály <kurkomisi@users.noreply.github.com>
+Date:   Wed Nov 13 13:13:13 2019 +0200
+
+     dashboard: send current block to the dashboard client (#19762)
+    
+    This adds all dashboard changes from the last couple months.
+    We're about to remove the dashboard, but decided that we should
+    get all the recent work in first in case anyone wants to pick up this
+    project later on.
+    
+    * cmd, dashboard, eth, p2p: send peer info to the dashboard
+    * dashboard: update npm packages, improve UI, rebase
+    * dashboard, p2p: remove println, change doc
+    * cmd, dashboard, eth, p2p: cleanup after review
+    * dashboard: send current block to the dashboard client
+
+commit 6f1a600f6c8be05252d3f313dccbca9de918010a
+Author: Rick <rick.no@groundx.xyz>
+Date:   Wed Nov 13 20:01:52 2019 +0900
+
+    p2p: fix bug in TestPeerDisconnect (#20277)
+
+commit de2259d27c75fa954115420e829a954486e6de92
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Fri Nov 8 09:58:57 2019 +0100
+
+    travis: enable test suite on ARM64 (#20219)
+    
+    * travis: Enable ARM support
+    
+    * Include fixes from 20039
+    
+    * Add a trace to debug the invalid lookup issue
+    
+    * Try increasing the timeout to see if the arm test passes
+    
+    * Investigate the resolver issue
+    
+    * Increase arm64 timeout for clique test
+    
+    * increase timeout in tests for arm64
+    
+    * Only test the failing tests
+    
+    * Review feedback: don't export epsilon
+    
+    * Remove investigation tricks+include fjl's feeback
+    
+    * Revert the retry ahead of using the mock resolver
+    
+    * Fix rebase errors
+
+commit adf007dadc1b5e4185c0fc088c7cde7d235feff1
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Nov 7 16:40:37 2019 +0100
+
+    p2p/enode: mock DNS resolver in URL parsing test (#20252)
+
+commit 4b8f56cf9809bb59366858dc7bfa9b0064c6496c
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 7 10:00:18 2019 +0200
+
+    params: begin v1.9.8 release cycle
+
+commit a718daa674a2e23cb0c8a6789f7e5467e705bbbd
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Nov 7 09:58:39 2019 +0200
+
+    params: release Geth v1.9.7
+
+commit b9bac1f384ceef7d7390b9dd9da759bce1741392
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Thu Nov 7 05:09:37 2019 +0800
+
+    les: fix and slim the unit tests of les (#20247)
+    
+    * les: loose restriction of unit tests
+    
+    * les: update unit tests
+    
+    * les, light: slim the unit tests
+
+commit fc3661f89ccdefc4cc31f9aeb15dffce59afddca
+Merge: c702bd70e 9948724de
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 6 17:54:39 2019 +0200
+
+    Merge pull request #20248 from karalabe/cht-1.9.7
+    
+    params: hard-code new CHTs for the 1.9.7 release
+
+commit 9948724debefc14a02849f2cefe085582da00919
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Nov 6 17:47:13 2019 +0200
+
+    params: hard-code new CHTs for the 1.9.7 release
+
+commit c702bd70edf7d6ed1946bcab34b1d40e487a7ee6
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Nov 5 15:35:51 2019 +0200
+
+    travis: bump linter to Go 1.13.x
+
+commit 734e00af9e9a5487f57b00ae33cbb52dbe0c9565
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Nov 5 15:32:42 2019 +0200
+
+    travis, build, internal: use own Go bundle for PPA builds (#20240)
+    
+    * build: bump PPAs to Go 1.13 (via longsleep), keep Trusty on 1.11
+    
+    * travis, build, vendor: use own Go bundle for PPA builds
+    
+    * travis, build, internal, vendor: smarter Go bundler, own untar
+    
+    * build: updated ci-notes with new Go bundling, only make, don't test
+
+commit b566cfdffdc51d5dcde571377d709a5519a24f0d
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Mon Nov 4 10:31:10 2019 +0100
+
+    core/evm: avoid copying memory for input in calls (#20177)
+    
+    * core/evm, contracts: avoid copying memory for input in calls + make ecrecover not modify input buffer
+    
+    * core/vm: optimize mstore a bit
+    
+    * core/vm: change Get -> GetCopy in vm memory access
+
+commit 7a6d5d0cce16e1a766e6fc89c3aacb7ecf502dcc
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Mon Nov 4 16:41:29 2019 +0800
+
+    cmd/puppeth: integrate istanbul into puppeth (#19926)
+    
+    * cmd/puppeth: integrate istanbul into puppeth
+    
+    * cmd/puppeth: address comment
+    
+    * cmd/puppeth: use hexutil.Big for fork indicator
+    
+    * cmd/puppeth: finalize istanbul fork
+    
+    * cmd/puppeth: fix 2200 for parity, rename is to eip1283ReenableTransition
+    
+    * cmd/puppeth: fix eip1108
+    
+    * cmd/puppeth: add blake2f for parity
+    
+    * cmd/puppeth: add aleth istanbul precompiled
+    
+    * cmd/puppeth: use hexutil.Big
+    
+    * cmd/puppeth: fix unit tests
+    
+    * cmd/puppeth: update testdata
+
+commit 0ff73804652e95ea730b5b5c941610c7947365d8
+Merge: 0ce5e113b 86fe283d1
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Nov 4 10:38:10 2019 +0200
+
+    Merge pull request #20231 from SamuelMarks/go1.13.4
+    
+    appveyor: bump to Go 1.13.4
+
+commit 0ce5e113be8c54c7c30a3a797827114adb0df19c
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Sat Nov 2 20:02:35 2019 +0800
+
+    les: rework clientpool (#20077)
+    
+    * les: rework clientpool
+
+commit 86fe283d194462a863977d83ba8c07209c41b05f
+Author: Samuel Marks <807580+SamuelMarks@users.noreply.github.com>
+Date:   Sat Nov 2 18:54:04 2019 +1100
+
+    appveyor: bump to Go 1.13.4
+
+commit 44b74cfc40aba4d76281ce4f0b8f020aa99a5687
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Thu Oct 31 21:17:51 2019 +0800
+
+    accounts/abi: add internalType information and fix issues (#20179)
+    
+    * accounts/abi: fix various issues
+    
+    The fixed issues include:
+    
+    (1) If there is no return in a call function, unpack should
+    return nil error
+    
+    (2) For some functions which have struct array as parameter,
+    it will also be detected and generate the struct definition
+    
+    (3) For event, if it has non-indexed parameter, the parameter
+    name will also be assigned if empty. Also the internal struct
+    will be detected and generate struct defition if not exist.
+    
+    (4) Fix annotation generation in event function
+    
+    * accounts/abi: add new abi field internalType
+    
+    * accounts: address comments and add tests
+    
+    * accounts/abi: replace strings.ReplaceAll with strings.Replace
+
+commit 9278951a626f7f13a53d28637bcda162f412f66c
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Oct 31 10:04:26 2019 +0100
+
+    params, core/forkid: configure mainnet istanbul block 9069K (#20222)
+    
+    * params: configure mainnet istanbul block 9069K
+    
+    * core/forkid: add some more test items for mainnet istanbul
+
+commit 12f2a25d5e585b6988819426a3df20fab4a1991c
+Merge: 93422e9d1 8927f7724
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Oct 31 10:58:28 2019 +0200
+
+    Merge pull request #20225 from karalabe/forkid-eth-handshake-verification-plus
+    
+    cmd/devp2p, core/forkid: make forkid.Filter API uniform
+
+commit 8927f7724aa1e096b458ca2c0b1a91d11fdfcc58
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Thu Oct 31 10:38:14 2019 +0200
+
+    cmd/devp2p, core/forkid: make forkid.Filter API uniform
+
+commit 93422e9d15063f707c381cd25758d6a34daece18
+Merge: 5d91acccd 64571f937
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Oct 30 13:21:25 2019 +0200
+
+    Merge pull request #20140 from karalabe/eth64-handshake-forkid
+    
+    eth: eth/64 - extend handshake with with fork id
+
+commit 5d91acccd5b1b050f49d048976496c6133da6dc5
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Wed Oct 30 19:07:30 2019 +0800
+
+    miner: increase import time allowance (#20217)
+    
+    Fix the block import unit test which can time out sometimes.
+
+commit 9641cacea87f6b97139e8930179ed98fb908c548
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Wed Oct 30 13:05:31 2019 +0200
+
+    core/forkid: add two clauses for more precise validation (#20220)
+
+commit 64571f9379fdca11165517c122551f246c613ea4
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Sep 30 21:28:50 2019 +0300
+
+    eth: eth/64 - extend handshake packet with fork id
+
+commit e3063044140254cb3b546e5ed0a2e230cfb2dd9f
+Merge: 2c37142d2 3eca7b5d2
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Oct 29 17:10:44 2019 +0200
+
+    Merge pull request #20204 from holiman/fix_downloader_race
+    
+    eth/downloader: fix data race in downloader
+
+commit 2c37142d2f177d0cccc114486040f0913a3900c7
+Author: Felix Lange <fjl@twurst.com>
+Date:   Tue Oct 29 16:08:57 2019 +0100
+
+    cmd/devp2p, p2p: dial using node iterator, discovery crawler (#20132)
+    
+    * p2p/enode: add Iterator and associated utilities
+    
+    * p2p/discover: add RandomNodes iterator
+    
+    * p2p: dial using iterator
+    
+    * cmd/devp2p: add discv4 crawler
+    
+    * cmd/devp2p: WIP nodeset filter
+    
+    * cmd/devp2p: fixup lesFilter
+    
+    * core/forkid: add NewStaticFilter
+    
+    * cmd/devp2p: make -eth-network filter actually work
+    
+    * cmd/devp2p: improve crawl timestamp handling
+    
+    * cmd/devp2p: fix typo
+    
+    * p2p/enode: fix comment typos
+    
+    * p2p/discover: fix comment typos
+    
+    * p2p/discover: rename lookup.next to 'advance'
+    
+    * p2p: lower discovery mixer timeout
+    
+    * p2p/enode: implement dynamic FairMix timeouts
+    
+    * cmd/devp2p: add ropsten support in -eth-network filter
+    
+    * cmd/devp2p: tweak crawler log message
+
+commit 3eca7b5d2770d046b673924152f2a747ff66434e
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Fri Oct 25 13:17:32 2019 +0200
+
+    eth/downloader: fix data race in downloader
+
+commit b0b277525cb4e476deb461de1b5827a33daa2086
+Author: Michael Forney <mforney@mforney.org>
+Date:   Tue Oct 29 05:47:18 2019 -0700
+
+    core/asm: assembly parser label fixes (#20210)
+    
+    * core/asm: Fix encoding of pushed labels
+    
+    EVM uses big-endian byte-order, so to pad a label value to 4 bytes,
+    zeros must be added to the front, not the end.
+    
+    * core/asm: Fix PC calculations when a label is pushed
+    
+    Incrementing PC by 5 is only correct if the label appears after a jump,
+    in which case there is an implicit push. When it appears after an explicit
+    push, PC should only be incremented by 4.
+    
+    * core/asm: Allow JUMP with no argument
+    
+    This way, a label can be pushed explicitly, or loaded from memory to
+    implement a jump table.
+
+commit ecdbb402ee0838a4be366b5f485a59d2da2053f5
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Tue Oct 29 02:50:11 2019 +0900
+
+    trie: remove node ordering slice in sync batch (#19929)
+    
+    When we flush a batch of trie nodes into database during the state
+    sync, we should guarantee that all children should be flushed before
+    parent.
+    
+    Actually the trie nodes commit order is strict by: children -> parent.
+    But when we flush all ready nodes into db, we don't need the order
+    anymore since
+    
+        (1) they are all ready nodes (no more dependency)
+        (2) underlying database provides write atomicity
+
+commit 9c81387befa18a686b262482cd1dd27b75fe8422
+Author: Michael Forney <mforney@mforney.org>
+Date:   Mon Oct 28 06:55:20 2019 -0700
+
+    cmd/evm: remove surrounding whitespace in hex input code (#20211)
+    
+    This way, the output of `evm compile` can be used directly in `evm
+    --codefile code.txt run`, without stripping the trailing newline first.
+
+commit 72617a0742391e80701123cd19429edd0e94fd10
+Author: Guillaume Ballet <gballet@gmail.com>
+Date:   Mon Oct 28 16:57:34 2019 +0900
+
+    consensus: fix possessives in comments. (#20209)
+
+commit db79143a13c9f912706b76a8c3a9e6966c39003a
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Thu Oct 24 10:45:07 2019 +0200
+
+    clef: resolve windows pipes, fixes #20121 (#20166)
+
+commit 538f763fdc304329d6231e6cb31efab4cba5153e
+Author: Piotr Dyraga <piotr.dyraga@keep.network>
+Date:   Mon Oct 21 10:13:41 2019 +0200
+
+    accounts/abi/bind: take into account gas price during gas estimation (#20189)
+    
+    The gas price was not passed to the `EstimateGas` function. As a result,
+    conditional execution paths depending on `tx.gasprice` could be not
+    correctly processed and we could get invalid gas estimates for contract
+    function calls.
+
+commit d4bb3798d8aa33a21b5422b800ccdef01c7e1574
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Sun Oct 20 19:36:40 2019 +0900
+
+    miner: add generate and import unit test (#20111)
+    
+    This PR adds a new unit test in miner package which will create some blocks from miner and then import into another chain. In this way, we can ensure all blocks generated by Geth miner obey consensus rules.
+
+commit 08953e42c1b7120dda8ebd6763e73a3aa5a27b4c
+Author: Marius Kjærstad <sandakersmann@users.noreply.github.com>
+Date:   Sun Oct 20 12:25:25 2019 +0200
+
+    metrics: change links in README.md to https (#20182)
+
+commit b9299bbc46567608b4e6dcc4e8b8758dd3289231
+Author: Marius Kjærstad <sandakersmann@users.noreply.github.com>
+Date:   Fri Oct 18 21:30:53 2019 +0200
+
+    dashboard: change links in README to https (#20181)
+    
+    Changed http:// to https:// on links in dashboard/README.md
+
+commit 9a770659486a51600d4781f6f67dd2f695c55644
+Author: Marius Kjærstad <sandakersmann@users.noreply.github.com>
+Date:   Fri Oct 18 08:51:54 2019 +0200
+
+    Changed http:// to https:// on links in log/README.md (#20178)
+    
+    docs: change http to https on links in log/README.md
+
+commit a28093ced4e81bcae10ccceba68f0c64da14383c
+Author: Jeffery Robert Walsh <rlxrlps@gmail.com>
+Date:   Thu Oct 17 01:39:14 2019 -0700
+
+    README: use new miner threads flag instead of legacy minerthreads flag (#20165)
+
+commit d5b79e752e80c097191630ada2b07b32b48de77b
+Author: Ross <9055337+Chadsr@users.noreply.github.com>
+Date:   Thu Oct 17 10:07:09 2019 +0200
+
+    p2p/simulations: add node properties support and utility functions (#20060)
+
+commit 73003659561d83eb3123e008157134eaab6e4b03
+Author: Felix Lange <fjl@twurst.com>
+Date:   Wed Oct 16 13:35:24 2019 +0200
+
+    p2p/dnsdisc: update to latest EIP-1459 spec (#20168)
+    
+    This updates the DNS TXT record format to the latest
+    changes in ethereum/EIPs#2313.
+
+commit c476460cb2ea573a3266da5d5ec121170bb48e56
+Author: Martin Holst Swende <martin@swende.se>
+Date:   Wed Oct 16 13:23:14 2019 +0200
+
+    params: check fork ordering when initializing new genesis, fixes #20136 (#20169)
+    
+    prevent users from misconfiguring their nodes so that fork ordering is not preserved.
+
+commit 028af3457d9491433c90eca8383be87e2becb574
+Author: gary rong <garyrong0905@gmail.com>
+Date:   Tue Oct 15 17:19:20 2019 +0900
+
+    cmd/utils: fix command line flag resolve (#20167)
+    
+    In Geth, we have two sources for configuration:
+    (1) Config file
+    (2) Command line flag
+    
+    Basically geth will first resolve config file and then overwrite
+    configs with command line flags.
+    
+    This issue is: geth should only overwrite configs if flags are truly
+    set. So before we apply any flag to configs, `GlobalIsSet` check
+    is necessary.
+
+commit a73f3f45183a347864a1c941930d6f26c6f06ac2
+Author: Felix Lange <fjl@twurst.com>
+Date:   Thu Oct 3 11:29:55 2019 +0200
+
+    params: begin v1.9.7 release cycle
