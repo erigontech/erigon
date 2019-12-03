@@ -14,11 +14,10 @@ type Change struct {
 	Value []byte
 }
 
-// ChangeSet is a sorted map with keys of the same size.
+// ChangeSet is a map with keys of the same size.
 // Both keys and values are byte strings.
 type ChangeSet struct {
-	// Invariant 1: all keys are of the same size.
-	// Invariant 2: sorted by keys.
+	// Invariant: all keys are of the same size.
 	Changes []Change
 }
 
@@ -52,7 +51,10 @@ len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})
 uint32 integers are serialized as big-endian.
 */
 
+// Encode sorts a ChangeSet by key and then serializes it.
 func (s *ChangeSet) Encode() ([]byte, error) {
+	sort.Sort(s)
+
 	buf := new(bytes.Buffer)
 	intArr := make([]byte, 4)
 	n := s.Len()
@@ -170,7 +172,6 @@ func (s *ChangeSet) Add(key []byte, value []byte) error {
 		Value: value,
 	})
 
-	sort.Sort(s)
 	return nil
 }
 
@@ -185,7 +186,6 @@ func (s *ChangeSet) MultiAdd(changes []Change) error {
 		s.Changes = append(s.Changes, changes[i])
 	}
 
-	sort.Sort(s)
 	return nil
 }
 
