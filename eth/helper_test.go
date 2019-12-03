@@ -23,8 +23,8 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
-	"log"
 	"fmt"
+	"log"
 	"math/big"
 	"sort"
 	"sync"
@@ -33,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -234,7 +235,7 @@ func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesi
 	case p.version == eth63:
 		msg = &statusData63{
 			ProtocolVersion: uint32(p.version),
-			NetworkId:       DefaultConfig.NetworkId,
+			NetworkID:       DefaultConfig.NetworkID,
 			TD:              td,
 			CurrentBlock:    head,
 			GenesisBlock:    genesis,
@@ -242,7 +243,7 @@ func (p *testPeer) handshake(t *testing.T, td *big.Int, head common.Hash, genesi
 	case p.version == eth64:
 		msg = &statusData{
 			ProtocolVersion: uint32(p.version),
-			NetworkID:       DefaultConfig.NetworkId,
+			NetworkID:       DefaultConfig.NetworkID,
 			TD:              td,
 			Head:            head,
 			Genesis:         genesis,

@@ -1423,10 +1423,10 @@ var bindTests = []struct {
 		`
 		"math/big"
 
-		"github.com/ethereum/go-ethereum/accounts/abi/bind"
-		"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
-		"github.com/ethereum/go-ethereum/crypto"
-		"github.com/ethereum/go-ethereum/core"
+		"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+		"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
+		"github.com/ledgerwatch/turbo-geth/crypto"
+		"github.com/ledgerwatch/turbo-geth/core"
 		`,
 		`
 		// Initialize test accounts
@@ -1486,10 +1486,10 @@ var bindTests = []struct {
 		`
 		"math/big"
 
-		"github.com/ethereum/go-ethereum/accounts/abi/bind"
-		"github.com/ethereum/go-ethereum/accounts/abi/bind/backends"
-		"github.com/ethereum/go-ethereum/crypto"
-		"github.com/ethereum/go-ethereum/core"
+		"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+		"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
+		"github.com/ledgerwatch/turbo-geth/crypto"
+		"github.com/ledgerwatch/turbo-geth/core"
         `,
 		`
 		key, _ := crypto.GenerateKey()
@@ -1591,7 +1591,13 @@ func TestGolangBindings(t *testing.T) {
 		t.Fatalf("failed to convert binding test to modules: %v\n%s", err, out)
 	}
 	pwd, _ := os.Getwd()
-	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/ethereum/go-ethereum="+filepath.Join(pwd, "..", "..", "..")) // Repo root
+	replacer := exec.Command(gocmd, "mod", "edit", "-replace", "github.com/ledgerwatch/turbo-geth="+filepath.Join(pwd, "..", "..", "..")) // Repo root
+	replacer.Dir = pkg
+	if out, err := replacer.CombinedOutput(); err != nil {
+		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
+	}
+
+	replacer = exec.Command(gocmd, "mod", "edit", "-replace", "github.com/rjeczalik/notify=github.com/JekaMas/notify@v0.9.4")
 	replacer.Dir = pkg
 	if out, err := replacer.CombinedOutput(); err != nil {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)

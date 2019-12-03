@@ -130,14 +130,15 @@ func dial(server string, pubkey []byte) (*sshClient, error) {
 			fmt.Printf("Are you sure you want to continue connecting (yes/no)? ")
 
 			for {
-				text, err := bufio.NewReader(os.Stdin).ReadString('\n')
+				var text string
+				text, err = bufio.NewReader(os.Stdin).ReadString('\n')
 				switch {
 				case err != nil:
 					return err
-				case strings.TrimSpace(text) == "yes":
+				case strings.TrimSpace(text) == "yes": //nolint: goconst
 					pubkey = key.Marshal()
 					return nil
-				case strings.TrimSpace(text) == "no":
+				case strings.TrimSpace(text) == "no": //nolint: goconst
 					return errors.New("users says no")
 				default:
 					fmt.Println("Please answer 'yes' or 'no'")

@@ -404,12 +404,16 @@ func initialize(c *cli.Context) error {
 	return nil
 }
 
+func windows() bool {
+	return runtime.GOOS == "windows"
+}
+
 // ipcEndpoint resolves an IPC endpoint based on a configured value, taking into
 // account the set data folders as well as the designated platform we're currently
 // running on.
 func ipcEndpoint(ipcPath, datadir string) string {
 	// On windows we can only use plain top-level pipes
-	if runtime.GOOS == "windows" {
+	if windows() {
 		if strings.HasPrefix(ipcPath, `\\.\pipe\`) {
 			return ipcPath
 		}
@@ -606,7 +610,7 @@ func DefaultConfigDir() string {
 	if home != "" {
 		if runtime.GOOS == "darwin" {
 			return filepath.Join(home, "Library", "Signer")
-		} else if runtime.GOOS == "windows" {
+		} else if windows() {
 			appdata := os.Getenv("APPDATA")
 			if appdata != "" {
 				return filepath.Join(appdata, "Signer")

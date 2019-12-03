@@ -47,8 +47,10 @@ func TestCreate2Revive(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -213,8 +215,10 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -349,8 +353,10 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{

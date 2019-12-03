@@ -57,7 +57,6 @@ func TestState(t *testing.T) {
 	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/0`, "bug in test")
 	//st.fails(`^stRevertTest/RevertPrecompiledTouch(_storage)?\.json/ConstantinopleFix/3`, "bug in test")
 
-
 	// For Istanbul, older tests were moved into LegacyTests
 	for _, dir := range []string{
 		stateTestDir,
@@ -67,11 +66,15 @@ func TestState(t *testing.T) {
 			for _, subtest := range test.Subtests() {
 				subtest := subtest
 				key := fmt.Sprintf("%s/%d", subtest.Fork, subtest.Index)
-				name := name + "/" + key
 				t.Run(key, func(t *testing.T) {
 					withTrace(t, test.gasLimit(subtest), func(vmconfig vm.Config) error {
-						_, err := test.Run(subtest, vmconfig)
-						return st.checkFailure(t, name, err)
+						config, ok := Forks[subtest.Fork]
+						if !ok {
+							return UnsupportedForkError{subtest.Fork}
+						}
+						ctx := config.WithEIPsFlags(context.Background(), big.NewInt(1))
+						_, _, _, err := test.Run(ctx, subtest, vmconfig)
+						return st.checkFailure(t, err)
 					})
 				})
 			}

@@ -25,6 +25,7 @@ import (
 
 	mapset "github.com/deckarep/golang-set"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -366,7 +367,7 @@ func (p *peer) Handshake(network uint64, td *big.Int, head common.Hash, genesis 
 		case p.version == eth63:
 			errc <- p2p.Send(p.rw, StatusMsg, &statusData63{
 				ProtocolVersion: uint32(p.version),
-				NetworkId:       network,
+				NetworkID:       network,
 				TD:              td,
 				CurrentBlock:    head,
 				GenesisBlock:    genesis,
@@ -436,8 +437,8 @@ func (p *peer) readStatusLegacy(network uint64, status *statusData63, genesis co
 	if status.GenesisBlock != genesis {
 		return errResp(ErrGenesisMismatch, "%x (!= %x)", status.GenesisBlock[:8], genesis[:8])
 	}
-	if status.NetworkId != network {
-		return errResp(ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkId, network)
+	if status.NetworkID != network {
+		return errResp(ErrNetworkIDMismatch, "%d (!= %d)", status.NetworkID, network)
 	}
 	if int(status.ProtocolVersion) != p.version {
 		return errResp(ErrProtocolVersionMismatch, "%d (!= %d)", status.ProtocolVersion, p.version)
@@ -453,8 +454,8 @@ func (p *peer) readStatus(network uint64, status *statusData, genesis common.Has
 	if msg.Code != StatusMsg {
 		return errResp(ErrNoStatusMsg, "first msg has code %x (!= %x)", msg.Code, StatusMsg)
 	}
-	if msg.Size > protocolMaxMsgSize {
-		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, protocolMaxMsgSize)
+	if msg.Size > ProtocolMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
 	}
 	// Decode the handshake and make sure everything matches
 	if err := msg.Decode(&status); err != nil {

@@ -27,6 +27,7 @@ import (
 	math2 "github.com/ledgerwatch/turbo-geth/common/math"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -35,29 +36,28 @@ import (
 type alethGenesisSpec struct {
 	SealEngine string `json:"sealEngine"`
 	Params     struct {
-		AccountStartNonce       math2.HexOrDecimal64   `json:"accountStartNonce"`
-		MaximumExtraDataSize    hexutil.Uint64         `json:"maximumExtraDataSize"`
-		DaoHardforkBlock        math2.HexOrDecimal64   `json:"daoHardforkBlock"`
-		MinGasLimit             hexutil.Uint64         `json:"minGasLimit"`
-		MaxGasLimit             hexutil.Uint64         `json:"maxGasLimit"`
-		TieBreakingGas          bool                   `json:"tieBreakingGas"`
-		GasLimitBoundDivisor    math2.HexOrDecimal64   `json:"gasLimitBoundDivisor"`
-		MinimumDifficulty       *hexutil.Big           `json:"minimumDifficulty"`
-		DifficultyBoundDivisor  *math2.HexOrDecimal256 `json:"difficultyBoundDivisor"`
-		DurationLimit           *math2.HexOrDecimal256 `json:"durationLimit"`
-		BlockReward             *hexutil.Big           `json:"blockReward"`
-		NetworkID               hexutil.Uint64         `json:"networkID"`
-		ChainID                 hexutil.Uint64         `json:"chainID"`
-		AllowFutureBlocks       bool                   `json:"allowFutureBlocks"`
+		AccountStartNonce          math2.HexOrDecimal64   `json:"accountStartNonce"`
 		MaximumExtraDataSize       hexutil.Uint64         `json:"maximumExtraDataSize"`
-		HomesteadForkBlock         *hexutil.Big           `json:"homesteadForkBlock,omitempty"`
 		DaoHardforkBlock           math2.HexOrDecimal64   `json:"daoHardforkBlock"`
+		MinGasLimit                hexutil.Uint64         `json:"minGasLimit"`
+		MaxGasLimit                hexutil.Uint64         `json:"maxGasLimit"`
+		TieBreakingGas             bool                   `json:"tieBreakingGas"`
+		GasLimitBoundDivisor       math2.HexOrDecimal64   `json:"gasLimitBoundDivisor"`
+		MinimumDifficulty          *hexutil.Big           `json:"minimumDifficulty"`
+		DifficultyBoundDivisor     *math2.HexOrDecimal256 `json:"difficultyBoundDivisor"`
+		DurationLimit              *math2.HexOrDecimal256 `json:"durationLimit"`
+		BlockReward                *hexutil.Big           `json:"blockReward"`
+		NetworkID                  hexutil.Uint64         `json:"networkID"`
+		ChainID                    hexutil.Uint64         `json:"chainID"`
+		AllowFutureBlocks          bool                   `json:"allowFutureBlocks"`
+		HomesteadForkBlock         *hexutil.Big           `json:"homesteadForkBlock,omitempty"`
 		EIP150ForkBlock            *hexutil.Big           `json:"EIP150ForkBlock,omitempty"`
 		EIP158ForkBlock            *hexutil.Big           `json:"EIP158ForkBlock,omitempty"`
 		ByzantiumForkBlock         *hexutil.Big           `json:"byzantiumForkBlock,omitempty"`
 		ConstantinopleForkBlock    *hexutil.Big           `json:"constantinopleForkBlock,omitempty"`
 		ConstantinopleFixForkBlock *hexutil.Big           `json:"constantinopleFixForkBlock,omitempty"`
 		IstanbulForkBlock          *hexutil.Big           `json:"istanbulForkBlock,omitempty"`
+		EIP2027ForkBlock           *hexutil.Big           `json:"EIP2027ForkBlock"`
 	} `json:"params"`
 
 	Genesis struct {
@@ -110,12 +110,6 @@ func newAlethGenesisSpec(network string, genesis *core.Genesis) (*alethGenesisSp
 	spec.Params.TieBreakingGas = false
 	spec.Params.AllowFutureBlocks = false
 
-	spec.Params.HomesteadForkBlock = (hexutil.Uint64)(genesis.Config.HomesteadBlock.Uint64())
-	spec.Params.EIP150ForkBlock = (hexutil.Uint64)(genesis.Config.EIP150Block.Uint64())
-	spec.Params.EIP158ForkBlock = (hexutil.Uint64)(genesis.Config.EIP158Block.Uint64())
-	if genesis.Config.EIP2027Block != nil {
-		spec.Params.EIP2027ForkBlock = (hexutil.Uint64)(genesis.Config.EIP2027Block.Uint64())
-	}
 	// Dao hardfork block is a special one. The fork block is listed as 0 in the
 	// config but aleth will sync with ETC clients up until the actual dao hard
 	// fork block.
@@ -142,6 +136,10 @@ func newAlethGenesisSpec(network string, genesis *core.Genesis) (*alethGenesisSp
 	if num := genesis.Config.IstanbulBlock; num != nil {
 		spec.Params.IstanbulForkBlock = (*hexutil.Big)(num)
 	}
+	if num := genesis.Config.EIP2027Block; num != nil {
+		spec.Params.EIP2027ForkBlock = (*hexutil.Big)(num)
+	}
+
 	spec.Params.NetworkID = (hexutil.Uint64)(genesis.Config.ChainID.Uint64())
 	spec.Params.ChainID = (hexutil.Uint64)(genesis.Config.ChainID.Uint64())
 	spec.Params.MaximumExtraDataSize = (hexutil.Uint64)(params.MaximumExtraDataSize)
@@ -251,7 +249,7 @@ type parityChainSpec struct {
 	} `json:"engine"`
 
 	Params struct {
-		AccountStartNonce         hexutil.Uint64       `json:"accountStartNonce"`
+		AccountStartNonce         hexutil.Uint64       `json:"accountStartNonce"` //nolint:unused
 		MaximumExtraDataSize      hexutil.Uint64       `json:"maximumExtraDataSize"`
 		MinGasLimit               hexutil.Uint64       `json:"minGasLimit"`
 		GasLimitBoundDivisor      math2.HexOrDecimal64 `json:"gasLimitBoundDivisor"`

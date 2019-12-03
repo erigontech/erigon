@@ -79,11 +79,13 @@ func (d iterativeDump) onAccount(addr common.Address, account DumpAccount) {
 	if addr != (common.Address{}) {
 		dumpAccount.Address = &addr
 	}
+	//nolint:errcheck
 	d.Encode(dumpAccount)
 }
 
-func (self iterativeDump) onRoot(root common.Hash) {
-	(*json.Encoder)(&self).Encode(struct {
+func (d iterativeDump) onRoot(root common.Hash) {
+	//nolint:errcheck
+	d.Encoder.Encode(struct {
 		Root common.Hash `json:"root"`
 	}{root})
 }
@@ -188,5 +190,5 @@ func (tds *TrieDbState) Dump(excludeCode, excludeStorage, excludeMissingPreimage
 
 // IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (tds *TrieDbState) IterativeDump(excludeCode, excludeStorage, excludeMissingPreimages bool, output *json.Encoder) {
-	tds.dump(iterativeDump(*output), excludeCode, excludeStorage, excludeMissingPreimages)
+	tds.dump(iterativeDump{output}, excludeCode, excludeStorage, excludeMissingPreimages)
 }

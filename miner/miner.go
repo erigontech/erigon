@@ -121,7 +121,6 @@ func (miner *Miner) update() {
 	}
 }
 
-
 func (miner *Miner) Start(coinbase common.Address) {
 	atomic.StoreInt32(&miner.shouldStart, 1)
 	miner.SetEtherbase(coinbase)
@@ -168,7 +167,7 @@ func (miner *Miner) SetRecommitInterval(interval time.Duration) {
 }
 
 // Pending returns the currently pending block and associated state.
-func (miner *Miner) Pending() (*types.Block, *state.StateDB) {
+func (miner *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
 	return miner.worker.pending()
 }
 

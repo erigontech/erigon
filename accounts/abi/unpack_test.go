@@ -450,7 +450,7 @@ func TestUnpack(t *testing.T) {
 			}
 			encb, err := hex.DecodeString(test.enc)
 			if err != nil {
-				t.Fatalf("invalid hex %s: %v", test.enc, err)
+				t.Fatalf("invalid hex %s: %v", test.enc, err) //nolint:scopelint
 			}
 			outptr := reflect.New(reflect.TypeOf(test.want))
 			err = abi.Unpack(outptr.Interface(), "method", encb)

@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -74,7 +75,6 @@ const (
 	ErrForkIDRejected
 	ErrNoStatusMsg
 	ErrExtraStatusMsg
-	ErrSuspendedPeer
 	ErrNotImplemented
 )
 
@@ -88,14 +88,12 @@ var errorToString = map[int]string{
 	ErrDecode:                  "Invalid message",
 	ErrInvalidMsgCode:          "Invalid message code",
 	ErrProtocolVersionMismatch: "Protocol version mismatch",
-	ErrNetworkIdMismatch:       "NetworkID mismatch",
-	ErrGenesisBlockMismatch:    "Genesis block mismatch",
-	ErrNoStatusMsg:             "No status message",
-	ErrExtraStatusMsg:          "Extra status message",
-	ErrSuspendedPeer:           "Suspended peer",
-	ErrNotImplemented:          "Not implemented yet",
+	ErrNetworkIDMismatch:       "Network ID mismatch",
 	ErrGenesisMismatch:         "Genesis mismatch",
 	ErrForkIDRejected:          "Fork ID rejected",
+	ErrNoStatusMsg:             "No status message",
+	ErrExtraStatusMsg:          "Extra status message",
+	ErrNotImplemented:          "Not implemented yet",
 }
 
 type txPool interface {

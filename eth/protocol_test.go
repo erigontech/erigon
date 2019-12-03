@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"sync"
@@ -24,10 +25,18 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
+	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -57,15 +66,15 @@ func TestStatusMsgErrors63(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData63{10, DefaultConfig.NetworkId, td, head.Hash(), genesis.Hash()},
+			code: StatusMsg, data: statusData63{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash()},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 63),
 		},
 		{
 			code: StatusMsg, data: statusData63{63, 999, td, head.Hash(), genesis.Hash()},
-			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkId),
+			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData63{63, DefaultConfig.NetworkId, td, head.Hash(), common.Hash{3}},
+			code: StatusMsg, data: statusData63{63, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000 (!= %x)", genesis.Hash().Bytes()[:8]),
 		},
 	}
@@ -109,19 +118,19 @@ func TestStatusMsgErrors64(t *testing.T) {
 			wantError: errResp(ErrNoStatusMsg, "first msg has code 2 (!= 0)"),
 		},
 		{
-			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkId, td, head.Hash(), genesis.Hash(), forkID},
+			code: StatusMsg, data: statusData{10, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkID},
 			wantError: errResp(ErrProtocolVersionMismatch, "10 (!= %d)", 64),
 		},
 		{
 			code: StatusMsg, data: statusData{64, 999, td, head.Hash(), genesis.Hash(), forkID},
-			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkId),
+			wantError: errResp(ErrNetworkIDMismatch, "999 (!= %d)", DefaultConfig.NetworkID),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkId, td, head.Hash(), common.Hash{3}, forkID},
+			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), common.Hash{3}, forkID},
 			wantError: errResp(ErrGenesisMismatch, "0300000000000000000000000000000000000000000000000000000000000000 (!= %x)", genesis.Hash()),
 		},
 		{
-			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkId, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
+			code: StatusMsg, data: statusData{64, DefaultConfig.NetworkID, td, head.Hash(), genesis.Hash(), forkid.ID{Hash: [4]byte{0x00, 0x01, 0x02, 0x03}}},
 			wantError: errResp(ErrForkIDRejected, forkid.ErrLocalIncompatibleOrStale.Error()),
 		},
 	}
@@ -157,8 +166,8 @@ func TestForkIDSplit(t *testing.T) {
 			EIP158Block:    big.NewInt(2),
 			ByzantiumBlock: big.NewInt(3),
 		}
-		dbNoFork  = rawdb.NewMemoryDatabase()
-		dbProFork = rawdb.NewMemoryDatabase()
+		dbNoFork  = ethdb.NewMemDatabase()
+		dbProFork = ethdb.NewMemDatabase()
 
 		gspecNoFork  = &core.Genesis{Config: configNoFork}
 		gspecProFork = &core.Genesis{Config: configProFork}
@@ -169,11 +178,14 @@ func TestForkIDSplit(t *testing.T) {
 		chainNoFork, _  = core.NewBlockChain(dbNoFork, nil, configNoFork, engine, vm.Config{}, nil)
 		chainProFork, _ = core.NewBlockChain(dbProFork, nil, configProFork, engine, vm.Config{}, nil)
 
-		blocksNoFork, _  = core.GenerateChain(configNoFork, genesisNoFork, engine, dbNoFork, 2, nil)
-		blocksProFork, _ = core.GenerateChain(configProFork, genesisProFork, engine, dbProFork, 2, nil)
+		ctxNoFork  = chainNoFork.WithContext(context.Background(), big.NewInt(genesisNoFork.Number().Int64()+1))
+		ctxProFork = chainProFork.WithContext(context.Background(), big.NewInt(genesisProFork.Number().Int64()+1))
 
-		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, 1, nil)
-		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, 1, nil)
+		blocksNoFork, _  = core.GenerateChain(ctxNoFork, configNoFork, genesisNoFork, engine, dbNoFork, 2, nil)
+		blocksProFork, _ = core.GenerateChain(ctxProFork, configProFork, genesisProFork, engine, dbProFork, 2, nil)
+
+		ethNoFork, _  = NewProtocolManager(configNoFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainNoFork, dbNoFork, nil)
+		ethProFork, _ = NewProtocolManager(configProFork, nil, downloader.FullSync, 1, new(event.TypeMux), new(testTxPool), engine, chainProFork, dbProFork, nil)
 	)
 	ethNoFork.Start(1000)
 	ethProFork.Start(1000)

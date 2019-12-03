@@ -22,8 +22,6 @@ import (
 	"io"
 	"sort"
 
-	"strings"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/urfave/cli"
