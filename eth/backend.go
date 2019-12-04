@@ -216,8 +216,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-	//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	//eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+
+	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 
 	eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
 	gpoParams := config.GPO
@@ -485,7 +486,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		//go s.miner.Start(eb)
+		go s.miner.Start(eb)
 	}
 	return nil
 }

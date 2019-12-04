@@ -323,7 +323,6 @@ func checkEmptyMining(t *testing.T, testCase *testCase, state *state.IntraBlockS
 	gotBankBalance := state.GetBalance(testCase.testBankAddress).Uint64()
 
 	var balance uint64
-	fmt.Println("========", index, testCase.testBankFunds.Uint64(), gotBankBalance)
 	if index == 1 || testCase.testBankFunds.Uint64() != gotBankBalance {
 		balance = 1000
 	}
@@ -339,7 +338,7 @@ func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, index int, state *
 	if ok {
 		return
 	}
-	//checkEmptyMining(t, testCase, state, index)
+	checkEmptyMining(t, testCase, state, index)
 	taskCh <- struct{}{}
 }
 

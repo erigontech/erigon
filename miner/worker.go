@@ -20,13 +20,13 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -1006,7 +1006,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	}
 
 	if err = w.current.tds.ResolveStateTrie(); err != nil {
-		fmt.Printf("Failed to resolve state trie: %v\n", err)
+		return err
 	}
 
 	root, err := w.current.tds.CalcTrieRoots(false)
@@ -1015,10 +1015,12 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	}
 
 	w.current.header.Root = root
+
 	if w.isRunning() {
 		if interval != nil {
 			interval()
 		}
+
 		select {
 		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
