@@ -294,13 +294,24 @@ func (bwb *BlockWitnessBuilder) emptyRoot() error {
 func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet, codeMap map[common.Hash][]byte) error {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
-	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeMap)
+	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeMap, expandKeyHex)
 }
+
+func expandKeyHex(hex []byte, nibble byte) []byte {
+	result := make([]byte, len(hex)+1)
+	copy(result, hex)
+	result[len(hex)] = nibble
+	return result
+}
+
+type expandKeyFunc func([]byte, byte) []byte
 
 func (bwb *BlockWitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool,
 	codeMap map[common.Hash][]byte,
+	expandKeyFunc expandKeyFunc,
 ) error {
+
 	switch n := nd.(type) {
 	case nil:
 		return nil
@@ -313,7 +324,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			h = h[:len(h)-1]
 		}
 		hexVal := concat(hex, h...)
-		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
 		switch v := n.Val.(type) {
@@ -355,16 +366,11 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			return bwb.hash(1)
 		}
 		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false, codeMap); err != nil {
+
+		if err := bwb.makeBlockWitness(n.child1, expandKeyFunc(hex, i1), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
-		if err := bwb.makeBlockWitness(n.child2, hex2, rs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.child2, expandKeyFunc(hex, i2), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
 		return bwb.branch(n.mask)
@@ -381,7 +387,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		var set uint32
 		for i, child := range n.Children {
 			if child != nil {
-				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false, codeMap); err != nil {
+				if err := bwb.makeBlockWitness(child, expandKeyFunc(hex, byte(i)), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 					return err
 				}
 				set |= (uint32(1) << uint(i))
@@ -412,7 +418,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 				}
 			} else {
 				// Here we substitute rs parameter for storageRs, because it needs to become the default
-				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap, expandKeyFunc); err != nil {
 					return err
 				}
 			}
@@ -574,6 +580,11 @@ func (cht *CborHashTape) Next() (common.Hash, error) {
 
 // BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
 func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, error) {
+	return BlockWitnessToTrieBin(bw, trace, false)
+}
+
+// BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
+func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[common.Hash][]byte, error) {
 	codeMap := make(map[common.Hash][]byte)
 	var lens map[string]int
 	var handle codec.CborHandle
@@ -743,7 +754,12 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 		fmt.Printf("\n")
 	}
 	r := hb.root()
-	tr := New(hb.rootHash())
+	var tr *Trie
+	if isBinary {
+		tr = NewBinary(hb.rootHash())
+	} else {
+		tr = New(hb.rootHash())
+	}
 	tr.root = r
 	return tr, codeMap, nil
 }

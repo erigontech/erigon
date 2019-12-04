@@ -1150,9 +1150,16 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, *BlockWitnessStats, error) {
+func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitnessStats, error) {
 	bwb := trie.NewBlockWitnessBuilder(trace)
-	rs := trie.NewResolveSet(0)
+
+	var rs *trie.ResolveSet
+	if bin {
+		rs = trie.NewBinaryResolveSet(0)
+	} else {
+		rs = trie.NewResolveSet(0)
+	}
+
 	touches, storageTouches := tds.pg.ExtractTouches()
 	for _, touch := range touches {
 		rs.AddKey(touch)
@@ -1161,8 +1168,14 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, *BlockWitnessStats, 
 		rs.AddKey(touch)
 	}
 	codeMap := tds.pg.ExtractCodeMap()
-	if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-		return nil, nil, err
+	if bin {
+		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
+			return nil, nil, err
+		}
 	}
 	var b bytes.Buffer
 

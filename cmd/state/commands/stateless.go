@@ -14,6 +14,7 @@ var (
 	snapshotFrom     uint64
 	witnessInterval  uint64
 	noverify         bool
+	bintries         bool
 )
 
 func init() {
@@ -28,6 +29,7 @@ func init() {
 	statelessCmd.Flags().Uint64Var(&snapshotFrom, "snapshotFrom", 0, "from which block to start snapshots")
 	statelessCmd.Flags().Uint64Var(&witnessInterval, "witnessInterval", 1, "after which block to extract witness (put a large number like 10000000 to disable)")
 	statelessCmd.Flags().BoolVar(&noverify, "noVerify", false, "skip snapshot verification on loading")
+	statelessCmd.Flags().BoolVar(&bintries, "bintries", false, "use binary tries instead of hexary to generate/load block witnesses")
 
 	rootCmd.AddCommand(statelessCmd)
 
@@ -53,6 +55,7 @@ var statelessCmd = &cobra.Command{
 			witnessInterval,
 			statsfile,
 			!noverify,
+			bintries,
 			createDb,
 		)
 
