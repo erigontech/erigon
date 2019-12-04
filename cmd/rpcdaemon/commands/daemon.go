@@ -40,13 +40,13 @@ type EthAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	remoteDbAdddress string
-	db               *remote.DB
+	remoteDbAddress string
+	db              *remote.DB
 }
 
 func (api *APIImpl) ensureConnected(ctx context.Context) error {
 	if api.db == nil {
-		conn, err := net.Dial("tcp", api.remoteDbAdddress)
+		conn, err := net.Dial("tcp", api.remoteDbAddress)
 		if err != nil {
 			return err
 		}
@@ -61,8 +61,8 @@ func (api *APIImpl) ensureConnected(ctx context.Context) error {
 }
 
 // ConnectAPIImpl connects to the remote DB and returns APIImpl instance
-func ConnectAPIImpl(remoteDbAdddress string) (*APIImpl, error) {
-	return &APIImpl{remoteDbAdddress: remoteDbAdddress}, nil
+func ConnectAPIImpl(remoteDbAddress string) (*APIImpl, error) {
+	return &APIImpl{remoteDbAddress: remoteDbAddress}, nil
 }
 
 // BlockNumber returns the currently highest block number available in the remote db
@@ -259,7 +259,7 @@ func daemon(cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 	var rpcAPI = []rpc.API{}
-	apiImpl, err := ConnectAPIImpl(cfg.remoteDbAdddress)
+	apiImpl, err := ConnectAPIImpl(cfg.remoteDbAddress)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return

@@ -720,8 +720,8 @@ func (b *Bucket) Cursor() *Cursor {
 		out:          b.out,
 		cursorHandle: cursorHandle,
 
-		cacheKeys:   make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
-		cacheValues: make([][]byte, DefaultCursorCacheSize, DefaultCursorCacheSize),
+		cacheKeys:   make([][]byte, DefaultCursorCacheSize),
+		cacheValues: make([][]byte, DefaultCursorCacheSize),
 	}
 
 	return cursor
@@ -853,5 +853,4 @@ func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
 		}
 	}
 
-	return
 }

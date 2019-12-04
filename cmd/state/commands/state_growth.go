@@ -17,7 +17,7 @@ func init() {
 		Use:   "stateGrowth",
 		Short: "stateGrowth",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			reporter, err := stateless.NewReporter(remoteDbAdddress)
+			reporter, err := stateless.NewReporter(remoteDbAddress)
 			if err != nil {
 				return err
 			}
