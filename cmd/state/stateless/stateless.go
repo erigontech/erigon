@@ -201,7 +201,7 @@ func Stateless(
 			var tapeStats *state.BlockWitnessStats
 			witness, tapeStats, err = tds.ExtractWitness(trace, binary /* is binary */)
 			if err != nil {
-				fmt.Printf("error extracting BIN witness for block %d: %v\n", blockNum, err)
+				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
 				return
 			}
 			err = stats.AddRow(tapeStats)
