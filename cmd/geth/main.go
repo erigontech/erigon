@@ -106,7 +106,7 @@ var (
 		utils.CacheGCFlag,
 		utils.TrieCacheGenFlag,
 		utils.DownloadOnlyFlag,
-		utils.NoHistory,
+		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
 		utils.DatabaseFlag,
 		utils.RemoteDbListenAddress,

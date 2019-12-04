@@ -86,7 +86,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.LightKDFFlag,
 			utils.WhitelistFlag,
 			utils.DownloadOnlyFlag,
-			utils.NoHistory,
+			utils.StorageModeFlag,
 			utils.ArchiveSyncInterval,
 		},
 	},

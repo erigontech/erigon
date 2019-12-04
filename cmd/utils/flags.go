@@ -413,9 +413,14 @@ var (
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
 	}
-	NoHistory = cli.BoolFlag{
-		Name:  "no-history",
-		Usage: "Write the whole state history",
+	StorageModeFlag = cli.StringFlag{
+		Name: "storage-mode",
+		Usage: `Configures the storage mode of the app:
+* h - write history to the DB
+* p - write preimages to the DB
+* r - write receipts to the DB
+* t - write tx lookup index to the DB`,
+		Value: eth.DefaultStorageMode.ToString(),
 	}
 	ArchiveSyncInterval = cli.IntFlag{
 		Name:  "archive-sync-interval",
@@ -1474,7 +1479,13 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
 
 	cfg.DownloadOnly = ctx.GlobalBoolT(DownloadOnlyFlag.Name)
-	cfg.NoHistory = ctx.GlobalBoolT(NoHistory.Name)
+
+	mode, err := eth.StorageModeFromString(ctx.GlobalString(StorageModeFlag.Name))
+	if err != nil {
+		Fatalf(fmt.Sprintf("error while parsing mode: %v", err))
+	}
+
+	cfg.StorageMode = mode
 	cfg.ArchiveSyncInterval = ctx.GlobalInt(ArchiveSyncInterval.Name)
 
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {
