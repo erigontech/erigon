@@ -18,6 +18,7 @@ package enode
 
 import (
 	"crypto/ecdsa"
+	"errors"
 	"net"
 	"reflect"
 	"strings"
@@ -26,6 +27,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 )
+
+func init() {
+	lookupIPFunc = func(name string) ([]net.IP, error) {
+		if name == "node.example.org" {
+			return []net.IP{{33, 44, 55, 66}}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+}
 
 var parseNodeTests = []struct {
 	input      string

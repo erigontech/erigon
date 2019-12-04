@@ -28,10 +28,10 @@ import (
 	cli "github.com/urfave/cli"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
-	"github.com/ledgerwatch/turbo-geth/dashboard"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
+
 	"github.com/naoina/toml"
 )
 
@@ -77,7 +77,6 @@ type gethConfig struct {
 	Eth       eth.Config
 	Node      node.Config
 	Ethstats  ethstatsConfig
-	Dashboard dashboard.Config
 }
 
 func loadConfig(file string, cfg *gethConfig) error {
@@ -110,7 +109,6 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	cfg := gethConfig{
 		Eth:       eth.DefaultConfig,
 		Node:      defaultNodeConfig(),
-		Dashboard: dashboard.DefaultConfig,
 	}
 
 	// Load config file.
@@ -130,7 +128,6 @@ func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	if ctx.GlobalIsSet(utils.EthStatsURLFlag.Name) {
 		cfg.Ethstats.URL = ctx.GlobalString(utils.EthStatsURLFlag.Name)
 	}
-	utils.SetDashboardConfig(ctx, &cfg.Dashboard)
 
 	return stack, cfg
 }
@@ -141,10 +138,6 @@ func makeFullNode(ctx *cli.Context) *node.Node {
 		cfg.Eth.OverrideIstanbul = new(big.Int).SetUint64(ctx.GlobalUint64(utils.OverrideIstanbulFlag.Name))
 	}
 	utils.RegisterEthService(stack, &cfg.Eth)
-
-	if ctx.GlobalBool(utils.DashboardEnabledFlag.Name) {
-		utils.RegisterDashboardService(stack, &cfg.Dashboard, gitCommit)
-	}
 
 	// Configure GraphQL if required
 	if ctx.GlobalIsSet(utils.GraphQLEnabledFlag.Name) {

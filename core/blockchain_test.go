@@ -1381,14 +1381,17 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 					continue // busy wait for canonical hash to be written
 				}
 				if ch != block.Hash() {
-					t.Fatalf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
+					t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
+					return
 				}
 				fb := rawdb.ReadBlock(blockchain.db, ch, block.NumberU64())
 				if fb == nil {
-					t.Fatalf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
+					t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
+					return
 				}
 				if fb.Hash() != block.Hash() {
-					t.Fatalf("invalid block hash for block %d, want %s, got %s", block.NumberU64(), block.Hash().Hex(), fb.Hash().Hex())
+					t.Errorf("invalid block hash for block %d, want %s, got %s", block.NumberU64(), block.Hash().Hex(), fb.Hash().Hex())
+					return
 				}
 				return
 			}
@@ -1410,7 +1413,7 @@ func TestEIP155Transition(t *testing.T) {
 		funds      = big.NewInt(1000000000)
 		deleteAddr = common.Address{1}
 		gspec      = &Genesis{
-			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
 		genesis = gspec.MustCommit(db)
@@ -1482,7 +1485,7 @@ func TestEIP155Transition(t *testing.T) {
 	}
 
 	// generate an invalid chain id transaction
-	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
+	config := &params.ChainConfig{ChainID: big.NewInt(2), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)}
 	ctx = blockchain.WithContext(context.Background(), big.NewInt(blocks[len(blocks)-1].Number().Int64()+1))
 	blocks, _ = GenerateChain(ctx, config, blocks[len(blocks)-1], ethash.NewFaker(), db.MemCopy(), 4, func(i int, block *BlockGen) {
 		var (
@@ -1519,6 +1522,7 @@ func TestEIP161AccountRemoval(t *testing.T) {
 				ChainID:        big.NewInt(1),
 				HomesteadBlock: new(big.Int),
 				EIP155Block:    new(big.Int),
+				EIP150Block:    new(big.Int),
 				EIP158Block:    big.NewInt(2),
 			},
 			Alloc: GenesisAlloc{address: {Balance: funds}},
@@ -1985,13 +1989,6 @@ func testInsertKnownChainData(t *testing.T, typ string) {
 		inserter func(blocks []*types.Block, receipts []types.Receipts) error
 		asserter func(t *testing.T, block *types.Block)
 	)
-	headers, headers2 := make([]*types.Header, 0, len(blocks)), make([]*types.Header, 0, len(blocks2))
-	for _, block := range blocks {
-		headers = append(headers, block.Header())
-	}
-	for _, block := range blocks2 {
-		headers2 = append(headers2, block.Header())
-	}
 	if typ == "headers" {
 		inserter = func(blocks []*types.Block, receipts []types.Receipts) error {
 			headers := make([]*types.Header, 0, len(blocks))

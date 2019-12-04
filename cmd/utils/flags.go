@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/dashboard"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
@@ -300,26 +299,6 @@ var (
 	DownloadOnlyFlag = cli.BoolFlag{
 		Name:  "download-only",
 		Usage: "Run in download only mode - only fetch blocks but not process them",
-	}
-	// Dashboard settings
-	DashboardEnabledFlag = cli.BoolFlag{
-		Name:  "dashboard",
-		Usage: "Enable the dashboard",
-	}
-	DashboardAddrFlag = cli.StringFlag{
-		Name:  "dashboard.addr",
-		Usage: "Dashboard listening interface",
-		Value: dashboard.DefaultConfig.Host,
-	}
-	DashboardPortFlag = cli.IntFlag{
-		Name:  "dashboard.host",
-		Usage: "Dashboard listening port",
-		Value: dashboard.DefaultConfig.Port,
-	}
-	DashboardRefreshFlag = cli.DurationFlag{
-		Name:  "dashboard.refresh",
-		Usage: "Dashboard metrics collection refresh rate",
-		Value: dashboard.DefaultConfig.Refresh,
 	}
 	// Ethash settings
 	EthashCacheDirFlag = DirectoryFlag{
@@ -1487,7 +1466,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {
 		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
 	}
-	cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+	if ctx.GlobalIsSet(GCModeFlag.Name) {
+		cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+	}
 	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
@@ -1571,13 +1552,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 }
 
-// SetDashboardConfig applies dashboard related command line flags to the config.
-func SetDashboardConfig(ctx *cli.Context, cfg *dashboard.Config) {
-	cfg.Host = ctx.GlobalString(DashboardAddrFlag.Name)
-	cfg.Port = ctx.GlobalInt(DashboardPortFlag.Name)
-	cfg.Refresh = ctx.GlobalDuration(DashboardRefreshFlag.Name)
-}
-
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *eth.Config) {
 	var err error
@@ -1588,13 +1562,6 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) {
 	if err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
-}
-
-// RegisterDashboardService adds a dashboard to the stack.
-func RegisterDashboardService(stack *node.Node, cfg *dashboard.Config, commit string) {
-	stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return dashboard.New(cfg, commit, ctx.ResolvePath("logs")), nil
-	})
 }
 
 // RegisterEthStatsService configures the Ethereum Stats daemon and adds it to
