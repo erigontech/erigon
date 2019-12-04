@@ -3,6 +3,7 @@ package stateless
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -100,21 +101,22 @@ func (isa IntSorterAddr) Swap(i, j int) {
 }
 
 type Reporter struct {
-	remoteDbAdddress string
-	db               *remote.DB
+	remoteDbAddress string
+	db              *remote.DB
 }
 
-func NewReporter(remoteDbAdddress string) (*Reporter, error) {
-	return &Reporter{remoteDbAdddress: remoteDbAdddress}, nil
+func NewReporter(remoteDbAddress string) (*Reporter, error) {
+	return &Reporter{remoteDbAddress: remoteDbAddress}, nil
 }
 
-func (r *Reporter) ensureConnected() error {
+func (r *Reporter) ensureConnected(ctx context.Context) error {
 	if r.db == nil {
-		conn, err := net.Dial("tcp", r.remoteDbAdddress)
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", r.remoteDbAddress)
 		if err != nil {
 			return err
 		}
-		r.db, err = remote.NewDB(conn, conn, conn)
+		r.db, err = remote.NewDB(ctx, conn, conn, conn)
 		if err != nil {
 			return err
 		}
@@ -122,10 +124,10 @@ func (r *Reporter) ensureConnected() error {
 	return nil
 }
 
-func (r *Reporter) StateGrowth1(chaindata string) {
+func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	startTime := time.Now()
 
-	err := r.ensureConnected()
+	err := r.ensureConnected(ctx)
 	check(err)
 
 	var count int
@@ -229,8 +231,8 @@ func (r *Reporter) StateGrowth1(chaindata string) {
 	}
 }
 
-func (r *Reporter) StateGrowth2(chaindata string) {
-	err := r.ensureConnected()
+func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
+	err := r.ensureConnected(ctx)
 	check(err)
 
 	startTime := time.Now()

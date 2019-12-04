@@ -44,16 +44,18 @@ type APIImpl struct {
 	db               *remote.DB
 }
 
-func (api *APIImpl) ensureConnected() error {
+func (api *APIImpl) ensureConnected(ctx context.Context) error {
 	if api.db == nil {
 		conn, err := net.Dial("tcp", api.remoteDbAdddress)
 		if err != nil {
 			return err
 		}
-		api.db, err = remote.NewDB(conn, conn, conn)
+
+		api.db, err = remote.NewDB(ctx, conn, conn, conn)
 		if err != nil {
 			return err
 		}
+
 	}
 	return nil
 }
@@ -65,7 +67,7 @@ func ConnectAPIImpl(remoteDbAdddress string) (*APIImpl, error) {
 
 // BlockNumber returns the currently highest block number available in the remote db
 func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
-	if err := api.ensureConnected(); err != nil {
+	if err := api.ensureConnected(context.Background()); err != nil {
 		return 0, err
 	}
 	var blockNumber uint64
@@ -99,7 +101,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	if err := api.ensureConnected(); err != nil {
+	if err := api.ensureConnected(context.Background()); err != nil {
 		return nil, err
 	}
 

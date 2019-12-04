@@ -18,6 +18,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
@@ -40,6 +41,8 @@ const (
 )
 
 func TestCmdVersion(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -58,7 +61,7 @@ func TestCmdVersion(t *testing.T) {
 	if err = encoder.Encode(&c); err != nil {
 		t.Errorf("Could not encode CmdVersion: %v", err)
 	}
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	var v uint64
@@ -71,6 +74,7 @@ func TestCmdVersion(t *testing.T) {
 }
 
 func TestCmdBeginEndLastError(t *testing.T) {
+	ctx := context.Background()
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -121,7 +125,7 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -144,6 +148,8 @@ func TestCmdBeginEndLastError(t *testing.T) {
 }
 
 func TestCmdBucket(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -183,7 +189,7 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -203,6 +209,8 @@ func TestCmdBucket(t *testing.T) {
 }
 
 func TestCmdGet(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -276,7 +284,7 @@ func TestCmdGet(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -312,6 +320,8 @@ func TestCmdGet(t *testing.T) {
 }
 
 func TestCmdSeek(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -380,7 +390,7 @@ func TestCmdSeek(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -423,6 +433,7 @@ func TestCmdSeek(t *testing.T) {
 
 func TestCmdNext(t *testing.T) {
 	// ---------- Start of boilerplate code
+	ctx := context.Background()
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		t.Errorf("Could not create database: %v", err)
@@ -501,7 +512,7 @@ func TestCmdNext(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
@@ -569,6 +580,7 @@ func TestCmdNext(t *testing.T) {
 
 func TestCmdFirst(t *testing.T) {
 	// ---------- Start of boilerplate code
+	ctx := context.Background()
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		t.Errorf("Could not create database: %v", err)
@@ -648,7 +660,7 @@ func TestCmdFirst(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
