@@ -100,7 +100,7 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	if err = encoder.Encode(&txHandle); err != nil {
 		t.Errorf("Could not encode txHandle: %v", err)
 	}
-	// CmdLastError to retrive the error related to the CmdEndTx with the wrong handle
+	// CmdLastError to retrieve the error related to the CmdEndTx with the wrong handle
 	c = CmdLastError
 	if err = encoder.Encode(&c); err != nil {
 		t.Errorf("Could not encode CmdLastError: %v", err)
@@ -126,17 +126,17 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	}
 	// And then we interpret the results
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBeginTx")
+		t.Errorf("Could not decode response from CmdBeginTx, %v", err)
 	}
 	var lastErrorStr string
 	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError")
+		t.Errorf("Could not decode response from CmdLastError, %v", err)
 	}
 	if lastErrorStr != "transaction not found" {
 		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
 	}
 	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError")
+		t.Errorf("Could not decode response from CmdLastError, %v", err)
 	}
 	if lastErrorStr != "<nil>" {
 		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
@@ -188,14 +188,14 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// And then we interpret the results
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	var bucketHandle uint64
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -282,14 +282,14 @@ func TestCmdGet(t *testing.T) {
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -386,14 +386,14 @@ func TestCmdSeek(t *testing.T) {
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -497,7 +497,7 @@ func TestCmdNext(t *testing.T) {
 	}
 	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
 	if err = encoder.Encode(&numberOfKeys); err != nil {
-		t.Errorf("Could not encode numberOfKeys for CmdNex: %v", err)
+		t.Errorf("Could not encode numberOfKeys for CmdCursorNext: %v", err)
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -507,14 +507,14 @@ func TestCmdNext(t *testing.T) {
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)

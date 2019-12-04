@@ -136,7 +136,7 @@ func (r *Reporter) StateGrowth1(chaindata string) {
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 	// Go through the history of account first
-	if err := r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
@@ -163,14 +163,15 @@ func (r *Reporter) StateGrowth1(chaindata string) {
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		r.db.Close()
 		r.db = nil
 		check(err)
 	}
 
 	// Go through the current state
-	if err := r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(func(tx *remote.Tx) error {
 		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
@@ -190,7 +191,8 @@ func (r *Reporter) StateGrowth1(chaindata string) {
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		r.db.Close()
 		r.db = nil
 		check(err)
@@ -241,7 +243,7 @@ func (r *Reporter) StateGrowth2(chaindata string) {
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
-	if err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
@@ -284,14 +286,15 @@ func (r *Reporter) StateGrowth2(chaindata string) {
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		r.db.Close()
 		r.db = nil
 		check(err)
 	}
 
 	// Go through the current state
-	if err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
@@ -312,7 +315,8 @@ func (r *Reporter) StateGrowth2(chaindata string) {
 			}
 		}
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		r.db.Close()
 		r.db = nil
 		check(err)

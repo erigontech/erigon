@@ -180,7 +180,9 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 				// We do Rollback and never Commit, because the remote transactions are always read-only, and must never change
 				// anything
 				// nolint:errcheck
-				defer tx.Rollback()
+				defer func(tx *bolt.Tx) {
+					tx.Rollback()
+				}(tx)
 				lastHandle++
 				txHandle = lastHandle
 				transactions[txHandle] = tx
@@ -192,13 +194,14 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 		case CmdEndTx:
 			var txHandle uint64
 			if err := decoder.Decode(&txHandle); err != nil {
-				log.Error("could not decode txHandle for CmdEndTx")
+				log.Error("could not decode txHandle for CmdEndTx, %v", err)
 				return err
 			}
 			tx, ok := transactions[txHandle]
 			if !ok {
 				lastError = fmt.Errorf("transaction not found")
-				return nil
+				continue
+				//return nil
 			}
 
 			// Remove all the buckets
@@ -225,7 +228,7 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			// Read the txHandle
 			var txHandle uint64
 			if err := decoder.Decode(&txHandle); err != nil {
-				log.Error("could not decode txHandle for CmdBucket")
+				log.Error("could not decode txHandle for CmdBucket, %v", err)
 				return err
 			}
 			// Read the name of the bucket
@@ -263,12 +266,12 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 		case CmdGet:
 			var bucketHandle uint64
 			if err := decoder.Decode(&bucketHandle); err != nil {
-				log.Error("could not decode bucketHandle for CmdGet")
+				log.Error("could not decode bucketHandle for CmdGet, %v", err)
 				return err
 			}
 			var key []byte
 			if err := decoder.Decode(&key); err != nil {
-				log.Error("could not decode key for CmdGet")
+				log.Error("could not decode key for CmdGet, %v", err)
 				return err
 			}
 			var value []byte
@@ -339,19 +342,19 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 			var err error
 
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdCursorNext")
+				log.Error("could not decode cursorHandle for CmdCursorNext, %v", err)
 				return err
 			}
 			var numberOfKeys uint64
 			if err := decoder.Decode(&numberOfKeys); err != nil {
-				log.Error("could not decode numberOfKeys for CmdCursorNext")
+				log.Error("could not decode numberOfKeys for CmdCursorNext, %v", err)
 			}
 			var key, value []byte
 
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				lastError = fmt.Errorf("cursor not found")
-				return nil
+				continue
 			}
 
 			for numberOfKeys > 0 {
@@ -376,18 +379,18 @@ func Server(db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 		case CmdCursorFirst:
 			var cursorHandle uint64
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdCursorFirst")
+				log.Error("could not decode cursorHandle for CmdCursorFirst, %v", err)
 				return err
 			}
 			var numberOfKeys uint64
 			if err := decoder.Decode(&numberOfKeys); err != nil {
-				log.Error("could not decode numberOfKeys for CmdCursorFirst")
+				log.Error("could not decode numberOfKeys for CmdCursorFirst, %v", err)
 			}
 			var key, value []byte
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				lastError = fmt.Errorf("cursor not found")
-				return nil
+				continue
 			}
 
 			key, value = cursor.First()
