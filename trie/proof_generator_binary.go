@@ -5,18 +5,9 @@ import (
 )
 
 func expandKeyBin(hex []byte, nibble byte) []byte {
+	// We actually will never receive anything except [0_1] in `hex`, so we can just
+	// reuse the existing functinality.
 	return expandKeyHex(hex, nibble)
-	/*
-		fmt.Printf("expandKeyBin hex=%x nibble=%x\n", hex, nibble)
-		if nibble == 16 {
-			// doesn't differ there
-			return expandKeyHex(hex, nibble)
-		}
-		result := make([]byte, len(hex)+4)
-		copy(result, hex)
-		writeHexNibbleToBinary(result[len(hex):], nibble)
-		return result
-	*/
 }
 
 // MakeBlockWitness constructs block witness from the given trie and the
