@@ -1421,6 +1421,8 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			td = new(big.Int).Add(block.Difficulty(), td)
 			rawdb.WriteBlock(bc.db, block)
 			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
+
+			events = append(events, ChainSideEvent{block})
 		}
 		return 0, events, coalescedLogs, nil
 	}
@@ -1880,31 +1882,23 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	}
 
 	if len(deletedLogs) > 0 {
-		go bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
+		bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
 	}
 	if _, err := bc.db.Commit(); err != nil {
 		return err
 	}
-	// If any logs need to be fired, do it now. In theory we could avoid creating
-	// this goroutine if there are no events to fire, but realistcally that only
-	// ever happens if we're reorging empty blocks, which will only happen on idle
-	// networks where performance is not an issue either way.
-	//
-	// TODO(karalabe): Can we get rid of the goroutine somehow to guarantee correct
-	// event ordering?
-	go func() {
-		if len(deletedLogs) > 0 {
-			bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
+
+	if len(deletedLogs) > 0 {
+		bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
+	}
+	if len(rebirthLogs) > 0 {
+		bc.logsFeed.Send(rebirthLogs)
+	}
+	if len(oldChain) > 0 {
+		for _, block := range oldChain {
+			bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 		}
-		if len(rebirthLogs) > 0 {
-			bc.logsFeed.Send(rebirthLogs)
-		}
-		if len(oldChain) > 0 {
-			for _, block := range oldChain {
-				bc.chainSideFeed.Send(ChainSideEvent{Block: block})
-			}
-		}
-	}()
+	}
 	return nil
 }
 

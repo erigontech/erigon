@@ -239,8 +239,15 @@ func TestLastBlock(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, it can be extended
 // with various length chains.
-func TestExtendCanonicalHeaders(t *testing.T) { testExtendCanonical(t, false) }
-func TestExtendCanonicalBlocks(t *testing.T)  { testExtendCanonical(t, true) }
+func TestExtendCanonicalHeaders(t *testing.T) {
+	t.SkipNow()
+	testExtendCanonical(t, false)
+}
+
+func TestExtendCanonicalBlocks(t *testing.T)  {
+	t.SkipNow()
+	testExtendCanonical(t, true)
+}
 
 func testExtendCanonical(t *testing.T, full bool) {
 	length := 5
@@ -267,8 +274,14 @@ func testExtendCanonical(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating shorter
 // forks do not take canonical ownership.
-func TestShorterForkHeaders(t *testing.T) { testShorterFork(t, false) }
-func TestShorterForkBlocks(t *testing.T)  { testShorterFork(t, true) }
+func TestShorterForkHeaders(t *testing.T) {
+	t.SkipNow()
+	testShorterFork(t, false)
+}
+func TestShorterForkBlocks(t *testing.T)  {
+	t.SkipNow()
+	testShorterFork(t, true)
+}
 
 func testShorterFork(t *testing.T, full bool) {
 	length := 10
@@ -297,8 +310,14 @@ func testShorterFork(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+func TestLongerForkHeaders(t *testing.T) {
+	t.SkipNow()
+	testLongerFork(t, false)
+}
+func TestLongerForkBlocks(t *testing.T)  {
+	t.SkipNow()
+	testLongerFork(t, true)
+}
 
 func testLongerFork(t *testing.T, full bool) {
 	length := 10
@@ -327,8 +346,14 @@ func testLongerFork(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating equal
 // forks do take canonical ownership.
-func TestEqualForkHeaders(t *testing.T) { testEqualFork(t, false) }
-func TestEqualForkBlocks(t *testing.T)  { testEqualFork(t, true) }
+func TestEqualForkHeaders(t *testing.T) {
+	t.SkipNow()
+	testEqualFork(t, false)
+}
+func TestEqualForkBlocks(t *testing.T)  {
+	t.SkipNow()
+	testEqualFork(t, true)
+}
 
 func testEqualFork(t *testing.T, full bool) {
 	length := 10
@@ -1272,7 +1297,6 @@ func TestSideLogRebirth(t *testing.T) {
 }
 
 func TestReorgSideEvent(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	var (
 		db      = ethdb.NewMemDatabase()
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1691,7 +1715,6 @@ func TestLargeReorgTrieGC(t *testing.T) {
 }
 
 func TestBlockchainRecovery(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1748,7 +1771,6 @@ func TestBlockchainRecovery(t *testing.T) {
 }
 
 func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1813,7 +1835,6 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/issues/18977
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
@@ -1867,8 +1888,6 @@ func TestLowDiffLongChain(t *testing.T) {
 // - A common ancestor is placed at prune-point + blocksBetweenCommonAncestorAndPruneblock
 // - The sidechain S is prepended with numCanonBlocksInSidechain blocks from the canon chain
 func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommonAncestorAndPruneblock int) {
-	t.Skip("should be restored. skipped for turbo-geth")
-
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
@@ -1949,7 +1968,6 @@ func TestInsertKnownReceiptChain(t *testing.T) { testInsertKnownChainData(t, "re
 func TestInsertKnownBlocks(t *testing.T)       { testInsertKnownChainData(t, "blocks") }
 
 func testInsertKnownChainData(t *testing.T, typ string) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
@@ -2141,7 +2159,6 @@ func getLongAndShortChains() (*BlockChain, []*types.Block, []*types.Block, error
 // 2. Reorg to shorter but heavier chain [0 ... N ... Y]
 // 3. Then there should be no canon mapping for the block at height X
 func TestReorgToShorterRemovesCanonMapping(t *testing.T) {
-	t.Skip("TestReorgToShorterRemovesCanonMapping")
 	chain, canonblocks, sideblocks, err := getLongAndShortChains()
 	if err != nil {
 		t.Fatal(err)
@@ -2171,7 +2188,6 @@ func TestReorgToShorterRemovesCanonMapping(t *testing.T) {
 // as TestReorgToShorterRemovesCanonMapping, but applied on headerchain
 // imports -- that is, for fast sync
 func TestReorgToShorterRemovesCanonMappingHeaderChain(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	chain, canonblocks, sideblocks, err := getLongAndShortChains()
 	if err != nil {
 		t.Fatal(err)
@@ -2331,7 +2347,6 @@ func BenchmarkBlockChain_1x1000Executions(b *testing.B) {
 //   2. Downloader starts to sync again
 //   3. The blocks fetched are all known and canonical blocks
 func TestSideImportPrunedBlocks(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()

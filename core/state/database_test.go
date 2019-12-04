@@ -202,6 +202,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
 }
+
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -336,6 +337,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
 }
+
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (

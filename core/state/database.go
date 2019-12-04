@@ -26,11 +26,12 @@ import (
 	"runtime"
 	"sort"
 	"sync"
+	"sync/atomic"
 
-	"github.com/davecgh/go-spew/spew"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -170,12 +171,25 @@ type TrieDbState struct {
 	tp              *trie.TriePruning
 }
 
-var trieObj = make(map[uintptr]*TrieDbState)
-var trieObjMu sync.RWMutex
+var (
+	trieObj = make(map[uintptr]*TrieDbState)
+	trieObjMu sync.RWMutex
+)
+
+type dbAddress interface {
+	GetDbAddress() uintptr
+}
 
 func getTrieDBState(db ethdb.Database) (*TrieDbState, uintptr) {
-	dbV := reflect.ValueOf(db).Elem()
-	dbAddr := dbV.UnsafeAddr()
+	var dbAddr uintptr
+
+	if dbGetter, ok := db.(dbAddress); ok {
+		dbAddr = dbGetter.GetDbAddress()
+		fmt.Println("!!! 2 - *ethdb.mutation", dbGetter.GetDbAddress())
+	} else {
+		dbV := reflect.ValueOf(db).Elem()
+		dbAddr = dbV.UnsafeAddr()
+	}
 
 	trieObjMu.RLock()
 	tr := trieObj[dbAddr]
@@ -192,12 +206,16 @@ func setTrieDBState(dbAddr uintptr, tds *TrieDbState) {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	tr, dbAddr := getTrieDBState(db)
-	fmt.Printf("\n************* NEW %v\n", dbAddr)
+	tt := reflect.TypeOf(db).Elem()
+
+	fmt.Printf("\n************* NEW %v %v\n%v\n", dbAddr, tt, debug.Callers(5))
 	if tr != nil {
-		if tr.blockNr == blockNr && tr.LastRoot() == root {
+		fmt.Printf("************* NEW TR %v %v\n%v %v\n", tr.getBlockNr(), blockNr, tr.LastRoot().String(), root.String())
+		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
 			return tr, nil
 		}
 	}
+	fmt.Printf("************* NEW Creating a new TR\n")
 
 	csc, err := lru.New(100000)
 	if err != nil {
@@ -243,12 +261,13 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tcopy := *tds.t
 
-	tp := trie.NewTriePruning(tds.blockNr)
+	n := tds.getBlockNr()
+	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
 		t:       &tcopy,
 		db:      tds.db,
-		blockNr: tds.blockNr,
+		blockNr: n,
 		tp:      tp,
 	}
 	return &cpy
@@ -277,19 +296,19 @@ func (tds *TrieDbState) StartNewBuffer() {
 }
 
 func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
-	fmt.Println("=== WithNewBuffer")
+	fmt.Println("=== WithNewBuffer START", tds.aggregateBuffer!=nil, tds.currentBuffer!=nil)
 	aggregateBuffer := &Buffer{}
 	aggregateBuffer.initialise()
 
 	currentBuffer := &Buffer{}
 	currentBuffer.initialise()
 
-	buffers := []*Buffer{tds.currentBuffer}
+	buffers := []*Buffer{currentBuffer}
 
 	return &TrieDbState{
 		t:               tds.t,
 		db:              tds.db,
-		blockNr:         tds.blockNr,
+		blockNr:         tds.getBlockNr(),
 		buffers:         buffers,
 		aggregateBuffer: aggregateBuffer,
 		currentBuffer:   currentBuffer,
@@ -552,8 +571,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
 	for i, b := range tds.buffers {
-
-		spew.Dump("buffers", b==nil)
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
@@ -709,7 +726,7 @@ func (tds *TrieDbState) Rebuild() error {
 }
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
-	tds.blockNr = blockNr
+	tds.setBlockNr(blockNr)
 	tds.tp.SetBlockNr(blockNr)
 }
 
@@ -776,7 +793,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}
 	fmt.Println("UnwindTo")
 	tds.clearUpdates()
-	tds.blockNr = blockNr
+	tds.setBlockNr(blockNr)
 	return nil
 }
 
@@ -1080,11 +1097,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 		return err
 	}
 
-	fmt.Println(1, tsw == nil)
-	fmt.Println(2, tsw.tds == nil)
-	fmt.Println(3, tsw.tds.currentBuffer == nil)
-	fmt.Println(4, tsw.tds.currentBuffer.accountUpdates == nil)
-
 	tsw.tds.currentBuffer.accountUpdates[addrHash] = account
 	return nil
 }
@@ -1266,3 +1278,12 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 func (tds *TrieDbState) TriePruningDebugDump() string {
 	return tds.tp.DebugDump()
 }
+
+func (tds *TrieDbState) getBlockNr() uint64 {
+	return atomic.LoadUint64(&tds.blockNr)
+}
+
+func (tds *TrieDbState) setBlockNr(n uint64) {
+	atomic.StoreUint64(&tds.blockNr, n)
+}
+

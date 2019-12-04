@@ -656,6 +656,7 @@ func (hb *HashBuilder) RootHash() (common.Hash, error) {
 
 func (hb *HashBuilder) rootHash() common.Hash {
 	var hash common.Hash
+	fmt.Println("++++++", len(hash), len(hb.hashStack))
 	copy(hash[:], hb.hashStack[1:hashStackStride])
 	return hash
 }
