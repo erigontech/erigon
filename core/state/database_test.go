@@ -17,8 +17,12 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"math/big"
 	"testing"
 
@@ -467,6 +471,147 @@ func TestReorgOverStateChange(t *testing.T) {
 	if valueX != correctValueX {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
+}
+
+func TestDatabaseStateChange_DB_Debug(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:             big.NewInt(1),
+				HomesteadBlock:      new(big.Int),
+				EIP155Block:         new(big.Int),
+				EIP158Block:         big.NewInt(1),
+				ConstantinopleBlock: big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+	)
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var selfDestruct *contracts.Selfdestruct
+
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	n:=100
+	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), n, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		case n-1:
+			tx, err = selfDestruct.Destruct(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		default:
+			tx, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+
+		}
+		contractBackend.Commit()
+		fmt.Println("commited i=",i)
+	})
+
+
+	st, _, _ := blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+	}
+
+	if _, err = blockchain.InsertChain(blocks); err != nil {
+		t.Fatal(err)
+	}
+
+	fmt.Println("==========================ACCOUNT===========================")
+	err=blockchain.ChainDb().Walk(dbutils.AccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		acc:=&accounts.Account{}
+		err:=acc.DecodeForStorage(v)
+		if err!=nil {
+			fmt.Println(err)
+		}
+		fmt.Println(common.BytesToHash(k).String(), len(v))
+		spew.Dump(acc)
+		return true, nil
+	})
+	if err!=nil {
+		fmt.Println(err)
+	}
+
+	fmt.Println("==========================ACCOUNTHISTORY===========================")
+	blockchain.ChainDb().Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		fmt.Println(common.BytesToHash(k).String(),v)
+		return true, nil
+	})
+
+	fmt.Println("==========================STORAGE===========================")
+	blockchain.ChainDb().Walk(dbutils.StorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		fmt.Println(common.BytesToHash(k).String(),v)
+		return true, nil
+	})
+
+	fmt.Println("==========================StorageHISTORY===========================")
+	blockchain.ChainDb().Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		fmt.Println(common.BytesToHash(k).String(),v)
+		return true, nil
+	})
+	fmt.Println("==========================CHANGESET===========================")
+	wholeChangesetLen:=0
+	hatChangesetLen:=0
+	hstChangesetLen:=0
+	blockchain.ChainDb().Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		fmt.Println("-------------------------", string(k),len(v), "--------------------------------------")
+		if bytes.HasSuffix(k, dbutils.AccountsHistoryBucket) {
+			hatChangesetLen+=len(v)
+		}
+		if bytes.HasSuffix(k, dbutils.StorageHistoryBucket) {
+			hstChangesetLen+=len(v)
+		}
+		wholeChangesetLen+=len(v)
+		cs,err:=dbutils.DecodeChangeSet(v)
+		if err!=nil {
+			fmt.Println(err)
+		}
+		for _,change:=range cs.Changes {
+			fmt.Println(string(change.Key), len(change.Value))
+		}
+		return true, nil
+	})
+
+	fmt.Println("whole", wholeChangesetLen)
+	fmt.Println("hat", hatChangesetLen)
+	fmt.Println("hst", hstChangesetLen)
 }
 
 

@@ -7,6 +7,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type DbStateWriter struct {
@@ -39,10 +40,10 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		// we can reduce storage size for history there
 		// because we have accountHash+incarnation -> codehash of contract in separate bucket
 		// and we don't need root in history requests
-		testAcc:=new(accounts.Account)
-		testAcc.Copy(original)
-		//testAcc.CodeHash=common.Hash{}
-		//testAcc.Root=emptyState
+
+		testAcc := original.SelfCopy()
+		testAcc.CodeHash= common.BytesToHash(emptyCodeHash)
+		testAcc.Root=trie.EmptyRoot
 
 		originalDataLen := testAcc.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
