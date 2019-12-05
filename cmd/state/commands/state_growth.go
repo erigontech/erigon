@@ -25,8 +25,8 @@ func init() {
 			ctx, _ := getContext()
 
 			fmt.Println("Processing started...")
-			reporter.StateGrowth1(ctx, chaindata)
-			reporter.StateGrowth2(ctx, chaindata)
+			reporter.StateGrowth1(ctx)
+			reporter.StateGrowth2(ctx)
 			return nil
 		},
 	}

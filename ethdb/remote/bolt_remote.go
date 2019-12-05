@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
-	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -357,6 +355,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 
 			for key, value := cursor.Next(); numberOfKeys > 0; key, value = cursor.Next() {
+				select {
+				default:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+
 				if err := encoder.Encode(key); err != nil {
 					log.Error("could not encode key in response to CmdNext", "error", err)
 					return err
@@ -365,11 +369,13 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					log.Error("could not encode value in response to CmdNext", "error", err)
 					return err
 				}
+
 				numberOfKeys--
 				if key == nil {
 					break
 				}
 			}
+
 			lastError = nil
 		case CmdCursorFirst:
 			var cursorHandle uint64
@@ -387,7 +393,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			numberOfKeys-- // 1 item will supply by .First call
 			for key, value := cursor.First(); numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
@@ -441,12 +446,6 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 			continue
 		}
 
-		select {
-		default:
-		case <-ctx.Done():
-			return
-		}
-
 		//nolint:errcheck
 		go Server(ctx, db, conn, conn, conn)
 	}
@@ -455,13 +454,12 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	in     io.Reader
-	out    io.Writer
-	closer io.Closer
+	dialFunc DialFunc
 }
 
-// NewDB creates a new instance of DB
-func NewDB(in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
+type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
+
+func ensureServerVersion(in io.Reader, out io.Writer) error {
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -469,43 +467,28 @@ func NewDB(in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
 	// Check version
 	var c = CmdVersion
 	if err := encoder.Encode(&c); err != nil {
-		return nil, err
+		return err
 	}
 	var v uint64
 	if err := decoder.Decode(&v); err != nil {
-		return nil, err
+		return err
 	}
 	if v != Version {
-		return nil, fmt.Errorf("returned version %d, expected %d", v, Version)
+		return fmt.Errorf("returned version %d, expected %d", v, Version)
 	}
 
-	db := &DB{in: in, out: out, closer: closer}
+	return nil
+}
+
+// NewDB creates a new instance of DB
+func NewDB(dialFunc DialFunc) (*DB, error) {
+	db := &DB{dialFunc: dialFunc}
 
 	return db, nil
 }
 
 // Close closes DB by using the closer field
 func (db *DB) Close() {
-	if db.closer == nil {
-		return
-	}
-
-	// TODO: here is data race between closing tcp connection and decoding results in cursor.Next loop
-	// On interruption by SIGTERM connection closed, but cursor.Next loop still trying to decode results
-	// Maybe take implementation from http.Server.shuttingDown
-	time.Sleep(10 * time.Millisecond)
-
-	err := db.closer.Close()
-	if err == nil {
-		return
-	}
-
-	// hack from: http.http2isClosedConnError
-	if strings.Contains(err.Error(), "use of closed network connection") {
-		return
-	}
-
-	log.Error("Could not close remote DB", "error", err)
 }
 
 // Tx mimicks the interface of bolt.Tx
@@ -519,15 +502,19 @@ type Tx struct {
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
-	select {
-	default:
-	case <-ctx.Done():
-		return nil
+	in, out, closer, err := db.dialFunc(ctx)
+	if err != nil {
+		return err
+	}
+	defer closer.Close()
+
+	if err := ensureServerVersion(in, out); err != nil {
+		return err
 	}
 
-	decoder := newDecoder(db.in)
+	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(db.out)
+	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
 	var c = CmdBeginTx
 	if err := encoder.Encode(&c); err != nil {
@@ -549,7 +536,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 		}
 		return fmt.Errorf("last server error: %v", lastErrorStr)
 	}
-	tx := &Tx{ctx: ctx, in: db.in, out: db.out, txHandle: txHandle}
+	tx := &Tx{ctx: ctx, in: in, out: out, txHandle: txHandle}
 	opErr := f(tx)
 	c = CmdEndTx
 	if err := encoder.Encode(&c); err != nil {

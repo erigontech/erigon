@@ -106,28 +106,22 @@ type Reporter struct {
 }
 
 func NewReporter(remoteDbAddress string) (*Reporter, error) {
-	return &Reporter{remoteDbAddress: remoteDbAddress}, nil
-}
-
-func (r *Reporter) ensureConnected() error {
-	if r.db == nil {
-		conn, err := net.Dial("tcp", r.remoteDbAddress)
-		if err != nil {
-			return err
-		}
-		r.db, err = remote.NewDB(conn, conn, conn)
-		if err != nil {
-			return err
-		}
+	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
+		return conn, conn, conn, err
 	}
-	return nil
+
+	db, err := remote.NewDB(dial)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Reporter{remoteDbAddress: remoteDbAddress, db: db}, nil
 }
 
-func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
+func (r *Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
-
-	err := r.ensureConnected()
-	check(err)
 
 	var count int
 	var maxTimestamp uint64
@@ -137,7 +131,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 	// Go through the history of account first
-	err = r.db.View(ctx, func(tx *remote.Tx) error {
+	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
@@ -165,11 +159,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 		}
 		return nil
 	})
-	if err != nil {
-		r.db.Close()
-		r.db = nil
-		check(err)
-	}
+	check(err)
 
 	// Go through the current state
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
@@ -193,11 +183,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 		}
 		return nil
 	})
-	if err != nil {
-		r.db.Close()
-		r.db = nil
-		check(err)
-	}
+	check(err)
 
 	for _, lt := range lastTimestamps {
 		if lt < maxTimestamp {
@@ -230,10 +216,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	}
 }
 
-func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
-	err := r.ensureConnected()
-	check(err)
-
+func (r *Reporter) StateGrowth2(ctx context.Context) {
 	startTime := time.Now()
 	var count int
 	var maxTimestamp uint64
@@ -244,7 +227,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
-	err = r.db.View(ctx, func(tx *remote.Tx) error {
+	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
@@ -288,11 +271,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
 		}
 		return nil
 	})
-	if err != nil {
-		r.db.Close()
-		r.db = nil
-		check(err)
-	}
+	check(err)
 
 	// Go through the current state
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
@@ -317,11 +296,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
 		}
 		return nil
 	})
-	if err != nil {
-		r.db.Close()
-		r.db = nil
-		check(err)
-	}
+	check(err)
 
 	for address, l := range lastTimestamps {
 		for _, lt := range l {
