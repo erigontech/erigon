@@ -109,14 +109,13 @@ func NewReporter(remoteDbAddress string) (*Reporter, error) {
 	return &Reporter{remoteDbAddress: remoteDbAddress}, nil
 }
 
-func (r *Reporter) ensureConnected(ctx context.Context) error {
+func (r *Reporter) ensureConnected() error {
 	if r.db == nil {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", r.remoteDbAddress)
+		conn, err := net.Dial("tcp", r.remoteDbAddress)
 		if err != nil {
 			return err
 		}
-		r.db, err = remote.NewDB(ctx, conn, conn, conn)
+		r.db, err = remote.NewDB(conn, conn, conn)
 		if err != nil {
 			return err
 		}
@@ -127,7 +126,7 @@ func (r *Reporter) ensureConnected(ctx context.Context) error {
 func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	startTime := time.Now()
 
-	err := r.ensureConnected(ctx)
+	err := r.ensureConnected()
 	check(err)
 
 	var count int
@@ -138,7 +137,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 	// Go through the history of account first
-	err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
@@ -173,7 +172,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 	}
 
 	// Go through the current state
-	err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
@@ -232,7 +231,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context, chaindata string) {
 }
 
 func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
-	err := r.ensureConnected(ctx)
+	err := r.ensureConnected()
 	check(err)
 
 	startTime := time.Now()
@@ -245,7 +244,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
-	err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
@@ -296,7 +295,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context, chaindata string) {
 	}
 
 	// Go through the current state
-	err = r.db.View(func(tx *remote.Tx) error {
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil

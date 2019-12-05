@@ -196,7 +196,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdEndTx:
 			var txHandle uint64
 			if err := decoder.Decode(&txHandle); err != nil {
-				log.Error("could not decode txHandle for CmdEndTx, %v", err)
+				log.Error("could not decode txHandle for CmdEndTx", "error", err)
 				return err
 			}
 			tx, ok := transactions[txHandle]
@@ -230,7 +230,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			// Read the txHandle
 			var txHandle uint64
 			if err := decoder.Decode(&txHandle); err != nil {
-				log.Error("could not decode txHandle for CmdBucket, %v", err)
+				log.Error("could not decode txHandle for CmdBucket", "error", err)
 				return err
 			}
 			// Read the name of the bucket
@@ -268,12 +268,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdGet:
 			var bucketHandle uint64
 			if err := decoder.Decode(&bucketHandle); err != nil {
-				log.Error("could not decode bucketHandle for CmdGet, %v", err)
+				log.Error("could not decode bucketHandle for CmdGet", "error", err)
 				return err
 			}
 			var key []byte
 			if err := decoder.Decode(&key); err != nil {
-				log.Error("could not decode key for CmdGet, %v", err)
+				log.Error("could not decode key for CmdGet", "error", err)
 				return err
 			}
 			var value []byte
@@ -290,7 +290,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdCursor:
 			var bucketHandle uint64
 			if err := decoder.Decode(&bucketHandle); err != nil {
-				log.Error("could not decode bucketHandle for CmdCursor")
+				log.Error("could not decode bucketHandle for CmdCursor", "error", err)
 				return err
 			}
 			var cursorHandle uint64
@@ -316,12 +316,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdCursorSeek:
 			var cursorHandle uint64
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdCursorSeek")
+				log.Error("could not decode cursorHandle for CmdCursorSeek", "error", err)
 				return err
 			}
 			var seekKey []byte
 			if err := decoder.Decode(&seekKey); err != nil {
-				log.Error("could not decode seekKey for CmdCursorSeek")
+				log.Error("could not decode seekKey for CmdCursorSeek", "error", err)
 				return err
 			}
 			var key, value []byte
@@ -344,12 +344,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			var err error
 
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdCursorNext, %v", err)
+				log.Error("could not decode cursorHandle for CmdCursorNext", "error", err)
 				return err
 			}
 			var numberOfKeys uint64
 			if err := decoder.Decode(&numberOfKeys); err != nil {
-				log.Error("could not decode numberOfKeys for CmdCursorNext, %v", err)
+				log.Error("could not decode numberOfKeys for CmdCursorNext", "error", err)
 			}
 			var key, value []byte
 
@@ -387,12 +387,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdCursorFirst:
 			var cursorHandle uint64
 			if err := decoder.Decode(&cursorHandle); err != nil {
-				log.Error("could not decode cursorHandle for CmdCursorFirst, %v", err)
+				log.Error("could not decode cursorHandle for CmdCursorFirst", "error", err)
 				return err
 			}
 			var numberOfKeys uint64
 			if err := decoder.Decode(&numberOfKeys); err != nil {
-				log.Error("could not decode numberOfKeys for CmdCursorFirst, %v", err)
+				log.Error("could not decode numberOfKeys for CmdCursorFirst", "error", err)
 			}
 			var key, value []byte
 			cursor, ok := cursors[cursorHandle]
@@ -401,28 +401,13 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			key, value = cursor.First()
-			if err := encoder.Encode(&key); err != nil {
-				log.Error("could not encode key in response to CmdCursorFirst", "error", err)
-				return err
-			}
-			if err := encoder.Encode(&value); err != nil {
-				log.Error("could not encode value in response to CmdCursorFirst", "error", err)
-				return err
-			}
-			numberOfKeys--
-			if key == nil {
-				break
-			}
-
-			for numberOfKeys > 0 {
+			for key, value = cursor.First(); key != nil || numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				key, value = cursor.Next()
 				if err := encoder.Encode(&key); err != nil {
 					log.Error("could not encode key in response to CmdCursorFirst", "error", err)
 					return err
@@ -432,10 +417,8 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return err
 				}
 				numberOfKeys--
-				if key == nil {
-					break
-				}
 			}
+
 			lastError = nil
 		default:
 			log.Error("unknown", "command", c)
@@ -482,14 +465,13 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	ctx    context.Context
 	in     io.Reader
 	out    io.Writer
 	closer io.Closer
 }
 
 // NewDB creates a new instance of DB
-func NewDB(ctx context.Context, in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
+func NewDB(in io.Reader, out io.Writer, closer io.Closer) (*DB, error) {
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -507,36 +489,33 @@ func NewDB(ctx context.Context, in io.Reader, out io.Writer, closer io.Closer) (
 		return nil, fmt.Errorf("returned version %d, expected %d", v, Version)
 	}
 
-	db := &DB{ctx: ctx, in: in, out: out, closer: closer}
-
-	go func() {
-		<-ctx.Done()
-		db.Close()
-	}()
+	db := &DB{in: in, out: out, closer: closer}
 
 	return db, nil
 }
 
 // Close closes DB by using the closer field
 func (db *DB) Close() {
-	if db.closer != nil {
-		// TODO: here is data race between closing tcp connection and decoding results in cursor.Next loop
-		// On interruption by SIGTERM connection closed, but cursor.Next loop still trying to decode results
-		// Maybe take implementation from http.Server.shuttingDown
-		time.Sleep(10 * time.Millisecond)
-
-		err := db.closer.Close()
-		if err == nil {
-			return
-		}
-
-		// hack from: http.http2isClosedConnError
-		if strings.Contains(err.Error(), "use of closed network connection") {
-			return
-		}
-
-		log.Error("Could not close remote DB", "error", err)
+	if db.closer == nil {
+		return
 	}
+
+	// TODO: here is data race between closing tcp connection and decoding results in cursor.Next loop
+	// On interruption by SIGTERM connection closed, but cursor.Next loop still trying to decode results
+	// Maybe take implementation from http.Server.shuttingDown
+	time.Sleep(10 * time.Millisecond)
+
+	err := db.closer.Close()
+	if err == nil {
+		return
+	}
+
+	// hack from: http.http2isClosedConnError
+	if strings.Contains(err.Error(), "use of closed network connection") {
+		return
+	}
+
+	log.Error("Could not close remote DB", "error", err)
 }
 
 // Tx mimicks the interface of bolt.Tx
@@ -549,10 +528,10 @@ type Tx struct {
 
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
-func (db *DB) View(f func(tx *Tx) error) error {
+func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 	select {
 	default:
-	case <-db.ctx.Done():
+	case <-ctx.Done():
 		return nil
 	}
 
@@ -580,7 +559,7 @@ func (db *DB) View(f func(tx *Tx) error) error {
 		}
 		return fmt.Errorf("last server error: %v", lastErrorStr)
 	}
-	tx := &Tx{ctx: db.ctx, in: db.in, out: db.out, txHandle: txHandle}
+	tx := &Tx{ctx: ctx, in: db.in, out: db.out, txHandle: txHandle}
 	opErr := f(tx)
 	c = CmdEndTx
 	if err := encoder.Encode(&c); err != nil {
