@@ -94,7 +94,9 @@ type Database interface {
 	// IdealBatchSize defines the size of the data batches should ideally add in one write.
 	IdealBatchSize() int
 
-	Size() int
+	// DiskSize returns the total disk size of the database in bytes.
+	DiskSize() int64
+
 	Keys() ([][]byte, error)
 
 	// MemCopy creates a copy of the database in memory.

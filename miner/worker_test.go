@@ -21,7 +21,9 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"math/rand"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,6 +39,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/params"
+)
+
+const (
+	// testCode is the testing contract binary code which will initialises some
+	// variables in constructor
+	testCode = "0x60806040527fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff0060005534801561003457600080fd5b5060fc806100436000396000f3fe6080604052348015600f57600080fd5b506004361060325760003560e01c80630c4dae8814603757806398a213cf146053575b600080fd5b603d607e565b6040518082815260200191505060405180910390f35b607c60048036036020811015606757600080fd5b81019080803590602001909291905050506084565b005b60005481565b806000819055507fe9e44f9f7da8c559de847a3232b57364adc0354f15a2cd8dc636d54396f9587a6000546040518082815260200191505060405180910390a15056fea265627a7a723058208ae31d9424f2d0bc2a3da1a5dd659db2d71ec322a17db8f87e19e209e3a1ff4a64736f6c634300050a0032"
+
+	// testGas is the gas required for contract deployment.
+	testGas = 144109
 )
 
 type testCase struct {
@@ -108,6 +119,8 @@ func getTestCase() (*testCase, error) {
 	}
 	t.newTxs = append(t.newTxs, tx2)
 
+	//rand.Seed(time.Now().UnixNano())
+
 	return t, nil
 }
 
@@ -117,12 +130,12 @@ type testWorkerBackend struct {
 	txPool     *core.TxPool
 	chain      *core.BlockChain
 	testTxFeed event.Feed
+	genesis    *core.Genesis
 	uncleBlock *types.Block
 }
 
-func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, n int) *testWorkerBackend {
+func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, n int) *testWorkerBackend {
 	var (
-		db    = ethdb.NewMemDatabase()
 		gspec = core.Genesis{
 			Config: chainConfig,
 			Alloc: core.GenesisAlloc{
@@ -188,6 +201,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		db:         db,
 		chain:      chain,
 		txPool:     txpool,
+		genesis:    &gspec,
 		uncleBlock: sideBlocks[0],
 	}
 }
@@ -199,13 +213,13 @@ func (b *testWorkerBackend) PostChainEvents(events []interface{}) {
 }
 
 func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend *testWorkerBackend, h hooks) *worker {
-	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h)
+	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
 	w.setEtherbase(t.testBankAddress)
 	return w
 }
 
-func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, blocks int, new ...bool) *testWorkerBackend {
-	backend := newTestWorkerBackend(t, testCase, chainConfig, engine, blocks)
+func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, db ethdb.Database, blocks int) *testWorkerBackend {
+	backend := newTestWorkerBackend(t, testCase, chainConfig, engine, db, blocks)
 
 	errs := backend.txPool.AddLocals(testCase.pendingTxs)
 	for _, err := range errs {
@@ -215,6 +229,112 @@ func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainC
 	}
 
 	return backend
+}
+
+func TestGenerateBlockAndImportEthash(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+	testCase, err := getTestCase()
+	if err != nil {
+		t.Error(err)
+	}
+	testGenerateBlockAndImport(t, testCase, false)
+}
+
+func TestGenerateBlockAndImportClique(t *testing.T) {
+	t.Skip("should be restored. skipped for turbo-geth")
+	testCase, err := getTestCase()
+	if err != nil {
+		t.Error(err)
+	}
+	testGenerateBlockAndImport(t, testCase, true)
+}
+
+func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool) {
+	var (
+		engine      consensus.Engine
+		chainConfig *params.ChainConfig
+		db          = ethdb.NewMemDatabase()
+	)
+	if isClique {
+		chainConfig = params.AllCliqueProtocolChanges
+		chainConfig.Clique = &params.CliqueConfig{Period: 1, Epoch: 30000}
+		engine = clique.New(chainConfig.Clique, db)
+	} else {
+		chainConfig = params.AllEthashProtocolChanges
+		engine = ethash.NewFaker()
+	}
+
+	b := newTestBackend(t, testCase, chainConfig, engine, db, 0)
+	w := newTestWorker(testCase, chainConfig, engine, b, hooks{})
+	defer w.close()
+
+	db2 := ethdb.NewMemDatabase()
+	b.genesis.MustCommit(db2)
+	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil)
+	defer chain.Stop()
+
+	loopErr := make(chan error)
+	newBlock := make(chan struct{})
+	listenNewBlock := func() {
+		sub := w.mux.Subscribe(core.NewMinedBlockEvent{})
+		defer sub.Unsubscribe()
+
+		for item := range sub.Chan() {
+			block := item.Data.(core.NewMinedBlockEvent).Block
+			_, err := chain.InsertChain([]*types.Block{block})
+			if err != nil {
+				loopErr <- fmt.Errorf("failed to insert new mined block:%d, error:%v", block.NumberU64(), err)
+			}
+			newBlock <- struct{}{}
+		}
+	}
+	// Ignore empty commit here for less noise
+	w.skipSealHook = func(task *task) bool {
+		return len(task.receipts) == 0
+	}
+	w.start() // Start mining!
+	go listenNewBlock()
+
+	for i := 0; i < 5; i++ {
+		b.txPool.AddLocal(b.newRandomTx(testCase, true))
+		b.txPool.AddLocal(b.newRandomTx(testCase, false))
+		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
+		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
+		select {
+		case e := <-loopErr:
+			t.Fatal(e)
+		case <-newBlock:
+		case <-time.NewTimer(3 * time.Second).C: // Worker needs 1s to include new changes.
+			t.Fatalf("timeout")
+		}
+	}
+}
+
+func (b *testWorkerBackend) newRandomUncle() *types.Block {
+	var parent *types.Block
+	cur := b.chain.CurrentBlock()
+	if cur.NumberU64() == 0 {
+		parent = b.chain.Genesis()
+	} else {
+		parent = b.chain.GetBlockByHash(b.chain.CurrentBlock().ParentHash())
+	}
+	ctx := b.chain.WithContext(context.Background(), big.NewInt(parent.Number().Int64()+1))
+	blocks, _ := core.GenerateChain(ctx, b.chain.Config(), parent, b.chain.Engine(), b.db, 1, func(i int, gen *core.BlockGen) {
+		var addr = make([]byte, common.AddressLength)
+		rand.Read(addr)
+		gen.SetCoinbase(common.BytesToAddress(addr))
+	})
+	return blocks[0]
+}
+
+func (b *testWorkerBackend) newRandomTx(testCase *testCase, creation bool) *types.Transaction {
+	var tx *types.Transaction
+	if creation {
+		tx, _ = types.SignTx(types.NewContractCreation(b.txPool.Nonce(testCase.testBankAddress), big.NewInt(0), testGas, nil, common.FromHex(testCode)), types.HomesteadSigner{}, testCase.testBankKey)
+	} else {
+		tx, _ = types.SignTx(types.NewTransaction(b.txPool.Nonce(testCase.testBankAddress), testCase.testUserAddress, big.NewInt(1000), params.TxGas, nil, nil), types.HomesteadSigner{}, testCase.testBankKey)
+	}
+	return tx
 }
 
 func TestPendingStateAndBlockEthash(t *testing.T) {
@@ -236,7 +356,7 @@ func TestPendingStateAndBlockClique(t *testing.T) {
 func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine) {
 	defer engine.Close()
 
-	b := newTestBackend(t, testCase, chainConfig, engine, 0)
+	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	w := newTestWorker(testCase, chainConfig, engine, b, hooks{})
 	defer w.close()
 
@@ -294,7 +414,7 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 		},
 	}
 
-	backend := newTestBackend(t, testCase, chainConfig, engine, 0)
+	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	w := newTestWorker(testCase, chainConfig, engine, backend, h)
 	defer w.close()
 
@@ -328,8 +448,8 @@ func checkEmptyMining(t *testing.T, testCase *testCase, state *state.IntraBlockS
 	}
 
 	if gotBalance != balance {
-		t.Errorf("account balance mismatch: have (%p) %d, want %d. index %d",
-			state, state.GetBalance(testCase.testUserAddress), balance, index)
+		t.Errorf("account balance mismatch: have (%p) %d, want %d. index %d. %v %v",
+			state, state.GetBalance(testCase.testUserAddress), balance, index, testCase.testBankFunds.Uint64(),  gotBankBalance)
 	}
 }
 
@@ -351,7 +471,7 @@ func TestStreamUncleBlock(t *testing.T) {
 		t.Error(err)
 	}
 
-	b := newTestBackend(t, testCase, testCase.ethashChainConfig, ethash, 1)
+	b := newTestBackend(t, testCase, testCase.ethashChainConfig, ethash, ethdb.NewMemDatabase(), 1)
 
 	var taskCh = make(chan struct{}, 1)
 	taskIndex := 0
@@ -453,7 +573,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 		},
 	}
 
-	b := newTestBackend(t, testCase, chainConfig, engine, 0)
+	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	w := newTestWorker(testCase, chainConfig, engine, b, h)
 	defer w.close()
 
@@ -508,7 +628,7 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 		progress = make(chan struct{}, 10)
 		result   = make([]float64, 0, 10)
 		index    = 0
-		start    = false
+		start    uint32
 	)
 	h := hooks{
 		skipSealHook: func(task *task) bool {
@@ -519,9 +639,10 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 		},
 		resubmitHook: func(minInterval time.Duration, recommitInterval time.Duration) {
 			// Short circuit if interval checking hasn't started.
-			if !start {
+			if atomic.LoadUint32(&start) == 0 {
 				return
 			}
+
 			var wantMinInterval, wantRecommitInterval time.Duration
 
 			switch index {
@@ -553,7 +674,7 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 		},
 	}
 
-	backend := newTestBackend(t, testCase, chainConfig, engine, 0)
+	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
 	w := newTestWorker(testCase, chainConfig, engine, backend, h)
 	defer w.close()
 
@@ -567,9 +688,9 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 
 	w.start()
 
-	time.Sleep(time.Second)
+	time.Sleep(time.Second) // Ensure two tasks have been summitted due to start opt
+	atomic.StoreUint32(&start, 1)
 
-	start = true
 	w.setRecommitInterval(3 * time.Second)
 	select {
 	case <-progress:

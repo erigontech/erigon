@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/dashboard"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/gasprice"
@@ -213,7 +212,7 @@ var (
 	GCModeFlag = cli.StringFlag{
 		Name:  "gcmode",
 		Usage: `Blockchain garbage collection mode ("full", "archive")`,
-		Value: "full",
+		Value: "archive",
 	}
 	GCModeLimitFlag = cli.Uint64Flag{
 		Name:  "gcmode.stop_limit",
@@ -300,26 +299,6 @@ var (
 	DownloadOnlyFlag = cli.BoolFlag{
 		Name:  "download-only",
 		Usage: "Run in download only mode - only fetch blocks but not process them",
-	}
-	// Dashboard settings
-	DashboardEnabledFlag = cli.BoolFlag{
-		Name:  "dashboard",
-		Usage: "Enable the dashboard",
-	}
-	DashboardAddrFlag = cli.StringFlag{
-		Name:  "dashboard.addr",
-		Usage: "Dashboard listening interface",
-		Value: dashboard.DefaultConfig.Host,
-	}
-	DashboardPortFlag = cli.IntFlag{
-		Name:  "dashboard.host",
-		Usage: "Dashboard listening port",
-		Value: dashboard.DefaultConfig.Port,
-	}
-	DashboardRefreshFlag = cli.DurationFlag{
-		Name:  "dashboard.refresh",
-		Usage: "Dashboard metrics collection refresh rate",
-		Value: dashboard.DefaultConfig.Refresh,
 	}
 	// Ethash settings
 	EthashCacheDirFlag = DirectoryFlag{
@@ -434,7 +413,7 @@ var (
 		Name:  "trie-cache-gens",
 		Usage: "Number of trie node generations to keep in memory",
 	}
-	NoHistory = cli.BoolTFlag{
+	NoHistory = cli.BoolFlag{
 		Name:  "no-history",
 		Usage: "Write the whole state history",
 	}
@@ -443,9 +422,15 @@ var (
 		Usage: "When to switch from full to archive sync",
 		Value: 1024,
 	}
-	BadgerFlag = cli.BoolFlag{
-		Name:  "badger",
-		Usage: "Use BadgerDB rather than BoltDB",
+	DatabaseFlag = cli.StringFlag{
+		Name:  "database",
+		Usage: "Which database software to use? Currently supported values: badger & bolt",
+		Value: "bolt",
+	}
+	RemoteDbListenAddress = cli.StringFlag{
+		Name:  "remote-db-listen-addr",
+		Usage: "network address (for example, localhost:9999) to start remote database server on",
+		Value: "",
 	}
 	// Miner settings
 	MiningEnabledFlag = cli.BoolFlag{
@@ -994,6 +979,12 @@ func setWS(ctx *cli.Context, cfg *node.Config) {
 	}
 }
 
+// setRemoteDb populates configuration fields related to the remote
+// read-only interface to the databae
+func setRemoteDb(ctx *cli.Context, cfg *node.Config) {
+	cfg.RemoteDbListenAddress = ctx.GlobalString(RemoteDbListenAddress.Name)
+}
+
 // setIPC creates an IPC path configuration from the set command line flags,
 // returning an empty string if IPC was explicitly disabled, or the set path.
 func setIPC(ctx *cli.Context, cfg *node.Config) {
@@ -1205,6 +1196,7 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 	setHTTP(ctx, cfg)
 	setGraphQL(ctx, cfg)
 	setWS(ctx, cfg)
+	setRemoteDb(ctx, cfg)
 	setNodeUserIdent(ctx, cfg)
 	setDataDir(ctx, cfg)
 	setSmartCard(ctx, cfg)
@@ -1226,7 +1218,8 @@ func SetNodeConfig(ctx *cli.Context, cfg *node.Config) {
 		cfg.InsecureUnlockAllowed = ctx.GlobalBool(InsecureUnlockAllowedFlag.Name)
 	}
 
-	cfg.BadgerDB = ctx.GlobalBool(BadgerFlag.Name)
+	databaseFlag := ctx.GlobalString(DatabaseFlag.Name)
+	cfg.BadgerDB = strings.EqualFold(databaseFlag, "badger") //case insensitive
 }
 
 func setSmartCard(ctx *cli.Context, cfg *node.Config) {
@@ -1473,7 +1466,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {
 		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
 	}
-	cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+	if ctx.GlobalIsSet(GCModeFlag.Name) {
+		cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
+	}
 	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
@@ -1557,13 +1552,6 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 }
 
-// SetDashboardConfig applies dashboard related command line flags to the config.
-func SetDashboardConfig(ctx *cli.Context, cfg *dashboard.Config) {
-	cfg.Host = ctx.GlobalString(DashboardAddrFlag.Name)
-	cfg.Port = ctx.GlobalInt(DashboardPortFlag.Name)
-	cfg.Refresh = ctx.GlobalDuration(DashboardRefreshFlag.Name)
-}
-
 // RegisterEthService adds an Ethereum client to the stack.
 func RegisterEthService(stack *node.Node, cfg *eth.Config) {
 	var err error
@@ -1574,13 +1562,6 @@ func RegisterEthService(stack *node.Node, cfg *eth.Config) {
 	if err != nil {
 		Fatalf("Failed to register the Ethereum service: %v", err)
 	}
-}
-
-// RegisterDashboardService adds a dashboard to the stack.
-func RegisterDashboardService(stack *node.Node, cfg *dashboard.Config, commit string) {
-	stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return dashboard.New(cfg, commit, ctx.ResolvePath("logs")), nil
-	})
 }
 
 // RegisterEthStatsService configures the Ethereum Stats daemon and adds it to

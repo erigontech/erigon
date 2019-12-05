@@ -21,6 +21,8 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"runtime"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -28,12 +30,20 @@ import (
 	"github.com/dgraph-io/badger"
 )
 
+// https://github.com/dgraph-io/badger#frequently-asked-questions
+// https://groups.google.com/forum/#!topic/golang-nuts/jPb_h3TvlKE/discussion
+const minGoMaxProcs = 128
+
+// https://github.com/dgraph-io/badger#garbage-collection
+const gcPeriod = 35 * time.Minute
+
 // BadgerDatabase is a wrapper over BadgerDb,
 // compatible with the Database interface.
 type BadgerDatabase struct {
-	db     *badger.DB // BadgerDB instance
-	log    log.Logger // Contextual logger tracking the database path
-	tmpDir string     // Temporary data directory
+	db       *badger.DB   // BadgerDB instance
+	log      log.Logger   // Contextual logger tracking the database path
+	tmpDir   string       // Temporary data directory
+	gcTicker *time.Ticker // Garbage Collector
 	id     uint64
 	name   string
 }
@@ -42,14 +52,34 @@ type BadgerDatabase struct {
 func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	logger := log.New("database", dir)
 
-	db, err := badger.Open(badger.DefaultOptions(dir))
+	oldMaxProcs := runtime.GOMAXPROCS(0)
+	if oldMaxProcs < minGoMaxProcs {
+		runtime.GOMAXPROCS(minGoMaxProcs)
+		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+	}
+
+	options := badger.DefaultOptions(dir).WithMaxTableSize(512 << 20)
+
+	db, err := badger.Open(options)
 	if err != nil {
 		return nil, err
 	}
 
+	ticker := time.NewTicker(gcPeriod)
+	// Start GC in backround
+	go func() {
+		for range ticker.C {
+			err := db.RunValueLogGC(0.5)
+			if err != badger.ErrNoRewrite {
+				logger.Info("Badger GC run", "err", err)
+			}
+		}
+	}()
+
 	return &BadgerDatabase{
-		db:   db,
-		log:  logger,
+		db:       db,
+		log:      logger,
+		gcTicker: ticker,
 		id:   rand.Uint64(),
 		name: "NewBadgerDatabase",
 	}, nil
@@ -57,22 +87,31 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 
 // NewEphemeralBadger returns a new BadgerDB in a temporary directory.
 func NewEphemeralBadger() (*BadgerDatabase, error) {
-	tmpDir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
+	dir, err := ioutil.TempDir(os.TempDir(), "badger_db_")
 	if err != nil {
 		return nil, err
 	}
 
-	db, err := NewBadgerDatabase(tmpDir)
+	logger := log.New("database", dir)
+
+	db, err := badger.Open(badger.DefaultOptions(dir))
 	if err != nil {
 		return nil, err
 	}
 
-	db.tmpDir = tmpDir
-	return db, nil
+	return &BadgerDatabase{
+		db:     db,
+		log:    logger,
+		tmpDir: dir,
+	}, nil
 }
 
 // Close closes the database.
 func (db *BadgerDatabase) Close() {
+	if db.gcTicker != nil {
+		db.gcTicker.Stop()
+	}
+
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 		if len(db.tmpDir) > 0 {
@@ -166,8 +205,11 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			}
 		}
 
-		sh = sh.Add(key, value)
-		dat, err := dbutils.Encode(sh)
+		err = sh.Add(key, value)
+		if err != nil {
+			return err
+		}
+		dat, err := sh.Encode()
 		if err != nil {
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
@@ -377,16 +419,6 @@ func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 	return err
 }
 
-// TODO [Andrew] implement the full Database interface
-
-func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	panic("Not implemented")
-}
-
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	panic("Not implemented")
-}
-
 // MultiPut inserts or updates multiple entries.
 // Entries are passed as an array:
 // bucket0, key0, val0, bucket1, key1, val1, ...
@@ -410,7 +442,7 @@ func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
 }
 
 func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
-	panic("Not implemented")
+	return rewindData(db, timestampSrc, timestampDst, df)
 }
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
@@ -430,16 +462,13 @@ func (db *BadgerDatabase) Name() string {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BadgerDatabase) IdealBatchSize() int {
-	return 10 * 1024
+	return 100 * 1024
 }
 
-func (db *BadgerDatabase) Size() int {
-	// TODO [Andrew] implement
-	return 0
-}
-
-func (db *BadgerDatabase) Keys() ([][]byte, error) {
-	panic("Not implemented")
+// DiskSize returns the total disk size of the database in bytes.
+func (db *BadgerDatabase) DiskSize() int64 {
+	lsm, vlog := db.db.Size()
+	return lsm + vlog
 }
 
 // MemCopy creates a copy of the database in a temporary directory.
@@ -474,6 +503,20 @@ func (db *BadgerDatabase) MemCopy() Database {
 	}
 
 	return newDb
+}
+
+// TODO [Issue 144] Implement the methods
+
+func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	panic("Not implemented")
+}
+
+func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+	panic("Not implemented")
+}
+
+func (db *BadgerDatabase) Keys() ([][]byte, error) {
+	panic("Not implemented")
 }
 
 func (db *BadgerDatabase) Ancients() (uint64, error) {

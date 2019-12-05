@@ -30,6 +30,7 @@ type ResolveSet struct {
 	hexes     sortable
 	inited    bool // Whether keys are sorted and "LTE" and "GT" indices set
 	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+	binary    bool // if true, use binary encoding instead of Hex
 }
 
 // NewResolveSet creates new ResolveSet
@@ -37,14 +38,23 @@ func NewResolveSet(minLength int) *ResolveSet {
 	return &ResolveSet{minLength: minLength}
 }
 
+func NewBinaryResolveSet(minLength int) *ResolveSet {
+	return &ResolveSet{minLength: minLength, binary: true}
+}
+
 // AddKey adds a new key (in KEY encoding) to the set
 func (rs *ResolveSet) AddKey(key []byte) {
-	rs.hexes = append(rs.hexes, keybytesToHex(key))
+	hex := keybytesToHex(key)
+	rs.AddHex(hex)
 }
 
 // AddHex adds a new key (in HEX encoding) to the set
 func (rs *ResolveSet) AddHex(hex []byte) {
-	rs.hexes = append(rs.hexes, hex)
+	if rs.binary {
+		rs.hexes = append(rs.hexes, keyHexToBin(hex))
+	} else {
+		rs.hexes = append(rs.hexes, hex)
+	}
 }
 
 func (rs *ResolveSet) ensureInited() {
@@ -97,6 +107,7 @@ func (rs *ResolveSet) HashOnly(prefix []byte) bool {
 			return false
 		}
 	}
+
 	return true
 }
 

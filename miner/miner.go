@@ -74,7 +74,7 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 		mux:      mux,
 		engine:   engine,
 		exitCh:   make(chan struct{}),
-		worker:   newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}),
+		worker:   newWorker(config, chainConfig, engine, eth, mux, hooks{isLocalBlock: isLocalBlock}, true),
 		canStart: 1,
 	}
 	go miner.update()
@@ -86,8 +86,8 @@ func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *even
 // It's entered once and as soon as `Done` or `Failed` has been broadcasted the events are unregistered and
 // the loop is exited. This to prevent a major security vuln where external parties can DOS you with blocks
 // and halt your mining operation for as long as the DOS continues.
-func (mnr *Miner) update() {
-	events := mnr.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
+func (miner *Miner) update() {
+	events := miner.mux.Subscribe(downloader.StartEvent{}, downloader.DoneEvent{}, downloader.FailedEvent{})
 	defer events.Unsubscribe()
 
 	for {
@@ -98,78 +98,77 @@ func (mnr *Miner) update() {
 			}
 			switch ev.Data.(type) {
 			case downloader.StartEvent:
-				atomic.StoreInt32(&mnr.canStart, 0)
-				if mnr.Mining() {
-					mnr.Stop()
-					atomic.StoreInt32(&mnr.shouldStart, 1)
+				atomic.StoreInt32(&miner.canStart, 0)
+				if miner.Mining() {
+					miner.Stop()
+					atomic.StoreInt32(&miner.shouldStart, 1)
 					log.Info("Mining aborted due to sync")
 				}
 			case downloader.DoneEvent, downloader.FailedEvent:
-				shouldStart := atomic.LoadInt32(&mnr.shouldStart) == 1
+				shouldStart := atomic.LoadInt32(&miner.shouldStart) == 1
 
-				atomic.StoreInt32(&mnr.canStart, 1)
-				atomic.StoreInt32(&mnr.shouldStart, 0)
+				atomic.StoreInt32(&miner.canStart, 1)
+				atomic.StoreInt32(&miner.shouldStart, 0)
 				if shouldStart {
-					mnr.Start(mnr.getCoinbase())
+					miner.Start(miner.coinbase)
 				}
 				// stop immediately and ignore all further pending events
 				return
 			}
-		case <-mnr.exitCh:
+		case <-miner.exitCh:
 			return
 		}
 	}
 }
 
-func (mnr *Miner) Start(coinbase common.Address) {
-	atomic.StoreInt32(&mnr.shouldStart, 1)
-	mnr.SetEtherbase(coinbase)
+func (miner *Miner) Start(coinbase common.Address) {
+	atomic.StoreInt32(&miner.shouldStart, 1)
+	miner.SetEtherbase(coinbase)
 
-	if atomic.LoadInt32(&mnr.canStart) == 0 {
+	if atomic.LoadInt32(&miner.canStart) == 0 {
 		log.Info("Network syncing, will start miner afterwards")
 		return
 	}
-	mnr.worker.start()
+	miner.worker.start()
 }
 
-func (mnr *Miner) Stop() {
-	mnr.worker.stop()
-	atomic.StoreInt32(&mnr.shouldStart, 0)
+func (miner *Miner) Stop() {
+	miner.worker.stop()
+	atomic.StoreInt32(&miner.shouldStart, 0)
 }
 
-func (mnr *Miner) Close() {
-	mnr.worker.stop()
-	mnr.worker.close()
-	close(mnr.exitCh)
+func (miner *Miner) Close() {
+	miner.worker.close()
+	close(miner.exitCh)
 }
 
-func (mnr *Miner) Mining() bool {
-	return mnr.worker.isRunning()
+func (miner *Miner) Mining() bool {
+	return miner.worker.isRunning()
 }
 
-func (mnr *Miner) HashRate() uint64 {
-	if pow, ok := mnr.engine.(consensus.PoW); ok {
+func (miner *Miner) HashRate() uint64 {
+	if pow, ok := miner.engine.(consensus.PoW); ok {
 		return uint64(pow.Hashrate())
 	}
 	return 0
 }
 
-func (mnr *Miner) SetExtra(extra []byte) error {
+func (miner *Miner) SetExtra(extra []byte) error {
 	if uint64(len(extra)) > params.MaximumExtraDataSize {
-		return fmt.Errorf("Extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
+		return fmt.Errorf("extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
 	}
-	mnr.worker.setExtra(extra)
+	miner.worker.setExtra(extra)
 	return nil
 }
 
 // SetRecommitInterval sets the interval for sealing work resubmitting.
-func (mnr *Miner) SetRecommitInterval(interval time.Duration) {
-	mnr.worker.setRecommitInterval(interval)
+func (miner *Miner) SetRecommitInterval(interval time.Duration) {
+	miner.worker.setRecommitInterval(interval)
 }
 
 // Pending returns the currently pending block and associated state.
-func (mnr *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
-	return mnr.worker.pending()
+func (miner *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDbState) {
+	return miner.worker.pending()
 }
 
 // PendingBlock returns the currently pending block.
@@ -177,23 +176,12 @@ func (mnr *Miner) Pending() (*types.Block, *state.IntraBlockState, *state.TrieDb
 // Note, to access both the pending block and the pending state
 // simultaneously, please use Pending(), as the pending state can
 // change between multiple method calls
-func (mnr *Miner) PendingBlock() *types.Block {
-	return mnr.worker.pendingBlock()
+
+func (miner *Miner) PendingBlock() *types.Block {
+	return miner.worker.pendingBlock()
 }
 
-func (mnr *Miner) SetEtherbase(addr common.Address) {
-	mnr.setCoinbase(addr)
-	mnr.worker.setEtherbase(addr)
-}
-
-func (mnr *Miner) getCoinbase() common.Address {
-	mnr.coinbaseMu.RLock()
-	defer mnr.coinbaseMu.RUnlock()
-	return mnr.coinbase
-}
-
-func (mnr *Miner) setCoinbase(addr common.Address) {
-	mnr.coinbaseMu.Lock()
-	mnr.coinbase = addr
-	mnr.coinbaseMu.Unlock()
+func (miner *Miner) SetEtherbase(addr common.Address) {
+	miner.coinbase = addr
+	miner.worker.setEtherbase(addr)
 }

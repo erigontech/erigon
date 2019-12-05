@@ -23,8 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-
-	//mrand "math/rand"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -346,6 +345,7 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 			log.Error("Creation aborted", "error", err)
 			return nil, err
 		}
+		bc.trieDbState.SetNoHistory(bc.NoHistory())
 		bc.trieDbState.SetResolveReads(bc.resolveReads)
 		if err := bc.trieDbState.Rebuild(); err != nil {
 			log.Error("Rebuiling aborted", "error", err)
@@ -894,8 +894,9 @@ func (bc *BlockChain) procFutureBlocks() {
 		}
 	}
 	if len(blocks) > 0 {
-		types.BlockBy(types.Number).Sort(blocks)
-
+		sort.Slice(blocks, func(i, j int) bool {
+			return blocks[i].NumberU64() < blocks[j].NumberU64()
+		})
 		// Insert one by one as chain insertion needs contiguous ancestry between blocks
 		for i := range blocks {
 			bc.InsertChain(blocks[i : i+1])
@@ -1152,16 +1153,16 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteTxLookupEntries(batch, block)
 
 			stats.processed++
-			if batch.Size() >= batch.IdealBatchSize() {
+			if batch.BatchSize() >= batch.IdealBatchSize() {
 				if _, err := batch.Commit(); err != nil {
 					return 0, err
 				}
-				size += batch.Size()
+				size += batch.BatchSize()
 				batch = bc.db.NewBatch()
 			}
 		}
-		if batch.Size() > 0 {
-			size += batch.Size()
+		if batch.BatchSize() > 0 {
+			size += batch.BatchSize()
 			if _, err := batch.Commit(); err != nil {
 				return 0, err
 			}
@@ -1687,7 +1688,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if bc.trieDbState != nil {
 				bc.trieDbState.PruneTries(false)
 			}
-			log.Info("Database", "size", bc.db.Size(), "written", written)
+			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
 		}
 	}
 
@@ -2166,6 +2167,7 @@ type Pruner interface {
 	Stop()
 }
 
+// addJob should be called only for public methods
 func (bc *BlockChain) addJob() error {
 	bc.quitMu.RLock()
 	defer bc.quitMu.RUnlock()

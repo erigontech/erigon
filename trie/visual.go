@@ -24,7 +24,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -397,7 +396,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 // HexToQuad converts hexary trie to quad trie with the same set of keys
 func HexToQuad(t *Trie) *Trie {
 	newTrie := New(common.Hash{})
-	hexToQuad(t.root, []byte{}, newTrie)
+	transformSubTrie(t.root, []byte{}, newTrie, keyHexToQuad)
 	return newTrie
 }
 
@@ -432,51 +431,6 @@ func keyHexToQuad(hex []byte) []byte {
 		}
 	}
 	return quad
-}
-
-func hexToQuad(nd node, hex []byte, newTrie *Trie) {
-	switch n := nd.(type) {
-	case nil:
-		return
-	case valueNode:
-		nCopy := make(valueNode, len(n))
-		copy(nCopy, n)
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, nCopy)
-		return
-	case *accountNode:
-		accountCopy := accounts.NewAccount()
-		accountCopy.Copy(&n.Account)
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, &accountNode{accountCopy, nil, true})
-		aHex := hex
-		if aHex[len(aHex)-1] == 16 {
-			aHex = aHex[:len(aHex)-1]
-		}
-		hexToQuad(n.storage, aHex, newTrie)
-	case hashNode:
-		return
-	case *shortNode:
-		var hexVal []byte
-		hexVal = concat(hex, n.Key...)
-		hexToQuad(n.Val, hexVal, newTrie)
-	case *duoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		hexToQuad(n.child1, hex1, newTrie)
-		hexToQuad(n.child2, hex2, newTrie)
-	case *fullNode:
-		for i, child := range n.Children {
-			if child != nil {
-				hexToQuad(child, concat(hex, byte(i)), newTrie)
-			}
-		}
-	default:
-		panic("")
-	}
 }
 
 // FullKeys construct the list of full keys (i.e. keys that can be accessed without resolution via DB) that are present in

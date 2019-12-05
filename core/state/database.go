@@ -35,7 +35,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -157,6 +156,7 @@ func (b *Buffer) merge(other *Buffer) {
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
 	t               *trie.Trie
+	tMu             *sync.Mutex
 	db              ethdb.Database
 	blockNr         uint64
 	buffers         []*Buffer
@@ -231,8 +231,9 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
-	tds := TrieDbState{
+	tds := &TrieDbState{
 		t:             t,
+		tMu:           new(sync.Mutex),
 		db:            db,
 		blockNr:       blockNr,
 		codeCache:     cc,
@@ -244,16 +245,14 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp.Touch(hex, del)
 	})
 
-	//fixme что-то не так с базами данных!!!
 	n++
 	if n > 0 {
-		setTrieDBState(&tds, db.ID())
+		setTrieDBState(tds, db.ID())
 	} else {
 		fmt.Println("@@@@@@@@@@@@", n, db.ID(), debug.Callers(100))
 	}
-	//}
 
-	return &tds, nil
+	return tds, nil
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -269,13 +268,16 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
+	tds.tMu.Lock()
 	tcopy := *tds.t
+	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
 	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
 		t:       &tcopy,
+		tMu:     new(sync.Mutex),
 		db:      tds.db,
 		blockNr: n,
 		tp:      tp,
@@ -315,8 +317,10 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 
 	buffers := []*Buffer{currentBuffer}
 
-	return &TrieDbState{
+	tds.tMu.Lock()
+	t := &TrieDbState{
 		t:               tds.t,
+		tMu:             tds.tMu,
 		db:              tds.db,
 		blockNr:         tds.getBlockNr(),
 		buffers:         buffers,
@@ -330,9 +334,14 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		pg:              tds.pg,
 		tp:              tds.tp,
 	}
+	tds.tMu.Unlock()
+
+	return t
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	return tds.t.Hash()
 }
 
@@ -348,6 +357,9 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 // UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	fmt.Println("UpdateStateTrie")
 	roots, err := tds.updateTrieRoots(true)
 	tds.clearUpdates()
@@ -355,7 +367,9 @@ func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
+	tds.tMu.Lock()
 	tds.t.Print(w)
+	tds.tMu.Unlock()
 	fmt.Fprintln(w, "") //nolint
 }
 
@@ -533,6 +547,9 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		return nil
 	}
 
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches, _ := tds.buildStorageTouches(tds.resolveReads, false)
 
@@ -558,6 +575,9 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 
 // CalcTrieRoots calculates trie roots without modifying the state trie
 func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	// Retrive the list of inserted/updated/deleted storage items (keys and values)
 	storageKeys, sValues := tds.buildStorageTouches(false, true)
 	if trace {
@@ -726,9 +746,13 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	if err := tds.Trie().Rebuild(tds.db, tds.blockNr); err != nil {
+	tds.tMu.Lock()
+	err := tds.t.Rebuild(tds.db, tds.blockNr)
+	tds.tMu.Unlock()
+	if err != nil {
 		return err
 	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
@@ -742,6 +766,9 @@ func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	fmt.Println("################ UnwindTo", tds.blockNr, blockNr, tds.db.ID(), debug.Callers(10))
 
 	tds.StartNewBuffer()
@@ -811,7 +838,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
+	tds.tMu.Lock()
 	acc, ok := tds.t.GetAccount(addrHash[:])
+	tds.tMu.Unlock()
 	if ok {
 		return acc, nil
 	}
@@ -925,7 +954,9 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
+	tds.tMu.Lock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
+	defer tds.tMu.Unlock()
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
@@ -1045,6 +1076,7 @@ type TrieStateWriter struct {
 }
 
 func (tds *TrieDbState) PruneTries(print bool) {
+	tds.tMu.Lock()
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
@@ -1056,6 +1088,8 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
+	tds.tMu.Unlock()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
@@ -1126,8 +1160,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
+	noHistory := dsw.tds.noHistory
 
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
@@ -1163,8 +1196,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
+	noHistory := dsw.tds.noHistory
 
 	var originalData []byte
 	if !original.Initialised {
@@ -1241,8 +1273,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
+	noHistory := dsw.tds.noHistory
 	o := bytes.TrimLeft(original[:], "\x00")
 	oo := make([]byte, len(o))
 	copy(oo, o)
@@ -1250,9 +1281,16 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStats, error) {
+func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitnessStats, error) {
 	bwb := trie.NewBlockWitnessBuilder(trace)
-	rs := trie.NewResolveSet(0)
+
+	var rs *trie.ResolveSet
+	if bin {
+		rs = trie.NewBinaryResolveSet(0)
+	} else {
+		rs = trie.NewResolveSet(0)
+	}
+
 	touches, storageTouches := tds.pg.ExtractTouches()
 	for _, touch := range touches {
 		rs.AddKey(touch)
@@ -1261,9 +1299,21 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStat
 		rs.AddKey(touch)
 	}
 	codeMap := tds.pg.ExtractCodeMap()
-	if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-		return nil, nil, err
+
+	tds.tMu.Lock()
+	if bin {
+		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
+			tds.tMu.Unlock()
+			return nil, nil, err
+		}
+	} else {
+		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
+			tds.tMu.Unlock()
+			return nil, nil, err
+		}
 	}
+	tds.tMu.Unlock()
+
 	var b bytes.Buffer
 
 	stats, err := bwb.WriteTo(&b)
@@ -1272,7 +1322,7 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStat
 		return nil, nil, err
 	}
 
-	return b.Bytes(), stats, nil
+	return b.Bytes(), NewBlockWitnessStats(tds.blockNr, uint64(b.Len()), stats), nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

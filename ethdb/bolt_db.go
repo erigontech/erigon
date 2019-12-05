@@ -103,8 +103,11 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			log.Error("PutS Decode changeSet err", "err", err)
 			return err
 		}
-		sh = sh.Add(key, value)
-		dat, err = dbutils.Encode(sh)
+		err = sh.Add(key, value)
+		if err != nil {
+			return err
+		}
+		dat, err = sh.Encode()
 		if err != nil {
 			log.Error("PutS Decode changeSet err", "err", err)
 			return err
@@ -161,8 +164,8 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *BoltDatabase) Size() int {
-	return db.db.Size()
+func (db *BoltDatabase) DiskSize() int64 {
+	return int64(db.db.Size())
 }
 
 // Get returns the value for a given key if it's present.
