@@ -119,7 +119,7 @@ func getTestCase() (*testCase, error) {
 	}
 	t.newTxs = append(t.newTxs, tx2)
 
-	//rand.Seed(time.Now().UnixNano())
+	rand.Seed(time.Now().UnixNano())
 
 	return t, nil
 }
