@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -459,7 +460,7 @@ type DB struct {
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
 
-func ensureServerVersion(in io.Reader, out io.Writer) error {
+func ping(in io.Reader, out io.Writer) error {
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -499,16 +500,26 @@ type Tx struct {
 	txHandle uint64
 }
 
+func (db *DB) getConnection(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+	connectionCtx, connectionCtxCancel := context.WithCancel(context.Background())
+	go func() {
+		<-ctx.Done()
+		time.Sleep(50 * time.Millisecond)
+		connectionCtxCancel()
+	}()
+	return db.dialFunc(connectionCtx)
+}
+
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
-	in, out, closer, err := db.dialFunc(ctx)
+	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
 		return err
 	}
 	defer closer.Close()
 
-	if err := ensureServerVersion(in, out); err != nil {
+	if err := ping(in, out); err != nil {
 		return err
 	}
 
