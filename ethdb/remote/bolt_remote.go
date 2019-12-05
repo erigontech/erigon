@@ -341,8 +341,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 		case CmdCursorNext:
 			var cursorHandle uint64
-			var err error
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				log.Error("could not decode cursorHandle for CmdCursorNext", "error", err)
 				return err
@@ -358,26 +356,19 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			// yes, here is 2 .Next() calls
-			for key, value := cursor.Next(); key != nil && numberOfKeys > 0; key, value = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				err = encoder.Encode(&key)
-				if err != nil {
-					log.Error("could not encode key in response to CmdCursorNext", "error", err)
+			for key, value := cursor.Next(); numberOfKeys > 0; key, value = cursor.Next() {
+				if err := encoder.Encode(key); err != nil {
+					log.Error("could not encode key in response to CmdNext", "error", err)
 					return err
 				}
-
-				err = encoder.Encode(&value)
-				if err != nil {
-					log.Error("could not encode value in response to CmdCursorNext", "error", err)
+				if err := encoder.Encode(value); err != nil {
+					log.Error("could not encode value in response to CmdNext", "error", err)
 					return err
 				}
 				numberOfKeys--
+				if key == nil {
+					break
+				}
 			}
 			lastError = nil
 		case CmdCursorFirst:
@@ -396,22 +387,26 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			for key, value := cursor.First(); key != nil && numberOfKeys > 0; key, value = cursor.Next() {
+			numberOfKeys-- // 1 item will supply by .First call
+			for key, value := cursor.First(); numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				if err := encoder.Encode(&key); err != nil {
+				if err := encoder.Encode(key); err != nil {
 					log.Error("could not encode key in response to CmdCursorFirst", "error", err)
 					return err
 				}
-				if err := encoder.Encode(&value); err != nil {
+				if err := encoder.Encode(value); err != nil {
 					log.Error("could not encode value in response to CmdCursorFirst", "error", err)
 					return err
 				}
 				numberOfKeys--
+				if key == nil {
+					break
+				}
 			}
 
 			lastError = nil
