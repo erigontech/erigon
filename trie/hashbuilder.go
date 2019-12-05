@@ -285,8 +285,8 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
-	fmt.Println("trie/hashbuilder.go:288 account leaf ",hb.acc.Incarnation, accCopy.Incarnation)
-	//fixme
+
+	//fixme[https://github.com/ledgerwatch/turbo-geth/issues/221] we start usisng incarnation for contracts started from 1
 	if accCopy.Root!=EmptyRoot && accCopy.CodeHash!=emptyHash {
 		accCopy.Incarnation=1
 	}

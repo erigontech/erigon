@@ -342,14 +342,9 @@ func (m *mutation) Commit() (uint64, error) {
 							value,_ =m.db.Get(hBucket, []byte(k))
 						}
 					}
-
-					if err!=nil {
-						log.Error("mutation, get index", "err", err)
-						continue
-					}
 					v,err:=AppendChangedOnIndex(value, timestamp)
 					if err!=nil {
-						log.Error("mutation, append index", "err", err)
+						log.Error("mutation, append to index", "err", err, "timestamp",timestamp, )
 						continue
 					}
 					m.puts.SetStr(hBucketStr, []byte(k), v)

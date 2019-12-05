@@ -21,8 +21,6 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
-	"github.com/dgraph-io/badger"
 	"io"
 	"runtime"
 	"sort"
@@ -248,10 +246,6 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	v, got:=tds.t.GetAccount(common.HexToHash("0x1cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b").Bytes())
-	fmt.Println("before resolve trie", got)
-	spew.Dump(v)
-	fmt.Println("------ResolveStateTrie------------")
 	if err := tds.ResolveStateTrie(); err != nil {
 		return nil, err
 	}
@@ -262,9 +256,6 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 	roots, err := tds.updateTrieRoots(true)
-	v, got:=tds.t.GetAccount(common.HexToHash("0x1cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b").Bytes())
-	fmt.Println("after UpdateStateTrie", got)
-	spew.Dump(v)
 	tds.clearUpdates()
 	return roots, err
 }
@@ -488,7 +479,6 @@ func (tds *TrieDbState) setNewIncarnationsAndCleanOldStorage() error {
 			}
 			alreadyCreated[addrHash] = struct{}{}
 			incarnation, err := tds.nextIncarnation(addrHash)
-			fmt.Println("Next incarnation for", addrHash.String(), incarnation)
 			if err != nil {
 				return err
 			}
@@ -530,7 +520,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
-	fmt.Println("updateTrieRoots", tds.blockNr)
 
 	for i, b := range tds.buffers {
 		for addrHash, account := range b.accountUpdates {
@@ -649,9 +638,6 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
-	fmt.Println("-------------------------------------------------------------")
-	fmt.Println("--------------Unwind---------------------")
-	fmt.Println("-------------------------------------------------------------")
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
 		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
@@ -763,11 +749,8 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
 	}
-	acc,err:= tds.readAccountDataByHash(addrHash)
-	if err==nil && acc!=nil {
-		fmt.Println("core/state/database.go:757 ReadAccountData", addrHash.String(), "incarnation - ", acc.Incarnation, " balance -", acc.Balance.Uint64(), acc.Root.String(), tds.blockNr)
-	}
-	return acc, err
+
+	return tds.readAccountDataByHash(addrHash)
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
@@ -1113,17 +1096,4 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 
 func (tds *TrieDbState) TriePruningDebugDump() string {
 	return tds.tp.DebugDump()
-}
-
-
-
-func isNotExistError(err error) bool {
-	switch err {
-	case ethdb.ErrKeyNotFound:
-		return true
-	case badger.ErrKeyNotFound:
-		return true
-	default:
-		return false
-	}
 }

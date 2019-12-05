@@ -208,8 +208,6 @@ func TestCreate2Revive(t *testing.T) {
 	}
 }
 
-
-
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -345,7 +343,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 }
 
-
 func TestReorgOverStateChange(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -473,7 +470,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 }
 
-func TestDatabaseStateChange_DB_Debug(t *testing.T) {
+func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
 		db      = ethdb.NewMemDatabase()

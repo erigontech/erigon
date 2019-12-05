@@ -250,12 +250,10 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(string(tds.Dump(false,false,false)))
-	tds.Trie().PrintTrie()
+
 	if err := tds.Rebuild(); err != nil {
 		panic(err)
 	}
-
 
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)

@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"github.com/davecgh/go-spew/spew"
 	"math/big"
 	"sort"
 
@@ -583,12 +582,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 		sdb.nilAccounts[addr] = struct{}{}
 		return nil
 	}
-	if common.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a").String()==addr.String() {
-		fmt.Println("-----------------0x3a220f351252089d385b29beca14e27f204c296a--------1cb2583748c26e89ef19c2a8529b05a270f735553b4d44b6f2a1894987a71c8b------------------")
-		spew.Dump(account)
-		spew.Dump(account)
-		fmt.Println("================================================================================")
-	}
+
 	// Insert into the live set.
 	obj := newObject(sdb, addr, account, account)
 	sdb.setStateObject(obj)
@@ -636,7 +630,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &accounts.Account{}
 	} else {
 		account.Copy(&previous.data)
-		fmt.Println("Set incarnation to 0")
 		account.Incarnation=0
 		original = &previous.original
 	}
@@ -750,6 +743,7 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			if stateObject.code != nil && stateObject.dirtyCode {
 				addrHash,err:=common.HashData(addr.Bytes())
 				if err!=nil {
+					log.Error("Hashing address error", "err", err)
 					return err
 				}
 				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation,common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
@@ -795,7 +789,7 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 			if stateObject.code != nil && stateObject.dirtyCode {
 				addrHash,err:=common.HashData(stateObject.Address().Bytes())
 				if err!=nil {
-					log.Error("incorrect hash addr", "err", err)
+					log.Error("Hashing address error", "err", err)
 					return err
 				}
 				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
