@@ -394,14 +394,13 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			if err := decoder.Decode(&numberOfKeys); err != nil {
 				log.Error("could not decode numberOfKeys for CmdCursorFirst", "error", err)
 			}
-			var key, value []byte
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				lastError = fmt.Errorf("cursor not found")
 				continue
 			}
 
-			for key, value = cursor.First(); key != nil || numberOfKeys > 0; key, value = cursor.Next() {
+			for key, value := cursor.First(); key != nil || numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
