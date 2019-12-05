@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"runtime"
 	"sort"
@@ -563,6 +564,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 
+			if forward || debug.IsDataLayoutExperiment() {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
@@ -583,7 +585,31 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						account.Root = trie.EmptyRoot
 					}
 				}
-		}
+			} else {
+					// Simply comparing the correctness of the storageRoot computations
+					if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+						ok, h := tds.t.DeepHash(addrHash[:])
+						if !ok {
+							h = trie.EmptyRoot
+						}
+
+						if account.Root != h {
+							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
+						}
+					}
+					if account, ok := accountUpdates[addrHash]; ok && account != nil {
+						ok, h := tds.t.DeepHash(addrHash[:])
+						if !ok {
+							h = trie.EmptyRoot
+						}
+
+						if account.Root != h {
+							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
+						}
+					}
+				}
+			}
+
 
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
@@ -728,7 +754,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 
-	if tds.historical {
+	if tds.historical && debug.IsDataLayoutExperiment() {
 		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err==nil {
 			a.CodeHash = common.BytesToHash(codeHash)

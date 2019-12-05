@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -172,14 +173,14 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
-
-	codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
-	if err!=nil {
-		acc.CodeHash = common.BytesToHash(codeHash)
-	} else {
-		log.Error("ReadAccountData Get code hash is incorrect")
+	if debug.IsDataLayoutExperiment() {
+		codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+		if err!=nil {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		} else {
+			log.Error("ReadAccountData Get code hash is incorrect")
+		}
 	}
-
 	return &acc, nil
 }
 

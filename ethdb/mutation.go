@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
 	"sync"
 
@@ -131,6 +132,11 @@ func (m *mutation) GetChangeSetByBlock(bucket []byte, timestamp uint64) (*dbutil
 }
 
 func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	if !debug.IsDataLayoutExperiment() {
+		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+		return m.Get(hBucket, composite)
+	}
+
 	chs, err:=m.GetChangeSetByBlock(hBucket, timestamp)
 	if err!=nil {
 		if m.db!=nil {
@@ -202,20 +208,24 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	hBuckeStr :=string(hBucket)
+	hBucketStr :=string(hBucket)
 	changesByBucket, ok := m.changeSetByBlock[timestamp]
 	if !ok {
 		changesByBucket = make(map[string]*dbutils.ChangeSet)
 		m.changeSetByBlock[timestamp] = changesByBucket
 	}
-	changeSet, ok := changesByBucket[string(hBucket)]
+	changeSet, ok := changesByBucket[hBucketStr]
 	if !ok {
 		changeSet = dbutils.NewChangeSet()
 	}
 
-	changesByBucket[hBuckeStr] = changeSet.Add(key,value)
+	changesByBucket[hBucketStr] = changeSet.Add(key,value)
 	if noHistory {
 		return nil
+	}
+	if !debug.IsDataLayoutExperiment() {
+		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+		m.puts.Set(hBucket, composite, value)
 	}
 
 	return nil
@@ -292,15 +302,19 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		if err != nil {
 			return false, err
 		}
-
-		err = changedAccounts.Walk(func(kk, _ []byte) error {
-			m.puts.DeleteStr(hBucketStr, kk)
-			return nil
-		})
-		if err != nil {
-			return false, err
+		if !debug.IsDataLayoutExperiment() {
+			err = changedAccounts.Walk(func(kk, _ []byte) error {
+				m.puts.DeleteStr(hBucketStr, kk)
+				return nil
+			})
+			if err != nil {
+				return false, err
+			}
+			m.puts.DeleteStr(hBucketStr, k)
+		} else {
+			//fixme experiment layout
+			panic("implement")
 		}
-		m.puts.DeleteStr(hBucketStr, k)
 		return true, nil
 	})
 	return err
@@ -334,20 +348,22 @@ func (m *mutation) Commit() (uint64, error) {
 				if err != nil {
 					log.Error("EncodeChangeSet changedAccounts error on commit", "err", err)
 				}
-				changedKeys:=changedAccounts.ChangedKeys()
-				for k:=range changedKeys {
-					value, ok := m.getMem(hBucket, []byte(k))
-					if !ok {
-						if m.db != nil {
-							value,_ =m.db.Get(hBucket, []byte(k))
+				if debug.IsDataLayoutExperiment() {
+					changedKeys:=changedAccounts.ChangedKeys()
+					for k:=range changedKeys {
+						value, ok := m.getMem(hBucket, []byte(k))
+						if !ok {
+							if m.db != nil {
+								value,_ =m.db.Get(hBucket, []byte(k))
+							}
 						}
+						v,err:=AppendChangedOnIndex(value, timestamp)
+						if err!=nil {
+							log.Error("mutation, append to index", "err", err, "timestamp",timestamp, )
+							continue
+						}
+						m.puts.SetStr(hBucketStr, []byte(k), v)
 					}
-					v,err:=AppendChangedOnIndex(value, timestamp)
-					if err!=nil {
-						log.Error("mutation, append to index", "err", err, "timestamp",timestamp, )
-						continue
-					}
-					m.puts.SetStr(hBucketStr, []byte(k), v)
 				}
 				m.puts.SetStr(changeSetStr, changeSetKey, changedRLP)
 			}

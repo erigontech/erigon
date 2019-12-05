@@ -8,27 +8,36 @@ var (
 	// value - account encoded for storage
 	AccountsBucket = []byte("AT")
 
+	//current
 	//key - key + encoded timestamp(block number)
 	//value - account for storage(old/original value)
+	//layout experiment
+	//key - address hash
+	//value - list of block where it's changed
 	AccountsHistoryBucket = []byte("hAT")
 
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
 	StorageBucket = []byte("ST")
 
+	//current
 	//key - address hash + incarnation + storage key hash
 	//value - storage value(common.hash)
+	//layout experiment
+	//key - address hash
+	//value - list of block where it's changed
 	StorageHistoryBucket = []byte("hST")
 
 	//key - contract code hash
 	//value - contract code
 	CodeBucket = []byte("CODE")
 
-	//addressHash+incarnation -> code hash
+	//key - addressHash+incarnation
+	//value - code hash
 	ContractCodeBucket = []byte("contractCode")
 
-	// key - encoded timestamp(block number) + history bucket
-	// value - rlp encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
+	// key - encoded timestamp(block number) + history bucket(hAT/hST)
+	// value - encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
 	ChangeSetBucket = []byte("ChangeSet")
 
 	// databaseVerisionKey tracks the current database version.

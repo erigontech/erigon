@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -40,10 +41,11 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		// we can reduce storage size for history there
 		// because we have accountHash+incarnation -> codehash of contract in separate bucket
 		// and we don't need root in history requests
-
 		testAcc := original.SelfCopy()
-		testAcc.CodeHash= common.BytesToHash(emptyCodeHash)
-		testAcc.Root=trie.EmptyRoot
+		if debug.IsDataLayoutExperiment() {
+			testAcc.CodeHash= common.BytesToHash(emptyCodeHash)
+			testAcc.Root=trie.EmptyRoot
+		}
 
 		originalDataLen := testAcc.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
@@ -81,8 +83,11 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 	if err:= dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err!=nil {
 		return err
 	}
-	//save contract to codeHash mapping
-	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash,incarnation), codeHash.Bytes())
+	if debug.IsDataLayoutExperiment() {
+		//save contract to codeHash mapping
+		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash,incarnation), codeHash.Bytes())
+	}
+	return nil
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
