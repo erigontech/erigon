@@ -1,7 +1,7 @@
 package ethdb
 
 import (
-	"reflect"
+	"math/rand"
 	"sort"
 	"sync"
 
@@ -91,6 +91,8 @@ type mutation struct {
 	changeSetByBlock map[uint64]map[string][]dbutils.Change //map[timestamp]map[hBucket]listOfChangedKeys
 	mu               sync.RWMutex
 	db               Database
+	id               uint64
+	name             string
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
@@ -399,6 +401,8 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 		db:               m,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		id:               rand.Uint64(),
+		name:             m.Name() + "-NewBatch",
 	}
 	return mm
 }
@@ -407,9 +411,12 @@ func (m *mutation) MemCopy() Database {
 	panic("Not implemented")
 }
 
-func (m mutation) GetDbAddress() uintptr {
-	dbV := reflect.ValueOf(m.db).Elem()
-	return dbV.UnsafeAddr()
+func (m *mutation) ID() uint64 {
+	//return m.id
+	return m.db.ID()
+}
+func (m *mutation) Name() string {
+	return m.name
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

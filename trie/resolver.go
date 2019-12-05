@@ -248,7 +248,7 @@ func (tr *Resolver) finaliseRoot() error {
 		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
 
 
-			fmt.Println("gotcha!")
+			fmt.Println("gotcha!", string(debug.Stack()))
 			return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
 				tr.currentReq.resolveHash, hbHash, tr.currentReq.contract, tr.currentReq.resolveHex, tr.currentReq.resolvePos)
 		}

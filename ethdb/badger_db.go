@@ -19,6 +19,7 @@ package ethdb
 import (
 	"bytes"
 	"io/ioutil"
+	"math/rand"
 	"os"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -33,6 +34,8 @@ type BadgerDatabase struct {
 	db     *badger.DB // BadgerDB instance
 	log    log.Logger // Contextual logger tracking the database path
 	tmpDir string     // Temporary data directory
+	id     uint64
+	name   string
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
@@ -45,8 +48,10 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 	}
 
 	return &BadgerDatabase{
-		db:  db,
-		log: logger,
+		db:   db,
+		log:  logger,
+		id:   rand.Uint64(),
+		name: "NewBadgerDatabase",
 	}, nil
 }
 
@@ -413,8 +418,14 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 		db:               db,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		id:               rand.Uint64(),
+		name:             db.Name() + "-NewBatch",
 	}
 	return m
+}
+
+func (db *BadgerDatabase) Name() string {
+	return db.name
 }
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
@@ -471,4 +482,8 @@ func (db *BadgerDatabase) Ancients() (uint64, error) {
 
 func (db *BadgerDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (db *BadgerDatabase) ID() uint64 {
+	return db.id
 }
