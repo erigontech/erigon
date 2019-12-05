@@ -3,7 +3,7 @@ jobs:
   build:
     docker:
       - image: circleci/golang:1.13.4
-    resource_class: large
+    resource_class: medium
 
     working_directory: /go/src/github.com/ledgerwatch/turbo-geth
 
