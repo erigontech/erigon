@@ -351,7 +351,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			if err := decoder.Decode(&numberOfKeys); err != nil {
 				log.Error("could not decode numberOfKeys for CmdCursorNext", "error", err)
 			}
-			var key, value []byte
 
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
@@ -359,14 +358,14 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			for numberOfKeys > 0 {
+			// yes, here is 2 .Next() calls
+			for key, value := cursor.Next(); key != nil && numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				key, value = cursor.Next()
 				err = encoder.Encode(&key)
 				if err != nil {
 					log.Error("could not encode key in response to CmdCursorNext", "error", err)
@@ -379,9 +378,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return err
 				}
 				numberOfKeys--
-				if key == nil {
-					break
-				}
 			}
 			lastError = nil
 		case CmdCursorFirst:
@@ -400,7 +396,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			for key, value := cursor.First(); key != nil || numberOfKeys > 0; key, value = cursor.Next() {
+			for key, value := cursor.First(); key != nil && numberOfKeys > 0; key, value = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
