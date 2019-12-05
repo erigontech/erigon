@@ -209,24 +209,23 @@ var (
 		Usage: `Blockchain sync mode ("fast", "full", or "light")`,
 		Value: &defaultSyncMode,
 	}
-	GCModeFlag = cli.StringFlag{
-		Name:  "gcmode",
-		Usage: `Blockchain garbage collection mode ("full", "archive")`,
-		Value: "archive",
+	GCModePruningFlag = cli.BoolFlag{
+		Name:  "pruning",
+		Usage: `Enable storage pruning`,
 	}
 	GCModeLimitFlag = cli.Uint64Flag{
-		Name:  "gcmode.stop_limit",
-		Usage: `Blockchain garbage collection mode limit("full")"`,
+		Name:  "pruning.stop_limit",
+		Usage: `Blockchain pruning limit`,
 		Value: 1024,
 	}
 	GCModeBlockToPruneFlag = cli.Uint64Flag{
-		Name:  "gcmode.processing_limit",
-		Usage: `Block to prune per tick"`,
+		Name:  "pruning.processing_limit",
+		Usage: `Block to prune per tick`,
 		Value: 20,
 	}
 	GCModeTickTimeout = cli.DurationFlag{
-		Name:  "gcmode.tick",
-		Usage: `Time of tick"`,
+		Name:  "pruning.tick",
+		Usage: `Time of tick`,
 		Value: time.Second * 2,
 	}
 	LightServFlag = cli.IntFlag{
@@ -1468,12 +1467,8 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 		cfg.DatabaseFreezer = ctx.GlobalString(AncientFlag.Name)
 	}
 
-	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {
-		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
-	}
-	if ctx.GlobalIsSet(GCModeFlag.Name) {
-		cfg.NoPruning = ctx.GlobalString(GCModeFlag.Name) == "archive"
-	}
+	// TODO: Invert the logic there.
+	cfg.NoPruning = !ctx.GlobalBool(GCModePruningFlag.Name)
 	cfg.BlocksBeforePruning = ctx.GlobalUint64(GCModeLimitFlag.Name)
 	cfg.BlocksToPrune = ctx.GlobalUint64(GCModeBlockToPruneFlag.Name)
 	cfg.PruningTimeout = ctx.GlobalDuration(GCModeTickTimeout.Name)
@@ -1694,14 +1689,10 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 			}, nil, false)
 		}
 	}
-	if gcmode := ctx.GlobalString(GCModeFlag.Name); gcmode != "full" && gcmode != "archive" {
-		Fatalf("--%s must be either 'full' or 'archive'", GCModeFlag.Name)
-	}
 	cache := &core.CacheConfig{
 		TrieCleanLimit:      eth.DefaultConfig.TrieCleanCache,
 		TrieCleanNoPrefetch: ctx.GlobalBool(CacheNoPrefetchFlag.Name),
 		TrieDirtyLimit:      eth.DefaultConfig.TrieDirtyCache,
-		TrieDirtyDisabled:   ctx.GlobalString(GCModeFlag.Name) == "archive",
 		TrieTimeLimit:       eth.DefaultConfig.TrieTimeout,
 	}
 	if ctx.GlobalIsSet(CacheFlag.Name) || ctx.GlobalIsSet(CacheTrieFlag.Name) {

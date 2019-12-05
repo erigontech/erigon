@@ -89,7 +89,7 @@ var (
 		utils.TxPoolLifetimeFlag,
 		utils.SyncModeFlag,
 		utils.ExitWhenSyncedFlag,
-		utils.GCModeFlag,
+		utils.GCModePruningFlag,
 		utils.GCModeLimitFlag,
 		utils.GCModeBlockToPruneFlag,
 		utils.GCModeTickTimeout,

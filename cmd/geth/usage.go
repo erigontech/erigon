@@ -77,7 +77,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.GoerliFlag,
 			utils.SyncModeFlag,
 			utils.ExitWhenSyncedFlag,
-			utils.GCModeFlag,
+			utils.GCModePruningFlag,
 			utils.GCModeLimitFlag,
 			utils.GCModeBlockToPruneFlag,
 			utils.GCModeTickTimeout,
