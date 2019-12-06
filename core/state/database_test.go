@@ -442,13 +442,13 @@ func TestReorgOverStateChange(t *testing.T) {
 	// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
 	correctValueX := st.GetState(contractAddress, common.Hash{})
 
-	fmt.Printf("Insert block 2")
+	fmt.Println("Insert block 2")
 	// BLOCK 2
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
-	fmt.Printf("Insert long blocks 2,3")
+	fmt.Println("Insert long blocks 2,3")
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
 		t.Fatal(err)

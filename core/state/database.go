@@ -449,10 +449,6 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		return err
 	}
 
-	if err:=tds.setNewIncarnationsAndCleanOldStorage(); err != nil {
-		return err
-	}
-
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
 	}
@@ -463,37 +459,6 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 	if tds.resolveReads {
 		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
 			return err
-		}
-	}
-	return nil
-}
-func (tds *TrieDbState) setNewIncarnationsAndCleanOldStorage() error {
-	// The following map is to prevent repeated clearouts of the storage
-	alreadyCreated := make(map[common.Hash]struct{})
-	for _, b := range tds.buffers {
-		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
-		// that might be remaining in the trie and figure out the next incarnations
-		for addrHash := range b.created {
-			// Prevent repeated storage clearouts
-			if _, ok := alreadyCreated[addrHash]; ok {
-				continue
-			}
-			alreadyCreated[addrHash] = struct{}{}
-			incarnation, err := tds.nextIncarnation(addrHash)
-			if err != nil {
-				return err
-			}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].SetIncarnation(incarnation)
-				b.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
-			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
-				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
-			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
-			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
 		}
 	}
 	return nil
@@ -521,8 +486,34 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
-
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Hash]struct{})
 	for i, b := range tds.buffers {
+		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
+		// that might be remaining in the trie and figure out the next incarnations
+		for addrHash := range b.created {
+			// Prevent repeated storage clearouts
+			if _, ok := alreadyCreated[addrHash]; ok {
+				continue
+			}
+			alreadyCreated[addrHash] = struct{}{}
+			incarnation, err := tds.nextIncarnation(addrHash)
+			if err != nil {
+				return nil, err
+			}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				b.accountUpdates[addrHash].SetIncarnation(incarnation)
+				b.accountUpdates[addrHash].Root = trie.EmptyRoot
+			}
+			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
+				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
+				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
+			}
+			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
+			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+		}
+
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				tds.t.UpdateAccount(addrHash[:], account)
