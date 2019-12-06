@@ -8,7 +8,7 @@ ETH transfers, or interactions with smart contracts, or both. For each step, we 
 produced by the code available in turbo-geth, and the code which currently resides on a fork
 of go-ethereum, but there is an intention to feed it upstream, if there is interest.
 
-Genesis
+Genesis in Turbo-Geth
 ------------------------------
 For the genesis block, we generate 3 different private keys and construct Ethereum addresses from them.
 Then, we endow one of the accounts with 9 ETH, and two others with 0.2 and 0.3 ETH, respectively.
@@ -75,7 +75,6 @@ Next bucket is "Headers", it records information about block headers from variou
 The keys for the first two records start with 8-byte encoding of the block number (0), followed by
 the block hash (or header hash, which is the same thing). The second record also has a suffix `0x74`,
 which is ASCII code for `t`. The records of the first type store the actual headers in their values.
-In our example, we can see that the value is shortened (there is "----" at the end) for better visualisation.
 The records of the second type store total mining difficulty (TD) of  the chain ending in that specific header.
 In our case it is `0x80`, which is RLP encoding of 0.
 The records of the third type have their keys composed of 8-byte encoding of the block number (0 here), and
@@ -121,14 +120,24 @@ and "History of Storage" (this bucket will appear later), where keys are derived
 ![genesis_db_change_sets](changes_0_ChangeSet_1.dot.gd.png)
 
 In the cases of our genesis block, the keys is composed from the encoding of the block number (`0x20`), and the
-ASCII-code of `hAT` (meaning **h**istory of **A**counts **T**rie). The value is RLP-encoded structure that is
-a list of key-value pairs. Change Sets bucket records how the accounts changed at each block. But, instead of recording,
-at each change, the value that the accounts had AFTER the change, it records what value the accounts
-had BEFORE the change. In our case, the values inside the structure encoding are empty, meaning that these three accounts
-did not exist before block 0.
-
-**WARNING** The layout of this bucket will change very soon, RLP encoding will be replaced by a special encoding,
-optimising for binary search of keys. Keys will also be sorted in lexicographic order.
+ASCII-code of `hAT` (meaning **h**istory of **A**counts **T**rie).
+The "Change Set" bucket records changes that happen to accounts and contract storage slots at every block.
+It is important to node that the values recorded in the "Changes Set" bucket are not the values the accounts
+(or storage slots) had AFTER the change, it records what value the accounts (or storage slots)
+had BEFORE the change. That explains the empty values here - it records the fact that these
+three accounts in questions did not exist prior to the block 0.
+The encoding of the values in the records is tailored for fast access and binary search. It has 5 parts:
+1. Number of keys-value pairs, encoded as a 4-byte (32-bit) number. In this example, it is `0x00000003`, which means
+there are 3 key-value pairs
+2. Size of each key, also encoded as a 32-bit number. All keys are the same size, which makes it possible to
+access them without deserialisation. In this example, it is `0x00000020`, which 32, meaning that all keys are
+32 bytes long.
+3. Keys themselves. In our examples, these are the coloured boxes before the streak of white 0s. Keys are sorted
+lexicographically. This, together with the keys being the same size, allows binary search without desearialision,
+as well as linear-time merge of multiple changesets.
+4. Value offsets. These offsets mark the beginning of the next, 5th part as offset 0. First value has offset 0.
+In our example, all values are empty strings, therefore we see 3 zero offsets (24 white boxes with zeros in them).
+5. Values themselves. In our example, they are empty, so this 5th part is not present.
 
 The next bucket is "Accounts":
 
@@ -158,7 +167,48 @@ incarnation 0, and all contract accounts will start their existence with incarna
 Contract accounts may also contract code hash and storage root, and these two pieces of information would make the record
 in the "Accounts" bucket contain 5 instead of 3 fields.
 
+Genesis in go-ethereum
+------------------------------
 
+Now we will create the same Genesis state and block in go-ethereum (in archive mode to make sure we compare like for like).
+Here is how the database looks like. Since go-ethereum uses LevelDB, and LevelDB does not have a concept of "Buckets" (or
+"Tables"), go-ethereum emulates them by adding table-specific prefixes to all the keys, with the exception of the keys that
+describe the state trie (bucket "Hashes" in our example). In the illustration, these prefixes are mostly removed for better
+comparison with turbo-geth. They were not removed only for the buckets "LastBlock", "LastHeader" and "LastFast", because
+othewise they key would be empty.
 
+![geth_genesis_db](geth_changes_0.dot.gd.png)
 
+The buckets "Preimages", "Receipts", "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
+to those in the turbo-geth database. We will walk through the ones that are different.
 
+In the bucket "Block Bodies", the value is slightly different:
+
+![geth_genesis_block_bodies](geth_changes_0_b_5.dot.gd.png)
+
+The difference is that the block body has 2 elements instead of 3 in turbo-geth. The missing element is the list
+of the sender addresses that go-ethereum does not store, but recomputes after loading or caches in memory.
+
+The buckets "Accounts", "History Of Accounts", and "Change Sets" are missing, because go-ethereum uses a very
+different mechanism for storing the state and its history:
+
+![geth_genesis_hashes](geth_changes_0_hashes_0.dot.gd.png)
+
+In the illustration showing the state trie, one can find 4 parts of the diagram that consist of the coloured boxes
+(that excludes the leaves that contain account balances and nonces). These parts are usually called "trie nodes",
+and in the diagram above we see 2 types of trie nodes:
+1. Branch node. This is the horizontal line of 3 coloured boxes on the top. It branches the traversal of the state
+trie from top to bottom 3-ways.
+2. Leaf node. These are 3 vertical lines of 63 coloured boxes.
+
+Each type of trie nodes can be serialised (using RLP encoding), to convert it to a string of bytes. What we see in
+the values of the records in the "Hashes" bucket just above are the RLP-encodings of these 4 trie nodes.
+What we see in the keys of these records are the results of `Keccak256` function applied to the values. In a way,
+this is similar to the "Preimages" bucket, with the different type of values.
+
+If you look closely, you may notice that the keys of the last 3 records are actually contained inside the value
+of the first record. This is because the first value correponds to that 3-way branch node, and the hashes of the
+leaf nodes are used like "pointers" to thoese nodes. Continuing the "pointer" analogy, you can say that
+"dereferencing" these pointers mean fetching the corresponding records from this "Hashes" bucket. Using such
+"derederencing" process, one can traverse the state trie from the top to any leaf at the bottom. Each step in
+such traversal requires finding the corresponding record in the "Hashes" bucket.
