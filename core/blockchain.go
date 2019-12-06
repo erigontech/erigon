@@ -116,7 +116,6 @@ type CacheConfig struct {
 	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
 	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
-	TrieDirtyDisabled   bool          // Whether to disable trie write caching and GC altogether (archive node)
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 
 	BlocksBeforePruning uint64
@@ -191,6 +190,8 @@ type BlockChain struct {
 	highestKnownBlock   uint64
 	highestKnownBlockMu sync.Mutex
 	enableReceipts      bool // Whether receipts need to be written to the database
+	enableTxLookupIndex bool // Whether we store tx lookup index into the database
+	enablePreimages     bool // Whether we store preimages into the database
 	resolveReads        bool
 	pruner              Pruner
 }
@@ -224,21 +225,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	cdb := db.NewBatch()
 
 	bc := &BlockChain{
-		chainConfig:    chainConfig,
-		cacheConfig:    cacheConfig,
-		db:             cdb,
-		triegc:         prque.New(nil),
-		quit:           make(chan struct{}),
-		shouldPreserve: shouldPreserve,
-		bodyCache:      bodyCache,
-		bodyRLPCache:   bodyRLPCache,
-		receiptsCache:  receiptsCache,
-		blockCache:     blockCache,
-		txLookupCache:  txLookupCache,
-		futureBlocks:   futureBlocks,
-		engine:         engine,
-		vmConfig:       vmConfig,
-		badBlocks:      badBlocks,
+		chainConfig:         chainConfig,
+		cacheConfig:         cacheConfig,
+		db:                  cdb,
+		triegc:              prque.New(nil),
+		quit:                make(chan struct{}),
+		shouldPreserve:      shouldPreserve,
+		bodyCache:           bodyCache,
+		bodyRLPCache:        bodyRLPCache,
+		receiptsCache:       receiptsCache,
+		blockCache:          blockCache,
+		txLookupCache:       txLookupCache,
+		futureBlocks:        futureBlocks,
+		engine:              engine,
+		vmConfig:            vmConfig,
+		badBlocks:           badBlocks,
+		enableTxLookupIndex: true,
+		enableReceipts:      false,
+		enablePreimages:     true,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -335,12 +339,21 @@ func (bc *BlockChain) EnableReceipts(er bool) {
 	bc.enableReceipts = er
 }
 
+func (bc *BlockChain) EnableTxLookupIndex(et bool) {
+	bc.enableTxLookupIndex = et
+}
+
+func (bc *BlockChain) EnablePreimages(ep bool) {
+	bc.enablePreimages = ep
+}
+
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
 		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+		bc.trieDbState.EnablePreimages(bc.enablePreimages)
 		if err != nil {
 			log.Error("Creation aborted", "error", err)
 			return nil, err
@@ -1079,7 +1092,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 			// Flush data into ancient database.
 			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
-			rawdb.WriteTxLookupEntries(batch, block)
+			if bc.enableTxLookupIndex {
+				rawdb.WriteTxLookupEntries(batch, block)
+			}
 
 			stats.processed++
 		}
@@ -1150,7 +1165,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			// Write all the data out into the database
 			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
-			rawdb.WriteTxLookupEntries(batch, block)
+			if bc.enableTxLookupIndex {
+				rawdb.WriteTxLookupEntries(batch, block)
+			}
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
@@ -1276,10 +1293,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
-	if !bc.cacheConfig.DownloadOnly {
+	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
-	if stateDb != nil && !bc.cacheConfig.DownloadOnly {
+	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
@@ -1862,7 +1879,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		collectLogs(newChain[i].Hash(), false)
 
 		// Write lookup entries for hash based transaction/receipt searches
-		rawdb.WriteTxLookupEntries(bc.db, newChain[i])
+		if bc.enableTxLookupIndex {
+			rawdb.WriteTxLookupEntries(bc.db, newChain[i])
+		}
 		addedTxs = append(addedTxs, newChain[i].Transactions()...)
 	}
 	// When transactions get deleted from the database, the receipts that were

@@ -187,7 +187,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			TrieCleanNoPrefetch: config.NoPrefetch,
 			TrieTimeLimit:       config.TrieTimeout,
 			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           config.NoHistory,
+			NoHistory:           !config.StorageMode.History,
 			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
@@ -195,6 +195,11 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
+	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
+	eth.blockchain.EnablePreimages(config.StorageMode.Preimages)
+
 	// Rewind the chain in case of an incompatible config upgrade.
 	if compat, ok := genesisErr.(*params.ConfigCompatError); ok {
 		log.Warn("Rewinding chain to upgrade configuration", "err", compat)
