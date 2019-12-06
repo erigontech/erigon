@@ -18,6 +18,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
@@ -40,6 +41,8 @@ const (
 )
 
 func TestCmdVersion(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -58,7 +61,7 @@ func TestCmdVersion(t *testing.T) {
 	if err = encoder.Encode(&c); err != nil {
 		t.Errorf("Could not encode CmdVersion: %v", err)
 	}
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	var v uint64
@@ -71,6 +74,7 @@ func TestCmdVersion(t *testing.T) {
 }
 
 func TestCmdBeginEndLastError(t *testing.T) {
+	ctx := context.Background()
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -100,7 +104,7 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	if err = encoder.Encode(&txHandle); err != nil {
 		t.Errorf("Could not encode txHandle: %v", err)
 	}
-	// CmdLastError to retrive the error related to the CmdEndTx with the wrong handle
+	// CmdLastError to retrieve the error related to the CmdEndTx with the wrong handle
 	c = CmdLastError
 	if err = encoder.Encode(&c); err != nil {
 		t.Errorf("Could not encode CmdLastError: %v", err)
@@ -121,22 +125,22 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBeginTx")
+		t.Errorf("Could not decode response from CmdBeginTx, %v", err)
 	}
 	var lastErrorStr string
 	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError")
+		t.Errorf("Could not decode response from CmdLastError, %v", err)
 	}
 	if lastErrorStr != "transaction not found" {
 		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
 	}
 	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError")
+		t.Errorf("Could not decode response from CmdLastError, %v", err)
 	}
 	if lastErrorStr != "<nil>" {
 		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
@@ -144,6 +148,8 @@ func TestCmdBeginEndLastError(t *testing.T) {
 }
 
 func TestCmdBucket(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -183,19 +189,19 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	var bucketHandle uint64
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -203,6 +209,8 @@ func TestCmdBucket(t *testing.T) {
 }
 
 func TestCmdGet(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -276,20 +284,20 @@ func TestCmdGet(t *testing.T) {
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -312,6 +320,8 @@ func TestCmdGet(t *testing.T) {
 }
 
 func TestCmdSeek(t *testing.T) {
+	ctx := context.Background()
+
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
@@ -366,34 +376,34 @@ func TestCmdSeek(t *testing.T) {
 	if err = encoder.Encode(&bucketHandle); err != nil {
 		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
 	}
-	c = CmdSeek
+	c = CmdCursorSeek
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdSeek: %v", err)
+		t.Errorf("Could not encode CmdCursorSeek: %v", err)
 	}
 	var cursorHandle uint64 = 3
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdSeek: %v", err)
+		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
 	}
 	var seekKey = []byte("key15") // Should find key2
 	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdSeek: %v", err)
+		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -405,16 +415,16 @@ func TestCmdSeek(t *testing.T) {
 	if cursorHandle != 3 {
 		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
 	}
-	// Results of CmdSeek
+	// Results of CmdCursorSeek
 	var key, value []byte
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(key) != key2 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(value) != value2 {
 		t.Errorf("Unexpected value: %s", key)
@@ -423,6 +433,7 @@ func TestCmdSeek(t *testing.T) {
 
 func TestCmdNext(t *testing.T) {
 	// ---------- Start of boilerplate code
+	ctx := context.Background()
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
 	if err != nil {
 		t.Errorf("Could not create database: %v", err)
@@ -476,45 +487,45 @@ func TestCmdNext(t *testing.T) {
 	if err = encoder.Encode(&bucketHandle); err != nil {
 		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
 	}
-	c = CmdSeek
+	c = CmdCursorSeek
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdSeek: %v", err)
+		t.Errorf("Could not encode CmdCursorSeek: %v", err)
 	}
 	var cursorHandle uint64 = 3
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdSeek: %v", err)
+		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
 	}
 	var seekKey = []byte("key1") // Should find key1
 	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdSeek: %v", err)
+		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
 	}
-	c = CmdNext
+	c = CmdCursorNext
 	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdNext: %v", err)
+		t.Errorf("Could not encode CmdCursorNext: %v", err)
 	}
 	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandler for CmdNext: %v", err)
+		t.Errorf("Could not encode cursorHandler for CmdCursorNext: %v", err)
 	}
 	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
 	if err = encoder.Encode(&numberOfKeys); err != nil {
-		t.Errorf("Could not encode numberOfKeys for CmdNex: %v", err)
+		t.Errorf("Could not encode numberOfKeys for CmdCursorNext: %v", err)
 	}
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(db, &inBuf, &outBuf, closer); err != nil {
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin")
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
 	}
 	if txHandle != 1 {
 		t.Errorf("Unexpected txHandle: %d", txHandle)
 	}
 	// Results of CmdBucket
 	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket")
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
 	}
 	if bucketHandle != 2 {
 		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
@@ -526,41 +537,189 @@ func TestCmdNext(t *testing.T) {
 	if cursorHandle != 3 {
 		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
 	}
-	// Results of CmdSeek
+	// Results of CmdCursorSeek
 	var key, value []byte
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(key) != key1 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdSeek: %v", err)
+		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
 	}
 	if string(value) != value1 {
 		t.Errorf("Unexpected value: %s", value)
 	}
-	// Results of CmdNext
+	// Results of CmdCursorNext
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if string(key) != key2 {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if string(value) != value2 {
 		t.Errorf("Unexpected value: %s", value)
 	}
 	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if key != nil {
 		t.Errorf("Unexpected key: %s", key)
 	}
 	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdNext: %v", err)
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
+	}
+	if value != nil {
+		t.Errorf("Unexpected value: %s", value)
+	}
+}
+
+func TestCmdFirst(t *testing.T) {
+	// ---------- Start of boilerplate code
+	ctx := context.Background()
+	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
+	if err != nil {
+		t.Errorf("Could not create database: %v", err)
+	}
+	// Prepare input buffer with one command CmdVersion
+	var inBuf bytes.Buffer
+	encoder := newEncoder(&inBuf)
+	defer returnEncoderToPool(encoder)
+	// output buffer to receive the result of the command
+	var outBuf bytes.Buffer
+	decoder := newDecoder(&outBuf)
+	defer returnDecoderToPool(decoder)
+	// ---------- End of boilerplate code
+	// Create a bucket and populate some values
+	var name = []byte("testbucket")
+	if err = db.Update(func(tx *bolt.Tx) error {
+		b, err1 := tx.CreateBucket(name, false)
+		if err1 != nil {
+			return err1
+		}
+		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
+			return err1
+		}
+		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
+			return err1
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("Could not create and populate a bucket: %v", err)
+	}
+	var c = CmdBeginTx
+	if err = encoder.Encode(&c); err != nil {
+		t.Errorf("Could not encode CmdBeginTx: %v", err)
+	}
+	c = CmdBucket
+	if err = encoder.Encode(&c); err != nil {
+		t.Errorf("Could not encode CmdBucket: %v", err)
+	}
+	var txHandle uint64 = 1
+	if err = encoder.Encode(&txHandle); err != nil {
+		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
+	}
+	if err = encoder.Encode(&name); err != nil {
+		t.Errorf("Could not encode name for CmdBucket: %v", err)
+	}
+	c = CmdCursor
+	if err = encoder.Encode(&c); err != nil {
+		t.Errorf("Could not encode CmdCursor: %v", err)
+	}
+	var bucketHandle uint64 = 2
+	if err = encoder.Encode(&bucketHandle); err != nil {
+		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
+	}
+	c = CmdCursorFirst
+	if err = encoder.Encode(&c); err != nil {
+		t.Errorf("Could not encode CmdCursorFirst: %v", err)
+	}
+	var cursorHandle uint64 = 3
+	if err = encoder.Encode(&cursorHandle); err != nil {
+		t.Errorf("Could not encode cursorHandle for CmdCursorFirst: %v", err)
+	}
+	var numberOfFirstKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
+	if err = encoder.Encode(&numberOfFirstKeys); err != nil {
+		t.Errorf("Could not encode numberOfFirstKeys for CmdCursorFirst: %v", err)
+	}
+
+	c = CmdCursorNext
+	if err = encoder.Encode(&c); err != nil {
+		t.Errorf("Could not encode CmdCursorNext: %v", err)
+	}
+	if err = encoder.Encode(&cursorHandle); err != nil {
+		t.Errorf("Could not encode cursorHandler for CmdCursorNext: %v", err)
+	}
+	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
+	if err = encoder.Encode(&numberOfKeys); err != nil {
+		t.Errorf("Could not encode numberOfKeys for CmdCursorNext: %v", err)
+	}
+	// By now we constructed all input requests, now we call the
+	// Server to process them all
+	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
+		t.Errorf("Error while calling Server: %v", err)
+	}
+	// And then we interpret the results
+	// Results of CmdBeginTx
+	if err = decoder.Decode(&txHandle); err != nil {
+		t.Errorf("Could not decode response from CmdBegin, %v", err)
+	}
+	if txHandle != 1 {
+		t.Errorf("Unexpected txHandle: %d", txHandle)
+	}
+	// Results of CmdBucket
+	if err = decoder.Decode(&bucketHandle); err != nil {
+		t.Errorf("Could not decode response from CmdBucket, %v", err)
+	}
+	if bucketHandle != 2 {
+		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
+	}
+	// Results of CmdCursor
+	if err = decoder.Decode(&cursorHandle); err != nil {
+		t.Errorf("Could not decode response from CmdCursor: %v", err)
+	}
+	if cursorHandle != 3 {
+		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
+	}
+	// Results of CmdCursorFirst
+	var key, value []byte
+	if err = decoder.Decode(&key); err != nil {
+		t.Errorf("Could not decode response from CmdCursorFirst: %v", err)
+	}
+	if string(key) != key1 {
+		t.Errorf("Unexpected key: %s", key)
+	}
+	if err = decoder.Decode(&value); err != nil {
+		t.Errorf("Could not decode response from CmdCursorFirst: %v", err)
+	}
+	if string(value) != value1 {
+		t.Errorf("Unexpected value: %s", value)
+	}
+	// Results of CmdCursorNext
+	if err = decoder.Decode(&key); err != nil {
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
+	}
+	if string(key) != key2 {
+		t.Errorf("Unexpected key: %s", key)
+	}
+	if err = decoder.Decode(&value); err != nil {
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
+	}
+	if string(value) != value2 {
+		t.Errorf("Unexpected value: %s", value)
+	}
+	if err = decoder.Decode(&key); err != nil {
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
+	}
+	if key != nil {
+		t.Errorf("Unexpected key: %s", key)
+	}
+	if err = decoder.Decode(&value); err != nil {
+		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
 	}
 	if value != nil {
 		t.Errorf("Unexpected value: %s", value)
