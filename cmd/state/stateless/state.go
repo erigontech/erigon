@@ -356,7 +356,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			if bytes.HasSuffix(k, dbutils.HeaderHashSuffix) || bytes.HasSuffix(k, dbutils.HeaderTDSuffix) {
+			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
 

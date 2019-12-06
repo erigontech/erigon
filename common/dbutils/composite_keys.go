@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"bytes"
 	"encoding/binary"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -18,14 +19,35 @@ func HeaderKey(number uint64, hash common.Hash) []byte {
 	return append(EncodeBlockNumber(number), hash.Bytes()...)
 }
 
+func IsHeaderKey(k []byte) bool {
+	l := common.BlockNumberLength + common.HashLength
+	if len(k) != l {
+		return false
+	}
+
+	return !IsHeaderHashKey(k) && !IsHeaderTDKey(k)
+}
+
 // headerTDKey = headerPrefix + num (uint64 big endian) + hash + headerTDSuffix
 func HeaderTDKey(number uint64, hash common.Hash) []byte {
 	return append(HeaderKey(number, hash), HeaderTDSuffix...)
 }
 
+func IsHeaderTDKey(k []byte) bool {
+	l := common.BlockNumberLength + common.HashLength + 1
+	result := len(k) == l && bytes.Compare(k[l-1:], HeaderTDSuffix) == 0
+	return result
+}
+
 // headerHashKey = headerPrefix + num (uint64 big endian) + headerHashSuffix
 func HeaderHashKey(number uint64) []byte {
 	return append(EncodeBlockNumber(number), HeaderHashSuffix...)
+}
+
+func IsHeaderHashKey(k []byte) bool {
+	l := common.BlockNumberLength + 1
+	result := len(k) == l && bytes.Compare(k[l-1:], HeaderHashSuffix) == 0
+	return result
 }
 
 // headerNumberKey = headerNumberPrefix + hash

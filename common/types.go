@@ -38,6 +38,8 @@ const (
 	HashLength = 32
 	// AddressLength is the expected length of the address (in bytes)
 	AddressLength = 20
+	// BlockNumberLength length of uint64 big endian
+	BlockNumberLength = 8
 )
 
 var (
