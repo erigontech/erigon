@@ -340,7 +340,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	}
 }
 
-func GasLimits(ctx context.Context, db *remote.DB) {
+func (r *Reporter) GasLimits(ctx context.Context) {
 	f, err := os.Create("gas_limits.csv")
 	check(err)
 	defer f.Close()
@@ -349,7 +349,7 @@ func GasLimits(ctx context.Context, db *remote.DB) {
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
 
-	err = db.View(ctx, func(tx *remote.Tx) error {
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.HeaderPrefix)
 		if b == nil {
 			return nil
@@ -361,8 +361,8 @@ func GasLimits(ctx context.Context, db *remote.DB) {
 			}
 
 			header := new(types.Header)
-			if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
-				log.Error("Invalid block header RLP", "blockNum", blockNum, "err", err)
+			if decodeErr := rlp.Decode(bytes.NewReader(v), header); decodeErr != nil {
+				log.Error("Invalid block header RLP", "blockNum", blockNum, "err", decodeErr)
 				return nil
 			}
 

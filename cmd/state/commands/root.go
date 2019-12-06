@@ -27,7 +27,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
 }
 
-func getContext() (context.Context, func()) {
+func getContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		ch := make(chan os.Signal, 1)
@@ -42,7 +42,7 @@ func getContext() (context.Context, func()) {
 
 		cancel()
 	}()
-	return ctx, cancel
+	return ctx
 }
 
 var rootCmd = &cobra.Command{

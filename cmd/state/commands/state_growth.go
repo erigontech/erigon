@@ -17,7 +17,7 @@ func init() {
 				return err
 			}
 
-			ctx, _ := getContext()
+			ctx := getContext()
 
 			fmt.Println("Processing started...")
 			reporter.StateGrowth1(ctx)
