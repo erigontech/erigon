@@ -19,15 +19,13 @@ package ethdb
 import (
 	"bytes"
 	"io/ioutil"
-	"math/rand"
 	"os"
 	"runtime"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-
-	"github.com/dgraph-io/badger"
 )
 
 // https://github.com/dgraph-io/badger#frequently-asked-questions
@@ -44,8 +42,7 @@ type BadgerDatabase struct {
 	log      log.Logger   // Contextual logger tracking the database path
 	tmpDir   string       // Temporary data directory
 	gcTicker *time.Ticker // Garbage Collector
-	id     uint64
-	name   string
+	id       uint64
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
@@ -80,8 +77,7 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		db:       db,
 		log:      logger,
 		gcTicker: ticker,
-		id:   rand.Uint64(),
-		name: "NewBadgerDatabase",
+		id:       id(),
 	}, nil
 }
 
@@ -450,14 +446,8 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 		db:               db,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
-		id:               rand.Uint64(),
-		name:             db.Name() + "-NewBatch",
 	}
 	return m
-}
-
-func (db *BadgerDatabase) Name() string {
-	return db.name
 }
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.

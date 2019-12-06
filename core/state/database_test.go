@@ -18,7 +18,6 @@ package state_test
 
 import (
 	"context"
-	"fmt"
 	"math/big"
 	"testing"
 
@@ -58,7 +57,6 @@ func TestCreate2Revive(t *testing.T) {
 				address: {Balance: funds},
 			},
 		}
-		//dbCopy = db.MemCopy()
 		genesis   = gspec.MustCommit(db)
 		genesisDb = db.MemCopy()
 		signer    = types.HomesteadSigner{}
@@ -72,10 +70,7 @@ func TestCreate2Revive(t *testing.T) {
 
 	blockchain.EnableReceipts(true)
 
-	fmt.Println("\n\n----------------------------------------")
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	fmt.Printf("----------------------------------------\n\n\n")
-	//contractBackend := backends.NewSimulatedBackendWithDB(dbCopy, genesisDb, gspec, genesis, blockchain)
 	transactOpts := bind.NewKeyedTransactor(key)
 	transactOpts.GasLimit = 1000000
 
@@ -92,10 +87,6 @@ func TestCreate2Revive(t *testing.T) {
 	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
 	// i.e. without any storage items that "inherited" from the first child contract by mistake
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-
-	fmt.Println("^^^^^^^^^^^^^^^ 0", db.ID())
-	fmt.Println("^^^^^^^^^^^^^^^ -1", genesisDb.ID())
-
 	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, genesisDb, 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
@@ -129,8 +120,6 @@ func TestCreate2Revive(t *testing.T) {
 			}
 			block.AddTx(tx)
 		}
-
-		fmt.Println("****************", i)
 		contractBackend.Commit()
 	})
 
@@ -287,6 +276,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
+
 	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 

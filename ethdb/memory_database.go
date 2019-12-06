@@ -17,7 +17,6 @@
 package ethdb
 
 import (
-	"fmt"
 	"math/rand"
 
 	"github.com/ledgerwatch/bolt"
@@ -34,13 +33,10 @@ func NewMemDatabase() *BoltDatabase {
 		panic(err)
 	}
 	b := &BoltDatabase{
-		db:  db,
-		log: logger,
-		id:  rand.Uint64(),
-		name: "NewMemDatabase",
+		db:   db,
+		log:  logger,
+		id:   rand.Uint64(),
 	}
-
-	fmt.Println("$$$$$ NEW BoltDatabase", b.id)
 
 	return b
 }
@@ -54,10 +50,9 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 		panic(err)
 	}
 	return &BoltDatabase{
-		db:  db,
-		log: logger,
-		id:  rand.Uint64(),
-		name: "NewMemDatabase2",
+		db:   db,
+		log:  logger,
+		id:   id(),
 	}, db
 }
 
@@ -89,9 +84,8 @@ func (db *BoltDatabase) MemCopy() Database {
 		panic(err)
 	}
 	return &BoltDatabase{
-		db:  mem,
-		log: logger,
-		id:  rand.Uint64(),
-		name: db.name+"-MemCopy",
+		db:   mem,
+		log:  logger,
+		id:   rand.Uint64(),
 	}
 }

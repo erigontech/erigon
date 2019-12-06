@@ -39,7 +39,6 @@ type BoltDatabase struct {
 	db   *bolt.DB   // BoltDB instance
 	log  log.Logger // Contextual logger tracking the database path
 	id   uint64
-	name string
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -60,7 +59,6 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		db:   db,
 		log:  logger,
 		id:   rand.Uint64(),
-		name: "NewBoltDatabase",
 	}, nil
 }
 
@@ -634,8 +632,6 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 		db:               db,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
-		id:               rand.Uint64(),
-		name:             db.Name() + "-NewBatch",
 	}
 	return m
 }
@@ -658,10 +654,6 @@ func (db *BoltDatabase) TruncateAncients(items uint64) error {
 
 func (db *BoltDatabase) ID() uint64 {
 	return db.id
-}
-
-func (db *BoltDatabase) Name() string {
-	return db.name
 }
 
 func InspectDatabase(db Database) error {

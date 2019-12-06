@@ -337,22 +337,34 @@ func (bc *BlockChain) EnableReceipts(er bool) {
 
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
-		currentBlockNr := bc.CurrentBlock().NumberU64()
-		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
-		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
+		currentBlockNr := bc.CurrentBlock().NumberU64()
+		bc.trieDbState, err = bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr, false)
 		if err != nil {
-			log.Error("Creation aborted", "error", err)
-			return nil, err
-		}
-		bc.trieDbState.SetNoHistory(bc.NoHistory())
-		bc.trieDbState.SetResolveReads(bc.resolveReads)
-		if err := bc.trieDbState.Rebuild(); err != nil {
-			log.Error("Rebuiling aborted", "error", err)
 			bc.trieDbState = nil
 			return nil, err
 		}
 		log.Info("Creation complete.")
+	}
+	return bc.trieDbState, nil
+}
+
+func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64, getStored bool) (*state.TrieDbState, error) {
+	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
+		log.Info("Creating IntraBlockState from latest state", "block", blockNr)
+		tds, err := state.NewTrieDbState(root, bc.db, blockNr, getStored)
+		if err != nil {
+			log.Error("Creation aborted", "error", err)
+			return nil, err
+		}
+		tds.SetNoHistory(bc.NoHistory())
+		tds.SetResolveReads(bc.resolveReads)
+		if err := tds.Rebuild(); err != nil {
+			log.Error("Rebuiling aborted", "error", err)
+			return nil, err
+		}
+		log.Info("Creation complete.")
+		return tds, nil
 	}
 	return bc.trieDbState, nil
 }
@@ -1372,7 +1384,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-
 	// Start the parallel header verifier
 	headers := make([]*types.Header, len(chain))
 	seals := make([]bool, len(chain))
@@ -1427,7 +1438,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		return 0, events, coalescedLogs, nil
 	}
-
 	var offset int
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
@@ -1462,7 +1472,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-
 	// Iterate over the blocks and insert when the verifier permits
 	for i, block := range chain {
 		start := time.Now()

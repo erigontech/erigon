@@ -107,7 +107,6 @@ type Database interface {
 	TruncateAncients(items uint64) error
 
 	ID() uint64
-	Name() string
 }
 
 // MinDatabase is a minimalistic version of the Database interface.

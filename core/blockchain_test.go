@@ -239,15 +239,8 @@ func TestLastBlock(t *testing.T) {
 
 // Tests that given a starting canonical chain of a given size, it can be extended
 // with various length chains.
-func TestExtendCanonicalHeaders(t *testing.T) {
-	t.SkipNow()
-	testExtendCanonical(t, false)
-}
-
-func TestExtendCanonicalBlocks(t *testing.T)  {
-	t.SkipNow()
-	testExtendCanonical(t, true)
-}
+func TestExtendCanonicalHeaders(t *testing.T) { testExtendCanonical(t, false) }
+func TestExtendCanonicalBlocks(t *testing.T)  { testExtendCanonical(t, true) }
 
 func testExtendCanonical(t *testing.T, full bool) {
 	length := 5
@@ -274,14 +267,8 @@ func testExtendCanonical(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating shorter
 // forks do not take canonical ownership.
-func TestShorterForkHeaders(t *testing.T) {
-	t.SkipNow()
-	testShorterFork(t, false)
-}
-func TestShorterForkBlocks(t *testing.T)  {
-	t.SkipNow()
-	testShorterFork(t, true)
-}
+func TestShorterForkHeaders(t *testing.T) { testShorterFork(t, false) }
+func TestShorterForkBlocks(t *testing.T)  { testShorterFork(t, true) }
 
 func testShorterFork(t *testing.T, full bool) {
 	length := 10
@@ -310,14 +297,8 @@ func testShorterFork(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
-func TestLongerForkHeaders(t *testing.T) {
-	t.SkipNow()
-	testLongerFork(t, false)
-}
-func TestLongerForkBlocks(t *testing.T)  {
-	t.SkipNow()
-	testLongerFork(t, true)
-}
+func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
+func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
 	length := 10
@@ -346,14 +327,8 @@ func testLongerFork(t *testing.T, full bool) {
 
 // Tests that given a starting canonical chain of a given size, creating equal
 // forks do take canonical ownership.
-func TestEqualForkHeaders(t *testing.T) {
-	t.SkipNow()
-	testEqualFork(t, false)
-}
-func TestEqualForkBlocks(t *testing.T)  {
-	t.SkipNow()
-	testEqualFork(t, true)
-}
+func TestEqualForkHeaders(t *testing.T) { testEqualFork(t, false) }
+func TestEqualForkBlocks(t *testing.T)  { testEqualFork(t, true) }
 
 func testEqualFork(t *testing.T, full bool) {
 	length := 10

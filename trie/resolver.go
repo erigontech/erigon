@@ -23,7 +23,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	}
 	n, ok := t.root.(hashNode)
 	if !ok {
-		return nil
+		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
 	}
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
 		return err
@@ -246,9 +246,6 @@ func (tr *Resolver) finaliseRoot() error {
 		//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
 		tr.currentReq.t.hook(hookKey, hbRoot)
 		if len(tr.currentReq.resolveHash) > 0 && !bytes.Equal(tr.currentReq.resolveHash, hbHash[:]) {
-
-
-			fmt.Println("gotcha!", string(debug.Stack()))
 			return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
 				tr.currentReq.resolveHash, hbHash, tr.currentReq.contract, tr.currentReq.resolveHex, tr.currentReq.resolvePos)
 		}

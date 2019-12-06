@@ -156,7 +156,8 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 
 	genesis := gspec.MustCommit(db)
 
-	chain, _ := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	dbCopy := db.MemCopy()
+	chain, _ := core.NewBlockChain(dbCopy, nil, gspec.Config, engine, vm.Config{}, nil)
 	txpool := core.NewTxPool(testCase.testTxPoolConfig, chainConfig, chain)
 
 	// Generate a small n-block chain and an uncle block for it
@@ -165,7 +166,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 	if n > 0 {
 		if n-1 > 0 {
 			ctx := chain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-			blocks, _ := core.GenerateChain(ctx, chainConfig, genesis, engine, db, n-1, func(i int, gen *core.BlockGen) {
+			blocks, _ := core.GenerateChain(ctx, chainConfig, genesis, engine, dbCopy, n-1, func(i int, gen *core.BlockGen) {
 				gen.SetCoinbase(testCase.testBankAddress)
 			})
 			if _, err := chain.InsertChain(blocks); err != nil {
@@ -232,7 +233,7 @@ func newTestBackend(t *testing.T, testCase *testCase, chainConfig *params.ChainC
 }
 
 func TestGenerateBlockAndImportEthash(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be fixed. a new test from geth 1.9.7")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -398,16 +399,11 @@ func TestEmptyWorkClique(t *testing.T) {
 func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainConfig, engine consensus.Engine) {
 	defer engine.Close()
 
-	var (
-		taskCh    = make(chan struct{})
-		taskIndex int
-	)
-
+	taskCh := make(chan struct{})
 	m := new(sync.Map)
 	h := hooks{
 		newTaskHook: func(task *task) {
-			taskIndex += 1
-			emptyMiningNewTaskHook(t, testCase, taskIndex-1, task.state, task.block, taskCh, m)
+			emptyMiningNewTaskHook(t, testCase, task.state, task.block, taskCh, m)
 		},
 		fullTaskHook: func() {
 			time.Sleep(100 * time.Millisecond)
@@ -443,22 +439,24 @@ func checkEmptyMining(t *testing.T, testCase *testCase, state *state.IntraBlockS
 	gotBankBalance := state.GetBalance(testCase.testBankAddress).Uint64()
 
 	var balance uint64
-	if index == 1 || testCase.testBankFunds.Uint64() != gotBankBalance {
+	if index == 1 {
 		balance = 1000
 	}
 
 	if gotBalance != balance {
 		t.Errorf("account balance mismatch: have (%p) %d, want %d. index %d. %v %v",
-			state, state.GetBalance(testCase.testUserAddress), balance, index, testCase.testBankFunds.Uint64(),  gotBankBalance)
+			state, state.GetBalance(testCase.testUserAddress),
+			balance, index,
+			testCase.testBankFunds.Uint64(), gotBankBalance)
 	}
 }
 
-func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, index int, state *state.IntraBlockState, block *types.Block, taskCh chan<- struct{}, m *sync.Map) {
+func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, state *state.IntraBlockState, block *types.Block, taskCh chan<- struct{}, m *sync.Map) {
 	_, ok := m.LoadOrStore(fmt.Sprintf("%d%s", block.NumberU64(), block.Hash().String()), struct{}{})
 	if ok {
 		return
 	}
-	checkEmptyMining(t, testCase, state, index)
+	checkEmptyMining(t, testCase, state, int(block.Number().Uint64()))
 	taskCh <- struct{}{}
 }
 

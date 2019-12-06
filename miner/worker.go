@@ -193,7 +193,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		eth:                eth,
 		mux:                mux,
 		chain:              eth.BlockChain(),
-		hooks:       		h,
+		hooks:              h,
 		localUncles:        make(map[common.Hash]*types.Block),
 		remoteUncles:       make(map[common.Hash]*types.Block),
 		unconfirmed:        newUnconfirmedBlocks(eth.BlockChain(), miningLogAtDepth),
@@ -261,8 +261,7 @@ func (w *worker) pending() (*types.Block, *state.IntraBlockState, *state.TrieDbS
 	if w.snapshotState == nil {
 		return nil, nil, nil
 	}
-	// FIXME: fix miner code
-	// https://github.com/ledgerwatch/turbo-geth/issues/131
+
 	return w.snapshotBlock, w.snapshotState, w.snapshotTds.Copy()
 }
 
@@ -601,7 +600,6 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			//fixme remove
 			stat, err := w.chain.WriteBlockWithState(block, receipts, task.state, task.tds)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
@@ -644,13 +642,14 @@ func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
 		return err
 	}
 
-	tds.SetResolveReads(true)
+	tds = tds.WithNewBuffer()
+	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 
 	env := &environment{
 		signer:    types.NewEIP155Signer(w.chainConfig.ChainID),
 		state:     stateV,
-		tds:       tds.WithNewBuffer(),
+		tds:       tds,
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -721,7 +720,6 @@ func (w *worker) updateSnapshot() {
 		w.current.receipts,
 	)
 
-	// FIXME: fix miner code
 	w.snapshotState = w.current.state
 	w.snapshotTds = w.current.tds.WithNewBuffer()
 }
@@ -872,7 +870,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	if now := time.Now().Unix(); timestamp > now+1 {
 		wait := time.Duration(timestamp-now) * time.Second
 		log.Info("Mining too far in the future", "wait", common.PrettyDuration(wait))
-		//fixme WTF
+		// fixme WTF
 		time.Sleep(wait)
 	}
 

@@ -123,36 +123,6 @@ func NewSimulatedBackendWithConfig(alloc core.GenesisAlloc, config *params.Chain
 	return backend
 }
 
-func NewSimulatedBackendWithDB(prependDb, database ethdb.Database, config *core.Genesis, genesisBlock *types.Block, blockchain *core.BlockChain) *SimulatedBackend {
-	engine := ethash.NewFaker()
-
-	backend := &SimulatedBackend{
-		prependBlock: genesisBlock,
-		prependDb:    database.MemCopy(),
-		database:     prependDb,
-		engine:       engine,
-		blockchain:   blockchain,
-		config:       config.Config,
-		events:       filters.NewEventSystem(new(event.TypeMux), &filterBackend{database, blockchain}, false),
-	}
-
-
-	/*
-	st, dbState, _ := blockchain.State()
-
-	backend.pendingBlock = blocks[0]
-	backend.pendingHeader = b.pendingBlock.Header()
-	backend.gasPool = new(core.GasPool).AddGas(config.GasLimit)
-	backend.pendingTds, _ = state.NewTrieDbState(backend.prependBlock.Root(), backend.prependDb.MemCopy(), backend.prependBlock.NumberU64())
-	backend.pendingState = state.New(backend.pendingTds)
-	backend.pendingTds.StartNewBuffer()
-	*/
-
-	backend.emptyPendingBlock()
-
-	return backend
-}
-
 // NewSimulatedBackend creates a new binding backend using a simulated blockchain
 // for testing purposes.
 func NewSimulatedBackend(alloc core.GenesisAlloc, gasLimit uint64) *SimulatedBackend {

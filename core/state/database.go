@@ -28,10 +28,8 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -184,12 +182,6 @@ func getTrieDBState(db ethdb.Database) *TrieDbState {
 	tr := trieObj[db.ID()]
 	trieObjMu.RUnlock()
 
-	if tr != nil && tr.db != nil {
-		fmt.Println("************* NEW GET", tr.db.ID(), tr.db.Name(), db.ID(), db.Name())
-	} else {
-		fmt.Println("************* NEW GET", "nil", db.ID(), db.Name(), debug.Callers(10))
-	}
-
 	return tr
 }
 
@@ -197,28 +189,22 @@ func setTrieDBState(tds *TrieDbState, id uint64) {
 	if tds == nil {
 		return
 	}
-	fmt.Println("************* NEW SET", tds.db.ID(), tds.db.Name())
+
 	trieObjMu.Lock()
 	trieObj[id] = tds
 	trieObjMu.Unlock()
 }
 
-var n = 0
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, getStored ...bool) (*TrieDbState, error) {
+	if len(getStored) > 0 && getStored[0] {
+		tr := getTrieDBState(db)
 
-func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	tr := getTrieDBState(db)
-
-	fmt.Printf("\n************* NEW %v %v\n%v\n", db.Name(), db.ID(), debug.Callers(5))
-	if tr != nil {
-		fmt.Printf("************* NEW TR %v %v\n%v %v\n%v %v\n",
-			db.Name(), db.ID(),
-			tr.getBlockNr(), blockNr,
-			tr.LastRoot().String(), root.String())
-		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
-			return tr, nil
+		if tr != nil {
+			if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
+				return tr, nil
+			}
 		}
 	}
-	fmt.Printf("************* NEW Creating a new TR\n")
 
 	csc, err := lru.New(100000)
 	if err != nil {
@@ -245,12 +231,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp.Touch(hex, del)
 	})
 
-	n++
-	if n > 0 {
-		setTrieDBState(tds, db.ID())
-	} else {
-		fmt.Println("@@@@@@@@@@@@", n, db.ID(), debug.Callers(100))
-	}
+	setTrieDBState(tds, db.ID())
 
 	return tds, nil
 }
@@ -308,7 +289,6 @@ func (tds *TrieDbState) StartNewBuffer() {
 }
 
 func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
-	fmt.Println("=== WithNewBuffer START", tds.aggregateBuffer != nil, tds.currentBuffer != nil)
 	aggregateBuffer := &Buffer{}
 	aggregateBuffer.initialise()
 
@@ -360,7 +340,6 @@ func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
-	fmt.Println("UpdateStateTrie")
 	roots, err := tds.updateTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
@@ -739,7 +718,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 }
 
 func (tds *TrieDbState) clearUpdates() {
-	fmt.Println("!!!!!!!!!!!!!!! clearUpdates")
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
@@ -760,17 +738,15 @@ func (tds *TrieDbState) Rebuild() error {
 }
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
-	fmt.Println("################ SetBlockNr", tds.blockNr, blockNr, tds.db.ID(), debug.Callers(10))
 	tds.setBlockNr(blockNr)
 	tds.tp.SetBlockNr(blockNr)
 }
 
+func (tds *TrieDbState) GetBlockNr() uint64 {
+	return tds.getBlockNr()
+}
+
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-
-	fmt.Println("################ UnwindTo", tds.blockNr, blockNr, tds.db.ID(), debug.Callers(10))
-
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
@@ -823,6 +799,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	if err := tds.ResolveStateTrie(); err != nil {
 		return err
 	}
+
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	if _, err := tds.updateTrieRoots(false); err != nil {
 		return err
 	}
@@ -831,7 +810,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			return err
 		}
 	}
-	fmt.Println("UnwindTo")
+
 	tds.clearUpdates()
 	tds.setBlockNr(blockNr)
 	return nil

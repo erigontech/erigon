@@ -135,7 +135,7 @@ func (sdb *IntraBlockState) setError(err error) {
 
 func (sdb *IntraBlockState) Error() error {
 	sdb.RLock()
-	sdb.RUnlock()
+	defer sdb.RUnlock()
 	return sdb.dbErr
 }
 
@@ -173,14 +173,14 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 
 func (sdb *IntraBlockState) GetLogs(hash common.Hash) []*types.Log {
 	sdb.RLock()
-	sdb.RUnlock()
+	defer sdb.RUnlock()
 
 	return sdb.logs[hash]
 }
 
 func (sdb *IntraBlockState) Logs() []*types.Log {
 	sdb.RLock()
-	sdb.RUnlock()
+	defer sdb.RUnlock()
 	var logs []*types.Log
 	for _, lgs := range sdb.logs {
 		logs = append(logs, lgs...)
@@ -201,7 +201,6 @@ func (sdb *IntraBlockState) AddPreimage(hash common.Hash, preimage []byte) {
 }
 
 // Preimages returns a list of SHA3 preimages that have been submitted.
-// fixme unsafe
 func (sdb *IntraBlockState) Preimages() map[common.Hash][]byte {
 	sdb.Lock()
 	defer sdb.Unlock()
