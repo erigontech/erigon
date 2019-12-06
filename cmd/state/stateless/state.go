@@ -20,6 +20,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -101,8 +103,7 @@ func (isa IntSorterAddr) Swap(i, j int) {
 }
 
 type Reporter struct {
-	remoteDbAddress string
-	db              *remote.DB
+	db *remote.DB
 }
 
 func NewReporter(remoteDbAddress string) (*Reporter, error) {
@@ -117,7 +118,7 @@ func NewReporter(remoteDbAddress string) (*Reporter, error) {
 		return nil, err
 	}
 
-	return &Reporter{remoteDbAddress: remoteDbAddress, db: db}, nil
+	return &Reporter{db: db}, nil
 }
 
 func (r *Reporter) StateGrowth1(ctx context.Context) {
@@ -339,34 +340,43 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	}
 }
 
-func GasLimits(chaindata string) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	defer ethDb.Close()
-	vmConfig := vm.Config{}
-	engine := ethash.NewFullFaker()
-	chainConfig := params.MainnetChainConfig
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil)
-	check(err)
+func GasLimits(ctx context.Context, db *remote.DB) {
 	f, err := os.Create("gas_limits.csv")
 	check(err)
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	var blockNum uint64 = 5346726
+	//var blockNum uint64 = 5346726
+	var blockNum uint64 = 0
 
-	for {
-		block := bcb.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
+	err = db.View(ctx, func(tx *remote.Tx) error {
+		b := tx.Bucket(dbutils.HeaderPrefix)
+		if b == nil {
+			return nil
 		}
-		fmt.Fprintf(w, "%d, %d\n", blockNum, block.GasLimit())
-		blockNum++
-		if blockNum%100000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if bytes.HasSuffix(k, dbutils.HeaderHashSuffix) || bytes.HasSuffix(k, dbutils.HeaderTDSuffix) {
+				continue
+			}
+
+			header := new(types.Header)
+			if err := rlp.Decode(bytes.NewReader(v), header); err != nil {
+				log.Error("Invalid block header RLP", "blockNum", blockNum, "err", err)
+				return nil
+			}
+
+			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
+			blockNum++
+			if blockNum%100000 == 0 {
+				fmt.Printf("Processed %d blocks\n", blockNum)
+			}
 		}
-	}
-	fmt.Printf("Read %d blocks\n", blockNum)
+		return nil
+	})
+	check(err)
+
+	fmt.Printf("Finish processing %d blocks\n", blockNum)
 }
 
 func parseFloat64(str string) float64 {
