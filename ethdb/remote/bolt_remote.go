@@ -133,6 +133,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			log.Error("Could not close connection", "error", err1)
 		}
 	}()
+
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -421,6 +422,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			return fmt.Errorf("unknown command %d", c)
 		}
 	}
+
 	return nil
 }
 

@@ -349,14 +349,33 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
 
+	mainHashes := make(map[string]struct{}, 10*000*000)
+
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.HeaderPrefix)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
+
+		fmt.Println("Preloading block numbers...")
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if !dbutils.IsHeaderHashKey(k) {
+				continue
+			}
+
+			mainHashes[string(v)] = struct{}{}
+		}
+
+		fmt.Println("Preloaded: ", len(mainHashes))
+
 		for k, v := c.First(); k != nil; k, v = c.Next() {
 			if !dbutils.IsHeaderKey(k) {
+				continue
+			}
+
+			if _, ok := mainHashes[string(k[common.BlockNumberLength:])]; !ok {
 				continue
 			}
 
@@ -367,10 +386,11 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 			}
 
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
-			blockNum++
-			if blockNum%100000 == 0 {
+			if blockNum%1000000 == 0 {
 				fmt.Printf("Processed %d blocks\n", blockNum)
 			}
+
+			blockNum++
 		}
 		return nil
 	})
