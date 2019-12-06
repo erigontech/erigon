@@ -362,7 +362,6 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	if err != nil {
 		return err
 	}
-	tr.Print()
 	return tr.finaliseRoot()
 }
 
