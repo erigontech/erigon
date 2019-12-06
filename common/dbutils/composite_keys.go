@@ -35,8 +35,7 @@ func HeaderTDKey(number uint64, hash common.Hash) []byte {
 
 func IsHeaderTDKey(k []byte) bool {
 	l := common.BlockNumberLength + common.HashLength + 1
-	result := len(k) == l && bytes.Compare(k[l-1:], HeaderTDSuffix) == 0
-	return result
+	return len(k) == l && bytes.Equal(k[l-1:], HeaderTDSuffix)
 }
 
 // headerHashKey = headerPrefix + num (uint64 big endian) + headerHashSuffix
@@ -46,8 +45,7 @@ func HeaderHashKey(number uint64) []byte {
 
 func IsHeaderHashKey(k []byte) bool {
 	l := common.BlockNumberLength + 1
-	result := len(k) == l && bytes.Compare(k[l-1:], HeaderHashSuffix) == 0
-	return result
+	return len(k) == l && bytes.Equal(k[l-1:], HeaderHashSuffix)
 }
 
 // headerNumberKey = headerNumberPrefix + hash
