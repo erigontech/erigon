@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
 	"sync"
@@ -421,7 +422,7 @@ func (m *mutation) Close() {
 
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:               m,
+		db:               m.db,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
@@ -448,4 +449,114 @@ func (m *mutation) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (m *mutation) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+
+func NewRWDecorator(db Database) *RWCounterDecorator  {
+	return &RWCounterDecorator {
+		db,
+		make(map[string]uint64),
+		sync.RWMutex{},
+	}
+}
+type RWCounterDecorator struct {
+	Database
+	Counts map[string]uint64
+	mtx sync.RWMutex
+
+}
+
+func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
+	d.mtx.Lock()
+	d.Counts["Put"]++
+	d.mtx.Unlock()
+	fmt.Println("PUT", string(bucket), key)
+	return d.Database.Put(bucket,key,value)
+}
+
+func (d *RWCounterDecorator) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error{
+	d.mtx.Lock()
+	d.Counts["PutS"]++
+	d.mtx.Unlock()
+	return d.Database.PutS(hBucket,key,value,timestamp,changeSetBucketOnly)
+}
+func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
+	d.mtx.Lock()
+	d.Counts["Get"]++
+	d.mtx.Unlock()
+	return d.Database.Get(bucket,key)
+}
+func (d *RWCounterDecorator) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	d.mtx.Lock()
+	d.Counts["GetS"]++
+	d.mtx.Unlock()
+	return d.Database.GetS(hBucket,key, timestamp)
+}
+func (d *RWCounterDecorator) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	d.mtx.Lock()
+	d.Counts["GetAsOf"]++
+	d.mtx.Unlock()
+	return d.Database.GetAsOf(bucket,hBucket,key,timestamp)
+}
+func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
+	d.mtx.Lock()
+	d.Counts["Has"]++
+	d.mtx.Unlock()
+	return d.Database.Has(bucket, key)
+}
+func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
+	d.mtx.Lock()
+	d.Counts["Walk"]++
+	d.mtx.Unlock()
+	return d.Database.Walk(bucket,startkey,fixedbits,walker)
+}
+func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+	d.mtx.Lock()
+	d.Counts["MultiWalk"]++
+	d.mtx.Unlock()
+	return d.Database.MultiWalk(bucket,startkeys,fixedbits,walker)
+}
+func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	d.mtx.Lock()
+	d.Counts["WalkAsOf"]++
+	d.mtx.Unlock()
+	return d.Database.WalkAsOf(bucket,hBucket,startkey,fixedbits,timestamp,walker)
+}
+func (d *RWCounterDecorator) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+	d.mtx.Lock()
+	d.Counts["MultiWalkAsOf"]++
+	d.mtx.Unlock()
+	return d.Database.MultiWalkAsOf(bucket,hBucket,startkeys,fixedbits,timestamp,walker)
+}
+func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
+	d.mtx.Lock()
+	d.Counts["Delete"]++
+	d.mtx.Unlock()
+	return d.Database.Delete(bucket,key)
+}
+func (d *RWCounterDecorator) DeleteTimestamp(timestamp uint64) error {
+	d.mtx.Lock()
+	d.Counts["DeleteTimestamp"]++
+	d.mtx.Unlock()
+	return d.Database.DeleteTimestamp(timestamp)
+}
+func (d *RWCounterDecorator) MultiPut(tuples ...[]byte) (uint64, error) {
+	d.mtx.Lock()
+	d.Counts["MultiPut"]++
+	d.mtx.Unlock()
+	return d.Database.MultiPut(tuples...)
+}
+func (d *RWCounterDecorator) MemCopy() Database {
+	return d.Database.MemCopy()
+}
+func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
+	d.mtx.Lock()
+	d.Counts["NewBatch"]++
+	d.mtx.Unlock()
+	mm := &mutation{
+		db:               d,
+		puts:             newPuts(),
+		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
+	}
+	return mm
 }

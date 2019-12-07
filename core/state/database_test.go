@@ -19,6 +19,7 @@ package state_test
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -472,11 +473,31 @@ func TestReorgOverStateChange(t *testing.T) {
 
 func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	// Configure and generate a sample block chain
+	numOfContracts:=10
+	txPerBlock:=10
+	numOfBlocks:=100
+	var keys []*ecdsa.PrivateKey
+	var addresses []common.Address
+	var transactOpts []*bind.TransactOpts
+	for i:=0;i<numOfContracts; i++ {
+		key,err:=crypto.GenerateKey()
+		if err!=nil {
+			t.Fatal(err)
+		}
+		keys=append(keys, key)
+		addresses=append(addresses, crypto.PubkeyToAddress(key.PublicKey))
+		transactOpt := bind.NewKeyedTransactor(key)
+		transactOpt.GasLimit = 1000000
+		transactOpts=append(transactOpts, transactOpt)
+
+	}
+	funds   := big.NewInt(1000000000)
+	alloc:=core.GenesisAlloc{}
+	for _,v:=range addresses {
+		alloc[v]=core.GenesisAccount{Balance:funds}
+	}
 	var (
-		db      = ethdb.NewMemDatabase()
-		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
-		address = crypto.PubkeyToAddress(key.PublicKey)
-		funds   = big.NewInt(1000000000)
+		db      = ethdb.NewRWDecorator(ethdb.NewMemDatabase())
 		gspec   = &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
@@ -485,9 +506,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 				EIP158Block:         big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
-			Alloc: core.GenesisAlloc{
-				address: {Balance: funds},
-			},
+			Alloc: alloc,
 		}
 		genesis = gspec.MustCommit(db)
 	)
@@ -501,55 +520,58 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
-	transactOpts := bind.NewKeyedTransactor(key)
-	transactOpts.GasLimit = 1000000
 
-	var contractAddress common.Address
-	var selfDestruct *contracts.Selfdestruct
+	var selfDestruct =make([]*contracts.Selfdestruct,numOfContracts)
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	n:=100
+
 	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
-	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), n, func(i int, block *core.BlockGen) {
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), numOfBlocks, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
 		switch i {
 		case 0:
-			contractAddress, tx, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
-			if err != nil {
-				t.Fatal(err)
+			for i:=0;i<numOfContracts; i++ {
+				_, tx, selfDestruct[i], err = contracts.DeploySelfdestruct(transactOpts[i], contractBackend)
+				if err != nil {
+					t.Fatal(err)
+				}
+				block.AddTx(tx)
 			}
-			block.AddTx(tx)
-		case n-1:
-			tx, err = selfDestruct.Destruct(transactOpts)
-			if err != nil {
-				t.Fatal(err)
+		case numOfBlocks -1:
+			for i:=0;i<numOfContracts; i++ {
+				for j:=0; j<txPerBlock; j++ {
+					tx, err = selfDestruct[i].Destruct(transactOpts[i])
+					if err != nil {
+						t.Fatal(err)
+					}
+					block.AddTx(tx)
+				}
 			}
-			block.AddTx(tx)
 		default:
-			tx, err = selfDestruct.Change(transactOpts)
-			if err != nil {
-				t.Fatal(err)
+			for i:=0;i<numOfContracts; i++ {
+				for j:=0; j<txPerBlock; j++ {
+					tx, err = selfDestruct[i].Change(transactOpts[i])
+					if err != nil {
+						t.Fatal(err)
+					}
+					block.AddTx(tx)
+				}
 			}
-			block.AddTx(tx)
 
 		}
 		contractBackend.Commit()
-		fmt.Println("commited i=",i)
+		//fmt.Println("commited i=",i)
 	})
 
 
-	st, _, _ := blockchain.State()
-	if !st.Exist(address) {
-		t.Error("expected account to exist")
-	}
-	if st.Exist(contractAddress) {
-		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
-	}
 
 	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
+
+	stats:= BucketsStats{}
+
 
 	fmt.Println("==========================ACCOUNT===========================")
 	err=blockchain.ChainDb().Walk(dbutils.AccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
@@ -558,8 +580,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		if err!=nil {
 			fmt.Println(err)
 		}
-		fmt.Println(common.BytesToHash(k).String(), len(v))
-		spew.Dump(acc)
+		stats.Accounts+=uint64(len(v))
 		return true, nil
 	})
 	if err!=nil {
@@ -568,47 +589,53 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 	fmt.Println("==========================ACCOUNTHISTORY===========================")
 	blockchain.ChainDb().Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		fmt.Println(common.BytesToHash(k).String(),v)
+		stats.HAT+=uint64(len(v))
 		return true, nil
 	})
 
 	fmt.Println("==========================STORAGE===========================")
 	blockchain.ChainDb().Walk(dbutils.StorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		fmt.Println(common.BytesToHash(k).String(),v)
+		stats.Storage+=uint64(len(v))
 		return true, nil
 	})
 
 	fmt.Println("==========================StorageHISTORY===========================")
 	blockchain.ChainDb().Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		fmt.Println(common.BytesToHash(k).String(),v)
+		stats.HST+=uint64(len(v))
 		return true, nil
 	})
 	fmt.Println("==========================CHANGESET===========================")
-	wholeChangesetLen:=0
-	hatChangesetLen:=0
-	hstChangesetLen:=0
 	blockchain.ChainDb().Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		fmt.Println("-------------------------", string(k),len(v), "--------------------------------------")
 		if bytes.HasSuffix(k, dbutils.AccountsHistoryBucket) {
-			hatChangesetLen+=len(v)
+			stats.ChangeSetHAT+=uint64(len(v))
 		}
 		if bytes.HasSuffix(k, dbutils.StorageHistoryBucket) {
-			hstChangesetLen+=len(v)
+			stats.ChangeSetHST+=uint64(len(v))
 		}
-		wholeChangesetLen+=len(v)
 		cs,err:=dbutils.DecodeChangeSet(v)
 		if err!=nil {
 			fmt.Println(err)
 		}
-		for _,change:=range cs.Changes {
-			fmt.Println(string(change.Key), len(change.Value))
-		}
+		_=cs
 		return true, nil
 	})
 
-	fmt.Println("whole", wholeChangesetLen)
-	fmt.Println("hat", hatChangesetLen)
-	fmt.Println("hst", hstChangesetLen)
+	spew.Dump(stats)
+	spew.Dump(db.Counts)
+	spew.Dump(stats.Size())
+}
+
+type BucketsStats struct {
+	Accounts uint64
+	Storage uint64
+	ChangeSetHAT uint64
+	ChangeSetHST uint64
+	HAT uint64
+	HST uint64
+}
+
+func (b BucketsStats) Size() uint64 {
+	return b.ChangeSetHST+b.ChangeSetHAT+b.HST+b.Storage+b.HAT+b.Accounts
 }
 
 
@@ -751,3 +778,4 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("Expected empty list of prunables, got:\n %s", prunables)
 	}
 }
+
