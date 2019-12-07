@@ -36,9 +36,9 @@ const HeapSize = 512 * 1024 * 1024
 // BoltDatabase is a wrapper over BoltDb,
 // compatible with the Database interface.
 type BoltDatabase struct {
-	db   *bolt.DB   // BoltDB instance
-	log  log.Logger // Contextual logger tracking the database path
-	id   uint64
+	db  *bolt.DB   // BoltDB instance
+	log log.Logger // Contextual logger tracking the database path
+	id  uint64
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -56,9 +56,9 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil, err
 	}
 	return &BoltDatabase{
-		db:   db,
-		log:  logger,
-		id:   rand.Uint64(),
+		db:  db,
+		log: logger,
+		id:  rand.Uint64(),
 	}, nil
 }
 

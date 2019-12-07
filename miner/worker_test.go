@@ -32,7 +32,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -213,7 +212,7 @@ func (b *testWorkerBackend) PostChainEvents(events []interface{}) {
 	b.chain.PostChainEvents(events, nil)
 }
 
-func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend *testWorkerBackend, h hooks) *worker {
+func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks) *worker {
 	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
 	w.setEtherbase(t.testBankAddress)
 	return w
@@ -297,8 +296,13 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	go listenNewBlock()
 
 	for i := 0; i < 5; i++ {
-		b.txPool.AddLocal(b.newRandomTx(testCase, true))
-		b.txPool.AddLocal(b.newRandomTx(testCase, false))
+		if err := b.txPool.AddLocal(b.newRandomTx(testCase, true)); err != nil {
+			t.Fatal(err)
+		}
+		if err := b.txPool.AddLocal(b.newRandomTx(testCase, false)); err != nil {
+			t.Fatal(err)
+		}
+
 		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
 		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
 		select {
@@ -401,9 +405,12 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 
 	taskCh := make(chan struct{})
 	m := new(sync.Map)
+	index := new(uint64)
 	h := hooks{
 		newTaskHook: func(task *task) {
-			emptyMiningNewTaskHook(t, testCase, task.state, task.block, taskCh, m)
+			gotBalance := task.state.GetBalance(testCase.testUserAddress).Uint64()
+			gotBankBalance := task.state.GetBalance(testCase.testBankAddress).Uint64()
+			emptyMiningNewTaskHook(t, testCase, task.block, taskCh, gotBalance, gotBankBalance, m, index)
 		},
 		fullTaskHook: func() {
 			time.Sleep(100 * time.Millisecond)
@@ -434,29 +441,26 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 	}
 }
 
-func checkEmptyMining(t *testing.T, testCase *testCase, state *state.IntraBlockState, index int) {
-	gotBalance := state.GetBalance(testCase.testUserAddress).Uint64()
-	gotBankBalance := state.GetBalance(testCase.testBankAddress).Uint64()
-
+func checkEmptyMining(t *testing.T, testCase *testCase, gotBalance uint64, gotBankBalance uint64, index int) {
 	var balance uint64
 	if index == 1 {
 		balance = 1000
 	}
 
 	if gotBalance != balance {
-		t.Errorf("account balance mismatch: have (%p) %d, want %d. index %d. %v %v",
-			state, state.GetBalance(testCase.testUserAddress),
+		t.Errorf("account balance mismatch: have %d, want %d. index %d. %v %v",
+			gotBalance,
 			balance, index,
 			testCase.testBankFunds.Uint64(), gotBankBalance)
 	}
 }
 
-func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, state *state.IntraBlockState, block *types.Block, taskCh chan<- struct{}, m *sync.Map) {
+func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, block *types.Block, taskCh chan<- struct{}, gotBalance uint64, gotBankBalance uint64, m *sync.Map, index *uint64) {
 	_, ok := m.LoadOrStore(fmt.Sprintf("%d%s", block.NumberU64(), block.Hash().String()), struct{}{})
 	if ok {
 		return
 	}
-	checkEmptyMining(t, testCase, state, int(block.Number().Uint64()))
+	checkEmptyMining(t, testCase, gotBalance, gotBankBalance, int(atomic.AddUint64(index, 1)-1))
 	taskCh <- struct{}{}
 }
 
@@ -485,7 +489,7 @@ func TestStreamUncleBlock(t *testing.T) {
 					}
 				}
 				taskCh <- struct{}{}
-				taskIndex += 1
+				taskIndex++
 			}
 		},
 		skipSealHook: func(task *task) bool {
@@ -560,7 +564,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 					}
 				}
 				taskCh <- struct{}{}
-				taskIndex += 1
+				taskIndex++
 			}
 		},
 		skipSealHook: func(task *task) bool {
@@ -667,7 +671,7 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 				t.Errorf("resubmit interval mismatch: have %v, want %v", recommitInterval, wantRecommitInterval)
 			}
 			result = append(result, float64(recommitInterval.Nanoseconds()))
-			index += 1
+			index++
 			progress <- struct{}{}
 		},
 	}

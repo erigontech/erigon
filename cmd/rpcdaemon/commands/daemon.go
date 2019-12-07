@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math/big"
 	"net"
 	"os"
@@ -40,36 +41,29 @@ type EthAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	remoteDbAdddress string
-	db               *remote.DB
-}
-
-func (api *APIImpl) ensureConnected() error {
-	if api.db == nil {
-		conn, err := net.Dial("tcp", api.remoteDbAdddress)
-		if err != nil {
-			return err
-		}
-		api.db, err = remote.NewDB(conn, conn, conn)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	remoteDbAddress string
+	db              *remote.DB
 }
 
 // ConnectAPIImpl connects to the remote DB and returns APIImpl instance
-func ConnectAPIImpl(remoteDbAdddress string) (*APIImpl, error) {
-	return &APIImpl{remoteDbAdddress: remoteDbAdddress}, nil
+func ConnectAPIImpl(remoteDbAddress string) (*APIImpl, error) {
+	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
+		return conn, conn, conn, err
+	}
+	db, err := remote.NewDB(dial)
+	if err != nil {
+		return nil, err
+	}
+
+	return &APIImpl{remoteDbAddress: remoteDbAddress, db: db}, nil
 }
 
 // BlockNumber returns the currently highest block number available in the remote db
 func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
-	if err := api.ensureConnected(); err != nil {
-		return 0, err
-	}
 	var blockNumber uint64
-	if err := api.db.View(func(tx *remote.Tx) error {
+	err := api.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.HeadHeaderKey)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
@@ -88,31 +82,26 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
 		}
 		blockNumber = binary.BigEndian.Uint64(blockNumberData)
 		return nil
-	}); err != nil {
-		api.db.Close()
-		api.db = nil
+	})
+	if err != nil {
 		return 0, err
 	}
+
 	return blockNumber, nil
 }
 
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	if err := api.ensureConnected(); err != nil {
-		return nil, err
-	}
-
 	var block *types.Block
 	additionalFields := make(map[string]interface{})
 
-	if err := api.db.View(func(tx *remote.Tx) error {
+	err := api.db.View(ctx, func(tx *remote.Tx) error {
 		block = GetBlockByNumber(tx, uint64(number.Int64()))
 		additionalFields["totalDifficulty"] = ReadTd(tx, block.Hash(), uint64(number.Int64()))
 		return nil
-	}); err != nil {
-		api.db.Close()
-		api.db = nil
+	})
+	if err != nil {
 		return nil, err
 	}
 
@@ -257,7 +246,7 @@ func daemon(cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 	var rpcAPI = []rpc.API{}
-	apiImpl, err := ConnectAPIImpl(cfg.remoteDbAdddress)
+	apiImpl, err := ConnectAPIImpl(cfg.remoteDbAddress)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return

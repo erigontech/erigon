@@ -186,6 +186,7 @@ func TestIntermediateLeaks(t *testing.T) {
 }
 
 func TestSnapshotRandom(t *testing.T) {
+	t.Skip("mining")
 	config := &quick.Config{MaxCount: 1000}
 	err := quick.Check((*snapshotTest).run, config)
 	if cerr, ok := err.(*quick.CheckError); ok {

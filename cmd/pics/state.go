@@ -203,8 +203,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 					visual.Horizontal(f1, key, len(key), fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 					if len(val) > 0 {
 						if len(val) > 64 {
-							compression := len(val) - 64
-							visual.Horizontal(f1, val, len(val), fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, compression)
+							visual.HexBox(f1, fmt.Sprintf("v_%d", i), val, 64, false /*compresses*/, true /*highlighted*/)
 						} else {
 							visual.Horizontal(f1, val, len(val), fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 						}
@@ -216,8 +215,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 					visual.Horizontal(f, key, 0, fmt.Sprintf("k_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 					if len(val) > 0 {
 						if len(val) > 64 {
-							compression := len(val) - 64
-							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, compression)
+							visual.HexBox(f, fmt.Sprintf("v_%d", i), val, 64, false /*compressed*/, false /*highlighted*/)
 						} else {
 							visual.Horizontal(f, val, 0, fmt.Sprintf("v_%d", i), visual.HexIndexColors, visual.HexFontColors, 0)
 						}

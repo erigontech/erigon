@@ -33,9 +33,9 @@ func NewMemDatabase() *BoltDatabase {
 		panic(err)
 	}
 	b := &BoltDatabase{
-		db:   db,
-		log:  logger,
-		id:   rand.Uint64(),
+		db:  db,
+		log: logger,
+		id:  rand.Uint64(),
 	}
 
 	return b
@@ -50,9 +50,9 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 		panic(err)
 	}
 	return &BoltDatabase{
-		db:   db,
-		log:  logger,
-		id:   id(),
+		db:  db,
+		log: logger,
+		id:  id(),
 	}, db
 }
 
@@ -84,8 +84,8 @@ func (db *BoltDatabase) MemCopy() Database {
 		panic(err)
 	}
 	return &BoltDatabase{
-		db:   mem,
-		log:  logger,
-		id:   rand.Uint64(),
+		db:  mem,
+		log: logger,
+		id:  rand.Uint64(),
 	}
 }

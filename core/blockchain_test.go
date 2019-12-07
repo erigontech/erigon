@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -1029,7 +1030,7 @@ func TestLogReorgs(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	rmLogsCh := make(chan RemovedLogsEvent)
+	rmLogsCh := make(chan RemovedLogsEvent, 1000)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	chain, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), genesisDb.MemCopy(), 2, func(i int, gen *BlockGen) {
 		if i == 1 {
@@ -1040,12 +1041,13 @@ func TestLogReorgs(t *testing.T) {
 			gen.AddTx(tx)
 		}
 	})
+
 	if _, err := blockchain.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
 	}
 
 	chain, _ = GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), genesisDb.MemCopy(), 3, func(i int, gen *BlockGen) {})
-	if _, err := blockchain.InsertChain(chain); err != nil {
+	if _, err := blockchain.InsertChain(chain, true); err != nil {
 		t.Fatalf("failed to insert forked chain: %v", err)
 	}
 
@@ -1107,10 +1109,10 @@ func TestLogRebirth(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log)
+	logsCh := make(chan []*types.Log, 1000)
 	blockchain.SubscribeLogsEvent(logsCh)
 
-	rmLogsCh := make(chan RemovedLogsEvent)
+	rmLogsCh := make(chan RemovedLogsEvent, 1000)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	dbCopy := db.MemCopy()
 
@@ -1230,7 +1232,7 @@ func TestSideLogRebirth(t *testing.T) {
 	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log)
+	logsCh := make(chan []*types.Log, 1000)
 	blockchain.SubscribeLogsEvent(logsCh)
 
 	dbCopy := db.MemCopy()
@@ -1272,6 +1274,7 @@ func TestSideLogRebirth(t *testing.T) {
 }
 
 func TestReorgSideEvent(t *testing.T) {
+	t.Skip("mining")
 	var (
 		db      = ethdb.NewMemDatabase()
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1508,6 +1511,166 @@ func TestEIP155Transition(t *testing.T) {
 	}
 }
 
+func TestModes(t *testing.T) {
+	// run test on all combination of flags
+	runWithModesPermuations(
+		t,
+		doModesTest,
+	)
+}
+
+func doModesTest(history, preimages, receipts, txlookup bool) error {
+	fmt.Printf("h=%v, p=%v, r=%v, t=%v\n", history, preimages, receipts, txlookup)
+	// Configure and generate a sample block chain
+	var (
+		db         = ethdb.NewMemDatabase()
+		key, _     = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address    = crypto.PubkeyToAddress(key.PublicKey)
+		funds      = big.NewInt(1000000000)
+		deleteAddr = common.Address{1}
+		gspec      = &Genesis{
+			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
+			Alloc:  GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
+		}
+		genesis = gspec.MustCommit(db)
+	)
+
+	cacheConfig := &CacheConfig{
+		Disabled:            true,
+		BlocksBeforePruning: 1024,
+		TrieCleanLimit:      256,
+		TrieDirtyLimit:      256,
+		TrieTimeLimit:       5 * time.Minute,
+		DownloadOnly:        false,
+		NoHistory:           !history,
+	}
+
+	blockchain, _ := NewBlockChain(db, cacheConfig, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	blockchain.EnableReceipts(receipts)
+	blockchain.EnablePreimages(preimages)
+	blockchain.EnableTxLookupIndex(txlookup)
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	defer blockchain.Stop()
+
+	blocks, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db.MemCopy(), 4, func(i int, block *BlockGen) {
+		var (
+			tx      *types.Transaction
+			err     error
+			basicTx = func(signer types.Signer) (*types.Transaction, error) {
+				return types.SignTx(types.NewTransaction(block.TxNonce(address), common.Address{}, new(big.Int), 21000, new(big.Int), nil), signer, key)
+			}
+		)
+		switch i {
+		case 0:
+			tx, err = basicTx(types.HomesteadSigner{})
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 2:
+			tx, err = basicTx(types.HomesteadSigner{})
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+
+			tx, err = basicTx(types.NewEIP155Signer(gspec.Config.ChainID))
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		case 3:
+			tx, err = basicTx(types.HomesteadSigner{})
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+
+			tx, err = basicTx(types.NewEIP155Signer(gspec.Config.ChainID))
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(tx)
+		}
+	})
+
+	if _, err := blockchain.InsertChain(blocks); err != nil {
+		return err
+	}
+
+	for bucketName, shouldBeEmpty := range map[string]bool{
+		string(dbutils.AccountsHistoryBucket): !history,
+		string(dbutils.PreimagePrefix):        !preimages,
+		string(dbutils.BlockReceiptsPrefix):   !receipts,
+		string(dbutils.TxLookupPrefix):        !txlookup,
+	} {
+		numberOfEntries := 0
+
+		err := db.Walk([]byte(bucketName), nil, 0, func(k, v []byte) (bool, error) {
+			// we ignore empty account history
+			//nolint:scopelint
+			if bucketName == string(dbutils.AccountsHistoryBucket) && len(v) == 0 {
+				return true, nil
+			}
+
+			numberOfEntries++
+			return true, nil
+		})
+		if err != nil {
+			return err
+		}
+
+		if bucketName == string(dbutils.BlockReceiptsPrefix) {
+			// we will always have a receipt for genesis
+			numberOfEntries--
+		}
+
+		if bucketName == string(dbutils.PreimagePrefix) {
+			// we will always have 2 preimages because GenerateChain interface does not
+			// allow us to set it to ignore them
+			// but if the preimages are enabled in BlockChain, we will have more than 2.
+			// TODO: with a better interface to GenerateChain allow to check preimages
+			numberOfEntries -= 2
+		}
+
+		if (shouldBeEmpty && numberOfEntries > 0) || (!shouldBeEmpty && numberOfEntries == 0) {
+			return fmt.Errorf("bucket '%s' should be empty? %v (actually %d entries)", bucketName, shouldBeEmpty, numberOfEntries)
+		}
+	}
+
+	return nil
+}
+
+func runWithModesPermuations(t *testing.T, testFunc func(bool, bool, bool, bool) error) {
+	err := runPermutation(testFunc, 0, true, true, true, true)
+	if err != nil {
+		t.Errorf("error while testing stuff: %v", err)
+	}
+}
+
+func runPermutation(testFunc func(bool, bool, bool, bool) error, current int, history, preimages, receipts, txlookup bool) error {
+	if current == 4 {
+		return testFunc(history, preimages, receipts, txlookup)
+	}
+	if err := runPermutation(testFunc, current+1, history, preimages, receipts, txlookup); err != nil {
+		return err
+	}
+	switch current {
+	case 0:
+		history = !history
+	case 1:
+		preimages = !preimages
+	case 2:
+		receipts = !receipts
+	case 3:
+		txlookup = !txlookup
+	default:
+		panic("unexpected current item")
+	}
+
+	return runPermutation(testFunc, current+1, history, preimages, receipts, txlookup)
+}
+
 func TestEIP161AccountRemoval(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -1694,6 +1857,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 }
 
 func TestBlockchainRecovery(t *testing.T) {
+	t.Skip("mining")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1750,6 +1914,7 @@ func TestBlockchainRecovery(t *testing.T) {
 }
 
 func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
+	t.Skip("mining")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()

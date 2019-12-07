@@ -165,6 +165,7 @@ type TrieDbState struct {
 	historical      bool
 	noHistory       bool
 	resolveReads    bool
+	savePreimages   bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
 }
@@ -226,6 +227,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, getStor
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
 		tp:            tp,
+		savePreimages: true,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -234,6 +236,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, getStor
 	setTrieDBState(tds, db.ID())
 
 	return tds, nil
+}
+
+func (tds *TrieDbState) EnablePreimages(ep bool) {
+	tds.savePreimages = ep
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -862,7 +868,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
-	if !save {
+	if !save || !tds.savePreimages {
 		return nil
 	}
 	// Following check is to minimise the overwriting the same value of preimage

@@ -116,7 +116,6 @@ type CacheConfig struct {
 	TrieCleanLimit      int           // Memory allowance (MB) to use for caching trie nodes in memory
 	TrieCleanNoPrefetch bool          // Whether to disable heuristic state prefetching for followup blocks
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
-	TrieDirtyDisabled   bool          // Whether to disable trie write caching and GC altogether (archive node)
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 
 	BlocksBeforePruning uint64
@@ -191,6 +190,8 @@ type BlockChain struct {
 	highestKnownBlock   uint64
 	highestKnownBlockMu sync.Mutex
 	enableReceipts      bool // Whether receipts need to be written to the database
+	enableTxLookupIndex bool // Whether we store tx lookup index into the database
+	enablePreimages     bool // Whether we store preimages into the database
 	resolveReads        bool
 	pruner              Pruner
 }
@@ -224,21 +225,24 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 	cdb := db.NewBatch()
 
 	bc := &BlockChain{
-		chainConfig:    chainConfig,
-		cacheConfig:    cacheConfig,
-		db:             cdb,
-		triegc:         prque.New(nil),
-		quit:           make(chan struct{}),
-		shouldPreserve: shouldPreserve,
-		bodyCache:      bodyCache,
-		bodyRLPCache:   bodyRLPCache,
-		receiptsCache:  receiptsCache,
-		blockCache:     blockCache,
-		txLookupCache:  txLookupCache,
-		futureBlocks:   futureBlocks,
-		engine:         engine,
-		vmConfig:       vmConfig,
-		badBlocks:      badBlocks,
+		chainConfig:         chainConfig,
+		cacheConfig:         cacheConfig,
+		db:                  cdb,
+		triegc:              prque.New(nil),
+		quit:                make(chan struct{}),
+		shouldPreserve:      shouldPreserve,
+		bodyCache:           bodyCache,
+		bodyRLPCache:        bodyRLPCache,
+		receiptsCache:       receiptsCache,
+		blockCache:          blockCache,
+		txLookupCache:       txLookupCache,
+		futureBlocks:        futureBlocks,
+		engine:              engine,
+		vmConfig:            vmConfig,
+		badBlocks:           badBlocks,
+		enableTxLookupIndex: true,
+		enableReceipts:      false,
+		enablePreimages:     true,
 	}
 	bc.validator = NewBlockValidator(chainConfig, bc, engine)
 	bc.prefetcher = newStatePrefetcher(chainConfig, bc, engine)
@@ -335,6 +339,14 @@ func (bc *BlockChain) EnableReceipts(er bool) {
 	bc.enableReceipts = er
 }
 
+func (bc *BlockChain) EnableTxLookupIndex(et bool) {
+	bc.enableTxLookupIndex = et
+}
+
+func (bc *BlockChain) EnablePreimages(ep bool) {
+	bc.enablePreimages = ep
+}
+
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
 		var err error
@@ -359,6 +371,7 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64, ge
 		}
 		tds.SetNoHistory(bc.NoHistory())
 		tds.SetResolveReads(bc.resolveReads)
+		tds.EnablePreimages(bc.enablePreimages)
 		if err := tds.Rebuild(); err != nil {
 			log.Error("Rebuiling aborted", "error", err)
 			return nil, err
@@ -1091,7 +1104,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 			// Flush data into ancient database.
 			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
-			rawdb.WriteTxLookupEntries(batch, block)
+			if bc.enableTxLookupIndex {
+				rawdb.WriteTxLookupEntries(batch, block)
+			}
 
 			stats.processed++
 		}
@@ -1162,7 +1177,9 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			// Write all the data out into the database
 			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
-			rawdb.WriteTxLookupEntries(batch, block)
+			if bc.enableTxLookupIndex {
+				rawdb.WriteTxLookupEntries(batch, block)
+			}
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
@@ -1288,10 +1305,10 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
-	if !bc.cacheConfig.DownloadOnly {
+	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
-	if stateDb != nil && !bc.cacheConfig.DownloadOnly {
+	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
@@ -1327,7 +1344,8 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 // wrong.
 //
 // After insertion is done, all accumulated events will be fired.
-func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
+func (bc *BlockChain) InsertChain(chain types.Blocks, debug ...bool) (int, error) {
+	isDebug := len(debug) > 0
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return 0, nil
@@ -1360,7 +1378,13 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	}
 	ctx := bc.WithContext(context.Background(), chain[0].Number())
 	bc.chainmu.Lock()
-	n, events, logs, err := bc.insertChain(ctx, chain, true)
+
+	var innerDebug []int
+	if isDebug {
+		innerDebug = append(innerDebug, 1)
+		fmt.Println("YYYYY", chain[0].Number())
+	}
+	n, events, logs, err := bc.insertChain(ctx, chain, true, innerDebug...)
 	bc.chainmu.Unlock()
 	bc.doneJob()
 
@@ -1376,7 +1400,8 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, []interface{}, []*types.Log, error) {
+func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool, debug ...int) (int, []interface{}, []*types.Log, error) {
+	isDebug := len(debug) > 0
 	log.Info("Inserting chain", "start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64())
 	// If the chain is terminating, don't even bother starting u
 	if bc.getProcInterrupt() {
@@ -1552,6 +1577,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if parent != nil {
 			parentRoot = parent.Root()
 		}
+		if isDebug {
+			fmt.Println("XXXXX-0", i, block.Number(), debug)
+		}
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
 			if _, err = bc.db.Commit(); err != nil {
@@ -1560,24 +1588,39 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
+			if isDebug {
+				fmt.Println("XXXXX-0.1", i, block.Number(), debug)
+			}
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
+			if isDebug {
+				fmt.Println("XXXXX-0.2", i, block.Number(), debug)
+			}
 			root := bc.trieDbState.LastRoot()
+			if isDebug {
+				fmt.Println("XXXXX-0.3", i, block.Number(), debug)
+			}
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
+			if isDebug {
+				fmt.Println("XXXXX-0.4", i, block.Number(), debug)
+			}
 			currentBlock := bc.CurrentBlock()
-			if err := bc.reorg(currentBlock, parent); err != nil {
+			if err = bc.reorg(currentBlock, parent, debug...); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
+			}
+			if isDebug {
+				fmt.Println("XXXXX-0.5", i, block.Number(), debug)
 			}
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
@@ -1585,11 +1628,17 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.trieDbState = nil
 				return 0, events, coalescedLogs, err
 			}
+			if isDebug {
+				fmt.Println("XXXXX-0.6", i, block.Number(), debug)
+			}
 		}
 		var stateDB *state.IntraBlockState
 		var receipts types.Receipts
 		var logs []*types.Log
 		var usedGas uint64
+		if isDebug {
+			fmt.Println("XXXXX-1", i, block.Number(), debug)
+		}
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
@@ -1634,7 +1683,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 			blockValidationTimer.Update(time.Since(substart) - (statedb.AccountHashes + statedb.StorageHashes - triehash))
 		*/
-
+		if isDebug {
+			fmt.Println("XXXXX-2", i, block.Number(), debug)
+		}
 		// Write the block to the chain and get the status.
 		status, err := bc.writeBlockWithState(block, receipts, stateDB, bc.trieDbState)
 		//t3 := time.Now()
@@ -1653,7 +1704,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			blockWriteTimer.Update(time.Since(substart) - statedb.AccountCommits - statedb.StorageCommits)
 			blockInsertTimer.UpdateSince(start)
 		*/
-
+		if isDebug {
+			fmt.Println("XXXXX-3", i, block.Number(), debug)
+		}
 		switch status {
 		case CanonStatTy:
 			log.Debug("Inserted new block", "number", block.Number(), "hash", block.Hash(),
@@ -1686,6 +1739,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.processed++
 		stats.usedGas += usedGas
 		stats.report(chain, i, bc.db)
+
+		if isDebug {
+			fmt.Println("XXXXX-4", i, block.Number(), debug)
+		}
 		if commitStats.needToCommit(chain, bc.db, i) {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
@@ -1763,7 +1820,7 @@ func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWit
 // reorg takes two blocks, an old chain and a new chain and will reconstruct the
 // blocks and inserts them to be part of the new canonical chain and accumulates
 // potential missing transactions and post an event about them.
-func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
+func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block, debug ...int) error {
 	var (
 		newChain    types.Blocks
 		oldChain    types.Blocks
@@ -1798,6 +1855,10 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			}
 		}
 	)
+	isDebug := len(debug) > 0
+	if isDebug {
+		fmt.Println("ZZZZZ 1", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	// Reduce the longer chain to the same number as the shorter one
 	// first reduce whoever is higher bound
 	if oldBlock.NumberU64() > newBlock.NumberU64() {
@@ -1812,6 +1873,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		for ; newBlock != nil && newBlock.NumberU64() != oldBlock.NumberU64(); newBlock = bc.GetBlock(newBlock.ParentHash(), newBlock.NumberU64()-1) {
 			newChain = append(newChain, newBlock)
 		}
+	}
+	if isDebug {
+		fmt.Println("ZZZZZ 2", oldBlock.NumberU64(), newBlock.NumberU64())
 	}
 	if oldBlock == nil {
 		return fmt.Errorf("invalid old chain")
@@ -1844,6 +1908,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			return fmt.Errorf("invalid new chain")
 		}
 	}
+	if isDebug {
+		fmt.Println("ZZZZZ 3", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	// Ensure the user sees large reorgs
 	if len(oldChain) > 0 && len(newChain) > 0 {
 		logFn := log.Info
@@ -1859,11 +1926,20 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	} else {
 		log.Error("Impossible reorg, please file an issue", "oldnum", oldBlock.Number(), "oldhash", oldBlock.Hash(), "newnum", newBlock.Number(), "newhash", newBlock.Hash())
 	}
+	if isDebug {
+		fmt.Println("ZZZZZ 4", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	// Delete the old chain
 	for _, oldBlock := range oldChain {
 		rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
 	}
+	if isDebug {
+		fmt.Println("ZZZZZ 5", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	bc.insert(commonBlock)
+	if isDebug {
+		fmt.Println("ZZZZZ 6", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	// Insert the new chain, taking care of the proper incremental order
 	for i := len(newChain) - 1; i >= 0; i-- {
 		// insert the block in the canonical way, re-writing history
@@ -1873,13 +1949,21 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		collectLogs(newChain[i].Hash(), false)
 
 		// Write lookup entries for hash based transaction/receipt searches
-		rawdb.WriteTxLookupEntries(bc.db, newChain[i])
+		if bc.enableTxLookupIndex {
+			rawdb.WriteTxLookupEntries(bc.db, newChain[i])
+		}
 		addedTxs = append(addedTxs, newChain[i].Transactions()...)
+	}
+	if isDebug {
+		fmt.Println("ZZZZZ 7", oldBlock.NumberU64(), newBlock.NumberU64())
 	}
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
 		rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
+	}
+	if isDebug {
+		fmt.Println("ZZZZZ 8", oldBlock.NumberU64(), newBlock.NumberU64())
 	}
 	// Delete any canonical number assignments above the new head
 	number := bc.CurrentBlock().NumberU64()
@@ -1890,14 +1974,21 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		}
 		rawdb.DeleteCanonicalHash(bc.db, i)
 	}
-
+	if isDebug {
+		fmt.Println("ZZZZZ 9", oldBlock.NumberU64(), newBlock.NumberU64(), len(deletedLogs))
+	}
 	if len(deletedLogs) > 0 {
 		bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
+	}
+	if isDebug {
+		fmt.Println("ZZZZZ 10", oldBlock.NumberU64(), newBlock.NumberU64())
 	}
 	if _, err := bc.db.Commit(); err != nil {
 		return err
 	}
-
+	if isDebug {
+		fmt.Println("ZZZZZ 11", oldBlock.NumberU64(), newBlock.NumberU64())
+	}
 	if len(deletedLogs) > 0 {
 		bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
 	}
@@ -1908,6 +1999,9 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		for _, block := range oldChain {
 			bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 		}
+	}
+	if isDebug {
+		fmt.Println("ZZZZZ 12", oldBlock.NumberU64(), newBlock.NumberU64())
 	}
 	return nil
 }

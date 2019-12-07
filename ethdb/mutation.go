@@ -90,7 +90,6 @@ type mutation struct {
 	changeSetByBlock map[uint64]map[string][]dbutils.Change //map[timestamp]map[hBucket]listOfChangedKeys
 	mu               sync.RWMutex
 	db               Database
-	name             string
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
