@@ -26,7 +26,6 @@ type HashBuilder struct {
 	nonceTape   Uint64Tape          // the source of nonces for accounts and contracts (field 0)
 	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
 	sSizeTape   Uint64Tape          // the source of storage sizes for contracts (field 4)
-	hashTape    HashTape            // the source of hashes
 
 	byteArrayWriter *ByteArrayWriter
 
@@ -60,11 +59,6 @@ func (hb *HashBuilder) SetNonceTape(nonceTape Uint64Tape) {
 // SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
 func (hb *HashBuilder) SetBalanceTape(balanceTape BigIntTape) {
 	hb.balanceTape = balanceTape
-}
-
-// SetHashTape sets the hash tape to be used by this builder (opcode hash)
-func (hb *HashBuilder) SetHashTape(hashTape HashTape) {
-	hb.hashTape = hashTape
 }
 
 // SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
@@ -566,15 +560,11 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	return nil
 }
 
-func (hb *HashBuilder) hash(number int) error {
+func (hb *HashBuilder) hash(hashes ...common.Hash) error {
 	if hb.trace {
-		fmt.Printf("HASH %d\n", number)
+		fmt.Printf("HASH %d\n", len(hashes))
 	}
-	for i := 0; i < number; i++ {
-		hash, err := hb.hashTape.Next()
-		if err != nil {
-			return err
-		}
+	for _, hash := range hashes {
 		hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
 		hb.hashStack = append(hb.hashStack, hash[:]...)
 		hb.nodeStack = append(hb.nodeStack, nil)

@@ -16,6 +16,8 @@
 
 package trie
 
+import "github.com/ledgerwatch/turbo-geth/common"
+
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
@@ -28,7 +30,7 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(number int) error
+	hash(...common.Hash) error
 }
 
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
@@ -55,6 +57,7 @@ func GenStructStep(
 	curr, succ []byte,
 	e structInfoReceiver,
 	keyTape BytesTape,
+	hashTape HashTape,
 	groups []uint16,
 ) ([]uint16, error) {
 	var precExists = len(groups) > 0
@@ -84,7 +87,11 @@ func GenStructStep(
 	}
 	remainderLen := len(curr) - remainderStart
 	if isHashOfNode {
-		if err := e.hash(1); err != nil {
+		hash, err := hashTape.Next()
+		if err != nil {
+			return nil, err
+		}
+		if err := e.hash(hash); err != nil {
 			return nil, err
 		}
 		if remainderLen > 0 {
@@ -168,5 +175,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, groups)
 }

@@ -189,7 +189,6 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	hb.SetValueTape(NewRlpSerializableBytesTape(&value))
 	hb.SetNonceTape((*OneUint64Tape)(&a.Nonce))
 	hb.SetBalanceTape((*OneBalanceTape)(&a.Balance))
-	hb.SetHashTape(&hashes)
 	hb.SetSSizeTape((*OneUint64Tape)(&a.StorageSize))
 
 	hb.Reset()
@@ -208,7 +207,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
 					var err error
-					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, sGroups)
+					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -216,10 +215,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 					fieldSet += AccountFieldRootOnly
 				}
 			} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-				// Push the account root on the stack instead
-				hashes.hashes[0] = a.Root
-				hashes.idx = 0
-				if err := hb.hash(1); err != nil {
+				if err := hb.hash(a.Root); err != nil {
 					return common.Hash{}, err
 				}
 				fieldSet += AccountFieldRootOnly
@@ -230,7 +226,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succ.Write(hex)
 			if curr.Len() > 0 {
 				var err error
-				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, groups)
+				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, groups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -249,10 +245,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				}
 				if !a.IsEmptyCodeHash() {
 					fieldSet += AccountFieldCodeHashOnly
-					// Load hashes onto the stack of the hashbuilder
-					hashes.hashes[0] = a.CodeHash // this will be just beneath the top of the stack
-					hashes.idx = 0                // Reset the counter
-					if err := hb.hash(1); err != nil {
+					if err := hb.hash(a.CodeHash); err != nil {
 						return common.Hash{}, err
 					}
 				}
@@ -269,7 +262,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
 				var err error
-				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, sGroups)
+				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -297,7 +290,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
 			var err error
-			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, sGroups)
+			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -305,10 +298,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			fieldSet += AccountFieldRootOnly
 		}
 	} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-		// Push the account root on the stack instead
-		hashes.hashes[0] = a.Root
-		hashes.idx = 0
-		if err := hb.hash(1); err != nil {
+		if err := hb.hash(a.Root); err != nil {
 			return common.Hash{}, err
 		}
 		fieldSet += AccountFieldRootOnly
@@ -318,7 +308,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	succ.Reset()
 	if curr.Len() > 0 {
 		var err error
-		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, groups)
+		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, groups)
 		if err != nil {
 			return common.Hash{}, err
 		}

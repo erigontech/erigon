@@ -613,7 +613,8 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 	hb.SetBalanceTape(NewCborBigIntTape(bw[startOffset:endOffset]))
 	startOffset = endOffset
 	endOffset = startOffset + lens[HashesTape]
-	hb.SetHashTape(NewCborHashTape(bw[startOffset:endOffset]))
+
+	hashTape := NewCborHashTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[CodesTape]
 
@@ -710,7 +711,15 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err := decoder.Decode(&number); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.hash(number); err != nil {
+			hashes := make([]common.Hash, number)
+			for i := range hashes {
+				hash, err := hashTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
+				hashes[i] = hash
+			}
+			if err := hb.hash(hashes...); err != nil {
 				return nil, nil, err
 			}
 		case OpCode:
