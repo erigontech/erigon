@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -44,6 +45,31 @@ func calcPrecLen(groups []uint16) int {
 	return len(groups) - 1
 }
 
+type GenStructStepData interface {
+	GenStructStepData()
+}
+
+type GenStructStepAccountData struct {
+	FieldSet    uint32
+	StorageSize uint64
+	Balance     *big.Int // nil-able
+	Nonce       uint64
+}
+
+func (GenStructStepAccountData) GenStructStepData() {}
+
+type GenStructStepLeafData struct {
+	ValueTape RlpSerializableTape
+}
+
+func (GenStructStepLeafData) GenStructStepData() {}
+
+type GenStructStepHashData struct {
+	Hash common.Hash
+}
+
+func (GenStructStepHashData) GenStructStepData() {}
+
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
 // an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
@@ -61,15 +87,10 @@ func calcPrecLen(groups []uint16) int {
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 func GenStructStep(
-	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	hashOfNode *common.Hash,
-	storageSize uint64,
-	balance *big.Int, // nil-able
-	nonce uint64,
-	valueTape RlpSerializableTape,
+	data GenStructStepData,
 	groups []uint16,
 ) ([]uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
@@ -113,40 +134,44 @@ func GenStructStep(
 					}
 				}
 			}
-		} else if hashOfNode != nil {
-			/* building a hash */
-			if err := e.hash(*hashOfNode); err != nil {
-				return nil, err
-			}
 		} else {
-			/* building leafs */
-			var err error
+			emitHash := hashOnly(curr[:maxLen])
 
-			val, err := valueTape.Next()
-			if err != nil {
-				return nil, err
-			}
+			switch v := data.(type) {
+			case GenStructStepHashData:
+				/* building a hash */
+				if err := e.hash(v.Hash); err != nil {
+					return nil, err
+				}
+			case GenStructStepAccountData:
+				if emitHash {
+					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+						return nil, err
+					}
+				}
+			case GenStructStepLeafData:
+				/* building leafs */
+				var err error
 
-			if hashOnly(curr[:maxLen]) {
-				if fieldSet == 0 {
+				val, err := v.ValueTape.Next()
+				if err != nil {
+					return nil, err
+				}
+				if emitHash {
 					if err := e.leafHash(remainderLen, curr, val); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, curr, storageSize, balance, nonce, fieldSet); err != nil {
-						return nil, err
-					}
-				}
-			} else {
-				if fieldSet == 0 {
 					if err := e.leaf(remainderLen, curr, val); err != nil {
 						return nil, err
 					}
-				} else {
-					if err := e.accountLeaf(remainderLen, curr, storageSize, balance, nonce, fieldSet); err != nil {
-						return nil, err
-					}
 				}
+			default:
+				panic(fmt.Errorf("unknown data type: %T", data))
 			}
 		}
 		// Check for the optional part

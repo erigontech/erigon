@@ -62,7 +62,7 @@ func DeriveSha(list DerivableList) common.Hash {
 
 		if curr.Len() > 0 {
 			value.Write(list.GetRlp(i))
-			groups, _ = trie.GenStructStep(0, hashOnly, curr.Bytes(), succ.Bytes(), hb, nil, 0, nil, 0, valueTape, groups)
+			groups, _ = trie.GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, trie.GenStructStepLeafData{ValueTape: valueTape}, groups)
 		}
 	})
 
