@@ -626,10 +626,19 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 		if err := decoder.Decode(&opcode); err != nil {
 			return nil, nil, err
 		}
+		hashOnly := false
 		switch opcode {
+		case OpLeafHash:
+			hashOnly = true
+			opcode = OpLeaf
+			fallthrough
 		case OpLeaf:
 			if trace {
-				fmt.Printf("LEAF ")
+				if hashOnly {
+					fmt.Printf("LEAFHASH ")
+				} else {
+					fmt.Printf("LEAF ")
+				}
 			}
 			var length int
 			if err := decoder.Decode(&length); err != nil {
@@ -643,71 +652,65 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leaf(length, keyHex, val); err != nil {
-				return nil, nil, err
-			}
-		case OpLeafHash:
-			if trace {
-				fmt.Printf("LEAFHASH ")
-			}
-			var length int
-			if err := decoder.Decode(&length); err != nil {
-				return nil, nil, err
-			}
-			keyHex, err := keyTape.Next()
-			if err != nil {
-				return nil, nil, err
-			}
-			val, err := valueTape.Next()
-			if err != nil {
-				return nil, nil, err
-			}
-			if err := hb.leafHash(length, keyHex, val); err != nil {
-				return nil, nil, err
-			}
-		case OpExtension:
-			if trace {
-				fmt.Printf("EXTENSION ")
-			}
-			var key []byte
-			if err := decoder.Decode(&key); err != nil {
-				return nil, nil, err
-			}
-			if err := hb.extension(key); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.leafHash(length, keyHex, val); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.leaf(length, keyHex, val); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpExtensionHash:
+			hashOnly = true
+			opcode = OpExtension
+			fallthrough
+		case OpExtension:
 			if trace {
-				fmt.Printf("EXTENSIONHASH ")
+				if hashOnly {
+					fmt.Printf("EXTENSIONHASH ")
+				} else {
+					fmt.Printf("EXTENSION ")
+				}
 			}
 			var key []byte
 			if err := decoder.Decode(&key); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.extensionHash(key); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.extensionHash(key); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.extension(key); err != nil {
+					return nil, nil, err
+				}
 			}
+
+		case OpBranchHash:
+			hashOnly = true
+			opcode = OpBranch
+			fallthrough
 		case OpBranch:
 			if trace {
-				fmt.Printf("BRANCH ")
+				if hashOnly {
+					fmt.Printf("BRANCHHASH ")
+				} else {
+					fmt.Printf("BRANCH ")
+				}
 			}
 			var set uint16
 			if err := decoder.Decode(&set); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.branch(set); err != nil {
-				return nil, nil, err
-			}
-		case OpBranchHash:
-			if trace {
-				fmt.Printf("BRANCHHASH ")
-			}
-			var set uint16
-			if err := decoder.Decode(&set); err != nil {
-				return nil, nil, err
-			}
-			if err := hb.branchHash(set); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.branchHash(set); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.branch(set); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpHash:
 			if trace {
@@ -741,6 +744,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			} else {
 				return nil, nil, err
 			}
+
+		case OpAccountLeafHash:
+			hashOnly = true
+			opcode = OpAccountLeaf
+			fallthrough
 		case OpAccountLeaf:
 			var length int
 			var fieldSet uint32
@@ -751,7 +759,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 				return nil, nil, err
 			}
 			if trace {
-				fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
+				if hashOnly {
+					fmt.Printf("ACCOUNTLEAFHASH (%b)", fieldSet)
+				} else {
+					fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
+				}
 			}
 			keyHex, err := keyTape.Next()
 			if err != nil {
@@ -771,43 +783,15 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 					return nil, nil, err
 				}
 			}
-			if err := hb.accountLeaf(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
-				return nil, nil, err
-			}
-		case OpAccountLeafHash:
-			if trace {
-				fmt.Printf("ACCOUNTLEAFHASH ")
-			}
-			var length int
-			var fieldSet uint32
-			if err := decoder.Decode(&length); err != nil {
-				return nil, nil, err
-			}
-			if err := decoder.Decode(&fieldSet); err != nil {
-				return nil, nil, err
-			}
-			keyHex, err := keyTape.Next()
-			if err != nil {
-				return nil, nil, err
-			}
+			if hashOnly {
 
-			balance := big.NewInt(0)
-			if fieldSet&uint32(2) != 0 {
-				balance, err = balanceTape.Next()
-				if err != nil {
+				if err := hb.accountLeafHash(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
 					return nil, nil, err
 				}
-			}
-
-			nonce := uint64(0)
-			if fieldSet&uint32(1) != 0 {
-				nonce, err = nonceTape.Next()
-				if err != nil {
+			} else {
+				if err := hb.accountLeaf(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
 					return nil, nil, err
 				}
-			}
-			if err := hb.accountLeafHash(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
-				return nil, nil, err
 			}
 		case OpEmptyRoot:
 			if trace {
