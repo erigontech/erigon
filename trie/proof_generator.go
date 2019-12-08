@@ -751,11 +751,14 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			balance, err := balanceTape.Next()
-			if err != nil {
-				return nil, nil, err
+			balance := big.NewInt(0)
+			if fieldSet&uint32(2) != 0 {
+				balance, err = balanceTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
 			}
-			if err := hb.accountLeaf(length, keyHex, 0, balance.Uint64(), fieldSet); err != nil {
+			if err := hb.accountLeaf(length, keyHex, 0, balance, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpAccountLeafHash:
@@ -775,11 +778,14 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 				return nil, nil, err
 			}
 
-			balance, err := balanceTape.Next()
-			if err != nil {
-				return nil, nil, err
+			balance := big.NewInt(0)
+			if fieldSet&uint32(2) != 0 {
+				balance, err = balanceTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
 			}
-			if err := hb.accountLeafHash(length, keyHex, 0, balance.Uint64(), fieldSet); err != nil {
+			if err := hb.accountLeafHash(length, keyHex, 0, balance, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpEmptyRoot:

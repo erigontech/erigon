@@ -3,6 +3,7 @@ package trie
 import (
 	"fmt"
 	"io"
+	"math/big"
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -193,7 +194,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -201,7 +202,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0
-	hb.acc.Balance.SetUint64(balance)
+	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
@@ -244,7 +245,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
@@ -252,7 +253,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0
-	hb.acc.Balance.SetUint64(balance)
+	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = storageSize > 0

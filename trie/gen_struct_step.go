@@ -16,7 +16,11 @@
 
 package trie
 
-import "github.com/ledgerwatch/turbo-geth/common"
+import (
+	"math/big"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+)
 
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
@@ -24,8 +28,8 @@ import "github.com/ledgerwatch/turbo-geth/common"
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte) error
 	leafHash(length int, keyHex []byte) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, balance uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -127,13 +131,12 @@ func GenStructStep(
 				return nil, err
 			}
 
-			balance := uint64(0)
+			balance := big.NewInt(0)
 			if fieldSet&uint32(2) != 0 {
-				balanceBig, err := balanceTape.Next()
+				balance, err = balanceTape.Next()
 				if err != nil {
 					return nil, err
 				}
-				balance = balanceBig.Uint64()
 			}
 
 			if hashOnly(curr[:maxLen]) {
