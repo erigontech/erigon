@@ -3,7 +3,6 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -49,15 +48,6 @@ type OneUint64Tape uint64
 // the currently set nonce
 func (out *OneUint64Tape) Next() (uint64, error) {
 	return uint64(*out), nil
-}
-
-// OneBalanceTape implements BigIntTape and can only contain one balance at a time
-type OneBalanceTape big.Int
-
-// Next belongs to the BigIntTape interface, and for this type it always returns
-// the currently set balance
-func (obt *OneBalanceTape) Next() (*big.Int, error) {
-	return (*big.Int)(obt), nil
 }
 
 // Resolver looks up (resolves) some keys and corresponding values from a database.
@@ -194,7 +184,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce),
+		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, &tr.a.Balance, (*OneUint64Tape)(&tr.a.Nonce),
 			tr.rlpValueTape, tr.groups)
 		if err != nil {
 			return err
@@ -277,7 +267,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce), tr.rlpValueTape, tr.groups)
+			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, &tr.a.Balance, (*OneUint64Tape)(&tr.a.Nonce), tr.rlpValueTape, tr.groups)
 			if err != nil {
 				return err
 			}
