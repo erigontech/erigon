@@ -11,6 +11,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 var emptyHash [32]byte
@@ -45,24 +46,23 @@ func (obt *OneBytesTape) Next() ([]byte, error) {
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts     bool // Is this a resolver for accounts or for storage
-	topLevels    int  // How many top levels of the trie to keep (not roll into hashes)
-	requests     []*ResolveRequest
-	reqIndices   []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	keyIdx       int
-	currentReq   *ResolveRequest // Request currently being handled
-	currentRs    *ResolveSet     // ResolveSet currently being used
-	historical   bool
-	blockNr      uint64
-	hb           *HashBuilder
-	fieldSet     uint32 // fieldSet for the next invocation of genStructStep
-	rss          []*ResolveSet
-	curr         OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ         bytes.Buffer
-	value        OneBytesTape // Current value to be used as the value tape for the hash builder
-	groups       []uint16
-	a            accounts.Account
-	rlpValueTape RlpSerializableTape
+	accounts   bool // Is this a resolver for accounts or for storage
+	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
+	requests   []*ResolveRequest
+	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	keyIdx     int
+	currentReq *ResolveRequest // Request currently being handled
+	currentRs  *ResolveSet     // ResolveSet currently being used
+	historical bool
+	blockNr    uint64
+	hb         *HashBuilder
+	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
+	rss        []*ResolveSet
+	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ       bytes.Buffer
+	value      OneBytesTape // Current value to be used as the value tape for the hash builder
+	groups     []uint16
+	a          accounts.Account
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -74,7 +74,6 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		blockNr:    blockNr,
 		hb:         NewHashBuilder(false),
 	}
-	tr.rlpValueTape = NewRlpSerializableBytesTape(&tr.value)
 	return &tr
 }
 
@@ -177,7 +176,7 @@ func (tr *Resolver) finaliseRoot() error {
 		var err error
 		var data GenStructStepData
 		if tr.fieldSet == 0 {
-			data = GenStructStepLeafData{ValueTape: tr.rlpValueTape}
+			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
 		} else {
 			data = GenStructStepAccountData{
 				FieldSet:    tr.fieldSet,
@@ -270,7 +269,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 			var err error
 			var data GenStructStepData
 			if tr.fieldSet == 0 {
-				data = GenStructStepLeafData{ValueTape: tr.rlpValueTape}
+				data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
 			} else {
 				data = GenStructStepAccountData{
 					FieldSet:    tr.fieldSet,

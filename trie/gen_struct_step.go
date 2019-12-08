@@ -59,7 +59,7 @@ type GenStructStepAccountData struct {
 func (GenStructStepAccountData) GenStructStepData() {}
 
 type GenStructStepLeafData struct {
-	ValueTape RlpSerializableTape
+	Value RlpSerializable
 }
 
 func (GenStructStepLeafData) GenStructStepData() {}
@@ -155,18 +155,12 @@ func GenStructStep(
 				}
 			case GenStructStepLeafData:
 				/* building leafs */
-				var err error
-
-				val, err := v.ValueTape.Next()
-				if err != nil {
-					return nil, err
-				}
 				if emitHash {
-					if err := e.leafHash(remainderLen, curr, val); err != nil {
+					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.leaf(remainderLen, curr, val); err != nil {
+					if err := e.leaf(remainderLen, curr, v.Value); err != nil {
 						return nil, err
 					}
 				}

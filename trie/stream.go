@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 // StreamItem is an enum type for values that help distinguish different
@@ -186,8 +187,6 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
 
-	valueTape := NewRlpSerializableBytesTape(&value)
-
 	hb.Reset()
 	curr.Reset()
 	currStorage.Reset()
@@ -196,7 +195,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		if hashRef != nil {
 			return GenStructStepHashData{*hashRef}
 		} else if fieldSet == 0 {
-			return GenStructStepLeafData{ValueTape: valueTape}
+			return GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(value.Bytes())}
 		} else {
 			return GenStructStepAccountData{
 				FieldSet:    fieldSet,

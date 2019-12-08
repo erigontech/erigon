@@ -20,6 +20,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 type DerivableList interface {
@@ -37,8 +38,6 @@ func DeriveSha(list DerivableList) common.Hash {
 	value := &trie.OneBytesTape{}
 
 	hb := trie.NewHashBuilder(false)
-
-	valueTape := trie.NewRlpEncodedBytesTape(value)
 
 	hb.Reset()
 	curr.Reset()
@@ -62,7 +61,7 @@ func DeriveSha(list DerivableList) common.Hash {
 
 		if curr.Len() > 0 {
 			value.Write(list.GetRlp(i))
-			groups, _ = trie.GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, trie.GenStructStepLeafData{ValueTape: valueTape}, groups)
+			groups, _ = trie.GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, trie.GenStructStepLeafData{Value: rlphacks.RlpEncodedBytes(value.Bytes())}, groups)
 		}
 	})
 
