@@ -34,6 +34,16 @@ func (hi *HistoryIndex) Append(v uint64) *HistoryIndex  {
 	return hi
 }
 
+//most common operation is remove one from the tail
+func (hi *HistoryIndex) Remove(v uint64) *HistoryIndex  {
+	for i := len(*hi)-1; i >= 0; i-- {
+		if (*hi)[i] == v {
+			*hi = append((*hi)[:i], (*hi)[i+1:]...)
+		}
+	}
+	return hi
+}
+
 func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
 	ln:=len(*hi)
 	//fixme it's could be a bug
@@ -46,7 +56,7 @@ func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
 	return 0, false
 }
 
-func AppendChangedOnIndex(b []byte, timestamp uint64) ([]byte, error)  {
+func AppendToIndex(b []byte, timestamp uint64) ([]byte, error)  {
 	v:=new(HistoryIndex)
 
 	if err:= v.Decode(b);err!=nil {
@@ -55,6 +65,20 @@ func AppendChangedOnIndex(b []byte, timestamp uint64) ([]byte, error)  {
 
 	v.Append(timestamp)
 	return v.Encode()
+}
+func RemoveFromIndex(b []byte, timestamp uint64) ([]byte, bool, error)  {
+	v:=new(HistoryIndex)
+
+	if err:= v.Decode(b);err!=nil {
+		return nil, false, err
+	}
+
+	v.Remove(timestamp)
+	res, err:=v.Encode()
+	if len(*v) ==0 {
+		return res, true, err
+	}
+	return res, false, err
 }
 
 func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {

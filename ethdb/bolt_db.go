@@ -85,7 +85,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			}
 			if debug.IsDataLayoutExperiment() {
 				b,_:=hb.Get(key)
-				b,err = AppendChangedOnIndex(b, timestamp)
+				b,err = AppendToIndex(b, timestamp)
 				if err!=nil {
 					log.Error("PutS AppendChangedOnIndex err", "err", err)
 					return err
@@ -212,7 +212,7 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 	return res, nil
 }
 
-// GetChangeSetByBlock returns changeset by block and bucket
+// getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
 	key:=dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte

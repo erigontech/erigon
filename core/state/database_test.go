@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"math/big"
 	"testing"
@@ -472,6 +473,9 @@ func TestReorgOverStateChange(t *testing.T) {
 }
 
 func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
+	if !debug.IsDataLayoutExperiment() {
+		t.Skip()
+	}
 	// Configure and generate a sample block chain
 	numOfContracts:=10
 	txPerBlock:=10

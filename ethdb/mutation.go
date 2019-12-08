@@ -5,6 +5,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
 	"sync"
+	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -96,6 +97,9 @@ type mutation struct {
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
 	if t, ok := m.puts[string(bucket)]; ok {
 		return t.Get(key)
 	}
@@ -104,9 +108,6 @@ func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 
 // Can only be called from the worker thread
 func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	if value, ok := m.getMem(bucket, key); ok {
 		if value == nil {
 			return nil, ErrKeyNotFound
@@ -119,7 +120,7 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-func (m *mutation) GetChangeSetByBlock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
 	bucketMap, ok:=m.changeSetByBlock[timestamp]
 	if !ok {
 		return nil, ErrKeyNotFound
@@ -138,7 +139,9 @@ func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 		return m.Get(hBucket, composite)
 	}
 
-	chs, err:=m.GetChangeSetByBlock(hBucket, timestamp)
+	m.mu.RLock()
+	chs, err:=m.getChangeSetByBlockNoLock(hBucket, timestamp)
+	m.mu.Unlock()
 	if err!=nil {
 		if m.db!=nil {
 			return m.db.GetS(hBucket,key,timestamp)
@@ -296,6 +299,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
 		hBucketStr := string(k[len(encodedTS):])
@@ -305,16 +309,34 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		}
 		if !debug.IsDataLayoutExperiment() {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				m.puts.DeleteStr(hBucketStr, kk)
+				composite,_:=dbutils.CompositeKeySuffix(kk, timestamp)
+				m.puts.DeleteStr(hBucketStr,composite)
 				return nil
 			})
+
 			if err != nil {
 				return false, err
 			}
-			m.puts.DeleteStr(hBucketStr, k)
+			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		} else {
-			//fixme experiment layout
-			panic("implement")
+			err = changedAccounts.Walk(func(kk, _ []byte) error {
+				fmt.Println("before get")
+				acc,err:=m.getNoLock(dbutils.AccountsHistoryBucket, kk)
+				fmt.Println("after get")
+				if err!=nil {
+					return nil
+				}
+				v, isEmpty, err:=RemoveFromIndex(acc, timestamp)
+				if err!=nil {
+					return nil
+				}
+				if isEmpty {
+					m.puts.DeleteStr(hBucketStr,kk)
+				} else {
+					m.puts.SetStr(hBucketStr, kk, v)
+				}
+				return nil
+			})
 		}
 		return true, nil
 	})
@@ -352,13 +374,16 @@ func (m *mutation) Commit() (uint64, error) {
 				if debug.IsDataLayoutExperiment() {
 					changedKeys:=changedAccounts.ChangedKeys()
 					for k:=range changedKeys {
-						value, ok := m.getMem(hBucket, []byte(k))
-						if !ok {
+						value, err := m.getNoLock(hBucket, []byte(k))
+						if err==ErrKeyNotFound {
 							if m.db != nil {
-								value,_ =m.db.Get(hBucket, []byte(k))
+								value,err=m.db.Get(hBucket, []byte(k))
+								if err!= nil && err!=ErrKeyNotFound {
+									return 0, err
+								}
 							}
 						}
-						v,err:=AppendChangedOnIndex(value, timestamp)
+						v,err:=AppendToIndex(value, timestamp)
 						if err!=nil {
 							log.Error("mutation, append to index", "err", err, "timestamp",timestamp, )
 							continue
@@ -370,7 +395,6 @@ func (m *mutation) Commit() (uint64, error) {
 			}
 		}
 	}
-
 	m.changeSetByBlock = make(map[uint64]map[string]*dbutils.ChangeSet)
 
 	tuples := common.NewTuples(m.puts.Size(), 3, 1)
@@ -422,7 +446,7 @@ func (m *mutation) Close() {
 
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:               m.db,
+		db:               m,
 		puts:             newPuts(),
 		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
@@ -455,104 +479,88 @@ func (m *mutation) TruncateAncients(items uint64) error {
 func NewRWDecorator(db Database) *RWCounterDecorator  {
 	return &RWCounterDecorator {
 		db,
-		make(map[string]uint64),
-		sync.RWMutex{},
+		DBCounterStats{},
 	}
 }
 type RWCounterDecorator struct {
 	Database
-	Counts map[string]uint64
-	mtx sync.RWMutex
+	DBCounterStats
+}
 
+type DBCounterStats struct {
+	Put uint64
+	PutS uint64
+	Get uint64
+	GetS uint64
+	GetAsOf uint64
+	Has uint64
+	Walk uint64
+	WalkAsOf uint64
+	MultiWalk uint64
+	MultiWalkAsOf uint64
+	Delete uint64
+	DeleteTimestamp uint64
+	MultiPut uint64
 }
 
 func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
-	d.mtx.Lock()
-	d.Counts["Put"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.Put, 1)
 	fmt.Println("PUT", string(bucket), key)
 	return d.Database.Put(bucket,key,value)
 }
 
 func (d *RWCounterDecorator) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error{
-	d.mtx.Lock()
-	d.Counts["PutS"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.PutS, 1)
 	return d.Database.PutS(hBucket,key,value,timestamp,changeSetBucketOnly)
 }
 func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
-	d.mtx.Lock()
-	d.Counts["Get"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.Get, 1)
 	return d.Database.Get(bucket,key)
 }
 func (d *RWCounterDecorator) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	d.mtx.Lock()
-	d.Counts["GetS"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.GetS, 1)
 	return d.Database.GetS(hBucket,key, timestamp)
 }
 func (d *RWCounterDecorator) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	d.mtx.Lock()
-	d.Counts["GetAsOf"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.GetAsOf, 1)
 	return d.Database.GetAsOf(bucket,hBucket,key,timestamp)
 }
 func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
-	d.mtx.Lock()
-	d.Counts["Has"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.Has, 1)
 	return d.Database.Has(bucket, key)
 }
 func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
-	d.mtx.Lock()
-	d.Counts["Walk"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
 	return d.Database.Walk(bucket,startkey,fixedbits,walker)
 }
 func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	d.mtx.Lock()
-	d.Counts["MultiWalk"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
 	return d.Database.MultiWalk(bucket,startkeys,fixedbits,walker)
 }
 func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	d.mtx.Lock()
-	d.Counts["WalkAsOf"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.WalkAsOf, 1)
 	return d.Database.WalkAsOf(bucket,hBucket,startkey,fixedbits,timestamp,walker)
 }
 func (d *RWCounterDecorator) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	d.mtx.Lock()
-	d.Counts["MultiWalkAsOf"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.MultiWalkAsOf, 1)
 	return d.Database.MultiWalkAsOf(bucket,hBucket,startkeys,fixedbits,timestamp,walker)
 }
 func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
-	d.mtx.Lock()
-	d.Counts["Delete"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
 	return d.Database.Delete(bucket,key)
 }
 func (d *RWCounterDecorator) DeleteTimestamp(timestamp uint64) error {
-	d.mtx.Lock()
-	d.Counts["DeleteTimestamp"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.DeleteTimestamp, 1)
 	return d.Database.DeleteTimestamp(timestamp)
 }
 func (d *RWCounterDecorator) MultiPut(tuples ...[]byte) (uint64, error) {
-	d.mtx.Lock()
-	d.Counts["MultiPut"]++
-	d.mtx.Unlock()
+	atomic.AddUint64(&d.DBCounterStats.MultiPut, 1)
 	return d.Database.MultiPut(tuples...)
 }
 func (d *RWCounterDecorator) MemCopy() Database {
 	return d.Database.MemCopy()
 }
 func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
-	d.mtx.Lock()
-	d.Counts["NewBatch"]++
-	d.mtx.Unlock()
 	mm := &mutation{
 		db:               d,
 		puts:             newPuts(),
