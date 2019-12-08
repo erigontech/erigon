@@ -175,8 +175,18 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, &tr.a.Balance, tr.a.Nonce,
-			tr.rlpValueTape, tr.groups)
+		var data GenStructStepData
+		if tr.fieldSet == 0 {
+			data = GenStructStepLeafData{ValueTape: tr.rlpValueTape}
+		} else {
+			data = GenStructStepAccountData{
+				FieldSet:    tr.fieldSet,
+				StorageSize: tr.a.StorageSize,
+				Balance:     &tr.a.Balance,
+				Nonce:       tr.a.Nonce,
+			}
+		}
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -258,7 +268,18 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, &tr.a.Balance, tr.a.Nonce, tr.rlpValueTape, tr.groups)
+			var data GenStructStepData
+			if tr.fieldSet == 0 {
+				data = GenStructStepLeafData{ValueTape: tr.rlpValueTape}
+			} else {
+				data = GenStructStepAccountData{
+					FieldSet:    tr.fieldSet,
+					StorageSize: tr.a.StorageSize,
+					Balance:     &tr.a.Balance,
+					Nonce:       tr.a.Nonce,
+				}
+			}
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 			if err != nil {
 				return err
 			}
