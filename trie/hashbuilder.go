@@ -27,7 +27,6 @@ type HashBuilder struct {
 	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
 	sSizeTape   Uint64Tape          // the source of storage sizes for contracts (field 4)
 	hashTape    HashTape            // the source of hashes
-	codeTape    BytesTape           // the source of bytecodes
 
 	byteArrayWriter *ByteArrayWriter
 
@@ -71,11 +70,6 @@ func (hb *HashBuilder) SetHashTape(hashTape HashTape) {
 // SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
 func (hb *HashBuilder) SetSSizeTape(sSizeTape Uint64Tape) {
 	hb.sSizeTape = sSizeTape
-}
-
-// SetCodeTape sets the code tape to be used by this builder (opcode CODE)
-func (hb *HashBuilder) SetCodeTape(codeTape BytesTape) {
-	hb.codeTape = codeTape
 }
 
 // Reset makes the HashBuilder suitable for reuse
@@ -591,13 +585,9 @@ func (hb *HashBuilder) hash(number int) error {
 	return nil
 }
 
-func (hb *HashBuilder) code() ([]byte, common.Hash, error) {
+func (hb *HashBuilder) code(code []byte) ([]byte, common.Hash, error) {
 	if hb.trace {
 		fmt.Printf("CODE\n")
-	}
-	code, err := hb.codeTape.Next()
-	if err != nil {
-		return nil, common.Hash{}, err
 	}
 	code = common.CopyBytes(code)
 	hb.nodeStack = append(hb.nodeStack, nil)

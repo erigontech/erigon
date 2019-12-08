@@ -616,7 +616,8 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 	hb.SetHashTape(NewCborHashTape(bw[startOffset:endOffset]))
 	startOffset = endOffset
 	endOffset = startOffset + lens[CodesTape]
-	hb.SetCodeTape(NewCborBytesTape(bw[startOffset:endOffset]))
+
+	codeTape := NewCborBytesTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[StructureTape]
 	structureB := bw[startOffset:endOffset]
@@ -716,7 +717,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if trace {
 				fmt.Printf("CODE ")
 			}
-			if code, codeHash, err := hb.code(); err == nil {
+			code, err := codeTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if code, codeHash, err := hb.code(code); err == nil {
 				codeMap[codeHash] = code
 			} else {
 				return nil, nil, err
