@@ -189,7 +189,6 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	hb.SetValueTape(NewRlpSerializableBytesTape(&value))
 	hb.SetNonceTape((*OneUint64Tape)(&a.Nonce))
 	hb.SetBalanceTape((*OneBalanceTape)(&a.Balance))
-	hb.SetSSizeTape((*OneUint64Tape)(&a.StorageSize))
 
 	hb.Reset()
 	curr.Reset()
@@ -207,7 +206,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
 					var err error
-					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
+					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, a.StorageSize, sGroups)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -226,7 +225,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succ.Write(hex)
 			if curr.Len() > 0 {
 				var err error
-				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, groups)
+				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, a.StorageSize, groups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -262,7 +261,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
 				var err error
-				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
+				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, a.StorageSize, sGroups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -290,7 +289,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
 			var err error
-			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, sGroups)
+			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, &currStorage, &hashes, a.StorageSize, sGroups)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -308,7 +307,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	succ.Reset()
 	if curr.Len() > 0 {
 		var err error
-		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, groups)
+		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, &curr, &hashes, a.StorageSize, groups)
 		if err != nil {
 			return common.Hash{}, err
 		}

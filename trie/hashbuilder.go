@@ -25,7 +25,6 @@ type HashBuilder struct {
 	valueTape   RlpSerializableTape // the source of values (for values that are not accounts or contracts)
 	nonceTape   Uint64Tape          // the source of nonces for accounts and contracts (field 0)
 	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
-	sSizeTape   Uint64Tape          // the source of storage sizes for contracts (field 4)
 
 	byteArrayWriter *ByteArrayWriter
 
@@ -59,11 +58,6 @@ func (hb *HashBuilder) SetNonceTape(nonceTape Uint64Tape) {
 // SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
 func (hb *HashBuilder) SetBalanceTape(balanceTape BigIntTape) {
 	hb.balanceTape = balanceTape
-}
-
-// SetSSizeTape sets the storage size tape to be used by this builder (opcodes accountLeaf, accountLeafHashs)
-func (hb *HashBuilder) SetSSizeTape(sSizeTape Uint64Tape) {
-	hb.sSizeTape = sSizeTape
 }
 
 // Reset makes the HashBuilder suitable for reuse
@@ -206,7 +200,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -216,8 +210,9 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, fieldSet uint32) (
 	hb.acc.Nonce = 0
 	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
-	hb.acc.StorageSize = 0
-	hb.acc.HasStorageSize = false
+	hb.acc.StorageSize = storageSize
+	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
+
 	if fieldSet&uint32(1) != 0 {
 		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
@@ -247,12 +242,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, fieldSet uint32) (
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
 	}
-	if fieldSet&uint32(16) != 0 {
-		if hb.acc.StorageSize, err = hb.sSizeTape.Next(); err != nil {
-			return err
-		}
-		hb.acc.HasStorageSize = hb.acc.StorageSize > 0
-	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
@@ -269,7 +258,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, fieldSet uint32) (
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
@@ -279,8 +268,8 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, fieldSet uint3
 	hb.acc.Nonce = 0
 	hb.acc.Balance.SetUint64(0)
 	hb.acc.Initialised = true
-	hb.acc.StorageSize = 0
-	hb.acc.HasStorageSize = false
+	hb.acc.StorageSize = storageSize
+	hb.acc.HasStorageSize = storageSize > 0
 	if fieldSet&uint32(1) != 0 {
 		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
@@ -301,12 +290,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, fieldSet uint3
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
-	}
-	if fieldSet&uint32(16) != 0 {
-		if hb.acc.StorageSize, err = hb.sSizeTape.Next(); err != nil {
-			return err
-		}
-		hb.acc.HasStorageSize = hb.acc.StorageSize > 0
 	}
 	return hb.accountLeafHashWithKey(key, popped)
 }

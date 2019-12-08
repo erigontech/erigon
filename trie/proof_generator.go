@@ -751,7 +751,7 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.accountLeaf(length, keyHex, fieldSet); err != nil {
+			if err := hb.accountLeaf(length, keyHex, 0, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpAccountLeafHash:
@@ -770,7 +770,7 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.accountLeafHash(length, keyHex, fieldSet); err != nil {
+			if err := hb.accountLeafHash(length, keyHex, 0, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpEmptyRoot:
