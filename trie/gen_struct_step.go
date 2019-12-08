@@ -71,8 +71,6 @@ type GenStructStepHashData struct {
 func (GenStructStepHashData) GenStructStepData() {}
 
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
-// `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
-// an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
 // `hashOnly` parameter is the function that, called for a certain prefix, determines whether the trie node for that prefix needs to be
 // compressed into just hash (if `true` is returned), or constructed (if `false` is returned). Usually the `hashOnly` function is
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
@@ -82,6 +80,7 @@ func (GenStructStepHashData) GenStructStepData() {}
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
+// `data` parameter specified if a hash or a binary string or an account should be emitted.
 // `groups` parameter is the map of the stack. each element of the `groups` slice is a bitmask, one bit per element currently on the stack.
 // Whenever a `BRANCH` or `BRANCHHASH` opcode is emitted, the set of digits is taken from the corresponding `groups` item, which is
 // then removed from the slice. This signifies the usage of the number of the stack items by the `BRANCH` or `BRANCHHASH` opcode.
