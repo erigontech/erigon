@@ -601,9 +601,7 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 
 	startOffset = endOffset
 	endOffset = startOffset + lens[ValueTape]
-	hb.SetValueTape(
-		NewRlpSerializableBytesTape(
-			NewCborBytesTape(bw[startOffset:endOffset])))
+	valueTape := NewRlpSerializableBytesTape(NewCborBytesTape(bw[startOffset:endOffset]))
 
 	startOffset = endOffset
 	endOffset = startOffset + lens[NonceTape]
@@ -641,7 +639,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leaf(length, keyHex); err != nil {
+			val, err := valueTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leaf(length, keyHex, val); err != nil {
 				return nil, nil, err
 			}
 		case OpLeafHash:
@@ -656,7 +658,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leafHash(length, keyHex); err != nil {
+			val, err := valueTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leafHash(length, keyHex, val); err != nil {
 				return nil, nil, err
 			}
 		case OpExtension:

@@ -22,8 +22,6 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
-	valueTape RlpSerializableTape // the source of values (for values that are not accounts or contracts)
-
 	byteArrayWriter *ByteArrayWriter
 
 	hashStack []byte           // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
@@ -43,18 +41,13 @@ func NewHashBuilder(trace bool) *HashBuilder {
 	}
 }
 
-// SetValueTape sets the value tape to be used by this builder (opcodes leaf and leafHash)
-func (hb *HashBuilder) SetValueTape(valueTape RlpSerializableTape) {
-	hb.valueTape = valueTape
-}
-
 // Reset makes the HashBuilder suitable for reuse
 func (hb *HashBuilder) Reset() {
 	hb.hashStack = hb.hashStack[:0]
 	hb.nodeStack = hb.nodeStack[:0]
 }
 
-func (hb *HashBuilder) leaf(length int, keyHex []byte) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte, val RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
 	}
@@ -62,10 +55,6 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte) error {
 		return fmt.Errorf("length %d", length)
 	}
 	key := keyHex[len(keyHex)-length:]
-	val, err := hb.valueTape.Next()
-	if err != nil {
-		return err
-	}
 	s := &shortNode{Key: common.CopyBytes(key), Val: valueNode(common.CopyBytes(val.RawBytes()))}
 	hb.nodeStack = append(hb.nodeStack, s)
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
@@ -173,7 +162,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte, val RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
 	}
@@ -181,10 +170,6 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 		return fmt.Errorf("length %d", length)
 	}
 	key := keyHex[len(keyHex)-length:]
-	val, err := hb.valueTape.Next()
-	if err != nil {
-		return err
-	}
 	return hb.leafHashWithKeyVal(key, val)
 }
 

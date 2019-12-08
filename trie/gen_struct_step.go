@@ -26,8 +26,8 @@ import (
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int, keyHex []byte) error
-	leafHash(length int, keyHex []byte) error
+	leaf(length int, keyHex []byte, val RlpSerializable) error
+	leafHash(length int, keyHex []byte, val RlpSerializable) error
 	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
 	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
 	extension(key []byte) error
@@ -65,6 +65,7 @@ func GenStructStep(
 	storageSize uint64,
 	balanceTape BigIntTape,
 	nonceTape Uint64Tape,
+	valueTape RlpSerializableTape,
 	groups []uint16,
 ) ([]uint16, error) {
 	var precExists = len(groups) > 0
@@ -148,9 +149,14 @@ func GenStructStep(
 				}
 			}
 
+			val, err := valueTape.Next()
+			if err != nil {
+				return nil, err
+			}
+
 			if hashOnly(curr[:maxLen]) {
 				if fieldSet == 0 {
-					if err := e.leafHash(remainderLen, keyHex); err != nil {
+					if err := e.leafHash(remainderLen, keyHex, val); err != nil {
 						return nil, err
 					}
 				} else {
@@ -160,7 +166,7 @@ func GenStructStep(
 				}
 			} else {
 				if fieldSet == 0 {
-					if err := e.leaf(remainderLen, keyHex); err != nil {
+					if err := e.leaf(remainderLen, keyHex, val); err != nil {
 						return nil, err
 					}
 				} else {
@@ -199,5 +205,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, nonceTape, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, nonceTape, valueTape, groups)
 }
