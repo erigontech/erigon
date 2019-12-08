@@ -67,8 +67,8 @@ func GenStructStep(
 	e structInfoReceiver,
 	hashOfNode *common.Hash,
 	storageSize uint64,
-	balance *big.Int,
-	nonceTape Uint64Tape,
+	balance *big.Int, // nil-able
+	nonce uint64,
 	valueTape RlpSerializableTape,
 	groups []uint16,
 ) ([]uint16, error) {
@@ -121,14 +121,6 @@ func GenStructStep(
 		} else {
 			/* building leafs */
 			var err error
-
-			nonce := uint64(0)
-			if fieldSet&uint32(1) != 0 {
-				nonce, err = nonceTape.Next()
-				if err != nil {
-					return nil, err
-				}
-			}
 
 			val, err := valueTape.Next()
 			if err != nil {
