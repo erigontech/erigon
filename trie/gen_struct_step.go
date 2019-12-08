@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -52,7 +53,7 @@ func calcPrecLen(groups []uint16) int {
 // implemented in such a way to guarantee that certain keys are always accessible in the resulting trie (see ResolveSet.HashOnly function).
 // `isHashNode` parameter is set to true if `curr` key corresponds not to a leaf but to a hash node (which is "folded" respresentation
 // of a branch node).
-// `recursive` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
+// `buildExtensions` is set to true if the algorithm's step is invoked recursively, i.e. not after a freshly provided leaf or hash
 // `curr`, `succ` are two full keys or prefixes that are currently visible to the algorithm. By comparing these, the algorithm
 // makes decisions about the local structure, i.e. the presense of the prefix groups.
 // `e` parameter is the trie builder, which uses the structure information to assemble trie on the stack and compute its hash.
@@ -63,17 +64,16 @@ func calcPrecLen(groups []uint16) int {
 func GenStructStep(
 	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
-	isHashOfNode bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	hashTape HashTape,
+	hashOfNode *common.Hash,
 	storageSize uint64,
 	balanceTape BigIntTape,
 	nonceTape Uint64Tape,
 	valueTape RlpSerializableTape,
 	groups []uint16,
 ) ([]uint16, error) {
-	for precLen, recursive := calcPrecLen(groups), false; precLen >= 0; precLen, recursive = calcPrecLen(groups), true {
+	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
 		// Calculate the prefix of the smallest prefix group containing curr
 		var precLen int
@@ -87,7 +87,7 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen, succLen)
+		fmt.Printf("curr: %x, succ: %x, isHashOfNode: %v, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, hashOfNode, maxLen, groups, precLen, succLen)
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
 		for maxLen >= len(groups) {
@@ -100,28 +100,25 @@ func GenStructStep(
 			remainderStart++
 		}
 		remainderLen := len(curr) - remainderStart
-		if isHashOfNode {
-			hash, err := hashTape.Next()
-			if err != nil {
-				return nil, err
-			}
-			if err := e.hash(hash); err != nil {
-				return nil, err
-			}
-		} else if recursive {
-			if remainderLen > 0 {
-				if hashOnly(curr[:maxLen]) {
-					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
-				} else {
-					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
+
+		if buildExtensions && remainderLen > 0 {
+			/* building extensions */
+			if hashOnly(curr[:maxLen]) {
+				if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+					return nil, err
 				}
 			}
-			// Emit LEAF or EXTENSION based on the remainder
+		} else if hashOfNode != nil {
+			/* building a hash */
+			if err := e.hash(*hashOfNode); err != nil {
+				return nil, err
+			}
 		} else {
+			/* building leafs */
 			var err error
 
 			balance := big.NewInt(0)
@@ -169,6 +166,7 @@ func GenStructStep(
 		}
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
+			fmt.Printf("--- precLen <= succLen return groups %v\n", groups)
 			return groups, nil
 		}
 		// Close the immediately encompassing prefix group, if needed
@@ -186,15 +184,16 @@ func GenStructStep(
 		groups = groups[:maxLen]
 		// Check the end of recursion
 		if precLen == 0 {
+			fmt.Printf("--- return groups %v\n", groups)
 			return groups, nil
 		}
-		// Identify preceding key for the recursive invocation
+		// Identify preceding key for the buildExtensions invocation
 		curr = curr[:precLen]
 		for len(groups) > 0 && groups[len(groups)-1] == 0 {
 			groups = groups[:len(groups)-1]
 		}
-		recursive = true
 	}
+	fmt.Printf("returning nil,nil\n")
 	return nil, nil
 
 }
