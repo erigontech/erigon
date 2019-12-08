@@ -113,7 +113,6 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	}
 	tr.hb.SetValueTape(NewRlpSerializableBytesTape(&tr.value))
 	tr.hb.SetNonceTape((*OneUint64Tape)(&tr.a.Nonce))
-	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
 	return &tr
 }
 
@@ -212,9 +211,10 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
+	balanceTape := (*OneBalanceTape)(&tr.a.Balance)
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, tr.groups)
+		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, balanceTape, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -277,6 +277,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.currentRs = tr.rss[keyIdx]
 		tr.curr.Reset()
 	}
+	balanceTape := (*OneBalanceTape)(&tr.a.Balance)
 	if len(v) > 0 {
 		tr.curr.Reset()
 		tr.curr.Write(tr.succ.Bytes())
@@ -296,7 +297,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, tr.groups)
+			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, balanceTape, tr.groups)
 			if err != nil {
 				return err
 			}

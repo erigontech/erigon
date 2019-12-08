@@ -3,7 +3,6 @@ package trie
 import (
 	"fmt"
 	"io"
-	"math/big"
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -22,9 +21,8 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
-	valueTape   RlpSerializableTape // the source of values (for values that are not accounts or contracts)
-	nonceTape   Uint64Tape          // the source of nonces for accounts and contracts (field 0)
-	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
+	valueTape RlpSerializableTape // the source of values (for values that are not accounts or contracts)
+	nonceTape Uint64Tape          // the source of nonces for accounts and contracts (field 0)
 
 	byteArrayWriter *ByteArrayWriter
 
@@ -53,11 +51,6 @@ func (hb *HashBuilder) SetValueTape(valueTape RlpSerializableTape) {
 // SetNonceTape sets the nonce tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
 func (hb *HashBuilder) SetNonceTape(nonceTape Uint64Tape) {
 	hb.nonceTape = nonceTape
-}
-
-// SetBalanceTape sets the balance tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
-func (hb *HashBuilder) SetBalanceTape(balanceTape BigIntTape) {
-	hb.balanceTape = balanceTape
 }
 
 // Reset makes the HashBuilder suitable for reuse
@@ -200,7 +193,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -208,7 +201,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0
-	hb.acc.Balance.SetUint64(0)
+	hb.acc.Balance.SetUint64(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
@@ -217,13 +210,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
 		}
-	}
-	if fieldSet&uint32(2) != 0 {
-		var balance *big.Int
-		if balance, err = hb.balanceTape.Next(); err != nil {
-			return err
-		}
-		hb.acc.Balance.Set(balance)
 	}
 	popped := 0
 	var root node
@@ -258,7 +244,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
@@ -266,7 +252,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0
-	hb.acc.Balance.SetUint64(0)
+	hb.acc.Balance.SetUint64(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = storageSize > 0
@@ -274,13 +260,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
 			return err
 		}
-	}
-	if fieldSet&uint32(2) != 0 {
-		var balance *big.Int
-		if balance, err = hb.balanceTape.Next(); err != nil {
-			return err
-		}
-		hb.acc.Balance.Set(balance)
 	}
 	popped := 0
 	if fieldSet&uint32(4) != 0 {

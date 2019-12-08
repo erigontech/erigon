@@ -610,7 +610,7 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 	hb.SetNonceTape(NewCborUint64Tape(bw[startOffset:endOffset]))
 	startOffset = endOffset
 	endOffset = startOffset + lens[BalanceTape]
-	hb.SetBalanceTape(NewCborBigIntTape(bw[startOffset:endOffset]))
+	balanceTape := NewCborBigIntTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[HashesTape]
 
@@ -751,7 +751,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.accountLeaf(length, keyHex, 0, fieldSet); err != nil {
+			balance, err := balanceTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeaf(length, keyHex, 0, balance.Uint64(), fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpAccountLeafHash:
@@ -770,7 +774,12 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.accountLeafHash(length, keyHex, 0, fieldSet); err != nil {
+
+			balance, err := balanceTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeafHash(length, keyHex, 0, balance.Uint64(), fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpEmptyRoot:

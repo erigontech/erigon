@@ -24,8 +24,8 @@ import "github.com/ledgerwatch/turbo-geth/common"
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte) error
 	leafHash(length int, keyHex []byte) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -59,6 +59,7 @@ func GenStructStep(
 	keyTape BytesTape,
 	hashTape HashTape,
 	storageSize uint64,
+	balanceTape BigIntTape,
 	groups []uint16,
 ) ([]uint16, error) {
 	var precExists = len(groups) > 0
@@ -126,13 +127,22 @@ func GenStructStep(
 				return nil, err
 			}
 
+			balance := uint64(0)
+			if fieldSet&uint32(2) != 0 {
+				balanceBig, err := balanceTape.Next()
+				if err != nil {
+					return nil, err
+				}
+				balance = balanceBig.Uint64()
+			}
+
 			if hashOnly(curr[:maxLen]) {
 				if fieldSet == 0 {
 					if err := e.leafHash(remainderLen, keyHex); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, fieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, balance, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -142,7 +152,7 @@ func GenStructStep(
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, keyHex, storageSize, fieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, keyHex, storageSize, balance, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -177,5 +187,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, groups)
 }
