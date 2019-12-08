@@ -720,16 +720,14 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err := decoder.Decode(&number); err != nil {
 				return nil, nil, err
 			}
-			hashes := make([]common.Hash, number)
-			for i := range hashes {
+			for i := 0; i < number; i++ {
 				hash, err := hashTape.Next()
 				if err != nil {
 					return nil, nil, err
 				}
-				hashes[i] = hash
-			}
-			if err := hb.hash(hashes...); err != nil {
-				return nil, nil, err
+				if err := hb.hash(hash); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpCode:
 			if trace {

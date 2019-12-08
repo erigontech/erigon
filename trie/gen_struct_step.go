@@ -34,7 +34,7 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(...common.Hash) error
+	hash(common.Hash) error
 }
 
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.

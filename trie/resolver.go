@@ -315,7 +315,10 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					tr.fieldSet = AccountFieldSetContract
 				}
 				// the first item ends up deepest on the stack, the seccond item - on the top
-				if err := tr.hb.hash(tr.a.CodeHash, tr.a.Root); err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash); err != nil {
+					return err
+				}
+				if err := tr.hb.hash(tr.a.Root); err != nil {
 					return err
 				}
 			}

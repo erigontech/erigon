@@ -493,15 +493,13 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	return nil
 }
 
-func (hb *HashBuilder) hash(hashes ...common.Hash) error {
+func (hb *HashBuilder) hash(hash common.Hash) error {
 	if hb.trace {
-		fmt.Printf("HASH %d\n", len(hashes))
+		fmt.Printf("HASH\n")
 	}
-	for _, hash := range hashes {
-		hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
-		hb.hashStack = append(hb.hashStack, hash[:]...)
-		hb.nodeStack = append(hb.nodeStack, nil)
-	}
+	hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
+	hb.hashStack = append(hb.hashStack, hash[:]...)
+	hb.nodeStack = append(hb.nodeStack, nil)
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
