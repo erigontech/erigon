@@ -60,7 +60,6 @@ func GenStructStep(
 	recursive bool,
 	curr, succ []byte,
 	e structInfoReceiver,
-	keyTape BytesTape,
 	hashTape HashTape,
 	storageSize uint64,
 	balanceTape BigIntTape,
@@ -128,10 +127,7 @@ func GenStructStep(
 				}
 			}
 		} else {
-			keyHex, err := keyTape.Next()
-			if err != nil {
-				return nil, err
-			}
+			var err error
 
 			balance := big.NewInt(0)
 			if fieldSet&uint32(2) != 0 {
@@ -156,21 +152,21 @@ func GenStructStep(
 
 			if hashOnly(curr[:maxLen]) {
 				if fieldSet == 0 {
-					if err := e.leafHash(remainderLen, keyHex, val); err != nil {
+					if err := e.leafHash(remainderLen, curr, val); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
 			} else {
 				if fieldSet == 0 {
-					if err := e.leaf(remainderLen, keyHex, val); err != nil {
+					if err := e.leaf(remainderLen, curr, val); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -205,5 +201,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, nonceTape, valueTape, groups)
+	return GenStructStep(fieldSet, hashOnly, false /*isHashOfNode*/, true /*recursive*/, newCurr, succ, e, hashTape, storageSize, balanceTape, nonceTape, valueTape, groups)
 }
