@@ -739,7 +739,7 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err != nil {
 				return nil, nil, err
 			}
-			if code, codeHash, err := hb.code(code); err == nil {
+			if codeHash, err := hb.code(code); err == nil {
 				codeMap[codeHash] = code
 			} else {
 				return nil, nil, err

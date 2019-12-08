@@ -508,23 +508,23 @@ func (hb *HashBuilder) hash(hashes ...common.Hash) error {
 	return nil
 }
 
-func (hb *HashBuilder) code(code []byte) ([]byte, common.Hash, error) {
+func (hb *HashBuilder) code(code []byte) (common.Hash, error) {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
-	code = common.CopyBytes(code)
+	codeCopy := common.CopyBytes(code)
 	hb.nodeStack = append(hb.nodeStack, nil)
 	hb.sha.Reset()
-	if _, err := hb.sha.Write(code); err != nil {
-		return nil, common.Hash{}, err
+	if _, err := hb.sha.Write(codeCopy); err != nil {
+		return common.Hash{}, err
 	}
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + common.HashLength
 	if _, err := hb.sha.Read(hash[1:]); err != nil {
-		return nil, common.Hash{}, err
+		return common.Hash{}, err
 	}
 	hb.hashStack = append(hb.hashStack, hash[:]...)
-	return code, common.BytesToHash(hash[1:]), nil
+	return common.BytesToHash(hash[1:]), nil
 }
 
 func (hb *HashBuilder) emptyRoot() {
