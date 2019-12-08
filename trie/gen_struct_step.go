@@ -37,6 +37,13 @@ type structInfoReceiver interface {
 	hash(common.Hash) error
 }
 
+func calcPrecLen(groups []uint16) int {
+	if len(groups) == 0 {
+		return 0
+	}
+	return len(groups) - 1
+}
+
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
 // `fieldSet` parameter specifies whether the generated leaf should be a binary string (fieldSet==0), or
 // an account (in that case the opcodes `ACCOUNTLEAF`/`ACCOUNTLEAFHASH` are emitted instead of `LEAF`/`LEAFHASH`).
@@ -57,7 +64,6 @@ func GenStructStep(
 	fieldSet uint32,
 	hashOnly func(prefix []byte) bool,
 	isHashOfNode bool,
-	recursive bool,
 	curr, succ []byte,
 	e structInfoReceiver,
 	hashTape HashTape,
@@ -67,54 +73,42 @@ func GenStructStep(
 	valueTape RlpSerializableTape,
 	groups []uint16,
 ) ([]uint16, error) {
-	var precExists = len(groups) > 0
-	// Calculate the prefix of the smallest prefix group containing curr
-	var precLen int
-	if len(groups) > 0 {
-		precLen = len(groups) - 1
-	}
-	succLen := prefixLen(succ, curr)
-	var maxLen int
-	if precLen > succLen {
-		maxLen = precLen
-	} else {
-		maxLen = succLen
-	}
-	//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen, succLen)
-	// Add the digit immediately following the max common prefix and compute length of remainder length
-	extraDigit := curr[maxLen]
-	for maxLen >= len(groups) {
-		groups = append(groups, 0)
-	}
-	groups[maxLen] |= (uint16(1) << extraDigit)
-	//fmt.Printf("groups is now %b\n", groups)
-	remainderStart := maxLen
-	if len(succ) > 0 || precExists {
-		remainderStart++
-	}
-	remainderLen := len(curr) - remainderStart
-	if isHashOfNode {
-		hash, err := hashTape.Next()
-		if err != nil {
-			return nil, err
+	for precLen, recursive := calcPrecLen(groups), false; precLen >= 0; precLen, recursive = calcPrecLen(groups), true {
+		var precExists = len(groups) > 0
+		// Calculate the prefix of the smallest prefix group containing curr
+		var precLen int
+		if len(groups) > 0 {
+			precLen = len(groups) - 1
 		}
-		if err := e.hash(hash); err != nil {
-			return nil, err
+		succLen := prefixLen(succ, curr)
+		var maxLen int
+		if precLen > succLen {
+			maxLen = precLen
+		} else {
+			maxLen = succLen
 		}
-		if remainderLen > 0 {
-			if hashOnly(curr[:maxLen]) {
-				if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-					return nil, err
-				}
+		//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %t, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, isHashOfNode, maxLen, groups, precLen, succLen)
+		// Add the digit immediately following the max common prefix and compute length of remainder length
+		extraDigit := curr[maxLen]
+		for maxLen >= len(groups) {
+			groups = append(groups, 0)
+		}
+		groups[maxLen] |= (uint16(1) << extraDigit)
+		//fmt.Printf("groups is now %b\n", groups)
+		remainderStart := maxLen
+		if len(succ) > 0 || precExists {
+			remainderStart++
+		}
+		remainderLen := len(curr) - remainderStart
+		if isHashOfNode {
+			hash, err := hashTape.Next()
+			if err != nil {
+				return nil, err
 			}
-		}
-	} else {
-		// Emit LEAF or EXTENSION based on the remainder
-		if recursive {
+			if err := e.hash(hash); err != nil {
+				return nil, err
+			}
+		} else if recursive {
 			if remainderLen > 0 {
 				if hashOnly(curr[:maxLen]) {
 					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
@@ -126,6 +120,7 @@ func GenStructStep(
 					}
 				}
 			}
+			// Emit LEAF or EXTENSION based on the remainder
 		} else {
 			var err error
 
@@ -172,34 +167,34 @@ func GenStructStep(
 				}
 			}
 		}
-	}
-	// Check for the optional part
-	if precLen <= succLen && len(succ) > 0 {
-		return groups, nil
-	}
-	// Close the immediately encompassing prefix group, if needed
-	if len(succ) > 0 || precExists {
-		if hashOnly(curr[:maxLen]) {
-			if err := e.branchHash(groups[maxLen]); err != nil {
-				return nil, err
-			}
-		} else {
-			if err := e.branch(groups[maxLen]); err != nil {
-				return nil, err
+		// Check for the optional part
+		if precLen <= succLen && len(succ) > 0 {
+			return groups, nil
+		}
+		// Close the immediately encompassing prefix group, if needed
+		if len(succ) > 0 || precExists {
+			if hashOnly(curr[:maxLen]) {
+				if err := e.branchHash(groups[maxLen]); err != nil {
+					return nil, err
+				}
+			} else {
+				if err := e.branch(groups[maxLen]); err != nil {
+					return nil, err
+				}
 			}
 		}
+		groups = groups[:maxLen]
+		// Check the end of recursion
+		if precLen == 0 {
+			return groups, nil
+		}
+		// Identify preceding key for the recursive invocation
+		curr = curr[:precLen]
+		for len(groups) > 0 && groups[len(groups)-1] == 0 {
+			groups = groups[:len(groups)-1]
+		}
+		recursive = true
 	}
-	groups = groups[:maxLen]
-	// Check the end of recursion
-	if precLen == 0 {
-		return groups, nil
-	}
-	// Identify preceding key for the recursive invocation
-	newCurr := curr[:precLen]
-	for len(groups) > 0 && groups[len(groups)-1] == 0 {
-		groups = groups[:len(groups)-1]
-	}
+	return nil, nil
 
-	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false /*isHashOfNode*/, true /*recursive*/, newCurr, succ, e, hashTape, storageSize, balanceTape, nonceTape, valueTape, groups)
 }
