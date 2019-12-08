@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -87,7 +86,7 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		fmt.Printf("curr: %x, succ: %x, isHashOfNode: %v, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, hashOfNode, maxLen, groups, precLen, succLen)
+		//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %v, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, hashOfNode, maxLen, groups, precLen, succLen)
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
 		for maxLen >= len(groups) {
@@ -101,15 +100,17 @@ func GenStructStep(
 		}
 		remainderLen := len(curr) - remainderStart
 
-		if buildExtensions && remainderLen > 0 {
-			/* building extensions */
-			if hashOnly(curr[:maxLen]) {
-				if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-					return nil, err
-				}
-			} else {
-				if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-					return nil, err
+		if buildExtensions {
+			if remainderLen > 0 {
+				/* building extensions */
+				if hashOnly(curr[:maxLen]) {
+					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
 				}
 			}
 		} else if hashOfNode != nil {
@@ -166,7 +167,6 @@ func GenStructStep(
 		}
 		// Check for the optional part
 		if precLen <= succLen && len(succ) > 0 {
-			fmt.Printf("--- precLen <= succLen return groups %v\n", groups)
 			return groups, nil
 		}
 		// Close the immediately encompassing prefix group, if needed
@@ -184,7 +184,6 @@ func GenStructStep(
 		groups = groups[:maxLen]
 		// Check the end of recursion
 		if precLen == 0 {
-			fmt.Printf("--- return groups %v\n", groups)
 			return groups, nil
 		}
 		// Identify preceding key for the buildExtensions invocation
@@ -193,7 +192,6 @@ func GenStructStep(
 			groups = groups[:len(groups)-1]
 		}
 	}
-	fmt.Printf("returning nil,nil\n")
 	return nil, nil
 
 }
