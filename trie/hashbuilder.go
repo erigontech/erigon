@@ -23,7 +23,6 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
 	valueTape RlpSerializableTape // the source of values (for values that are not accounts or contracts)
-	nonceTape Uint64Tape          // the source of nonces for accounts and contracts (field 0)
 
 	byteArrayWriter *ByteArrayWriter
 
@@ -47,11 +46,6 @@ func NewHashBuilder(trace bool) *HashBuilder {
 // SetValueTape sets the value tape to be used by this builder (opcodes leaf and leafHash)
 func (hb *HashBuilder) SetValueTape(valueTape RlpSerializableTape) {
 	hb.valueTape = valueTape
-}
-
-// SetNonceTape sets the nonce tape to be used by this builder (opcodes accountLeaf, accountLeafHash)
-func (hb *HashBuilder) SetNonceTape(nonceTape Uint64Tape) {
-	hb.nonceTape = nonceTape
 }
 
 // Reset makes the HashBuilder suitable for reuse
@@ -194,24 +188,19 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
-	hb.acc.Nonce = 0
+	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
 
-	if fieldSet&uint32(1) != 0 {
-		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
-			return err
-		}
-	}
 	popped := 0
 	var root node
 	if fieldSet&uint32(4) != 0 {
@@ -245,23 +234,19 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
-	hb.acc.Nonce = 0
+	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = storageSize > 0
-	if fieldSet&uint32(1) != 0 {
-		if hb.acc.Nonce, err = hb.nonceTape.Next(); err != nil {
-			return err
-		}
-	}
+
 	popped := 0
 	if fieldSet&uint32(4) != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])

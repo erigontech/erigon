@@ -28,8 +28,8 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte) error
 	leafHash(length int, keyHex []byte) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, fieldset uint32) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -64,6 +64,7 @@ func GenStructStep(
 	hashTape HashTape,
 	storageSize uint64,
 	balanceTape BigIntTape,
+	nonceTape Uint64Tape,
 	groups []uint16,
 ) ([]uint16, error) {
 	var precExists = len(groups) > 0
@@ -139,13 +140,21 @@ func GenStructStep(
 				}
 			}
 
+			nonce := uint64(0)
+			if fieldSet&uint32(1) != 0 {
+				nonce, err = nonceTape.Next()
+				if err != nil {
+					return nil, err
+				}
+			}
+
 			if hashOnly(curr[:maxLen]) {
 				if fieldSet == 0 {
 					if err := e.leafHash(remainderLen, keyHex); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, balance, fieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -155,7 +164,7 @@ func GenStructStep(
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, keyHex, storageSize, balance, fieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -190,5 +199,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, nonceTape, groups)
 }
