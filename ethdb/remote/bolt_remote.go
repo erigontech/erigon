@@ -18,6 +18,7 @@ package remote
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -31,8 +32,6 @@ import (
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
 // this constant needs to be increased
 const Version uint64 = 1
-
-const DefaultCursorCacheSize uint64 = 100 * 1000
 
 // Command is the type of command in the boltdb remote protocol
 type Command uint8
@@ -72,6 +71,10 @@ const (
 	// Pair with key == nil signifies the end of the stream
 	CmdCursorFirst
 )
+
+const DefaultCursorBatchSize uint64 = 100 * 1000
+const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
+const ServerMaxConnections uint64 = 100
 
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)
@@ -158,7 +161,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				// Graceful termination when the end of the input is reached
 				break
 			}
-			log.Error("could not decode command", "error", err)
+			log.Error("could not decode command", "error", err, "command", c)
 			return err
 		}
 		switch c {
@@ -201,6 +204,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 			tx, ok := transactions[txHandle]
 			if !ok {
+				log.Error("transaction not found", "txHandle", txHandle)
 				lastError = fmt.Errorf("transaction not found")
 				continue
 				//return nil
@@ -350,6 +354,11 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				log.Error("could not decode numberOfKeys for CmdCursorNext", "error", err)
 			}
 
+			if numberOfKeys > CursorMaxBatchSize {
+				lastError = errors.New("requested numberOfKeys is too large")
+				continue
+			}
+
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				lastError = fmt.Errorf("cursor not found")
@@ -364,11 +373,11 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				}
 
 				if err := encoder.Encode(key); err != nil {
-					log.Error("could not encode key in response to CmdNext", "error", err)
+					log.Error("could not encode key in response to CmdCursorNext", "error", err)
 					return err
 				}
 				if err := encoder.Encode(value); err != nil {
-					log.Error("could not encode value in response to CmdNext", "error", err)
+					log.Error("could not encode value in response to CmdCursorNext", "error", err)
 					return err
 				}
 
@@ -442,15 +451,26 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 	}()
 	log.Info("Remote DB interface listening on", "address", address)
 
+	ch := make(chan bool, ServerMaxConnections)
+	defer close(ch)
+
 	for {
+		ch <- true
+
 		conn, err1 := ln.Accept()
 		if err1 != nil {
 			log.Error("Could not accept connection", "err", err1)
 			continue
 		}
 
-		//nolint:errcheck
-		go Server(ctx, db, conn, conn, conn)
+		go func() {
+			defer func() {
+				<-ch
+			}()
+
+			//nolint:errcheck
+			Server(ctx, db, conn, conn, conn)
+		}()
 	}
 }
 
@@ -575,6 +595,7 @@ type Cursor struct {
 	out          io.Writer
 	cursorHandle uint64
 
+	batchSize    uint64
 	cacheKeys    [][]byte
 	cacheValues  [][]byte
 	cacheLastIdx uint64
@@ -689,8 +710,9 @@ func (b *Bucket) Cursor() *Cursor {
 		out:          b.out,
 		cursorHandle: cursorHandle,
 
-		cacheKeys:   make([][]byte, DefaultCursorCacheSize),
-		cacheValues: make([][]byte, DefaultCursorCacheSize),
+		batchSize:   DefaultCursorBatchSize,
+		cacheKeys:   make([][]byte, DefaultCursorBatchSize),
+		cacheValues: make([][]byte, DefaultCursorBatchSize),
 	}
 
 	return cursor
@@ -711,7 +733,7 @@ func lastError(encoder *codec.Encoder, decoder *codec.Decoder) (lastErrorStr str
 }
 
 func (c *Cursor) First() (key []byte, value []byte) {
-	c.fetchPage(CmdCursorFirst, DefaultCursorCacheSize)
+	c.fetchPage(CmdCursorFirst)
 	c.cacheIdx = 0
 
 	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
@@ -760,7 +782,7 @@ func (c *Cursor) needFetchNextPage() bool {
 
 func (c *Cursor) Next() (keys []byte, values []byte) {
 	if c.needFetchNextPage() {
-		c.fetchPage(CmdCursorNext, DefaultCursorCacheSize)
+		c.fetchPage(CmdCursorNext)
 		c.cacheIdx = 0
 	}
 
@@ -776,7 +798,7 @@ func (c *Cursor) Next() (keys []byte, values []byte) {
 	return k, v
 }
 
-func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
+func (c *Cursor) fetchPage(cmd Command) {
 	decoder := newDecoder(c.in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(c.out)
@@ -791,14 +813,14 @@ func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
 		return
 	}
 
-	if err := encoder.Encode(&numberOfKeys); err != nil {
-		log.Error("Could not encode numberOfKeys", "error", err, "command", cmd)
+	if err := encoder.Encode(&c.batchSize); err != nil {
+		log.Error("Could not encode c.batchSize", "error", err, "command", cmd)
 		return
 	}
 
 	var err error
 
-	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < numberOfKeys; c.cacheLastIdx++ {
+	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < c.batchSize; c.cacheLastIdx++ {
 		select {
 		default:
 		case <-c.ctx.Done():
@@ -821,5 +843,4 @@ func (c *Cursor) fetchPage(cmd Command, numberOfKeys uint64) {
 			break
 		}
 	}
-
 }
