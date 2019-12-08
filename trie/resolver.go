@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -61,23 +60,6 @@ func (obt *OneBalanceTape) Next() (*big.Int, error) {
 	return (*big.Int)(obt), nil
 }
 
-// TwoHashTape implements HashTape and can only contain two hashes at a time
-type TwoHashTape struct {
-	hashes [2]common.Hash
-	idx    int
-}
-
-// Next belongs to the HashTape interface, and for this type it returns
-// the first hash on the first invocation, and the second hash on all
-// subsequent invocations
-func (tht *TwoHashTape) Next() (common.Hash, error) {
-	h := tht.hashes[tht.idx]
-	if tht.idx == 0 {
-		tht.idx = 1
-	}
-	return h, nil
-}
-
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
@@ -97,7 +79,6 @@ type Resolver struct {
 	curr         OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ         bytes.Buffer
 	value        OneBytesTape // Current value to be used as the value tape for the hash builder
-	hashes       TwoHashTape  // Current code hash and storage hash as the hash tape for the hash builder
 	groups       []uint16
 	a            accounts.Account
 	rlpValueTape RlpSerializableTape
@@ -213,7 +194,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.hashes, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce),
+		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce),
 			tr.rlpValueTape, tr.groups)
 		if err != nil {
 			return err
@@ -296,7 +277,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.hashes, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce), tr.rlpValueTape, tr.groups)
+			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, nil, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce), tr.rlpValueTape, tr.groups)
 			if err != nil {
 				return err
 			}
