@@ -596,7 +596,9 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 	// It is important to read the tapes in the same order as they were written
 	startOffset := decoder.NumBytesRead()
 	endOffset := startOffset + lens[KeyTape]
-	hb.SetKeyTape(NewCborBytesTape(bw[startOffset:endOffset]))
+
+	keyTape := NewCborBytesTape(bw[startOffset:endOffset])
+
 	startOffset = endOffset
 	endOffset = startOffset + lens[ValueTape]
 	hb.SetValueTape(
@@ -633,7 +635,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err := decoder.Decode(&length); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leaf(length); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leaf(length, keyHex); err != nil {
 				return nil, nil, err
 			}
 		case OpLeafHash:
@@ -644,7 +650,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err := decoder.Decode(&length); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leafHash(length); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.leafHash(length, keyHex); err != nil {
 				return nil, nil, err
 			}
 		case OpExtension:
@@ -723,7 +733,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
 			}
-			if err := hb.accountLeaf(length, fieldSet); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeaf(length, keyHex, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpAccountLeafHash:
@@ -738,7 +752,11 @@ func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[com
 			if err := decoder.Decode(&fieldSet); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.accountLeafHash(length, fieldSet); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if err := hb.accountLeafHash(length, keyHex, fieldSet); err != nil {
 				return nil, nil, err
 			}
 		case OpEmptyRoot:

@@ -22,7 +22,6 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 // is comprised of
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type HashBuilder struct {
-	keyTape     BytesTape           // the source of key sequence
 	valueTape   RlpSerializableTape // the source of values (for values that are not accounts or contracts)
 	nonceTape   Uint64Tape          // the source of nonces for accounts and contracts (field 0)
 	balanceTape BigIntTape          // the source of balances for accounts and contracts (field 1)
@@ -47,11 +46,6 @@ func NewHashBuilder(trace bool) *HashBuilder {
 		byteArrayWriter: &ByteArrayWriter{},
 		trace:           trace,
 	}
-}
-
-// SetKeyTape sets the key tape to be used by this builder (opcodes leaf, leafHash, accountLeaf, accountLeafHash)
-func (hb *HashBuilder) SetKeyTape(keyTape BytesTape) {
-	hb.keyTape = keyTape
 }
 
 // SetValueTape sets the value tape to be used by this builder (opcodes leaf and leafHash)
@@ -90,18 +84,14 @@ func (hb *HashBuilder) Reset() {
 	hb.nodeStack = hb.nodeStack[:0]
 }
 
-func (hb *HashBuilder) leaf(length int) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
-	}
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
 	}
 	if length < 0 {
 		return fmt.Errorf("length %d", length)
 	}
-	key := hex[len(hex)-length:]
+	key := keyHex[len(keyHex)-length:]
 	val, err := hb.valueTape.Next()
 	if err != nil {
 		return err
@@ -213,18 +203,14 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
-	}
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
 	}
 	if length < 0 {
 		return fmt.Errorf("length %d", length)
 	}
-	key := hex[len(hex)-length:]
+	key := keyHex[len(keyHex)-length:]
 	val, err := hb.valueTape.Next()
 	if err != nil {
 		return err
@@ -232,15 +218,11 @@ func (hb *HashBuilder) leafHash(length int) error {
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
-	}
-	key := hex[len(hex)-length:]
+	key := keyHex[len(keyHex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0
@@ -299,15 +281,11 @@ func (hb *HashBuilder) accountLeaf(length int, fieldSet uint32) error {
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, fieldSet uint32) error {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
-	hex, err := hb.keyTape.Next()
-	if err != nil {
-		return err
-	}
-	key := hex[len(hex)-length:]
+	key := keyHex[len(keyHex)-length:]
 	hb.acc.Root = EmptyRoot
 	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = 0

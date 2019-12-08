@@ -20,10 +20,10 @@ package trie
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int) error
-	leafHash(length int) error
-	accountLeaf(length int, fieldset uint32) error
-	accountLeafHash(length int, fieldset uint32) error
+	leaf(length int, keyHex []byte) error
+	leafHash(length int, keyHex []byte) error
+	accountLeaf(length int, keyHex []byte, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
