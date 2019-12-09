@@ -479,7 +479,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	// Configure and generate a sample block chain
 	numOfContracts:=10
 	txPerBlock:=10
-	numOfBlocks:=100
+	numOfBlocks:=10
 	var keys []*ecdsa.PrivateKey
 	var addresses []common.Address
 	var transactOpts []*bind.TransactOpts
@@ -625,7 +625,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	})
 
 	spew.Dump(stats)
-	spew.Dump(db.Counts)
+	spew.Dump(db.DBCounterStats)
 	spew.Dump(stats.Size())
 }
 
