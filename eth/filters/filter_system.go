@@ -63,9 +63,9 @@ const (
 	// The number is referenced from the size of tx pool.
 	txChanSize = 4096
 	// rmLogsChanSize is the size of channel listening to RemovedLogsEvent.
-	rmLogsChanSize = 1000
+	rmLogsChanSize = 10
 	// logsChanSize is the size of channel listening to LogsEvent.
-	logsChanSize = 1000
+	logsChanSize = 10
 	// chainEvChanSize is the size of channel listening to ChainEvent.
 	chainEvChanSize = 10
 )

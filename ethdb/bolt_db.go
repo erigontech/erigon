@@ -19,7 +19,6 @@ package ethdb
 
 import (
 	"bytes"
-	"math/rand"
 	"os"
 	"path"
 
@@ -58,7 +57,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
-		id:  rand.Uint64(),
+		id:  id(),
 	}, nil
 }
 

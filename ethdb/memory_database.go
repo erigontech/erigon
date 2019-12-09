@@ -17,8 +17,6 @@
 package ethdb
 
 import (
-	"math/rand"
-
 	"github.com/ledgerwatch/bolt"
 
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -35,7 +33,7 @@ func NewMemDatabase() *BoltDatabase {
 	b := &BoltDatabase{
 		db:  db,
 		log: logger,
-		id:  rand.Uint64(),
+		id:  id(),
 	}
 
 	return b
@@ -86,6 +84,6 @@ func (db *BoltDatabase) MemCopy() Database {
 	return &BoltDatabase{
 		db:  mem,
 		log: logger,
-		id:  rand.Uint64(),
+		id:  id(),
 	}
 }
