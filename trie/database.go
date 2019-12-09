@@ -17,7 +17,6 @@
 package trie
 
 import (
-	"encoding/binary"
 	"io"
 	"reflect"
 	"sync"
@@ -36,6 +35,11 @@ var (
 	memcacheCleanMissMeter  = metrics.NewRegisteredMeter("trie/memcache/clean/miss", nil)
 	memcacheCleanReadMeter  = metrics.NewRegisteredMeter("trie/memcache/clean/read", nil)
 	memcacheCleanWriteMeter = metrics.NewRegisteredMeter("trie/memcache/clean/write", nil)
+
+	memcacheDirtyHitMeter   = metrics.NewRegisteredMeter("trie/memcache/dirty/hit", nil)   //nolint:deadcode,varcheck,unused
+	memcacheDirtyMissMeter  = metrics.NewRegisteredMeter("trie/memcache/dirty/miss", nil)  //nolint:deadcode,varcheck,unused
+	memcacheDirtyReadMeter  = metrics.NewRegisteredMeter("trie/memcache/dirty/read", nil)  //nolint:deadcode,varcheck,unused
+	memcacheDirtyWriteMeter = metrics.NewRegisteredMeter("trie/memcache/dirty/write", nil) //nolint:deadcode,varcheck,unused
 
 	memcacheFlushTimeTimer  = metrics.NewRegisteredResettingTimer("trie/memcache/flush/time", nil)
 	memcacheFlushNodesMeter = metrics.NewRegisteredMeter("trie/memcache/flush/nodes", nil)
@@ -201,19 +205,6 @@ func expandNode(hash hashNode, n node, cachegen uint16) node {
 	return nil
 }
 
-// trienodeHasher is a struct to be used with BigCache, which uses a Hasher to
-// determine which shard to place an entry into. It's not a cryptographic hash,
-// just to provide a bit of anti-collision (default is FNV64a).
-//
-// Since trie keys are already hashes, we can just use the key directly to
-// map shard id.
-type trienodeHasher struct{}
-
-// Sum64 implements the bigcache.Hasher interface.
-func (t trienodeHasher) Sum64(key string) uint64 {
-	return binary.BigEndian.Uint64([]byte(key))
-}
-
 // NewDatabase creates a new trie database to store ephemeral trie content before
 // its written out to disk or garbage collected. No read cache is created, so all
 // data retrievals will hit the underlying disk database.
@@ -261,6 +252,8 @@ func (db *Database) insert(hash common.Hash, blob []byte, node node) {
 	if _, ok := db.dirties[hash]; ok {
 		return
 	}
+	memcacheDirtyWriteMeter.Mark(int64(len(blob)))
+
 	// Create the cached entry for this node
 	entry := &cachedNode{
 		node:      simplifyNode(node),
@@ -293,13 +286,6 @@ func (db *Database) insertPreimage(hash common.Hash, preimage []byte) {
 	}
 	db.preimages[hash] = common.CopyBytes(preimage)
 	db.preimagesSize += common.StorageSize(common.HashLength + len(preimage))
-}
-
-// node retrieves a cached trie node from memory, or returns nil if none can be
-// found in the memory cache.
-func (db *Database) node(hash common.Hash, cachegen uint16) node {
-	// FIXME: Intentionally? does nothing in TurboGeth
-	return nil
 }
 
 // Node retrieves an encoded cached trie node from memory. If it cannot be found
@@ -491,6 +477,7 @@ func (c *cleaner) Put(key []byte, rlp []byte) error {
 	// Move the flushed node into the clean cache to prevent insta-reloads
 	if c.db.cleans != nil {
 		c.db.cleans.Set(hash[:], rlp)
+		memcacheCleanWriteMeter.Mark(int64(len(rlp)))
 	}
 	return nil
 }
