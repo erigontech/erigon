@@ -61,8 +61,7 @@ func TestV2HashBuilding(t *testing.T) {
 	var succ bytes.Buffer
 	var curr OneBytesTape
 	var valueTape OneBytesTape
-	hb.SetKeyTape(&curr)
-	hb.SetValueTape(NewRlpSerializableBytesTape(&valueTape))
+	rlpValueTape := NewRlpSerializableBytesTape(&valueTape)
 	var groups []uint16
 	for i, key := range keys {
 		curr.Reset()
@@ -76,7 +75,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(0, func(_ []byte) bool { return true }, false, false, curr.Bytes(), succ.Bytes(), hb, groups)
+			groups, err = GenStructStep(0, func(_ []byte) bool { return true }, false, false, curr.Bytes(), succ.Bytes(), hb, &curr, nil, 0, nil, nil, rlpValueTape, groups)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -91,7 +90,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(0, func(_ []byte) bool { return true }, false, false, curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+	if _, err := GenStructStep(0, func(_ []byte) bool { return true }, false, false, curr.Bytes(), succ.Bytes(), hb, &curr, nil, 0, nil, nil, rlpValueTape, groups); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -131,8 +130,7 @@ func TestV2Resolution(t *testing.T) {
 	var succ bytes.Buffer
 	var curr OneBytesTape
 	var valueTape OneBytesTape
-	hb.SetKeyTape(&curr)
-	hb.SetValueTape(NewRlpSerializableBytesTape(&valueTape))
+	rlpValueTape := NewRlpSerializableBytesTape(&valueTape)
 	var groups []uint16
 	for _, key := range keys {
 		curr.Reset()
@@ -146,7 +144,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(0, rs.HashOnly, false, false, curr.Bytes(), succ.Bytes(), hb, groups)
+			groups, err = GenStructStep(0, rs.HashOnly, false, false, curr.Bytes(), succ.Bytes(), hb, &curr, nil, 0, nil, nil, rlpValueTape, groups)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -157,7 +155,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(0, rs.HashOnly, false, false, curr.Bytes(), succ.Bytes(), hb, groups); err != nil {
+	if _, err := GenStructStep(0, rs.HashOnly, false, false, curr.Bytes(), succ.Bytes(), hb, &curr, nil, 0, nil, nil, rlpValueTape, groups); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})

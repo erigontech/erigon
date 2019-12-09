@@ -16,19 +16,25 @@
 
 package trie
 
+import (
+	"math/big"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+)
+
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int) error
-	leafHash(length int) error
-	accountLeaf(length int, fieldset uint32) error
-	accountLeafHash(length int, fieldset uint32) error
+	leaf(length int, keyHex []byte, val RlpSerializable) error
+	leafHash(length int, keyHex []byte, val RlpSerializable) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(number int) error
+	hash(common.Hash) error
 }
 
 // GenStructStep is one step of the algorithm that generates the structural information based on the sequence of keys.
@@ -54,6 +60,12 @@ func GenStructStep(
 	recursive bool,
 	curr, succ []byte,
 	e structInfoReceiver,
+	keyTape BytesTape,
+	hashTape HashTape,
+	storageSize uint64,
+	balanceTape BigIntTape,
+	nonceTape Uint64Tape,
+	valueTape RlpSerializableTape,
 	groups []uint16,
 ) ([]uint16, error) {
 	var precExists = len(groups) > 0
@@ -83,7 +95,11 @@ func GenStructStep(
 	}
 	remainderLen := len(curr) - remainderStart
 	if isHashOfNode {
-		if err := e.hash(1); err != nil {
+		hash, err := hashTape.Next()
+		if err != nil {
+			return nil, err
+		}
+		if err := e.hash(hash); err != nil {
 			return nil, err
 		}
 		if remainderLen > 0 {
@@ -112,23 +128,49 @@ func GenStructStep(
 				}
 			}
 		} else {
+			keyHex, err := keyTape.Next()
+			if err != nil {
+				return nil, err
+			}
+
+			balance := big.NewInt(0)
+			if fieldSet&uint32(2) != 0 {
+				balance, err = balanceTape.Next()
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			nonce := uint64(0)
+			if fieldSet&uint32(1) != 0 {
+				nonce, err = nonceTape.Next()
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			val, err := valueTape.Next()
+			if err != nil {
+				return nil, err
+			}
+
 			if hashOnly(curr[:maxLen]) {
 				if fieldSet == 0 {
-					if err := e.leafHash(remainderLen); err != nil {
+					if err := e.leafHash(remainderLen, keyHex, val); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeafHash(remainderLen, fieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
 			} else {
 				if fieldSet == 0 {
-					if err := e.leaf(remainderLen); err != nil {
+					if err := e.leaf(remainderLen, keyHex, val); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, fieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, keyHex, storageSize, balance, nonce, fieldSet); err != nil {
 						return nil, err
 					}
 				}
@@ -163,5 +205,5 @@ func GenStructStep(
 	}
 
 	// Recursion
-	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, groups)
+	return GenStructStep(fieldSet, hashOnly, false, true, newCurr, succ, e, keyTape, hashTape, storageSize, balanceTape, nonceTape, valueTape, groups)
 }
