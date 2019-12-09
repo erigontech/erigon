@@ -326,6 +326,7 @@ func (b *testWorkerBackend) newRandomUncle() *types.Block {
 	ctx := b.chain.WithContext(context.Background(), big.NewInt(parent.Number().Int64()+1))
 	blocks, _ := core.GenerateChain(ctx, b.chain.Config(), parent, b.chain.Engine(), b.db, 1, func(i int, gen *core.BlockGen) {
 		var addr = make([]byte, common.AddressLength)
+		//nolint:gosec
 		rand.Read(addr)
 		gen.SetCoinbase(common.BytesToAddress(addr))
 	})
