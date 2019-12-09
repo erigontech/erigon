@@ -34,7 +34,7 @@ import (
 
 func TestV2HashBuilding(t *testing.T) {
 	var keys []string
-	for b := uint32(0); b < 10000; b++ {
+	for b := uint32(0); b < 100000; b++ {
 		var preimage [4]byte
 		binary.BigEndian.PutUint32(preimage[:], b)
 		key := crypto.Keccak256(preimage[:])[:8]
