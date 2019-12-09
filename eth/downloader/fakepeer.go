@@ -20,24 +20,39 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
+
+type HeaderChain interface {
+	// CurrentHeader retrieves the current header from the local chain.
+	CurrentHeader() *types.Header
+
+	// GetHeader retrieves a block header from the database by hash and number.
+	GetHeader(hash common.Hash, number uint64) *types.Header
+
+	// GetHeaderByNumber retrieves a block header from the database by number.
+	GetHeaderByNumber(number uint64) *types.Header
+
+	// GetHeaderByHash retrieves a block header from the database by its hash.
+	GetHeaderByHash(hash common.Hash) *types.Header
+
+	GetBlockHashesFromHash(hash common.Hash, max uint64) []common.Hash
+	GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash) *uint64
+}
 
 // FakePeer is a mock downloader peer that operates on a local database instance
 // instead of being an actual live node. It's useful for testing and to implement
 // sync commands from an existing local database.
 type FakePeer struct {
 	id string
-	db ethdb.Database
-	hc *core.HeaderChain
+	db rawdb.DatabaseReader
+	hc HeaderChain
 	dl *Downloader
 }
 
 // NewFakePeer creates a new mock downloader peer with the given data sources.
-func NewFakePeer(id string, db ethdb.Database, hc *core.HeaderChain, dl *Downloader) *FakePeer {
+func NewFakePeer(id string, db rawdb.DatabaseReader, hc HeaderChain, dl *Downloader) *FakePeer {
 	return &FakePeer{id: id, db: db, hc: hc, dl: dl}
 }
 
