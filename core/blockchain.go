@@ -1221,7 +1221,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, state *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1230,12 +1230,12 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	return bc.writeBlockWithState(block, receipts, state, tds)
+	return bc.writeBlockWithState(block, receipts, logs, state, tds, emitHeadEvent)
 }
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, stateDb *state.IntraBlockState, tds *state.TrieDbState) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
@@ -1311,6 +1311,22 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	bc.futureBlocks.Remove(block.Hash())
 
+	if status == CanonStatTy {
+		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
+		if len(logs) > 0 {
+			bc.logsFeed.Send(logs)
+		}
+		// In theory we should fire a ChainHeadEvent when we inject
+		// a canonical block, but sometimes we can insert a batch of
+		// canonicial blocks. Avoid firing too much ChainHeadEvents,
+		// we will fire an accumulated ChainHeadEvent and disable fire
+		// event here.
+		if emitHeadEvent {
+			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		}
+	} else {
+		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
+	}
 	return status, nil
 }
 
@@ -1365,11 +1381,10 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	}
 	ctx := bc.WithContext(context.Background(), chain[0].Number())
 	bc.chainmu.Lock()
-	n, events, logs, err := bc.insertChain(ctx, chain, true)
+	n, err := bc.insertChain(ctx, chain, true)
 	bc.chainmu.Unlock()
 	bc.doneJob()
 
-	bc.PostChainEvents(events, logs)
 	return n, err
 }
 
@@ -1381,15 +1396,28 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // racey behaviour. If a sidechain import is in progress, and the historic state
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
-func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, []interface{}, []*types.Log, error) {
+func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
 	log.Info("Inserting chain", "start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64())
 	// If the chain is terminating, don't even bother starting u
 	if bc.getProcInterrupt() {
-		return 0, nil, nil, nil
+		return 0, nil
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
+	// A queued approach to delivering events. This is generally
+	// faster than direct delivery and requires much less mutex
+	// acquiring.
+	var (
+		stats     = insertStats{startTime: mclock.Now()}
+		lastCanon *types.Block
+	)
+	// Fire a single chain head event if we've progressed the chain
+	defer func() {
+		if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
+			bc.chainHeadFeed.Send(ChainHeadEvent{lastCanon})
+		}
+	}()
 	// Start the parallel header verifier
 	headers := make([]*types.Header, len(chain))
 	seals := make([]bool, len(chain))
@@ -1401,16 +1429,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	abort, results := bc.engine.VerifyHeaders(bc, headers, seals)
 	defer close(abort)
 
-	// A queued approach to delivering events. This is generally
-	// faster than direct delivery and requires much less mutex
-	// acquiring.
-	var (
-		stats         = insertStats{startTime: mclock.Now()}
-		commitStats   = insertStats{startTime: mclock.Now()}
-		events        = make([]interface{}, 0, len(chain))
-		lastCanon     *types.Block
-		coalescedLogs []*types.Log
-	)
 	externTd := big.NewInt(0)
 	if len(chain) > 0 && chain[0].NumberU64() > 0 {
 		d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
@@ -1426,7 +1444,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		err := <-results
 		if err != nil {
 			bc.reportBlock(chain[verifyFrom], nil, err)
-			return 0, events, coalescedLogs, err
+			return 0, err
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
 	}
@@ -1440,7 +1458,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			rawdb.WriteBlock(bc.db, block)
 			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
 		}
-		return 0, events, coalescedLogs, nil
+		return 0, nil
 	}
 
 	var offset int
@@ -1453,7 +1471,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	parent = bc.GetBlock(parentHash, parentNumber)
 	if parent == nil {
 		log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
-		return 0, events, coalescedLogs, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
+		return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 	}
 	canonicalHash := rawdb.ReadCanonicalHash(bc.db, parentNumber)
 	for canonicalHash != parentHash {
@@ -1464,7 +1482,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		parent = bc.GetBlock(parentHash, parentNumber)
 		if parent == nil {
 			log.Error("chain segment could not be inserted, missing parent", "hash", parentHash)
-			return 0, events, coalescedLogs, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
+			return 0, fmt.Errorf("chain segment could not be inserted, missing parent %x", parentHash)
 		}
 		canonicalHash = rawdb.ReadCanonicalHash(bc.db, parentNumber)
 	}
@@ -1493,7 +1511,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		// If the header is a banned one, straight out abort
 		if BadHashes[block.Hash()] {
 			bc.reportBlock(block, nil, ErrBlacklistedHash)
-			return k, events, coalescedLogs, ErrBlacklistedHash
+			return k, ErrBlacklistedHash
 		}
 		// Wait for the block's verification to complete
 		var err error
@@ -1519,7 +1537,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			// the chain is discarded and processed at a later time if given.
 			max := big.NewInt(time.Now().Unix() + maxTimeFutureBlocks)
 			if block.Time() > max.Uint64() {
-				return k, events, coalescedLogs, fmt.Errorf("future block: %v > %v", block.Time(), max)
+				return k, fmt.Errorf("future block: %v > %v", block.Time(), max)
 			}
 			bc.futureBlocks.Add(block.Hash(), block)
 			stats.queued++
@@ -1537,7 +1555,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		case err != nil:
 			bc.reportBlock(block, nil, err)
-			return i, events, coalescedLogs, err
+			return i, err
 		}
 		// Create a new statedb using the parent block and report an
 		// error if it fails.
@@ -1548,7 +1566,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		var root common.Hash
 		if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
 			if _, err = bc.GetTrieDbState(); err != nil {
-				return k, events, coalescedLogs, err
+				return k, err
 			}
 		}
 		if !bc.cacheConfig.DownloadOnly {
@@ -1564,38 +1582,38 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
+				return 0, err
 			}
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
+				return 0, err
 			}
 			root := bc.trieDbState.LastRoot()
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
+				return 0, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err := bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
+				return 0, err
 			}
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
+				return 0, err
 			}
 		}
 		var stateDB *state.IntraBlockState
 		var receipts types.Receipts
-		var logs []*types.Log
 		var usedGas uint64
+		var logs []*types.Log
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
@@ -1606,7 +1624,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				bc.reportBlock(block, receipts, err)
-				return k, events, coalescedLogs, err
+				return k, err
 			}
 			// Update the metrics touched during block processing
 			/*
@@ -1628,7 +1646,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				bc.reportBlock(block, receipts, err)
-				return k, events, coalescedLogs, err
+				return k, err
 			}
 		}
 		proctime := time.Since(start)
@@ -1642,12 +1660,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		*/
 
 		// Write the block to the chain and get the status.
-		status, err := bc.writeBlockWithState(block, receipts, stateDB, bc.trieDbState)
+		status, err := bc.writeBlockWithState(block, receipts, logs, stateDB, bc.trieDbState, false)
 		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
 			bc.trieDbState = nil
-			return k, events, coalescedLogs, err
+			return k, err
 		}
 		//atomic.StoreUint32(&followupInterrupt, 1)
 
@@ -1667,8 +1685,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				"elapsed", common.PrettyDuration(time.Since(start)),
 				"root", block.Root())
 
-			coalescedLogs = append(coalescedLogs, logs...)
-			events = append(events, ChainEvent{block, block.Hash(), logs})
 			lastCanon = block
 
 			// Only count canonical blocks for GC processing time
@@ -1679,7 +1695,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				"diff", block.Difficulty(), "elapsed", common.PrettyDuration(time.Since(start)),
 				"txs", len(block.Transactions()), "gas", block.GasUsed(), "uncles", len(block.Uncles()),
 				"root", block.Root())
-			events = append(events, ChainSideEvent{block})
 
 		default:
 			// This in theory is impossible, but lets be nice to our future selves and leave
@@ -1692,13 +1707,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.processed++
 		stats.usedGas += usedGas
 		stats.report(chain, i, bc.db)
-		if commitStats.needToCommit(chain, bc.db, i) {
+		if stats.needToCommit(chain, bc.db, i) {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
 				bc.trieDbState = nil
-				return 0, events, coalescedLogs, err
+				return 0, err
 			}
 			if bc.trieDbState != nil {
 				bc.trieDbState.PruneTries(false)
@@ -1707,11 +1722,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 	}
 
-	// Append a single chain head event if we've progressed the chain
-	if lastCanon != nil && bc.CurrentBlock().Hash() == lastCanon.Hash() {
-		events = append(events, ChainHeadEvent{lastCanon})
-	}
-	return 0, events, coalescedLogs, nil
+	return 0, nil
 }
 
 // statsReportLimit is the time limit during import and export after which we
@@ -1778,12 +1789,12 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		deletedTxs types.Transactions
 		addedTxs   types.Transactions
 
-		deletedLogs []*types.Log
-		rebirthLogs []*types.Log
+		deletedLogs [][]*types.Log
+		rebirthLogs [][]*types.Log
 
-		// collectLogs collects the logs that were generated during the
-		// processing of the block that corresponds with the given hash.
-		// These logs are later announced as deleted.
+		// collectLogs collects the logs that were generated or removed during
+		// the processing of the block that corresponds with the given hash.
+		// These logs are later announced as deleted or reborn
 		collectLogs = func(hash common.Hash, removed bool) {
 			// Coalesce logs and set 'Removed'.
 			number := bc.hc.GetBlockNumber(bc.db, hash)
@@ -1791,17 +1802,39 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 				return
 			}
 			receipts := rawdb.ReadReceipts(bc.db, hash, *number, bc.chainConfig)
+
+			var logs []*types.Log
 			for _, receipt := range receipts {
 				for _, log := range receipt.Logs {
 					l := *log
 					if removed {
 						l.Removed = true
-						deletedLogs = append(deletedLogs, &l)
 					} else {
-						rebirthLogs = append(rebirthLogs, &l)
 					}
+					logs = append(logs, &l)
 				}
 			}
+			if len(logs) > 0 {
+				if removed {
+					deletedLogs = append(deletedLogs, logs)
+				} else {
+					rebirthLogs = append(rebirthLogs, logs)
+				}
+			}
+		}
+		// mergeLogs returns a merged log slice with specified sort order.
+		mergeLogs = func(logs [][]*types.Log, reverse bool) []*types.Log {
+			var ret []*types.Log
+			if reverse {
+				for i := len(logs) - 1; i >= 0; i-- {
+					ret = append(ret, logs[i]...)
+				}
+			} else {
+				for i := 0; i < len(logs); i++ {
+					ret = append(ret, logs[i]...)
+				}
+			}
+			return ret
 		}
 	)
 	// Reduce the longer chain to the same number as the shorter one
@@ -1899,9 +1932,6 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		rawdb.DeleteCanonicalHash(bc.db, i)
 	}
 
-	if len(deletedLogs) > 0 {
-		go bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
-	}
 	if _, err := bc.db.Commit(); err != nil {
 		return err
 	}
@@ -1909,45 +1939,18 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	// this goroutine if there are no events to fire, but realistcally that only
 	// ever happens if we're reorging empty blocks, which will only happen on idle
 	// networks where performance is not an issue either way.
-	//
-	// TODO(karalabe): Can we get rid of the goroutine somehow to guarantee correct
-	// event ordering?
-	go func() {
-		if len(deletedLogs) > 0 {
-			bc.rmLogsFeed.Send(RemovedLogsEvent{deletedLogs})
+	if len(deletedLogs) > 0 {
+		bc.rmLogsFeed.Send(RemovedLogsEvent{mergeLogs(deletedLogs, true)})
+	}
+	if len(rebirthLogs) > 0 {
+		bc.logsFeed.Send(mergeLogs(rebirthLogs, false))
+	}
+	if len(oldChain) > 0 {
+		for i := len(oldChain) - 1; i >= 0; i-- {
+			bc.chainSideFeed.Send(ChainSideEvent{Block: oldChain[i]})
 		}
-		if len(rebirthLogs) > 0 {
-			bc.logsFeed.Send(rebirthLogs)
-		}
-		if len(oldChain) > 0 {
-			for _, block := range oldChain {
-				bc.chainSideFeed.Send(ChainSideEvent{Block: block})
-			}
-		}
-	}()
+	}
 	return nil
-}
-
-// PostChainEvents iterates over the events generated by a chain insertion and
-// posts them into the event feed.
-// TODO: Should not expose PostChainEvents. The chain events should be posted in WriteBlock.
-func (bc *BlockChain) PostChainEvents(events []interface{}, logs []*types.Log) {
-	// post event logs for further processing
-	if logs != nil {
-		bc.logsFeed.Send(logs)
-	}
-	for _, event := range events {
-		switch ev := event.(type) {
-		case ChainEvent:
-			bc.chainFeed.Send(ev)
-
-		case ChainHeadEvent:
-			bc.chainHeadFeed.Send(ev)
-
-		case ChainSideEvent:
-			bc.chainSideFeed.Send(ev)
-		}
-	}
 }
 
 func (bc *BlockChain) update() {
