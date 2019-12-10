@@ -6,10 +6,10 @@ import (
 )
 
 var gerEnv sync.Once
-var DataLayoutExperiment bool
-func IsDataLayoutExperiment() bool  {
+var ThinHistory bool
+func IsThinHistory() bool  {
 	gerEnv.Do(func() {
-		_,DataLayoutExperiment = os.LookupEnv("DATA_LAYOUT_EXPERIMENT")
+		_, ThinHistory = os.LookupEnv("THIN_HISTORY")
 	})
-	return DataLayoutExperiment
+	return ThinHistory
 }

@@ -83,7 +83,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if debug.IsDataLayoutExperiment() {
+			if debug.IsThinHistory() {
 				b,_:=hb.Get(key)
 				b,err = AppendToIndex(b, timestamp)
 				if err!=nil {
@@ -196,7 +196,7 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 // GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsDataLayoutExperiment() {
+	if !debug.IsThinHistory() {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		return db.Get(hBucket, composite)
 	}
@@ -239,7 +239,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		if debug.IsDataLayoutExperiment() {
+		if debug.IsThinHistory() {
 			v, err:=BoltDBFindByHistory(tx, hBucket, key, timestamp)
 			if err==nil {
 				dat = make([]byte, len(v))
@@ -373,7 +373,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		panic("WalkAsOf")
 	}
 
@@ -458,7 +458,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 }
 
 func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		panic("MultiWalkAsOf")
 	}
 

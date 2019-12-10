@@ -48,7 +48,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		csData, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
 		if err!=nil {
 			t.Fatal(err)
@@ -87,7 +87,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal("changeset must be deleted")
 	}
 
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		csData, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
 		if err!=ErrKeyNotFound {
 			t.Fatal("account must be deleted")
@@ -102,7 +102,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 }
 
 func TestMutationCommit(t *testing.T) {
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		t.Skip()
 	}
 	db:=NewMemDatabase()

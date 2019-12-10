@@ -173,7 +173,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
 		if err!=nil {
 			acc.CodeHash = common.BytesToHash(codeHash)

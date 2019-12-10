@@ -555,7 +555,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 
-			if forward || debug.IsDataLayoutExperiment() {
+			if forward || debug.IsThinHistory() {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
@@ -745,7 +745,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 
-	if tds.historical && debug.IsDataLayoutExperiment() {
+	if tds.historical && debug.IsThinHistory() {
 		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err==nil {
 			a.CodeHash = common.BytesToHash(codeHash)

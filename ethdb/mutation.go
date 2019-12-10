@@ -134,7 +134,7 @@ func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*
 }
 
 func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsDataLayoutExperiment() {
+	if !debug.IsThinHistory() {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		return m.Get(hBucket, composite)
 	}
@@ -227,7 +227,7 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	if noHistory {
 		return nil
 	}
-	if !debug.IsDataLayoutExperiment() {
+	if !debug.IsThinHistory() {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		m.puts.Set(hBucket, composite, value)
 	}
@@ -307,7 +307,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		if err != nil {
 			return false, err
 		}
-		if !debug.IsDataLayoutExperiment() {
+		if !debug.IsThinHistory() {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
 				composite,_:=dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(hBucketStr,composite)
@@ -371,7 +371,7 @@ func (m *mutation) Commit() (uint64, error) {
 				if err != nil {
 					log.Error("EncodeChangeSet changedAccounts error on commit", "err", err)
 				}
-				if debug.IsDataLayoutExperiment() {
+				if debug.IsThinHistory() {
 					changedKeys:=changedAccounts.ChangedKeys()
 					for k:=range changedKeys {
 						value, err := m.getNoLock(hBucket, []byte(k))

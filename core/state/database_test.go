@@ -473,7 +473,7 @@ func TestReorgOverStateChange(t *testing.T) {
 }
 
 func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
-	if !debug.IsDataLayoutExperiment() {
+	if !debug.IsThinHistory() {
 		t.Skip()
 	}
 	// Configure and generate a sample block chain

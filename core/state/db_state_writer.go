@@ -42,7 +42,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		// because we have accountHash+incarnation -> codehash of contract in separate bucket
 		// and we don't need root in history requests
 		testAcc := original.SelfCopy()
-		if debug.IsDataLayoutExperiment() {
+		if debug.IsThinHistory() {
 			testAcc.CodeHash= common.BytesToHash(emptyCodeHash)
 			testAcc.Root=trie.EmptyRoot
 		}
@@ -83,7 +83,7 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 	if err:= dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err!=nil {
 		return err
 	}
-	if debug.IsDataLayoutExperiment() {
+	if debug.IsThinHistory() {
 		//save contract to codeHash mapping
 		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash,incarnation), codeHash.Bytes())
 	}
