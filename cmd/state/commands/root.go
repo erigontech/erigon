@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"runtime"
 	"runtime/pprof"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -22,6 +25,24 @@ var (
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
 	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
+}
+
+func getContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+
+		select {
+		case <-ch:
+			log.Info("Got interrupt, shutting down...")
+		case <-ctx.Done():
+		}
+
+		cancel()
+	}()
+	return ctx
 }
 
 var rootCmd = &cobra.Command{
