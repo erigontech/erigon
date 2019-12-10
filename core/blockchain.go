@@ -352,7 +352,7 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
 		var err error
 		currentBlockNr := bc.CurrentBlock().NumberU64()
-		bc.trieDbState, err = bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr, false)
+		bc.trieDbState, err = bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
 		if err != nil {
 			bc.trieDbState = nil
 			return nil, err
@@ -362,10 +362,10 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	return bc.trieDbState, nil
 }
 
-func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64, getStored bool) (*state.TrieDbState, error) {
+func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
 	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
 		log.Info("Creating IntraBlockState from latest state", "block", blockNr)
-		tds, err := state.NewTrieDbState(root, bc.db, blockNr, getStored)
+		tds, err := state.NewTrieDbState(root, bc.db, blockNr)
 		if err != nil {
 			log.Error("Creation aborted", "error", err)
 			return nil, err

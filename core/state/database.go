@@ -204,17 +204,18 @@ func setTrieDBState(tds *TrieDbState, id uint64) {
 	trieObjMu.Unlock()
 }
 
-func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, getStored ...bool) (*TrieDbState, error) {
-	if len(getStored) > 0 && getStored[0] {
-		tr := getTrieDBState(db)
-
-		if tr != nil {
-			if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
-				return tr, nil
-			}
-		}
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+	tds, err := newTrieDbState(root, db, blockNr)
+	if err != nil {
+		return nil, err
 	}
 
+	setTrieDBState(tds, db.ID())
+
+	return tds, nil
+}
+
+func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -241,9 +242,17 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64, getStor
 		tp.Touch(hex, del)
 	})
 
-	setTrieDBState(tds, db.ID())
-
 	return tds, nil
+}
+
+func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+	if tr := getTrieDBState(db); tr != nil {
+		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
+			return tr, nil
+		}
+	}
+
+	return newTrieDbState(root, db, blockNr)
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {

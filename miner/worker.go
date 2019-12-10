@@ -634,7 +634,7 @@ func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
 		return err
 	}
 
-	tds, err := state.NewTrieDbState(parent.Root(), w.chain.ChainDb(), parent.NumberU64(), true)
+	tds, err := state.GetTrieDbState(parent.Root(), w.chain.ChainDb(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
