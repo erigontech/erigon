@@ -28,7 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/node"
 )
 
@@ -122,14 +121,13 @@ func benchmarkBloomBits(b *testing.B, sectionSize uint64) {
 
 	b.Log("Running filter benchmarks...")
 	start = time.Now()
-	mux := new(event.TypeMux)
 	var backend *testBackend
 
 	for i := 0; i < benchFilterCnt; i++ {
 		if i%20 == 0 {
 			db.Close()
 			db, _ = ethdb.NewBoltDatabase(benchDataDir)
-			backend = &testBackend{mux, db, cnt, new(event.Feed), new(event.Feed), new(event.Feed), new(event.Feed)}
+			backend = &testBackend{db: db, sections: cnt}
 		}
 		var addr common.Address
 		addr[0] = byte(i)
@@ -169,8 +167,7 @@ func BenchmarkNoBloomBits(b *testing.B) {
 
 	b.Log("Running filter benchmarks...")
 	start := time.Now()
-	mux := new(event.TypeMux)
-	backend := &testBackend{mux, db, 0, new(event.Feed), new(event.Feed), new(event.Feed), new(event.Feed)}
+	backend := &testBackend{db: db}
 	filter := NewRangeFilter(backend, 0, int64(*headNum), []common.Address{{}}, nil)
 	filter.Logs(context.Background())
 	d := time.Since(start)
