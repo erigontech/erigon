@@ -47,13 +47,13 @@ const (
 	txChanSize = 4096
 
 	// chainHeadChanSize is the size of channel listening to ChainHeadEvent.
-	chainHeadChanSize = 1000
+	chainHeadChanSize = 10
 
 	// chainSideChanSize is the size of channel listening to ChainSideEvent.
-	chainSideChanSize = 1000
+	chainSideChanSize = 10
 
 	// resubmitAdjustChanSize is the size of resubmitting interval adjustment channel.
-	resubmitAdjustChanSize = 1000
+	resubmitAdjustChanSize = 10
 
 	// miningLogAtDepth is the number of confirmations before logging successful mining.
 	miningLogAtDepth = 7
@@ -172,6 +172,8 @@ type worker struct {
 	newTxs  int32 // New arrival transaction count since last sealing work submitting.
 
 	hooks
+
+	initOnce sync.Once
 }
 
 type hooks struct {
@@ -214,18 +216,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 	// Subscribe events for blockchain
 	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
 	worker.chainSideSub = eth.BlockChain().SubscribeChainSideEvent(worker.chainSideCh)
-
-	// Sanitize recommit interval if the user-specified one is too short.
-	recommit := worker.config.Recommit
-	if recommit < minRecommitInterval {
-		log.Warn("Sanitizing miner recommit interval", "provided", recommit, "updated", minRecommitInterval)
-		recommit = minRecommitInterval
-	}
-
-	go worker.mainLoop()
-	go worker.newWorkLoop(recommit)
-	go worker.resultLoop()
-	go worker.taskLoop()
 
 	// Submit first work to initialize pending state.
 	if init {
@@ -273,9 +263,26 @@ func (w *worker) pendingBlock() *types.Block {
 	return w.snapshotBlock
 }
 
+func (w *worker) init() {
+	w.initOnce.Do(func(){
+		// Sanitize recommit interval if the user-specified one is too short.
+		recommit := w.config.Recommit
+		if recommit < minRecommitInterval {
+			log.Warn("Sanitizing miner recommit interval", "provided", recommit, "updated", minRecommitInterval)
+			recommit = minRecommitInterval
+		}
+
+		go w.mainLoop()
+		go w.newWorkLoop(recommit)
+		go w.resultLoop()
+		go w.taskLoop()
+	})
+}
+
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
 	atomic.StoreInt32(&w.running, 1)
+	w.init()
 	w.startCh <- struct{}{}
 }
 

@@ -212,9 +212,22 @@ func (b *testWorkerBackend) PostChainEvents(events []interface{}) {
 	b.chain.PostChainEvents(events, nil)
 }
 
-func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks) *worker {
+func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks, waitStart bool) *worker {
 	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
 	w.setEtherbase(t.testBankAddress)
+	if waitStart {
+		w.init()
+
+		// Ensure worker has finished initialization
+		timer := time.NewTicker(10*time.Millisecond)
+		defer timer.Stop()
+		for range timer.C {
+			b := w.pendingBlock()
+			if b != nil && b.NumberU64() >= 1 {
+				break
+			}
+		}
+	}
 	return w
 }
 
@@ -265,7 +278,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	}
 
 	b := newTestBackend(t, testCase, chainConfig, engine, db, 0)
-	w := newTestWorker(testCase, chainConfig, engine, b, hooks{})
+	w := newTestWorker(testCase, chainConfig, engine, b, hooks{}, false)
 	defer w.close()
 
 	db2 := ethdb.NewMemDatabase()
@@ -363,12 +376,15 @@ func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *par
 	defer engine.Close()
 
 	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
-	w := newTestWorker(testCase, chainConfig, engine, b, hooks{})
+	w := newTestWorker(testCase, chainConfig, engine, b, hooks{}, true)
 	defer w.close()
 
 	// Ensure snapshot has been updated.
 	time.Sleep(100 * time.Millisecond)
 	block, state, _ := w.pending()
+	if block == nil {
+		t.Fatalf("block number mismatch: have nil, want %d", 1)
+	}
 	if block.NumberU64() != 1 {
 		t.Errorf("block number mismatch: have %d, want %d", block.NumberU64(), 1)
 	}
@@ -419,17 +435,8 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 	}
 
 	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
-	w := newTestWorker(testCase, chainConfig, engine, backend, h)
+	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
-
-	// Ensure worker has finished initialization
-	for {
-		b := w.pendingBlock()
-
-		if b != nil && b.NumberU64() > 0 {
-			break
-		}
-	}
 
 	w.start()
 	for i := 0; i < 2; i++ {
@@ -501,16 +508,9 @@ func TestStreamUncleBlock(t *testing.T) {
 		},
 	}
 
-	w := newTestWorker(testCase, testCase.ethashChainConfig, ethash, b, h)
+	w := newTestWorker(testCase, testCase.ethashChainConfig, ethash, b, h, true)
 	defer w.close()
 
-	// Ensure worker has finished initialization
-	for {
-		b := w.pendingBlock()
-		if b != nil && b.NumberU64() == 2 {
-			break
-		}
-	}
 	w.start()
 
 	// Ignore the first two works
@@ -577,16 +577,8 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 	}
 
 	b := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
-	w := newTestWorker(testCase, chainConfig, engine, b, h)
+	w := newTestWorker(testCase, chainConfig, engine, b, h, true)
 	defer w.close()
-
-	// Ensure worker has finished initialization
-	for {
-		b := w.pendingBlock()
-		if b != nil && b.NumberU64() == 1 {
-			break
-		}
-	}
 
 	w.start()
 	// Ignore the first two works
@@ -678,16 +670,8 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 	}
 
 	backend := newTestBackend(t, testCase, chainConfig, engine, ethdb.NewMemDatabase(), 0)
-	w := newTestWorker(testCase, chainConfig, engine, backend, h)
+	w := newTestWorker(testCase, chainConfig, engine, backend, h, true)
 	defer w.close()
-
-	// Ensure worker has finished initialization
-	for {
-		b := w.pendingBlock()
-		if b != nil && b.NumberU64() == 1 {
-			break
-		}
-	}
 
 	w.start()
 

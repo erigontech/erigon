@@ -1318,6 +1318,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//	fmt.Printf("SideStatTy for block %d\n", block.NumberU64())
 	//	status = SideStatTy
 	//}
+
 	// Set new head.
 	if status == CanonStatTy {
 		bc.insert(block)
@@ -1334,9 +1335,11 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		// canonicial blocks. Avoid firing too much ChainHeadEvents,
 		// we will fire an accumulated ChainHeadEvent and disable fire
 		// event here.
-		if emitHeadEvent {
-			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
-		}
+
+		// restore if fast sync is needed
+		// if emitHeadEvent {
+		//  	bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		// }
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
