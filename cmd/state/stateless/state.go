@@ -20,6 +20,8 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -101,8 +103,7 @@ func (isa IntSorterAddr) Swap(i, j int) {
 }
 
 type Reporter struct {
-	remoteDbAddress string
-	db              *remote.DB
+	db *remote.DB
 }
 
 func NewReporter(remoteDbAddress string) (*Reporter, error) {
@@ -117,7 +118,7 @@ func NewReporter(remoteDbAddress string) (*Reporter, error) {
 		return nil, err
 	}
 
-	return &Reporter{remoteDbAddress: remoteDbAddress, db: db}, nil
+	return &Reporter{db: db}, nil
 }
 
 func (r *Reporter) StateGrowth1(ctx context.Context) {
@@ -339,34 +340,63 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	}
 }
 
-func GasLimits(chaindata string) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
-	check(err)
-	defer ethDb.Close()
-	vmConfig := vm.Config{}
-	engine := ethash.NewFullFaker()
-	chainConfig := params.MainnetChainConfig
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil)
-	check(err)
+func (r *Reporter) GasLimits(ctx context.Context) {
 	f, err := os.Create("gas_limits.csv")
 	check(err)
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
-	var blockNum uint64 = 5346726
+	//var blockNum uint64 = 5346726
+	var blockNum uint64 = 0
 
-	for {
-		block := bcb.GetBlockByNumber(blockNum)
-		if block == nil {
-			break
+	mainHashes := make(map[string]struct{}, 10*000*000)
+
+	err = r.db.View(ctx, func(tx *remote.Tx) error {
+		b := tx.Bucket(dbutils.HeaderPrefix)
+		if b == nil {
+			return nil
 		}
-		fmt.Fprintf(w, "%d, %d\n", blockNum, block.GasLimit())
-		blockNum++
-		if blockNum%100000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+		c := b.Cursor()
+
+		fmt.Println("Preloading block numbers...")
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if !dbutils.IsHeaderHashKey(k) {
+				continue
+			}
+
+			mainHashes[string(v)] = struct{}{}
 		}
-	}
-	fmt.Printf("Read %d blocks\n", blockNum)
+
+		fmt.Println("Preloaded: ", len(mainHashes))
+
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if !dbutils.IsHeaderKey(k) {
+				continue
+			}
+
+			if _, ok := mainHashes[string(k[common.BlockNumberLength:])]; !ok {
+				continue
+			}
+
+			header := new(types.Header)
+			if decodeErr := rlp.Decode(bytes.NewReader(v), header); decodeErr != nil {
+				log.Error("Invalid block header RLP", "blockNum", blockNum, "err", decodeErr)
+				return nil
+			}
+
+			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
+			if blockNum%1000000 == 0 {
+				fmt.Printf("Processed %d blocks\n", blockNum)
+			}
+
+			blockNum++
+		}
+		return nil
+	})
+	check(err)
+
+	fmt.Printf("Finish processing %d blocks\n", blockNum)
 }
 
 func parseFloat64(str string) float64 {
