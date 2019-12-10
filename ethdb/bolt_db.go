@@ -229,7 +229,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 	return dat, err
 }
 
-func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
+func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
 	fixedbytes = int((fixedbits + 7) / 8)
 	shiftbits := fixedbits & 7
 	mask = byte(0xff)
@@ -240,7 +240,7 @@ func bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
 }
 
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := bytesmask(fixedbits)
+	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
@@ -268,7 +268,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 		return nil
 	}
 	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
+	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
@@ -302,7 +302,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = bytesmask(fixedbits[rangeIdx])
+						fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 					}
 				}
@@ -320,7 +320,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	fixedbytes, mask := bytesmask(fixedbits)
+	fixedbytes, mask := Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
@@ -402,7 +402,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		return nil
 	}
 	keyIdx := 0 // What is the current key we are extracting
-	fixedbytes, mask := bytesmask(fixedbits[keyIdx])
+	fixedbytes, mask := Bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
@@ -472,7 +472,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						if keyIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = bytesmask(fixedbits[keyIdx])
+						fixedbytes, mask = Bytesmask(fixedbits[keyIdx])
 						startkey = startkeys[keyIdx]
 					}
 				}
@@ -527,7 +527,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 }
 
 func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return rewindData(db, timestampSrc, timestampDst, df)
+	return RewindData(db, timestampSrc, timestampDst, df)
 }
 
 // Delete deletes the key from the queue and database

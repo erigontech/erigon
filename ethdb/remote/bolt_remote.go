@@ -78,6 +78,9 @@ const (
 	// Moves given cursor to bucket start and streams back the (key, value) pairs
 	// Pair with key == nil signifies the end of the stream
 	CmdCursorFirst
+	// CmdCursorSeekTo (cursorHandle, seekKey): (key, value)
+	// Moves given cursor to the seekKey, or to the next key after seekKey
+	CmdCursorSeekTo
 )
 
 const DefaultCursorBatchSize uint64 = 100 * 1000
@@ -415,6 +418,32 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				log.Error("could not encode (key,value) in response to CmdCursorSeek", "error", err)
 				return err
 			}
+		case CmdCursorSeekTo:
+			var cursorHandle uint64
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				log.Error("could not decode cursorHandle for CmdCursorSeekTo", "error", err)
+				return err
+			}
+			var seekKey []byte
+			if err := decoder.Decode(&seekKey); err != nil {
+				log.Error("could not decode seekKey for CmdCursorSeekTo", "error", err)
+				return err
+			}
+			var key, value []byte
+			if cursor, ok := cursors[cursorHandle]; ok {
+				key, value = cursor.Seek(seekKey)
+				lastError = nil
+			} else {
+				lastError = fmt.Errorf("cursor not found")
+			}
+			if err := encoder.Encode(&key); err != nil {
+				log.Error("could not encode key in response to CmdCursorSeekTo", "error", err)
+				return err
+			}
+			if err := encoder.Encode(&value); err != nil {
+				log.Error("could not encode value in response to CmdCursorSeekTo", "error", err)
+				return err
+			}
 		case CmdCursorNext:
 			var cursorHandle uint64
 			if err := decoder.Decode(&cursorHandle); err != nil {
@@ -591,7 +620,8 @@ func NewDB(dialFunc DialFunc) (*DB, error) {
 }
 
 // Close closes DB by using the closer field
-func (db *DB) Close() {
+func (db *DB) Close() error {
+	return nil
 }
 
 // Tx mimicks the interface of bolt.Tx
@@ -886,6 +916,37 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
 
 	if err := decoder.Decode(&value); err != nil {
 		log.Error("Could not decode value from CmdCursorSeek result", "error", err)
+	}
+
+	return key, value
+}
+
+func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
+	decoder := newDecoder(c.in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(c.out)
+	defer returnEncoderToPool(encoder)
+	var cmd = CmdCursorSeekTo
+	if err := encoder.Encode(&cmd); err != nil {
+		log.Error("Could not encode CmdCursorSeekTo", "error", err)
+		return nil, nil
+	}
+	if err := encoder.Encode(&c.cursorHandle); err != nil {
+		log.Error("Could not encode cursorHandle for CmdCursorSeekTo", "error", err)
+		return nil, nil
+	}
+	if err := encoder.Encode(&seek); err != nil {
+		log.Error("Could not encode seek key for CmdCursorSeekTo", "error", err)
+		return nil, nil
+	}
+
+	if err := decoder.Decode(&key); err != nil {
+		log.Error("Could not decode key for CmdCursorSeekTo", "error", err)
+		return nil, nil
+	}
+
+	if err := decoder.Decode(&value); err != nil {
+		log.Error("Could not decode value from CmdCursorSeekTo result", "error", err)
 	}
 
 	return key, value

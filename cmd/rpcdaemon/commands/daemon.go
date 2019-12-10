@@ -12,7 +12,12 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
+	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -31,14 +36,24 @@ func splitAndTrim(input string) []string {
 
 // EthAPI is a collection of functions that are exposed in the
 type EthAPI interface {
-	BlockNumber(ctx context.Context) (uint64, error)
+	BlockNumber(ctx context.Context) (hexutil.Uint64, error)
 	GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	remoteDbAddress string
-	db              *remote.DB
+	db *remote.DB
+}
+
+// PrivateDebugAPI
+type PrivateDebugAPI interface {
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error)
+}
+
+// APIImpl is implementation of the EthAPI interface based on remote Db access
+type PrivateDebugAPIImpl struct {
+	db       *remote.DB
+	dbReader ethdb.Getter
 }
 
 // ConnectAPIImpl connects to the remote DB and returns APIImpl instance
@@ -53,12 +68,32 @@ func ConnectAPIImpl(remoteDbAddress string) (*APIImpl, error) {
 		return nil, err
 	}
 
-	return &APIImpl{remoteDbAddress: remoteDbAddress, db: db}, nil
+	return &APIImpl{
+		db: db,
+	}, nil
 }
 
-// BlockNumber returns the currently highest block number available in the remote db
-func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
+// ConnectAPIImpl connects to the remote DB and returns APIImpl instance
+func ConnectPrivateDebugAPIImpl(remoteDbAddress string) (*PrivateDebugAPIImpl, error) {
+	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
+		return conn, conn, conn, err
+	}
+	db, err := remote.NewDB(dial)
+	if err != nil {
+		return nil, err
+	}
+
+	return &PrivateDebugAPIImpl{
+		db:       db,
+		dbReader: remote.NewRemoteBoltDatabase(db),
+	}, nil
+}
+
+func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	var blockNumber uint64
+
 	err := api.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.HeadHeaderKey)
 		if b == nil {
@@ -83,7 +118,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (uint64, error) {
 		return 0, err
 	}
 
-	return blockNumber, nil
+	return hexutil.Uint64(blockNumber), nil
 }
 
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
@@ -115,6 +150,37 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return nil, nil
 }
 
+// StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
+	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
+	if block == nil {
+		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", blockHash)
+	}
+	parent := rawdb.ReadBlock(api.dbReader, block.ParentHash(), block.NumberU64()-1)
+	if parent == nil {
+		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", block.ParentHash())
+	}
+
+	// TODO: eth/api.go:StorageRangeAt does call api.computeTxEnv, do we need it?
+	//	_, _, _, dbstate, _, err = api.computeTxEnv(block.Hash(), len(block.Transactions())-1)
+	_, dbstate := api.computeIntraBlockState(parent)
+	fmt.Println(dbstate)
+
+	//dbstate.SetBlockNr(block.NumberU64())
+	//statedb.CommitBlock(api.eth.chainConfig.IsEIP158(block.Number()), dbstate)
+	return eth.StorageRangeAt(dbstate, contractAddress, keyStart, maxResult)
+}
+
+// computeIntraBlockState retrieves the state database associated with a certain block.
+// If no state is locally available for the given block, a number of blocks are
+// attempted to be reexecuted to generate the desired state.
+func (api *PrivateDebugAPIImpl) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
+	// If we have the state fully available, use that
+	dbstate := state.NewDbState(api.dbReader, block.NumberU64())
+	statedb := state.New(dbstate)
+	return statedb, dbstate
+}
+
 // rpcMarshalBlock reimplementation of ethapi.rpcMarshalBlock
 func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[string]interface{}) (map[string]interface{}, error) {
 	fields, err := ethapi.RPCMarshalBlock(b, inclTx, fullTx)
@@ -139,17 +205,29 @@ func daemon(cfg Config) {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
 	}
+	dbgApiImpl, err := ConnectPrivateDebugAPIImpl(cfg.remoteDbAddress)
+	if err != nil {
+		log.Error("Could not connect to remoteDb", "error", err)
+		return
+	}
+
 	for _, enabledAPI := range enabledApis {
 		switch enabledAPI {
 		case "eth":
-			var api EthAPI
-			api = apiImpl
 			rpcAPI = append(rpcAPI, rpc.API{
 				Namespace: "eth",
 				Public:    true,
-				Service:   api,
+				Service:   EthAPI(apiImpl),
 				Version:   "1.0",
 			})
+		case "debug":
+			rpcAPI = append(rpcAPI, rpc.API{
+				Namespace: "debug",
+				Public:    true,
+				Service:   PrivateDebugAPI(dbgApiImpl),
+				Version:   "1.0",
+			})
+
 		default:
 			log.Error("Unrecognised", "api", enabledAPI)
 		}
