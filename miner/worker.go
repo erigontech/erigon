@@ -264,7 +264,7 @@ func (w *worker) pendingBlock() *types.Block {
 }
 
 func (w *worker) init() {
-	w.initOnce.Do(func(){
+	w.initOnce.Do(func() {
 		// Sanitize recommit interval if the user-specified one is too short.
 		recommit := w.config.Recommit
 		if recommit < minRecommitInterval {

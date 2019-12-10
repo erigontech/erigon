@@ -212,14 +212,14 @@ func (b *testWorkerBackend) PostChainEvents(events []interface{}) {
 	b.chain.PostChainEvents(events, nil)
 }
 
-func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks, waitStart bool) *worker {
+func newTestWorker(t *testCase, chainConfig *params.ChainConfig, engine consensus.Engine, backend Backend, h hooks, waitInit bool) *worker {
 	w := newWorker(t.testConfig, chainConfig, engine, backend, new(event.TypeMux), h, true)
 	w.setEtherbase(t.testBankAddress)
-	if waitStart {
+	if waitInit {
 		w.init()
 
 		// Ensure worker has finished initialization
-		timer := time.NewTicker(10*time.Millisecond)
+		timer := time.NewTicker(10 * time.Millisecond)
 		defer timer.Stop()
 		for range timer.C {
 			b := w.pendingBlock()
