@@ -26,8 +26,10 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -171,7 +173,7 @@ type TrieDbState struct {
 }
 
 var (
-	trieObj   = make(map[uint64]*TrieDbState)
+	trieObj   = make(map[uint64]uintptr)
 	trieObjMu sync.RWMutex
 )
 
@@ -180,10 +182,14 @@ func getTrieDBState(db ethdb.Database) *TrieDbState {
 		return nil
 	}
 	trieObjMu.RLock()
-	tr := trieObj[db.ID()]
+	tr, ok := trieObj[db.ID()]
 	trieObjMu.RUnlock()
 
-	return tr
+	if !ok {
+		return nil
+	}
+
+	return (*TrieDbState)(unsafe.Pointer(tr))
 }
 
 func setTrieDBState(tds *TrieDbState, id uint64) {
@@ -191,8 +197,10 @@ func setTrieDBState(tds *TrieDbState, id uint64) {
 		return
 	}
 
+	ptr := unsafe.Pointer(tds)
+
 	trieObjMu.Lock()
-	trieObj[id] = tds
+	trieObj[id] = uintptr(ptr)
 	trieObjMu.Unlock()
 }
 
