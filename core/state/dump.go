@@ -92,7 +92,11 @@ func (d iterativeDump) onRoot(root common.Hash) {
 func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
 	emptyAddress := (common.Address{})
 	missingPreimages := 0
-	c.onRoot(tds.t.Hash())
+
+	tds.tMu.Lock()
+	h := tds.t.Hash()
+	tds.tMu.Unlock()
+	c.onRoot(h)
 	var acc accounts.Account
 	var prefix [32]byte
 	err := tds.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {

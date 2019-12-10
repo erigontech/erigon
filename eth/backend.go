@@ -221,8 +221,9 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if eth.protocolManager, err = NewProtocolManager(chainConfig, checkpoint, config.SyncMode, config.NetworkID, eth.eventMux, eth.txPool, eth.engine, eth.blockchain, chainDb, config.Whitelist); err != nil {
 		return nil, err
 	}
-	//eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
-	//eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
+
+	eth.miner = miner.New(eth, &config.Miner, chainConfig, eth.EventMux(), eth.engine, eth.isLocalBlock)
+	_ = eth.miner.SetExtra(makeExtraData(config.Miner.ExtraData))
 
 	eth.APIBackend = &EthAPIBackend{ctx.ExtRPCEnabled(), eth, nil}
 	gpoParams := config.GPO
@@ -326,13 +327,11 @@ func (s *Ethereum) APIs() []rpc.API {
 			Service:   downloader.NewPublicDownloaderAPI(s.protocolManager.downloader, s.eventMux),
 			Public:    true,
 		}, {
-			/*
-					Namespace: "miner",
-					Version:   "1.0",
-					Service:   NewPrivateMinerAPI(s),
-					Public:    false,
-				}, {
-			*/
+			Namespace: "miner",
+			Version:   "1.0",
+			Service:   NewPrivateMinerAPI(s),
+			Public:    false,
+		}, {
 			Namespace: "eth",
 			Version:   "1.0",
 			Service:   filters.NewPublicFilterAPI(s.APIBackend, false),
@@ -446,7 +445,7 @@ func (s *Ethereum) SetEtherbase(etherbase common.Address) {
 	s.etherbase = etherbase
 	s.lock.Unlock()
 
-	//s.miner.SetEtherbase(etherbase)
+	s.miner.SetEtherbase(etherbase)
 }
 
 // StartMining starts the miner with the given number of CPU threads. If mining
@@ -490,7 +489,7 @@ func (s *Ethereum) StartMining(threads int) error {
 		// introduced to speed sync times.
 		atomic.StoreUint32(&s.protocolManager.acceptTxs, 1)
 
-		//go s.miner.Start(eb)
+		go s.miner.Start(eb)
 	}
 	return nil
 }
@@ -506,11 +505,11 @@ func (s *Ethereum) StopMining() {
 		th.SetThreads(-1)
 	}
 	// Stop the block creating itself
-	//s.miner.Stop()
+	s.miner.Stop()
 }
 
-func (s *Ethereum) IsMining() bool      { return /*s.miner.Mining()*/ false }
-func (s *Ethereum) Miner() *miner.Miner { return /*s.miner*/ nil }
+func (s *Ethereum) IsMining() bool      { return s.miner.Mining() }
+func (s *Ethereum) Miner() *miner.Miner { return s.miner }
 
 func (s *Ethereum) AccountManager() *accounts.Manager  { return s.accountManager }
 func (s *Ethereum) BlockChain() *core.BlockChain       { return s.blockchain }
@@ -581,7 +580,7 @@ func (s *Ethereum) Stop() error {
 		s.lesServer.Stop()
 	}
 	s.txPool.Stop()
-	//s.miner.Close()
+	s.miner.Stop()
 	s.eventMux.Stop()
 
 	s.chainDb.Close()

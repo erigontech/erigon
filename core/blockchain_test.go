@@ -1031,7 +1031,7 @@ func TestLogReorgs(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	rmLogsCh := make(chan RemovedLogsEvent)
+	rmLogsCh := make(chan RemovedLogsEvent, 10)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	chain, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), genesisDb.MemCopy(), 2, func(i int, gen *BlockGen) {
 		if i == 1 {
@@ -1042,6 +1042,7 @@ func TestLogReorgs(t *testing.T) {
 			gen.AddTx(tx)
 		}
 	})
+
 	if _, err := blockchain.InsertChain(chain); err != nil {
 		t.Fatalf("failed to insert chain: %v", err)
 	}
@@ -1119,10 +1120,10 @@ func TestLogRebirth(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log)
+	logsCh := make(chan []*types.Log, 10)
 	blockchain.SubscribeLogsEvent(logsCh)
 
-	rmLogsCh := make(chan RemovedLogsEvent)
+	rmLogsCh := make(chan RemovedLogsEvent, 10)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	dbCopy := db.MemCopy()
 
@@ -1233,7 +1234,7 @@ func TestSideLogRebirth(t *testing.T) {
 	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log)
+	logsCh := make(chan []*types.Log, 10)
 	blockchain.SubscribeLogsEvent(logsCh)
 
 	dbCopy := db.MemCopy()
@@ -1275,7 +1276,7 @@ func TestSideLogRebirth(t *testing.T) {
 }
 
 func TestReorgSideEvent(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	var (
 		db      = ethdb.NewMemDatabase()
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1858,7 +1859,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 }
 
 func TestBlockchainRecovery(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1877,11 +1878,14 @@ func TestBlockchainRecovery(t *testing.T) {
 		t.Fatalf("failed to create temp freezer dir: %v", err)
 	}
 	defer os.Remove(frdir)
+
 	ancientDb, err := ethdb.NewDatabaseWithFreezer(ethdb.NewMemDatabase(), frdir, "")
 	if err != nil {
 		t.Fatalf("failed to create temp freezer db: %v", err)
 	}
+
 	gspec.MustCommit(ancientDb)
+
 	ancient, _ := NewBlockChain(ancientDb, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 
 	headers := make([]*types.Header, len(blocks))
@@ -1891,6 +1895,7 @@ func TestBlockchainRecovery(t *testing.T) {
 	if n, err := ancient.InsertHeaderChain(headers, 1); err != nil {
 		t.Fatalf("failed to insert header %d: %v", n, err)
 	}
+
 	if n, err := ancient.InsertReceiptChain(blocks, receipts, uint64(3*len(blocks)/4)); err != nil {
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}
@@ -1915,7 +1920,7 @@ func TestBlockchainRecovery(t *testing.T) {
 }
 
 func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: fast-sync")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1980,17 +1985,20 @@ func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
 //  - https://github.com/ethereum/go-ethereum/issues/18977
 //  - https://github.com/ethereum/go-ethereum/pull/18988
 func TestLowDiffLongChain(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()
 	genesis := new(Genesis).MustCommit(db)
 
+	var side ethdb.Database
 	// We must use a pretty long chain to ensure that the fork doesn't overtake us
 	// until after at least 128 blocks post tip
 	blocks, _ := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, 6*triesInMemory, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		b.OffsetTime(-9)
+		if i == 11 {
+			side = db.MemCopy()
+		}
 	})
 
 	// Import the canonical chain
@@ -2006,7 +2014,7 @@ func TestLowDiffLongChain(t *testing.T) {
 	}
 	// Generate fork chain, starting from an early block
 	parent := blocks[10]
-	fork, _ := GenerateChain(context.Background(), params.TestChainConfig, parent, engine, db, 8*triesInMemory, func(i int, b *BlockGen) {
+	fork, _ := GenerateChain(context.Background(), params.TestChainConfig, parent, engine, side, 8*triesInMemory, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{2})
 	})
 
@@ -2041,8 +2049,18 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 	db := ethdb.NewMemDatabase()
 	genesis := new(Genesis).MustCommit(db)
 
+	blocksNum := 2 * triesInMemory
+	lastPrunedIndex := blocksNum - triesInMemory - 1
+	parentIndex := lastPrunedIndex + blocksBetweenCommonAncestorAndPruneblock
+
+	var side ethdb.Database
 	// Generate and import the canonical chain
-	blocks, _ := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, 2*triesInMemory, nil)
+	blocks, _ := GenerateChain(context.Background(), params.TestChainConfig, genesis, engine, db, blocksNum, func(i int, gen *BlockGen) {
+		if i == parentIndex+1 {
+			side = db.MemCopy()
+		}
+	})
+
 	diskdb := ethdb.NewMemDatabase()
 	new(Genesis).MustCommit(diskdb)
 	chain, err := NewBlockChain(diskdb, nil, params.TestChainConfig, engine, vm.Config{}, nil)
@@ -2053,7 +2071,6 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 		t.Fatalf("block %d: failed to insert into chain: %v", n, err)
 	}
 
-	lastPrunedIndex := len(blocks) - triesInMemory - 1
 	lastPrunedBlock := blocks[lastPrunedIndex]
 	firstNonPrunedBlock := blocks[len(blocks)-triesInMemory]
 
@@ -2070,9 +2087,8 @@ func testSideImport(t *testing.T, numCanonBlocksInSidechain, blocksBetweenCommon
 	// canon(pruned), side, side...
 
 	// Generate fork chain, make it longer than canon
-	parentIndex := lastPrunedIndex + blocksBetweenCommonAncestorAndPruneblock
 	parent := blocks[parentIndex]
-	fork, _ := GenerateChain(context.Background(), params.TestChainConfig, parent, engine, db, 2*triesInMemory, func(i int, b *BlockGen) {
+	fork, _ := GenerateChain(context.Background(), params.TestChainConfig, parent, engine, side, 2*triesInMemory, func(i int, b *BlockGen) {
 		b.SetCoinbase(common.Address{2})
 	})
 	// Prepend the parent(s)
@@ -2116,7 +2132,7 @@ func TestInsertKnownReceiptChain(t *testing.T) { testInsertKnownChainData(t, "re
 func TestInsertKnownBlocks(t *testing.T)       { testInsertKnownChainData(t, "blocks") }
 
 func testInsertKnownChainData(t *testing.T, typ string) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
@@ -2491,7 +2507,7 @@ func BenchmarkBlockChain_1x1000Executions(b *testing.B) {
 //   2. Downloader starts to sync again
 //   3. The blocks fetched are all known and canonical blocks
 func TestSideImportPrunedBlocks(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()

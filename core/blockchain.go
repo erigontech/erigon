@@ -29,6 +29,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -349,23 +350,35 @@ func (bc *BlockChain) EnablePreimages(ep bool) {
 
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
-		currentBlockNr := bc.CurrentBlock().NumberU64()
-		log.Info("Creating IntraBlockState from latest state", "block", currentBlockNr)
 		var err error
-		bc.trieDbState, err = state.NewTrieDbState(bc.CurrentBlock().Header().Root, bc.db, currentBlockNr)
-		bc.trieDbState.EnablePreimages(bc.enablePreimages)
+		currentBlockNr := bc.CurrentBlock().NumberU64()
+		bc.trieDbState, err = bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
 		if err != nil {
-			log.Error("Creation aborted", "error", err)
-			return nil, err
-		}
-		bc.trieDbState.SetNoHistory(bc.NoHistory())
-		bc.trieDbState.SetResolveReads(bc.resolveReads)
-		if err := bc.trieDbState.Rebuild(); err != nil {
-			log.Error("Rebuiling aborted", "error", err)
 			bc.trieDbState = nil
 			return nil, err
 		}
 		log.Info("Creation complete.")
+	}
+	return bc.trieDbState, nil
+}
+
+func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
+	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
+		log.Info("Creating IntraBlockState from latest state", "block", blockNr)
+		tds, err := state.NewTrieDbState(root, bc.db, blockNr)
+		if err != nil {
+			log.Error("Creation aborted", "error", err)
+			return nil, err
+		}
+		tds.SetNoHistory(bc.NoHistory())
+		tds.SetResolveReads(bc.resolveReads)
+		tds.EnablePreimages(bc.enablePreimages)
+		if err := tds.Rebuild(); err != nil {
+			log.Error("Rebuiling aborted", "error", err)
+			return nil, err
+		}
+		log.Info("Creation complete.")
+		return tds, nil
 	}
 	return bc.trieDbState, nil
 }
@@ -1305,6 +1318,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//	fmt.Printf("SideStatTy for block %d\n", block.NumberU64())
 	//	status = SideStatTy
 	//}
+
 	// Set new head.
 	if status == CanonStatTy {
 		bc.insert(block)
@@ -1321,9 +1335,11 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		// canonicial blocks. Avoid firing too much ChainHeadEvents,
 		// we will fire an accumulated ChainHeadEvent and disable fire
 		// event here.
-		if emitHeadEvent {
-			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
-		}
+
+		// restore if fast sync is needed
+		// if emitHeadEvent {
+		//  	bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+		// }
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
@@ -1460,7 +1476,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		return 0, nil
 	}
-
 	var offset int
 	var parent *types.Block
 	var parentNumber = chain[0].NumberU64() - 1
@@ -1495,7 +1510,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
-
 	// Iterate over the blocks and insert when the verifier permits
 	for i, block := range chain {
 		start := time.Now()
@@ -1576,6 +1590,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if parent != nil {
 			parentRoot = parent.Root()
 		}
+
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
 			if _, err = bc.db.Commit(); err != nil {
@@ -1584,12 +1599,14 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.trieDbState = nil
 				return 0, err
 			}
+
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
 				bc.trieDbState = nil
 				return 0, err
 			}
+
 			root := bc.trieDbState.LastRoot()
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
@@ -1598,11 +1615,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				return 0, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
-			if err := bc.reorg(currentBlock, parent); err != nil {
+			if err = bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
 				bc.trieDbState = nil
 				return 0, err
 			}
+
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
@@ -1658,7 +1676,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 			blockValidationTimer.Update(time.Since(substart) - (statedb.AccountHashes + statedb.StorageHashes - triehash))
 		*/
-
 		// Write the block to the chain and get the status.
 		status, err := bc.writeBlockWithState(block, receipts, logs, stateDB, bc.trieDbState, false)
 		//t3 := time.Now()
@@ -1837,6 +1854,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 			return ret
 		}
 	)
+
 	// Reduce the longer chain to the same number as the shorter one
 	// first reduce whoever is higher bound
 	if oldBlock.NumberU64() > newBlock.NumberU64() {
@@ -1951,6 +1969,28 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 		}
 	}
 	return nil
+}
+
+// PostChainEvents iterates over the events generated by a chain insertion and
+// posts them into the event feed.
+// TODO: Should not expose PostChainEvents. The chain events should be posted in WriteBlock.
+func (bc *BlockChain) PostChainEvents(events []interface{}, logs []*types.Log) {
+	// post event logs for further processing
+	if logs != nil {
+		bc.logsFeed.Send(logs)
+	}
+	for _, event := range events {
+		switch ev := event.(type) {
+		case ChainEvent:
+			bc.chainFeed.Send(ev)
+
+		case ChainHeadEvent:
+			bc.chainHeadFeed.Send(ev)
+
+		case ChainSideEvent:
+			bc.chainSideFeed.Send(ev)
+		}
+	}
 }
 
 func (bc *BlockChain) update() {

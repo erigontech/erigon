@@ -86,9 +86,8 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 }
 
 type mutation struct {
-	puts puts // Map buckets to map[key]value
-	//map[timestamp]map[hBucket]listOfChangedKeys
-	changeSetByBlock map[uint64]map[string][]dbutils.Change
+	puts             puts                                   // Map buckets to map[key]value
+	changeSetByBlock map[uint64]map[string][]dbutils.Change //map[timestamp]map[hBucket]listOfChangedKeys
 	mu               sync.RWMutex
 	db               Database
 }
@@ -407,6 +406,10 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 
 func (m *mutation) MemCopy() Database {
 	panic("Not implemented")
+}
+
+func (m *mutation) ID() uint64 {
+	return m.db.ID()
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

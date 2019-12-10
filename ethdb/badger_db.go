@@ -23,10 +23,9 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
-
-	"github.com/dgraph-io/badger"
 )
 
 // https://github.com/dgraph-io/badger#frequently-asked-questions
@@ -43,6 +42,7 @@ type BadgerDatabase struct {
 	log      log.Logger   // Contextual logger tracking the database path
 	tmpDir   string       // Temporary data directory
 	gcTicker *time.Ticker // Garbage Collector
+	id       uint64
 }
 
 // NewBadgerDatabase returns a BadgerDB wrapper.
@@ -77,6 +77,7 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		db:       db,
 		log:      logger,
 		gcTicker: ticker,
+		id:       id(),
 	}, nil
 }
 
@@ -514,4 +515,8 @@ func (db *BadgerDatabase) Ancients() (uint64, error) {
 
 func (db *BadgerDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (db *BadgerDatabase) ID() uint64 {
+	return db.id
 }

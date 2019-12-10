@@ -30,10 +30,13 @@ func NewMemDatabase() *BoltDatabase {
 	if err != nil {
 		panic(err)
 	}
-	return &BoltDatabase{
+	b := &BoltDatabase{
 		db:  db,
 		log: logger,
+		id:  id(),
 	}
+
+	return b
 }
 
 func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
@@ -47,6 +50,7 @@ func NewMemDatabase2() (*BoltDatabase, *bolt.DB) {
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
+		id:  id(),
 	}, db
 }
 
@@ -80,5 +84,6 @@ func (db *BoltDatabase) MemCopy() Database {
 	return &BoltDatabase{
 		db:  mem,
 		log: logger,
+		id:  id(),
 	}
 }

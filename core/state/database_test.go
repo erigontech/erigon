@@ -204,6 +204,7 @@ func TestCreate2Revive(t *testing.T) {
 		t.Errorf("expected 0x0 in position 2, got: %x", check2)
 	}
 }
+
 func TestReorgOverSelfDestruct(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -275,6 +276,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
+
 	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
@@ -340,6 +342,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
 	}
 }
+
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (

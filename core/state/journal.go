@@ -18,6 +18,7 @@ package state
 
 import (
 	"math/big"
+	"sync"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -38,6 +39,7 @@ type journalEntry interface {
 type journal struct {
 	entries []journalEntry         // Current changes tracked by the journal
 	dirties map[common.Address]int // Dirty accounts and the number of changes
+	sync.RWMutex
 }
 
 // newJournal create a new initialized journal.
@@ -49,15 +51,18 @@ func newJournal() *journal {
 
 // append inserts a new modification entry to the end of the change journal.
 func (j *journal) append(entry journalEntry) {
+	j.Lock()
 	j.entries = append(j.entries, entry)
 	if addr := entry.dirtied(); addr != nil {
 		j.dirties[*addr]++
 	}
+	j.Unlock()
 }
 
 // revert undoes a batch of journalled modifications along with any reverted
 // dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
+	j.Lock()
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
 		// Undo the changes made by the operation
 		j.entries[i].revert(statedb)
@@ -70,18 +75,24 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 		}
 	}
 	j.entries = j.entries[:snapshot]
+	j.Unlock()
 }
 
 // dirty explicitly sets an address to dirty, even if the change entries would
 // otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
 // precompile consensus exception.
 func (j *journal) dirty(addr common.Address) {
+	j.Lock()
 	j.dirties[addr]++
+	j.Unlock()
 }
 
 // length returns the current number of entries in the journal.
 func (j *journal) length() int {
-	return len(j.entries)
+	j.RLock()
+	n := len(j.entries)
+	j.RUnlock()
+	return n
 }
 
 type (

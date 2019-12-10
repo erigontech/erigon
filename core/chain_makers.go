@@ -17,10 +17,9 @@
 package core
 
 import (
+	"context"
 	"fmt"
 	"math/big"
-
-	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -246,6 +245,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		}
 		return nil, nil
 	}
+
 	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
 	if err != nil {
 		panic(err)
