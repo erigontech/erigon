@@ -1031,7 +1031,7 @@ func TestLogReorgs(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	rmLogsCh := make(chan RemovedLogsEvent, 1000)
+	rmLogsCh := make(chan RemovedLogsEvent, 10)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	chain, _ := GenerateChain(ctx, params.TestChainConfig, genesis, ethash.NewFaker(), genesisDb.MemCopy(), 2, func(i int, gen *BlockGen) {
 		if i == 1 {
@@ -1120,10 +1120,10 @@ func TestLogRebirth(t *testing.T) {
 	blockchain.EnableReceipts(true)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log, 1000)
+	logsCh := make(chan []*types.Log, 10)
 	blockchain.SubscribeLogsEvent(logsCh)
 
-	rmLogsCh := make(chan RemovedLogsEvent, 1000)
+	rmLogsCh := make(chan RemovedLogsEvent, 10)
 	blockchain.SubscribeRemovedLogsEvent(rmLogsCh)
 	dbCopy := db.MemCopy()
 
@@ -1234,7 +1234,7 @@ func TestSideLogRebirth(t *testing.T) {
 	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
 	defer blockchain.Stop()
 
-	logsCh := make(chan []*types.Log, 1000)
+	logsCh := make(chan []*types.Log, 10)
 	blockchain.SubscribeLogsEvent(logsCh)
 
 	dbCopy := db.MemCopy()
@@ -1276,7 +1276,7 @@ func TestSideLogRebirth(t *testing.T) {
 }
 
 func TestReorgSideEvent(t *testing.T) {
-	t.Skip("mining")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	var (
 		db      = ethdb.NewMemDatabase()
 		key1, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1335,7 +1335,6 @@ done:
 		select {
 		case ev := <-chainSideCh:
 			block := ev.Block
-			fmt.Println("block", i, block.Number().String(), len(expectedSideHashes), replacementBlocks[0].Number().String(), replacementBlocks[1].Number().String())
 			if _, ok := expectedSideHashes[block.Hash()]; !ok {
 				t.Errorf("%d: didn't expect %x to be in side chain", i, block.Hash())
 			}
@@ -1357,7 +1356,7 @@ done:
 	select {
 	case e := <-chainSideCh:
 		t.Errorf("unexpected event fired: %v", e)
-	case <-time.After(2500 * time.Millisecond):
+	case <-time.After(250 * time.Millisecond):
 	}
 
 }
@@ -1860,7 +1859,7 @@ func TestLargeReorgTrieGC(t *testing.T) {
 }
 
 func TestBlockchainRecovery(t *testing.T) {
-	t.Skip("restore with fast sync if needed")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -1898,10 +1897,8 @@ func TestBlockchainRecovery(t *testing.T) {
 	}
 
 	if n, err := ancient.InsertReceiptChain(blocks, receipts, uint64(3*len(blocks)/4)); err != nil {
-		fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
 		t.Fatalf("failed to insert receipt %d: %v", n, err)
 	}
-	fmt.Println("2222222222222222222222")
 	ancient.Stop()
 
 	// Destroy head fast block manually
@@ -1923,7 +1920,7 @@ func TestBlockchainRecovery(t *testing.T) {
 }
 
 func TestIncompleteAncientReceiptChainInsertion(t *testing.T) {
-	t.Skip("restore with fast sync if needed")
+	t.Skip("should be restored. skipped for turbo-geth. tag: fast-sync")
 	// Configure and generate a sample block chain
 	var (
 		gendb   = ethdb.NewMemDatabase()
@@ -2135,7 +2132,7 @@ func TestInsertKnownReceiptChain(t *testing.T) { testInsertKnownChainData(t, "re
 func TestInsertKnownBlocks(t *testing.T)       { testInsertKnownChainData(t, "blocks") }
 
 func testInsertKnownChainData(t *testing.T, typ string) {
-	t.Skip("reorg")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	engine := ethash.NewFaker()
 
 	db := ethdb.NewMemDatabase()
@@ -2510,7 +2507,7 @@ func BenchmarkBlockChain_1x1000Executions(b *testing.B) {
 //   2. Downloader starts to sync again
 //   3. The blocks fetched are all known and canonical blocks
 func TestSideImportPrunedBlocks(t *testing.T) {
-	t.Skip("reorg")
+	t.Skip("should be restored. skipped for turbo-geth. tag: reorg")
 	// Generate a canonical chain to act as the main dataset
 	engine := ethash.NewFaker()
 	db := ethdb.NewMemDatabase()

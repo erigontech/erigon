@@ -254,7 +254,7 @@ func TestGenerateBlockAndImportEthash(t *testing.T) {
 }
 
 func TestGenerateBlockAndImportClique(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
+	t.Skip("should be restored. skipped for turbo-geth. tag: Clique")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -364,7 +364,7 @@ func TestPendingStateAndBlockEthash(t *testing.T) {
 	testPendingStateAndBlock(t, testCase, testCase.ethashChainConfig, ethash.NewFaker())
 }
 func TestPendingStateAndBlockClique(t *testing.T) {
-	t.SkipNow()
+	t.Skip("should be restored. skipped for turbo-geth. tag: Clique")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -409,7 +409,7 @@ func TestEmptyWorkEthash(t *testing.T) {
 	testEmptyWork(t, testCase, testCase.ethashChainConfig, ethash.NewFaker())
 }
 func TestEmptyWorkClique(t *testing.T) {
-	t.SkipNow()
+	t.Skip("should be restored. skipped for turbo-geth. tag: Clique")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -539,7 +539,7 @@ func TestRegenerateMiningBlockEthash(t *testing.T) {
 	testRegenerateMiningBlock(t, testCase, testCase.ethashChainConfig, ethash.NewFaker())
 }
 func TestRegenerateMiningBlockClique(t *testing.T) {
-	t.SkipNow()
+	t.Skip("should be restored. skipped for turbo-geth. tag: Clique")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -608,7 +608,7 @@ func TestAdjustIntervalEthash(t *testing.T) {
 }
 
 func TestAdjustIntervalClique(t *testing.T) {
-	t.SkipNow()
+	t.Skip("should be restored. skipped for turbo-geth. tag: Clique")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
