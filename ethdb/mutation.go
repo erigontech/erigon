@@ -361,18 +361,18 @@ func (m *mutation) Commit() (uint64, error) {
 					return 0, err
 				}
 
-				changedAccounts, err := dbutils.DecodeChangeSet(dat)
+				changeSet, err := dbutils.DecodeChangeSet(dat)
 				if err != nil {
-					log.Error("DecodeChangeSet changedAccounts error on commit", "err", err)
+					log.Error("DecodeChangeSet changeSet error on commit", "err", err)
 				}
 
-				changedAccounts = changedAccounts.MultiAdd(changes.Changes)
-				changedRLP, err := dbutils.EncodeChangeSet(changedAccounts)
+				changeSet = changeSet.MultiAdd(changes.Changes)
+				changedRLP, err := dbutils.EncodeChangeSet(changeSet)
 				if err != nil {
-					log.Error("EncodeChangeSet changedAccounts error on commit", "err", err)
+					log.Error("EncodeChangeSet changeSet error on commit", "err", err)
 				}
 				if debug.IsThinHistory() {
-					changedKeys:=changedAccounts.ChangedKeys()
+					changedKeys:= changeSet.ChangedKeys()
 					for k:=range changedKeys {
 						value, err := m.getNoLock(hBucket, []byte(k))
 						if err==ErrKeyNotFound {
