@@ -1336,7 +1336,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 		// we will fire an accumulated ChainHeadEvent and disable fire
 		// event here.
 		if emitHeadEvent {
-		  	bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
+			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 		}
 	} else {
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
