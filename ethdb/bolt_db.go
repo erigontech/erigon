@@ -205,9 +205,10 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 	if err!=nil {
 		return nil, err
 	}
+
 	res,err:=chs.FindLast(key)
 	if err!=nil {
-		return nil, err
+		return nil, ErrKeyNotFound
 	}
 	return res, nil
 }
