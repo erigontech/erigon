@@ -200,9 +200,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		remoteUncles:       make(map[common.Hash]*types.Block),
 		unconfirmed:        newUnconfirmedBlocks(eth.BlockChain(), miningLogAtDepth),
 		pendingTasks:       make(map[common.Hash]*task),
-		txsCh:              make(chan core.NewTxsEvent, txChanSize),
-		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
-		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
 		resultCh:           make(chan *types.Block, resultQueueSize),
@@ -260,12 +257,16 @@ func (w *worker) pendingBlock() *types.Block {
 
 func (w *worker) init() {
 	w.initOnce.Do(func() {
+		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
+		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
+		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
+
 		// Subscribe NewTxsEvent for tx pool
 		w.txsSub = w.eth.TxPool().SubscribeNewTxsEvent(w.txsCh)
 		// Subscribe events for blockchain
 		w.chainHeadSub = w.eth.BlockChain().SubscribeChainHeadEvent(w.chainHeadCh)
 		w.chainSideSub = w.eth.BlockChain().SubscribeChainSideEvent(w.chainSideCh)
-		
+
 		// Sanitize recommit interval if the user-specified one is too short.
 		recommit := w.config.Recommit
 		if recommit < minRecommitInterval {
