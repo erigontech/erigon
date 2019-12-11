@@ -83,7 +83,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if debug.IsThinHistory() {
+			if debug.IsThinHistory()&&bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 				b,_:=hb.Get(key)
 				b,err = AppendToIndex(b, timestamp)
 				if err!=nil {
@@ -196,7 +196,7 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 // GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsThinHistory() {
+	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		return db.Get(hBucket, composite)
 	}
@@ -239,7 +239,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		if debug.IsThinHistory() {
+		if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 			v, err:=BoltDBFindByHistory(tx, hBucket, key, timestamp)
 			if err==nil {
 				dat = make([]byte, len(v))

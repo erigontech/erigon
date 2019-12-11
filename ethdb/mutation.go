@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
@@ -134,7 +135,7 @@ func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*
 }
 
 func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsThinHistory() {
+	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		return m.Get(hBucket, composite)
 	}
@@ -227,7 +228,7 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	if noHistory {
 		return nil
 	}
-	if !debug.IsThinHistory() {
+	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		m.puts.Set(hBucket, composite, value)
 	}
@@ -302,12 +303,13 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
-		hBucketStr := string(k[len(encodedTS):])
+		hBucket:=k[len(encodedTS):]
+		hBucketStr := string(hBucket)
 		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}
-		if !debug.IsThinHistory() {
+		if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
 				composite,_:=dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(hBucketStr,composite)
@@ -320,9 +322,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		} else {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				fmt.Println("before get")
 				acc,err:=m.getNoLock(dbutils.AccountsHistoryBucket, kk)
-				fmt.Println("after get")
 				if err!=nil {
 					return nil
 				}
@@ -337,6 +337,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 				}
 				return nil
 			})
+			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		}
 		return true, nil
 	})

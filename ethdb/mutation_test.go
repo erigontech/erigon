@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -70,9 +69,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		}
 	}
 
-	fmt.Println("DeleteTimestamp")
 	err=mutDB.DeleteTimestamp(1)
-	fmt.Println("DeleteTimestamp+")
 	if err!=nil {
 		t.Fatal(err)
 	}
