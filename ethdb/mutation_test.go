@@ -438,10 +438,10 @@ func TestMutation_GetAsOf(t *testing.T) {
 	mutDB:=db.NewBatch()
 
 	acc, _, addrHash := randomAccount(t)
-	acc1 := acc.SelfCopy()
-	acc1.Nonce=1
-	acc3 := acc.SelfCopy()
-	acc1.Nonce=3
+	acc2 := acc.SelfCopy()
+	acc2.Nonce=1
+	acc4 := acc.SelfCopy()
+	acc4.Nonce=3
 
 	b:=make([]byte, acc.EncodingLengthForStorage())
 	acc.EncodeForStorage(b)
@@ -450,16 +450,16 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	b=make([]byte, acc1.EncodingLengthForStorage())
-	acc1.EncodeForStorage(b)
-	err=db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 1,false)
+	b=make([]byte, acc2.EncodingLengthForStorage())
+	acc2.EncodeForStorage(b)
+	err=db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 2,false)
 	if err!=nil {
 		t.Fatal(err)
 	}
 
-	b=make([]byte, acc3.EncodingLengthForStorage())
-	acc3.EncodeForStorage(b)
-	err=db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 3,false)
+	b=make([]byte, acc4.EncodingLengthForStorage())
+	acc4.EncodeForStorage(b)
+	err=db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 4,false)
 	if err!=nil {
 		t.Fatal(err)
 	}
@@ -482,8 +482,22 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from Get is incorrect")
 	}
 
+	_, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
+	if err!=nil {
+		t.Fatal("incorrect value on block 1", err)
+	}
+	resAcc=new(accounts.Account)
+	err=resAcc.DecodeForStorage(b)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	//todo Почему???
+	if !acc.Equals(resAcc) {
+		spew.Dump(resAcc)
+		t.Fatal("Account from GetAsOf(1) is incorrect")
+	}
 
-	b, err=db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
+	b, err=db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 	if err!=nil {
 		t.Fatal(err)
 	}
@@ -492,15 +506,15 @@ func TestMutation_GetAsOf(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-	if !acc1.Equals(resAcc) {
+	if !acc2.Equals(resAcc) {
 		t.Fatal("Account from GetS(1) is incorrect")
 	}
 
-	_, err=db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
+	_, err=db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
 	if err!=ErrKeyNotFound {
-		spew.Dump(err)
 		t.Fatal(err)
 	}
+
 	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 	if err!=nil {
 		t.Fatal(err)
@@ -510,11 +524,12 @@ func TestMutation_GetAsOf(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-	if !acc1.Equals(resAcc) {
+	if !acc2.Equals(resAcc) {
+		spew.Dump(resAcc)
 		t.Fatal("Account from GetAsOf(2) is incorrect")
 	}
 
-	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 4)
+	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
 	if err!=nil {
 		t.Fatal(err)
 	}
@@ -523,12 +538,26 @@ func TestMutation_GetAsOf(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-	if !acc3.Equals(resAcc) {
+	if !acc4.Equals(resAcc) {
+		spew.Dump(resAcc)
+		t.Fatal("Account from GetAsOf(2) is incorrect")
+	}
+
+	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 5)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	resAcc=new(accounts.Account)
+	err=resAcc.DecodeForStorage(b)
+	if err!=nil {
+		t.Fatal(err)
+	}
+	if !acc.Equals(resAcc) {
 		t.Fatal("Account from GetAsOf(4) is incorrect")
 	}
 
 
-	b, err=db.GetAsOf(dbutils.AccountsHistoryBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 7)
+	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 7)
 	if err!=nil {
 		t.Fatal(err)
 	}

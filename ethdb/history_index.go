@@ -45,7 +45,7 @@ func (hi *HistoryIndex) Remove(v uint64) *HistoryIndex  {
 }
 
 func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
-	//ln:=len(*hi)
+	ln:=len(*hi)-1
 	////fixme it's could be a bug
 	//i:=sort.Search(ln, func(i int) bool {
 	//	return (*hi)[i]>=v
@@ -54,15 +54,16 @@ func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
 	//	return (*hi)[i], true
 	//}
 
-	for i, v2:=range *hi {
-		if v==v2 {
+	if (*hi)[ln]<v {
+		return 0,false
+	}
+	for i:=ln;i>=0;i-- {
+		if v==(*hi)[i] {
 			return v, true
 		}
-		if v2>v && i==0 {
-			return 0,false
-		}
-		if v2>v {
-			return (*hi)[i-1], true
+
+		if (*hi)[i]<v {
+			return (*hi)[i+1], true
 		}
 	}
 	return 0, false
