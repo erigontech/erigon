@@ -211,7 +211,7 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 	}
-	
+
 	// Submit first work to initialize pending state.
 	if init {
 		worker.startCh <- struct{}{}
@@ -261,10 +261,10 @@ func (w *worker) pendingBlock() *types.Block {
 func (w *worker) init() {
 	w.initOnce.Do(func() {
 		// Subscribe NewTxsEvent for tx pool
-		worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
+		w.txsSub = w.eth.TxPool().SubscribeNewTxsEvent(w.txsCh)
 		// Subscribe events for blockchain
-		worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
-		worker.chainSideSub = eth.BlockChain().SubscribeChainSideEvent(worker.chainSideCh)
+		w.chainHeadSub = w.eth.BlockChain().SubscribeChainHeadEvent(w.chainHeadCh)
+		w.chainSideSub = w.eth.BlockChain().SubscribeChainSideEvent(w.chainSideCh)
 		
 		// Sanitize recommit interval if the user-specified one is too short.
 		recommit := w.config.Recommit
