@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/stretchr/testify/assert"
 )
 
 type closerType struct {
@@ -57,23 +58,21 @@ func TestCmdVersion(t *testing.T) {
 	decoder := newDecoder(&outBuf)
 	defer returnDecoderToPool(decoder)
 	// ---------- End of boilerplate code
-	var c = CmdVersion
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdVersion: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdVersion), "Could not encode CmdVersion")
+
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
+
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdVersion")
+
 	var v uint64
-	if err = decoder.Decode(&v); err != nil {
-		t.Errorf("Could not decode version returned by CmdVersion: %v", err)
-	}
-	if v != Version {
-		t.Errorf("Returned version %d, expected %d", v, Version)
-	}
+	assert.Nil(t, decoder.Decode(&v), "Could not decode version returned by CmdVersion")
+	assert.Equal(t, Version, v)
 }
 
-func TestCmdBeginEndLastError(t *testing.T) {
+func TestCmdBeginEndError(t *testing.T) {
 	ctx := context.Background()
 	// ---------- Start of boilerplate code
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
@@ -91,60 +90,40 @@ func TestCmdBeginEndLastError(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Send CmdBeginTx, followed by CmdEndTx with the wrong txHandle, followed by CmdLastError, followed by CmdEndTx with the correct handle
 	// followed by the CmdLastError
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBeginTx: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
+
 	// CmdEnd with the wrong handle
-	var txHandle uint64 = 156
-	c = CmdEndTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdEndTx: %v", err)
-	}
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle: %v", err)
-	}
-	// CmdLastError to retrieve the error related to the CmdEndTx with the wrong handle
-	c = CmdLastError
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdLastError: %v", err)
-	}
+	txHandle := 156
+	assert.Nil(t, encoder.Encode(CmdEndTx), "Could not encode CmdEndTx")
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle")
+
 	// Now we issue CmdEndTx with the correct tx handle
-	c = CmdEndTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdEndTx: %v", err)
-	}
 	txHandle = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle: %v", err)
-	}
-	// Check that CmdLastError now returns empty string
-	c = CmdLastError
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdLastError: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdEndTx), "Could not encode CmdEndTx")
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle")
+
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
+
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 	// And then we interpret the results
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBeginTx, %v", err)
-	}
-	var lastErrorStr string
-	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError, %v", err)
-	}
-	if lastErrorStr != "transaction not found" {
-		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
-	}
-	if err = decoder.Decode(&lastErrorStr); err != nil {
-		t.Errorf("Could not decode response from CmdLastError, %v", err)
-	}
-	if lastErrorStr != "<nil>" {
-		t.Errorf("Wrong error message from CmdLastError: %s", lastErrorStr)
-	}
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBeginTx")
+
+	// receive error message
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdEndTx")
+	assert.Equal(t, ResponseErr, responseCode, "unexpected response code")
+	var errorMessage string
+	assert.Nil(t, decoder.Decode(&errorMessage), "Could not decode response")
+	assert.Equal(t, "transaction not found: 156", errorMessage, "unexpected response code")
+
+	// receive good response
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdEndTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 }
 
 func TestCmdBucket(t *testing.T) {
@@ -172,40 +151,30 @@ func TestCmdBucket(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBegin: %v", err)
-	}
-	c = CmdBucket
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBegin")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
-	}
-	if err = encoder.Encode(&name); err != nil {
-		t.Errorf("Could not encode name for CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
 		t.Errorf("Error while calling Server: %v", err)
 	}
+
 	// And then we interpret the results
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin, %v", err)
-	}
-	if txHandle != 1 {
-		t.Errorf("Unexpected txHandle: %d", txHandle)
-	}
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBeginTx")
+	assert.Equal(t, uint64(1), txHandle, "Unexpected txHandle")
+
 	var bucketHandle uint64
-	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket, %v", err)
-	}
-	if bucketHandle != 2 {
-		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
+	assert.Equal(t, uint64(2), bucketHandle, "Could not decode response from CmdBucket")
 }
 
 func TestCmdGet(t *testing.T) {
@@ -242,46 +211,24 @@ func TestCmdGet(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBeginTx: %v", err)
-	}
-	c = CmdBucket
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
-	}
-	if err = encoder.Encode(&name); err != nil {
-		t.Errorf("Could not encode name for CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
+
 	// Issue CmdGet with existing key
-	c = CmdGet
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdGet: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	var bucketHandle uint64 = 2
 	var key = []byte("key1")
-	if err = encoder.Encode(&bucketHandle); err != nil {
-		t.Errorf("Could not encode bucketHandle for CmdGet: %v", err)
-	}
-	if err = encoder.Encode(&key); err != nil {
-		t.Errorf("Could not encode key for CmdGet: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandle for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
 	// Issue CmdGet with non-existing key
-	c = CmdGet
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdGet: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	key = []byte("key3")
-	if err = encoder.Encode(&bucketHandle); err != nil {
-		t.Errorf("Could not encode bucketHandle for CmdGet: %v", err)
-	}
-	if err = encoder.Encode(&key); err != nil {
-		t.Errorf("Could not encode key for CmdGet: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandle for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
+
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -289,34 +236,27 @@ func TestCmdGet(t *testing.T) {
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin, %v", err)
-	}
-	if txHandle != 1 {
-		t.Errorf("Unexpected txHandle: %d", txHandle)
-	}
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBegin")
+	assert.Equal(t, uint64(1), txHandle, "Unexpected txHandle")
 	// Results of CmdBucket
-	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket, %v", err)
-	}
-	if bucketHandle != 2 {
-		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
+	assert.Equal(t, uint64(2), bucketHandle, "Unexpected bucketHandle")
 	// Results of CmdGet (for key1)
 	var value []byte
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode value from CmdGet: %v", err)
-	}
-	if string(value) != "value1" {
-		t.Errorf("Wrong value from CmdGet, expected: %x, got %x", "value1", value)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode value from CmdGet")
+	assert.Equal(t, "value1", string(value), "Wrong value from CmdGet")
 	// Results of CmdGet (for key3)
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode value from CmdGet: %v", err)
-	}
-	if value != nil {
-		t.Errorf("Wrong value from CmdGet, expected: %x, got %x", "value1", value)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode value from CmdGet")
+	assert.Nil(t, value, "Wrong value from CmdGet")
 }
 
 func TestCmdSeek(t *testing.T) {
@@ -353,41 +293,21 @@ func TestCmdSeek(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBeginTx: %v", err)
-	}
-	c = CmdBucket
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
-	}
-	if err = encoder.Encode(&name); err != nil {
-		t.Errorf("Could not encode name for CmdBucket: %v", err)
-	}
-	c = CmdCursor
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursor: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
+
+	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
 	var bucketHandle uint64 = 2
-	if err = encoder.Encode(&bucketHandle); err != nil {
-		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
-	}
-	c = CmdCursorSeek
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursorSeek: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandler for CmdCursor")
+
+	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	var cursorHandle uint64 = 3
-	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
 	var seekKey = []byte("key15") // Should find key2
-	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -395,40 +315,29 @@ func TestCmdSeek(t *testing.T) {
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin, %v", err)
-	}
-	if txHandle != 1 {
-		t.Errorf("Unexpected txHandle: %d", txHandle)
-	}
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBegin")
+	assert.Equal(t, uint64(1), txHandle, "Unexpected txHandle")
 	// Results of CmdBucket
-	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket, %v", err)
-	}
-	if bucketHandle != 2 {
-		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
+	assert.Equal(t, uint64(2), bucketHandle, "Unexpected bucketHandle")
 	// Results of CmdCursor
-	if err = decoder.Decode(&cursorHandle); err != nil {
-		t.Errorf("Could not decode response from CmdCursor: %v", err)
-	}
-	if cursorHandle != 3 {
-		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&cursorHandle), "Could not decode response from CmdCursor")
+	assert.Equal(t, uint64(3), cursorHandle, "Unexpected cursorHandle")
 	// Results of CmdCursorSeek
 	var key, value []byte
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
-	}
-	if string(key) != key2 {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
-	}
-	if string(value) != value2 {
-		t.Errorf("Unexpected value: %s", key)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorSeek")
+	assert.Equal(t, key2, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorSeek")
+	assert.Equal(t, value2, string(value), "Unexpected value")
 }
 
 func TestCmdNext(t *testing.T) {
@@ -464,52 +373,23 @@ func TestCmdNext(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBeginTx: %v", err)
-	}
-	c = CmdBucket
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBucket: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
-	}
-	if err = encoder.Encode(&name); err != nil {
-		t.Errorf("Could not encode name for CmdBucket: %v", err)
-	}
-	c = CmdCursor
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursor: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
 	var bucketHandle uint64 = 2
-	if err = encoder.Encode(&bucketHandle); err != nil {
-		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
-	}
-	c = CmdCursorSeek
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursorSeek: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
+	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	var cursorHandle uint64 = 3
-	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdCursorSeek: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
 	var seekKey = []byte("key1") // Should find key1
-	if err = encoder.Encode(&seekKey); err != nil {
-		t.Errorf("Could not encode seekKey for CmdCursorSeek: %v", err)
-	}
-	c = CmdCursorNext
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursorNext: %v", err)
-	}
-	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandler for CmdCursorNext: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(CmdCursorNext), "Could not encode CmdCursorNext")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
 	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
-	if err = encoder.Encode(&numberOfKeys); err != nil {
-		t.Errorf("Could not encode numberOfKeys for CmdCursorNext: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -517,65 +397,43 @@ func TestCmdNext(t *testing.T) {
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin, %v", err)
-	}
-	if txHandle != 1 {
-		t.Errorf("Unexpected txHandle: %d", txHandle)
-	}
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBegin")
+	assert.Equal(t, uint64(1), txHandle, "Unexpected txHandle")
 	// Results of CmdBucket
-	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket, %v", err)
-	}
-	if bucketHandle != 2 {
-		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
+	assert.Equal(t, uint64(2), bucketHandle, "Unexpected bucketHandle")
 	// Results of CmdCursor
-	if err = decoder.Decode(&cursorHandle); err != nil {
-		t.Errorf("Could not decode response from CmdCursor: %v", err)
-	}
-	if cursorHandle != 3 {
-		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&cursorHandle), "Could not decode response from CmdCursor")
+	assert.Equal(t, uint64(3), cursorHandle, "Unexpected cursorHandle")
 	// Results of CmdCursorSeek
 	var key, value []byte
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
-	}
-	if string(key) != key1 {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorSeek: %v", err)
-	}
-	if string(value) != value1 {
-		t.Errorf("Unexpected value: %s", value)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorSeek")
+	assert.Equal(t, key1, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorSeek")
+	assert.Equal(t, value1, string(value), "Unexpected value")
+
 	// Results of CmdCursorNext
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if string(key) != key2 {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if string(value) != value2 {
-		t.Errorf("Unexpected value: %s", value)
-	}
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if key != nil {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if value != nil {
-		t.Errorf("Unexpected value: %s", value)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
+	assert.Equal(t, key2, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
+	assert.Equal(t, value2, string(value), "Unexpected value")
+
+	// Results of last CmdCursorNext
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
+	assert.Nil(t, key, "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
+	assert.Nil(t, value, "Unexpected value")
 }
 
 func TestCmdFirst(t *testing.T) {
@@ -611,53 +469,27 @@ func TestCmdFirst(t *testing.T) {
 	}); err != nil {
 		t.Errorf("Could not create and populate a bucket: %v", err)
 	}
-	var c = CmdBeginTx
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBeginTx: %v", err)
-	}
-	c = CmdBucket
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdBucket: %v", err)
-	}
-	var txHandle uint64 = 1
-	if err = encoder.Encode(&txHandle); err != nil {
-		t.Errorf("Could not encode txHandle for CmdBucket: %v", err)
-	}
-	if err = encoder.Encode(&name); err != nil {
-		t.Errorf("Could not encode name for CmdBucket: %v", err)
-	}
-	c = CmdCursor
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursor: %v", err)
-	}
-	var bucketHandle uint64 = 2
-	if err = encoder.Encode(&bucketHandle); err != nil {
-		t.Errorf("Could not encode bucketHandler for CmdCursor: %v", err)
-	}
-	c = CmdCursorFirst
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursorFirst: %v", err)
-	}
-	var cursorHandle uint64 = 3
-	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandle for CmdCursorFirst: %v", err)
-	}
-	var numberOfFirstKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
-	if err = encoder.Encode(&numberOfFirstKeys); err != nil {
-		t.Errorf("Could not encode numberOfFirstKeys for CmdCursorFirst: %v", err)
-	}
 
-	c = CmdCursorNext
-	if err = encoder.Encode(&c); err != nil {
-		t.Errorf("Could not encode CmdCursorNext: %v", err)
-	}
-	if err = encoder.Encode(&cursorHandle); err != nil {
-		t.Errorf("Could not encode cursorHandler for CmdCursorNext: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
+
+	var txHandle uint64 = 1
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
+	var bucketHandle uint64 = 2
+	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
+
+	assert.Nil(t, encoder.Encode(CmdCursorFirst), "Could not encode CmdCursorFirst")
+	var cursorHandle uint64 = 3
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorFirst")
+	var numberOfFirstKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
+	assert.Nil(t, encoder.Encode(numberOfFirstKeys), "Could not encode numberOfFirstKeys for CmdCursorFirst")
+
+	assert.Nil(t, encoder.Encode(CmdCursorNext), "Could not encode CmdCursorNext")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
 	var numberOfKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
-	if err = encoder.Encode(&numberOfKeys); err != nil {
-		t.Errorf("Could not encode numberOfKeys for CmdCursorNext: %v", err)
-	}
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -665,63 +497,42 @@ func TestCmdFirst(t *testing.T) {
 	}
 	// And then we interpret the results
 	// Results of CmdBeginTx
-	if err = decoder.Decode(&txHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBegin, %v", err)
-	}
-	if txHandle != 1 {
-		t.Errorf("Unexpected txHandle: %d", txHandle)
-	}
+	var responseCode ResponseCode
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&txHandle), "Could not decode response from CmdBegin")
+	assert.Equal(t, uint64(1), txHandle, "Unexpected txHandle")
+
 	// Results of CmdBucket
-	if err = decoder.Decode(&bucketHandle); err != nil {
-		t.Errorf("Could not decode response from CmdBucket, %v", err)
-	}
-	if bucketHandle != 2 {
-		t.Errorf("Unexpected bucketHandle: %d", bucketHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
+	assert.Equal(t, uint64(2), bucketHandle, "Unexpected bucketHandle")
+
 	// Results of CmdCursor
-	if err = decoder.Decode(&cursorHandle); err != nil {
-		t.Errorf("Could not decode response from CmdCursor: %v", err)
-	}
-	if cursorHandle != 3 {
-		t.Errorf("Unexpected cursorHandle: %d", cursorHandle)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&cursorHandle), "Could not decode response from CmdCursor")
+	assert.Equal(t, uint64(3), cursorHandle, "Unexpected cursorHandle")
+
 	// Results of CmdCursorFirst
 	var key, value []byte
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorFirst: %v", err)
-	}
-	if string(key) != key1 {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorFirst: %v", err)
-	}
-	if string(value) != value1 {
-		t.Errorf("Unexpected value: %s", value)
-	}
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode response from CmdCursorFirst")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected responseCode")
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
+	assert.Equal(t, key1, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
+	assert.Equal(t, value1, string(value), "Unexpected value")
+
 	// Results of CmdCursorNext
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if string(key) != key2 {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if string(value) != value2 {
-		t.Errorf("Unexpected value: %s", value)
-	}
-	if err = decoder.Decode(&key); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if key != nil {
-		t.Errorf("Unexpected key: %s", key)
-	}
-	if err = decoder.Decode(&value); err != nil {
-		t.Errorf("Could not decode response from CmdCursorNext: %v", err)
-	}
-	if value != nil {
-		t.Errorf("Unexpected value: %s", value)
-	}
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
+	assert.Equal(t, key2, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
+	assert.Equal(t, value2, string(value), "Unexpected value")
+
+	// Results of last CmdCursorNext
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
+	assert.Nil(t, key, "Unexpected key")
+	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
+	assert.Nil(t, value, "Unexpected value")
 }
