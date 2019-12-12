@@ -214,20 +214,20 @@ func TestCmdGet(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	assert.Nil(t, encoder.Encode(&txHandle), "Could not encode txHandle for CmdBucket")
-	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
 
 	// Issue CmdGet with existing key
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	var bucketHandle uint64 = 2
 	var key = []byte("key1")
-	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
+	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
 	// Issue CmdGet with non-existing key
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	key = []byte("key3")
-	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
+	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -296,18 +296,18 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
 	var txHandle uint64 = 1
-	assert.Nil(t, encoder.Encode(&txHandle), "Could not encode txHandle for CmdBucket")
-	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(txHandle), "Could not encode txHandle for CmdBucket")
+	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
 
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
 	var bucketHandle uint64 = 2
-	assert.Nil(t, encoder.Encode(&bucketHandle), "Could not encode bucketHandler for CmdCursor")
+	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
 
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	var cursorHandle uint64 = 3
-	assert.Nil(t, encoder.Encode(&cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
 	var seekKey = []byte("key15") // Should find key2
-	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
