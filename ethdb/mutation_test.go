@@ -482,7 +482,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from Get is incorrect")
 	}
 
-	_, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
+	b, err=db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
 	if err!=nil {
 		t.Fatal("incorrect value on block 1", err)
 	}
