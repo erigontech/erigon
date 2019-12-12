@@ -430,12 +430,12 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return err
 			}
 			var key, value []byte
-			if cursor, ok := cursors[cursorHandle]; ok {
-				key, value = cursor.Seek(seekKey)
-				lastError = nil
-			} else {
-				lastError = fmt.Errorf("cursor not found")
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
+				continue
 			}
+			key, value = cursor.SeekTo(seekKey)
 			if err := encoder.Encode(&key); err != nil {
 				log.Error("could not encode key in response to CmdCursorSeekTo", "error", err)
 				return err
@@ -463,7 +463,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			cursor, ok := cursors[cursorHandle]
 			if !ok {
 				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				return nil
+				continue
 			}
 
 			if err := encoder.Encode(ResponseOk); err != nil {
@@ -926,18 +926,31 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(c.out)
 	defer returnEncoderToPool(encoder)
-	var cmd = CmdCursorSeekTo
-	if err := encoder.Encode(&cmd); err != nil {
+
+	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
 		log.Error("Could not encode CmdCursorSeekTo", "error", err)
 		return nil, nil
 	}
-	if err := encoder.Encode(&c.cursorHandle); err != nil {
+	if err := encoder.Encode(c.cursorHandle); err != nil {
 		log.Error("Could not encode cursorHandle for CmdCursorSeekTo", "error", err)
 		return nil, nil
 	}
-	if err := encoder.Encode(&seek); err != nil {
+	if err := encoder.Encode(seek); err != nil {
 		log.Error("Could not encode seek key for CmdCursorSeekTo", "error", err)
 		return nil, nil
+	}
+
+	var responseCode ResponseCode
+	if err := decoder.Decode(&responseCode); err != nil {
+		log.Error("Could not decode ResponseCode for CmdCursorSeek", "error", err)
+		return nil, nil
+	}
+
+	if responseCode != ResponseOk {
+		if err := decodeErr(decoder, responseCode); err != nil {
+			log.Error("Could not decode errorMessage for CmdCursorSeek", "error", err)
+			return nil, nil
+		}
 	}
 
 	if err := decoder.Decode(&key); err != nil {
