@@ -19,6 +19,7 @@ package ethdb
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path"
 
@@ -171,17 +172,18 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
-		if b != nil {
-			v, _ := b.Get(key)
-			if v != nil {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-			}
+		if b == nil {
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
+		}
+		v, _ := b.Get(key)
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
 		}
 		return nil
 	})
 	if dat == nil {
-		return nil, ErrKeyNotFound
+		return nil, fmt.Errorf("%w: %s", ErrKeyNotFound, key)
 	}
 	return dat, err
 }
@@ -200,7 +202,8 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 		{
 			hB := tx.Bucket(hBucket)
 			if hB == nil {
-				return ErrKeyNotFound
+				return nil
+				//return fmt.Errorf("%w: %s", ErrBucketNotFound, hBucket)
 			}
 			hC := hB.Cursor()
 			hK, hV := hC.Seek(composite)
@@ -213,7 +216,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 		{
 			b := tx.Bucket(bucket)
 			if b == nil {
-				return ErrKeyNotFound
+				return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
 			}
 			c := b.Cursor()
 			k, v := c.Seek(key)
@@ -224,7 +227,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			}
 		}
 
-		return ErrKeyNotFound
+		return fmt.Errorf("%w: %s", ErrKeyNotFound, key)
 	})
 	return dat, err
 }
@@ -245,6 +248,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
+			//return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
 		}
 		c := b.Cursor()
 		k, v := c.Seek(startkey)
@@ -273,7 +277,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
 		}
 		c := b.Cursor()
 		k, v := c.Seek(startkey)
@@ -328,11 +332,13 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
-			return nil
+			//return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
 		}
 		hB := tx.Bucket(hBucket)
 		if hB == nil {
-			return nil
+			//return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, hBucket)
 		}
 		c := b.Cursor()
 		hC := hB.Cursor()
@@ -411,11 +417,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	if err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, bucket)
 		}
 		hB := tx.Bucket(hBucket)
 		if hB == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, hBucket)
 		}
 		c := b.Cursor()
 		hC := hB.Cursor()
@@ -551,7 +557,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(dbutils.ChangeSetBucket)
 		if sb == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ErrBucketNotFound, dbutils.ChangeSetBucket)
 		}
 		var keys [][]byte
 		c := sb.Cursor()
@@ -559,7 +565,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			// k = encodedTS + hBucket
 			hb := tx.Bucket(k[len(encodedTS):])
 			if hb == nil {
-				return nil
+				return fmt.Errorf("%w: %s", ErrBucketNotFound, k[len(encodedTS):])
 			}
 			changedAccounts, err := dbutils.Decode(v)
 			if err != nil {

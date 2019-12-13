@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"errors"
 	"sort"
 	"sync"
 
@@ -323,7 +324,7 @@ func (m *mutation) Commit() (uint64, error) {
 				hBucket := []byte(bucketStr)
 				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
 				dat, err := m.getNoLock(dbutils.ChangeSetBucket, changeSetKey)
-				if err != nil && err != ErrKeyNotFound {
+				if err != nil && !errors.Is(err, ErrKeyNotFound) {
 					return 0, err
 				}
 

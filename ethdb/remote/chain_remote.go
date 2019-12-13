@@ -2,12 +2,14 @@ package remote
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -16,6 +18,8 @@ import (
 func ReadTd(tx *Tx, hash common.Hash, number uint64) *hexutil.Big {
 	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
+		err := fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.HeaderPrefix)
+		log.Error(err.Error())
 		return nil
 	}
 

@@ -18,6 +18,7 @@ package ethdb
 
 import (
 	"bytes"
+	"errors"
 	"io/ioutil"
 	"os"
 	"runtime"
@@ -160,7 +161,7 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 		val, err = item.ValueCopy(nil)
 		return err
 	})
-	if err == badger.ErrKeyNotFound {
+	if errors.Is(err, badger.ErrKeyNotFound) {
 		return nil, ErrKeyNotFound
 	}
 	return val, err
@@ -181,7 +182,7 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 		}
 
 		changeSetItem, err := tx.Get(changeSetKey)
-		if err != nil && err != badger.ErrKeyNotFound {
+		if err != nil && !errors.Is(err, badger.ErrKeyNotFound) {
 			return err
 		}
 
@@ -290,7 +291,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 		}
 	})
 
-	if err == badger.ErrKeyNotFound {
+	if errors.Is(err, badger.ErrKeyNotFound) {
 		return dat, ErrKeyNotFound
 	}
 	return dat, err
@@ -299,7 +300,7 @@ func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64)
 // Has indicates whether a key exists in the database.
 func (db *BadgerDatabase) Has(bucket, key []byte) (bool, error) {
 	_, err := db.Get(bucket, key)
-	if err == ErrKeyNotFound {
+	if errors.Is(err, ErrKeyNotFound) {
 		return false, nil
 	}
 	return err == nil, err

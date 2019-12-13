@@ -23,8 +23,16 @@ import (
 // TODO [Andrew] Add some comments about historical buckets & ChangeSet.
 // https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
 
-// ErrKeyNotFound is returned when key isn't found in the database.
-var ErrKeyNotFound = errors.New("db: key not found")
+var (
+	// ErrKeyNotFound is returned when key isn't found in the database.
+	ErrKeyNotFound = errors.New("db: key not found")
+
+	// ErrBucketNotFound is returned when bucket isn't found in the database.
+	ErrBucketNotFound = errors.New("db: bucket not found")
+
+	// ErrCursorNotFound is returned when cursor isn't found in the database.
+	ErrCursorNotFound = errors.New("db: cursor not found")
+)
 
 // Putter wraps the database write operations.
 type Putter interface {
