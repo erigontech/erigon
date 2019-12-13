@@ -492,21 +492,25 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
+			incarnation, err := tds.nextIncarnation(addrHash)
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				b.accountUpdates[addrHash].SetIncarnation(incarnation)
+			}
+			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
+				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
+			}
+			if err != nil {
+				return nil, err
+			}
 			// Prevent repeated storage clearouts
 			if _, ok := alreadyCreated[addrHash]; ok {
 				continue
 			}
 			alreadyCreated[addrHash] = struct{}{}
-			incarnation, err := tds.nextIncarnation(addrHash)
-			if err != nil {
-				return nil, err
-			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].SetIncarnation(incarnation)
 				b.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
 			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
 				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
