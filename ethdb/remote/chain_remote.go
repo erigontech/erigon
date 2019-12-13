@@ -77,7 +77,7 @@ func ReadHeaderRLP(tx *Tx, hash common.Hash, number uint64) rlp.RawValue {
 	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
 		//return fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
-		log.Error("Bucket not founc", "error", dbutils.HeaderPrefix)
+		log.Error("Bucket not found", "error", dbutils.HeaderPrefix)
 		return rlp.RawValue{}
 	}
 	return bucket.Get(dbutils.HeaderKey(number, hash))
@@ -102,7 +102,7 @@ func ReadBodyRLP(tx *Tx, hash common.Hash, number uint64) rlp.RawValue {
 	bucket := tx.Bucket(dbutils.BlockBodyPrefix)
 	if bucket == nil {
 		//return fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
-		log.Error("Bucket not founc", "error", dbutils.BlockBodyPrefix)
+		log.Error("Bucket not found", "error", dbutils.BlockBodyPrefix)
 		return rlp.RawValue{}
 	}
 	return bucket.Get(dbutils.BlockBodyKey(number, hash))
