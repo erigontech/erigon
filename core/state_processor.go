@@ -21,7 +21,10 @@ import (
 	//"encoding/json"
 	//"bytes"
 
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 
 	"context"
 
@@ -168,12 +171,13 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		// at the end of this function, after the execution of transaction with given hash, the file
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
 		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		var h common.Hash = tx.Hash()
-		if bytes.Equal(h[:], common.FromHex("0x340acfd967a744646ebdcfa2cab9b457a1d42224598d33051047ededdd24caa1")) {
-			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			cfg.Debug = true
-		}
 	*/
+	var h common.Hash = tx.Hash()
+	if bytes.Equal(h[:], common.FromHex("0x2461475426b3c85d1bbff317e8e76e98059250a2a4d20330212bfe5c7015dff9")) {
+		cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+		cfg.Debug = true
+	}
+
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
@@ -191,23 +195,24 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 		// at the end of this function, after the execution of transaction with given hash, the file
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
 		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		if cfg.Tracer != nil {
-			w, err := os.Create("structlogs.txt")
-			if err != nil {
-				panic(err)
-			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
-			if err := encoder.Encode(logs); err != nil {
-				panic(err)
-			}
-			if err := w.Close(); err != nil {
-				panic(err)
-			}
-			cfg.Debug = false
-			cfg.Tracer = nil
-		}
 	*/
+	if cfg.Tracer != nil {
+		w, err := os.Create("structlogs.txt")
+		if err != nil {
+			panic(err)
+		}
+		encoder := json.NewEncoder(w)
+		logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
+		if err := encoder.Encode(logs); err != nil {
+			panic(err)
+		}
+		if err := w.Close(); err != nil {
+			panic(err)
+		}
+		cfg.Debug = false
+		cfg.Tracer = nil
+	}
+
 	if err != nil {
 		return nil, err
 	}

@@ -491,8 +491,8 @@ func TestMutation_GetAsOf(t *testing.T) {
 	if err!=nil {
 		t.Fatal(err)
 	}
-	//todo Почему???
-	if !acc.Equals(resAcc) {
+
+	if !acc2.Equals(resAcc) {
 		spew.Dump(resAcc)
 		t.Fatal("Account from GetAsOf(1) is incorrect")
 	}

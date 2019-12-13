@@ -45,7 +45,7 @@ func (hi *HistoryIndex) Remove(v uint64) *HistoryIndex  {
 }
 
 func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
-	ln:=len(*hi)-1
+	ln:=len(*hi)
 	////fixme it's could be a bug
 	//i:=sort.Search(ln, func(i int) bool {
 	//	return (*hi)[i]>=v
@@ -53,11 +53,14 @@ func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
 	//if i<ln {
 	//	return (*hi)[i], true
 	//}
+	if ln==0 {
+		return 0, false
+	}
 
-	if (*hi)[ln]<v {
+	if (*hi)[ln-1]<v {
 		return 0,false
 	}
-	for i:=ln;i>=0;i-- {
+	for i:=ln-1;i>=0;i-- {
 		if v==(*hi)[i] {
 			return v, true
 		}
@@ -66,7 +69,7 @@ func (hi *HistoryIndex) Search(v uint64) (uint64, bool)  {
 			return (*hi)[i+1], true
 		}
 	}
-	return 0, false
+	return (*hi)[0],true
 }
 
 func AppendToIndex(b []byte, timestamp uint64) ([]byte, error)  {
