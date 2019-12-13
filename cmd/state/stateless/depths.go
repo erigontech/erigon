@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/bolt"
 
@@ -24,7 +25,7 @@ func countDepths() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -120,11 +121,11 @@ func countStorageDepths() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		ab := tx.Bucket(dbutils.AccountsBucket)
 		if ab == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {

@@ -135,7 +135,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsHistoryBucket)
 		}
 		c := b.Cursor()
 
@@ -166,11 +166,11 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.PreimagePrefix)
 		}
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -231,7 +231,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageHistoryBucket)
 		}
 		c := b.Cursor()
 
@@ -278,7 +278,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -354,7 +354,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	err = r.db.View(ctx, func(tx *remote.Tx) error {
 		b := tx.Bucket(dbutils.HeaderPrefix)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.HeaderPrefix)
 		}
 		c := b.Cursor()
 
@@ -1074,9 +1074,12 @@ func storageUsage() {
 	var leafSize uint64
 	err = db.View(func(tx *bolt.Tx) error {
 		a := tx.Bucket(dbutils.AccountsBucket)
+		if a == nil {
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
+		}
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
@@ -1186,7 +1189,7 @@ func tokenUsage() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -1262,7 +1265,7 @@ func nonTokenUsage() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -1323,7 +1326,7 @@ func oldStorage() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -1340,7 +1343,7 @@ func oldStorage() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsHistoryBucket)
 		}
 		c := b.Cursor()
 		for addr := range itemsByAddress {
@@ -1398,7 +1401,7 @@ func dustEOA() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {

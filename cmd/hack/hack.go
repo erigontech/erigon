@@ -898,7 +898,7 @@ func relayoutKeys() {
 	err = db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.ChangeSetBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.ChangeSetBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {

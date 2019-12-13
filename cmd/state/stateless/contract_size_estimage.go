@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 
 	"github.com/ledgerwatch/bolt"
 
@@ -38,7 +39,7 @@ func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	err := db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return fmt.Errorf("Could not find accounts bucket")
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
 		}
 		enc, _ := b.Get(crypto.Keccak256(contract[:]))
 		if enc == nil {
@@ -308,9 +309,12 @@ func estimate() {
 	contractCount := 0
 	err = db.View(func(tx *bolt.Tx) error {
 		a := tx.Bucket(dbutils.AccountsBucket)
+		if a == nil {
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.AccountsBucket)
+		}
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbutils.StorageBucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {

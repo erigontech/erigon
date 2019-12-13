@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 
@@ -164,7 +165,7 @@ func (db *nodeDB) fetchInt64(key []byte) int64 {
 	if err := db.lvl.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		blob, _ := b.Get(key)
 		if blob != nil {
@@ -212,7 +213,7 @@ func (db *nodeDB) fetchRLP(key []byte, val interface{}) error {
 	if err := db.lvl.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		if v, _ := b.Get(key); v != nil {
 			blob = make([]byte, len(v))
@@ -249,7 +250,7 @@ func (db *nodeDB) deleteNode(id NodeID) error {
 	return db.lvl.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		p := makeKey(id, "")
 		c := b.Cursor()
@@ -302,7 +303,7 @@ func (db *nodeDB) expireNodes() error {
 	if err := db.lvl.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
@@ -374,7 +375,7 @@ func (db *nodeDB) querySeeds(n int, maxAge time.Duration) []*Node {
 	db.lvl.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		c := b.Cursor()
 	seek:
@@ -432,7 +433,7 @@ func (db *nodeDB) fetchTopicRegTickets(id NodeID) (issued, used uint32) {
 	db.lvl.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte(dbbucket))
 		if b == nil {
-			return nil
+			return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, dbbucket)
 		}
 		if v, _ := b.Get(key); v != nil {
 			blob = make([]byte, len(v))

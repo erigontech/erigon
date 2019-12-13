@@ -288,7 +288,7 @@ func makeTokenBalances() {
 				err := pdb.View(func(tx *bolt.Tx) error {
 					b := tx.Bucket(bucket)
 					if b == nil {
-						return nil
+						return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, bucket)
 					}
 					preimage, _ = b.Get(key)
 					if preimage != nil {
@@ -527,7 +527,7 @@ func makeTokenAllowances() {
 				err := pdb.View(func(tx *bolt.Tx) error {
 					b := tx.Bucket(bucket)
 					if b == nil {
-						return nil
+						return fmt.Errorf("%w: %s", ethdb.ErrBucketNotFound, bucket)
 					}
 					preimage, _ = b.Get(key)
 					if preimage != nil && len(preimage) == 64 {
