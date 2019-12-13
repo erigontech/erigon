@@ -226,7 +226,7 @@ how turbo-geth's database after such a block would be generated:
 ![block1_db](changes_1.dot.gd.png)
 
 We have got now two more preimages:
-* the preimage of the recipient of the transaction (account 0x0)
+* the preimage of the recipient of the transaction (account 0x01)
 * the preimage of the signer
 
 ![block1_db_preimages](changes_1_secure-key-_11.dot.gd.png)
