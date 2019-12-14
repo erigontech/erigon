@@ -152,8 +152,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
 		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
 		if writeTrace {
-			w, err := os.Create(fmt.Sprintf("txtrace_%x.txt", p.txTraceHash))
-			if err != nil {
+			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", p.txTraceHash))
+			if err1 != nil {
 				panic(err)
 			}
 			encoder := json.NewEncoder(w)
@@ -161,7 +161,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 			if err := encoder.Encode(logs); err != nil {
 				panic(err)
 			}
-			if err := w.Close(); err != nil {
+			if err2 := w.Close(); err2 != nil {
 				panic(err)
 			}
 			cfg.Debug = false
