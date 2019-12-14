@@ -154,15 +154,15 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 		if writeTrace {
 			w, err1 := os.Create(fmt.Sprintf("txtrace_%x.txt", p.txTraceHash))
 			if err1 != nil {
-				panic(err)
+				panic(err1)
 			}
 			encoder := json.NewEncoder(w)
 			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
-			if err := encoder.Encode(logs); err != nil {
-				panic(err)
+			if err2 := encoder.Encode(logs); err2 != nil {
+				panic(err2)
 			}
 			if err2 := w.Close(); err2 != nil {
-				panic(err)
+				panic(err2)
 			}
 			cfg.Debug = false
 			cfg.Tracer = nil
