@@ -17,9 +17,9 @@
 package core
 
 import (
-	//"os"
-	//"encoding/json"
-	//"bytes"
+	"os"
+	"encoding/json"
+	"bytes"
 
 	"fmt"
 
@@ -44,6 +44,7 @@ type StateProcessor struct {
 	config *params.ChainConfig // Chain configuration options
 	bc     *BlockChain         // Canonical block chain
 	engine consensus.Engine    // Consensus engine used for block rewards
+	txTraceHash []byte 		   // Hash of the transaction to trace (or nil if there nothing to trace)
 }
 
 // NewStateProcessor initialises a new StateProcessor.
@@ -53,6 +54,11 @@ func NewStateProcessor(config *params.ChainConfig, bc *BlockChain, engine consen
 		bc:     bc,
 		engine: engine,
 	}
+}
+
+// SetTxTraceHash allows setting the hash of the transaction to trace
+func (p *StateProcessor) SetTxTraceHash(txTraceHash common.Hash) {
+	p.txTraceHash = txTraceHash[:]
 }
 
 // StructLogRes stores a structured log emitted by the EVM while replaying a
@@ -69,7 +75,7 @@ type StructLogRes struct {
 	Storage *map[string]string `json:"storage,omitempty"`
 }
 
-// formatLogs formats EVM returned structured logs for json output
+// FormatLogs formats EVM returned structured logs for json output
 func FormatLogs(logs []vm.StructLog) []StructLogRes {
 	formatted := make([]StructLogRes, len(logs))
 	for index, trace := range logs {
@@ -128,8 +134,39 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 	// Iterate over and process the individual transactions
 	tds.StartNewBuffer()
 	for i, tx := range block.Transactions() {
-		statedb.Prepare(tx.Hash(), block.Hash(), i)
+		txHash := tx.Hash()
+		statedb.Prepare(txHash, block.Hash(), i)
+		writeTrace := false
+		if !cfg.Debug && p.txTraceHash != nil && bytes.Equal(p.txTraceHash, txHash[:]) {
+			// This code is useful when debugging a certain transaction. If uncommented, together with the code
+			// at the end of this function, after the execution of transaction with given hash, the file
+			// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
+			// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
+			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
+			cfg.Debug = true
+			writeTrace = true
+		}
 		receipt, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, cfg)
+		// This code is useful when debugging a certain transaction. If uncommented, together with the code
+		// at the end of this function, after the execution of transaction with given hash, the file
+		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
+		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
+		if writeTrace {
+			w, err := os.Create(fmt.Sprintf("txtrace_%x.txt", p.txTraceHash))
+			if err != nil {
+				panic(err)
+			}
+			encoder := json.NewEncoder(w)
+			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
+			if err := encoder.Encode(logs); err != nil {
+				panic(err)
+			}
+			if err := w.Close(); err != nil {
+				panic(err)
+			}
+			cfg.Debug = false
+			cfg.Tracer = nil
+		}
 		if err != nil {
 			return nil, nil, 0, err
 		}
@@ -163,17 +200,6 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 // for the transaction, gas used and an error if the transaction failed,
 // indicating the block was invalid.
 func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *common.Address, gp *GasPool, statedb *state.IntraBlockState, stateWriter state.StateWriter, header *types.Header, tx *types.Transaction, usedGas *uint64, cfg vm.Config) (*types.Receipt, error) {
-	/*
-		// This code is useful when debugging a certain transaction. If uncommented, together with the code
-		// at the end of this function, after the execution of transaction with given hash, the file
-		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		var h common.Hash = tx.Hash()
-		if bytes.Equal(h[:], common.FromHex("0x340acfd967a744646ebdcfa2cab9b457a1d42224598d33051047ededdd24caa1")) {
-			cfg.Tracer = vm.NewStructLogger(&vm.LogConfig{})
-			cfg.Debug = true
-		}
-	*/
 	msg, err := tx.AsMessage(types.MakeSigner(config, header.Number))
 	if err != nil {
 		return nil, err
@@ -186,28 +212,6 @@ func ApplyTransaction(config *params.ChainConfig, bc ChainContext, author *commo
 	vmenv := vm.NewEVM(context, statedb, config, cfg)
 	// Apply the transaction to the current state (included in the env)
 	_, gas, failed, err := ApplyMessage(vmenv, msg, gp)
-	/*
-		// This code is useful when debugging a certain transaction. If uncommented, together with the code
-		// at the end of this function, after the execution of transaction with given hash, the file
-		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
-		// to another trace, obtained from the correct version of the turbo-geth or go-ethereum
-		if cfg.Tracer != nil {
-			w, err := os.Create("structlogs.txt")
-			if err != nil {
-				panic(err)
-			}
-			encoder := json.NewEncoder(w)
-			logs := FormatLogs(cfg.Tracer.(*vm.StructLogger).StructLogs())
-			if err := encoder.Encode(logs); err != nil {
-				panic(err)
-			}
-			if err := w.Close(); err != nil {
-				panic(err)
-			}
-			cfg.Debug = false
-			cfg.Tracer = nil
-		}
-	*/
 	if err != nil {
 		return nil, err
 	}

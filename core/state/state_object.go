@@ -81,7 +81,6 @@ type stateObject struct {
 	code Code // contract bytecode, which gets set when code is loaded
 
 	originStorage      Storage // Storage cache of original entries to dedup rewrites
-	pendingStorage     Storage // Storage entries that need to be flushed to disk, at the end of an entire block
 	blockOriginStorage Storage
 	dirtyStorage       Storage // Storage entries that need to be flushed to disk
 	fakeStorage        Storage // Fake storage which constructed by caller for debugging purpose.
@@ -109,7 +108,6 @@ func newObject(db *IntraBlockState, address common.Address, data, original *acco
 		db:                 db,
 		address:            address,
 		originStorage:      make(Storage),
-		pendingStorage:     make(Storage),
 		blockOriginStorage: make(Storage),
 		dirtyStorage:       make(Storage),
 	}
@@ -168,9 +166,6 @@ func (so *stateObject) GetState(key common.Hash) common.Hash {
 
 // GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
-	if so.created {
-		return common.Hash{}
-	}
 	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
@@ -229,17 +224,6 @@ func (so *stateObject) SetStorage(storage map[common.Hash]common.Hash) {
 
 func (so *stateObject) setState(key, value common.Hash) {
 	so.dirtyStorage[key] = value
-}
-
-// finalise moves all dirty storage slots into the pending area to be hashed or
-// committed later. It is invoked at the end of every transaction.
-func (so *stateObject) finalise() {
-	for key, value := range so.dirtyStorage {
-		so.pendingStorage[key] = value
-	}
-	if len(so.dirtyStorage) > 0 {
-		so.dirtyStorage = make(Storage)
-	}
 }
 
 // updateTrie writes cached storage modifications into the object's storage trie.
