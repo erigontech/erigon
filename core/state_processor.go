@@ -17,9 +17,9 @@
 package core
 
 import (
-	"os"
-	"encoding/json"
 	"bytes"
+	"encoding/json"
+	"os"
 
 	"fmt"
 
@@ -41,10 +41,10 @@ import (
 //
 // StateProcessor implements Processor.
 type StateProcessor struct {
-	config *params.ChainConfig // Chain configuration options
-	bc     *BlockChain         // Canonical block chain
-	engine consensus.Engine    // Consensus engine used for block rewards
-	txTraceHash []byte 		   // Hash of the transaction to trace (or nil if there nothing to trace)
+	config      *params.ChainConfig // Chain configuration options
+	bc          *BlockChain         // Canonical block chain
+	engine      consensus.Engine    // Consensus engine used for block rewards
+	txTraceHash []byte              // Hash of the transaction to trace (or nil if there nothing to trace)
 }
 
 // NewStateProcessor initialises a new StateProcessor.
