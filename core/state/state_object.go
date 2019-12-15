@@ -173,6 +173,9 @@ func (so *stateObject) GetCommittedState(key common.Hash) common.Hash {
 			return value
 		}
 	}
+	if so.created {
+		return common.Hash{}
+	}
 	// Load from DB in case it is missing.
 	enc, err := so.db.stateReader.ReadAccountStorage(so.address, so.data.GetIncarnation(), &key)
 	if err != nil {
