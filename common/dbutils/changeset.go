@@ -148,6 +148,7 @@ func DecodeChangeSet(b []byte) (*ChangeSet, error) {
 		h.Changes[i].Value = common.CopyBytes(val)
 	}
 
+	sort.Sort(h)
 	return h, nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"math/rand"
 	"reflect"
+	"sort"
 	"testing"
 )
 
@@ -193,9 +194,14 @@ func TestMutationCommit(t *testing.T) {
 	for i:=range addrHashes {
 		b:=make([]byte, accHistory[i].EncodingLengthForStorage())
 		accHistory[i].EncodeForStorage(b)
-		expectedChangeSet.Add(addrHashes[i].Bytes(), b)
+		err = expectedChangeSet.Add(addrHashes[i].Bytes(), b)
+		if err!=nil {
+			t.Fatal(err)
+		}
 	}
 
+
+	sort.Sort(expectedChangeSet)
 	if !reflect.DeepEqual(cs, expectedChangeSet) {
 		spew.Dump("res", cs)
 		spew.Dump("expected", expectedChangeSet)
@@ -225,6 +231,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 	}
 
+	sort.Sort(expectedChangeSet)
 	if !reflect.DeepEqual(cs, expectedChangeSet) {
 		spew.Dump("res", cs)
 		spew.Dump("expected", expectedChangeSet)

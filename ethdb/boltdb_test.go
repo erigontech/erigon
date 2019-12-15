@@ -33,9 +33,17 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		if err!=nil {
 			t.Fatal(err)
 		}
-		block6Expected=block6Expected.Add(key,val)
+		err=block6Expected.Add(key,val)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
 		if i<=2 {
-			block4Expected=block4Expected.Add(key,val)
+			err=block4Expected.Add(key,val)
+			if err!=nil {
+				t.Fatal(err)
+			}
+
 		}
 	}
 	for i:=uint8(1); i<=7;i++ {
@@ -48,7 +56,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 			3,
 			false,
 		)
-		block2Expected = block2Expected.Add(key, val)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
+		err = block2Expected.Add(key, val)
 		if err!=nil {
 			t.Fatal(err)
 		}
@@ -66,7 +78,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		if err!=nil {
 			t.Fatal(err)
 		}
-		block4Expected=block4Expected.Add(key,val)
+		err=block4Expected.Add(key,val)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
 	}
 
 
@@ -87,8 +103,12 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	var err error
 	var startKey [72]byte
 	err=db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		block2 = block2.Add(k,v)
-		fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
+		err = block2.Add(k,v)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
+		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err!=nil {
@@ -96,7 +116,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 
 	err=db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket,  startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		block4 = block4.Add(k,v)
+		err = block4.Add(k,v)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
 		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
@@ -105,7 +129,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 
 	err=db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket,  startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		block6 = block6.Add(k,v)
+		err = block6.Add(k,v)
+		if err!=nil {
+			t.Fatal(err)
+		}
+
 		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
@@ -199,17 +227,49 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 		60,
 	}
 
-	block2Expected = block2Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}), []byte("block 3 "+ strconv.Itoa(1)))
-	block2Expected = block2Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}), []byte("block 3 "+ strconv.Itoa(3)))
-	block2Expected = block2Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1,common.Hash{7}), []byte("block 3 "+ strconv.Itoa(7)))
+	err = block2Expected.MultiAdd([]dbutils.Change{
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}),
+			Value:[]byte("block 3 "+ strconv.Itoa(1)),
+		},
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}),
+			Value:[]byte("block 3 "+ strconv.Itoa(3)),
+		},
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1,common.Hash{7}),
+			Value:[]byte("block 3 "+ strconv.Itoa(7)),
+		},
+	})
+	if err!=nil {
+		t.Fatal(err)
+	}
 
-	block4Expected = block4Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}), []byte("state   "+ strconv.Itoa(1)))
-	block4Expected = block4Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}), []byte("block 5 "+ strconv.Itoa(3)))
-	block4Expected = block4Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1,common.Hash{7}), []byte("block 5 "+ strconv.Itoa(7)))
+	block4Expected.MultiAdd([]dbutils.Change{
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}),
+			Value:[]byte("state   "+ strconv.Itoa(1)),
+		},
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}),
+			Value:[]byte("block 5 "+ strconv.Itoa(3)),
+		},
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1,common.Hash{7}),
+			Value:[]byte("block 5 "+ strconv.Itoa(7)),
+		},
+	})
 
-	block6Expected = block6Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}), []byte("state   "+ strconv.Itoa(1)))
-	block6Expected = block6Expected.Add(dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}), []byte("state   "+ strconv.Itoa(3)))
-
+	block6Expected.MultiAdd([]dbutils.Change{
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1,common.Hash{1}),
+			Value:[]byte("state   "+ strconv.Itoa(1)),
+		},
+		{
+			Key:dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1,common.Hash{3}),
+			Value:[]byte("state   "+ strconv.Itoa(3)),
+		},
+	})
 
 	block2:= &dbutils.ChangeSet{
 		Changes:make([]dbutils.Change,0),
@@ -225,7 +285,10 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 
 	err=db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 2, func(idx int, k []byte, v []byte) error {
 		fmt.Printf("%v - %s - %s\n", idx, string(k),string(v))
-		block2 = block2.Add(k, v)
+		err = block2.Add(k, v)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return nil
 	})
 	if err!=nil {
@@ -233,7 +296,10 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 	}
 	err=db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 4, func(idx int, k []byte, v []byte) error {
 		fmt.Printf("%v - %s - %s\n", idx, string(k),string(v))
-		block4 = block4.Add(k, v)
+		err = block4.Add(k, v)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return nil
 	})
 	if err!=nil {
@@ -241,7 +307,10 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 	}
 	err=db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 6, func(idx int, k []byte, v []byte) error {
 		fmt.Printf("%v - %s - %s\n", idx, string(k),string(v))
-		block6 = block6.Add(k, v)
+		err = block6.Add(k, v)
+		if err != nil {
+			t.Fatal(err)
+		}
 		return nil
 	})
 	if err!=nil {

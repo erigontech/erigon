@@ -7,7 +7,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
@@ -27,9 +26,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
 
+	noHistory := dsw.tds.noHistory
 	// Don't write historical record if the account did not change
 	if accountsEqual(original, account) {
 		return nil
@@ -73,8 +71,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		original.EncodeForStorage(originalData)
 	}
 
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
+	noHistory := dsw.tds.noHistory
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
 
@@ -117,8 +114,8 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if err != nil {
 		return err
 	}
-	_, noHistory := params.GetNoHistory(ctx)
-	noHistory = dsw.tds.noHistory || noHistory
+
+	noHistory := dsw.tds.noHistory
 	o := bytes.TrimLeft(original[:], "\x00")
 	originalValue := make([]byte, len(o))
 	copy(originalValue, o)
