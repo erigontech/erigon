@@ -1552,6 +1552,45 @@ func (d *Downloader) importBlockResults(results []*fetchResult) error {
 	return nil
 }
 
+func splitAroundPivot(pivot uint64, results []*fetchResult) (p *fetchResult, before, after []*fetchResult) {
+	for _, result := range results {
+		num := result.Header.Number.Uint64()
+		switch {
+		case num < pivot:
+			before = append(before, result)
+		case num == pivot:
+			p = result
+		default:
+			after = append(after, result)
+		}
+	}
+	return p, before, after
+}
+
+func (d *Downloader) commitPivotBlock(result *fetchResult) error {
+	block := types.NewBlockWithHeader(result.Header).WithBody(result.Transactions, result.Uncles)
+	log.Debug("Committing fast sync pivot as new head", "number", block.Number(), "hash", block.Hash())
+
+	// Commit the pivot block as the new head, will require full sync from here on
+	if _, err := d.blockchain.InsertReceiptChain([]*types.Block{block}, []types.Receipts{result.Receipts}, d.ancientLimit); err != nil {
+		return err
+	}
+	if err := d.blockchain.FastSyncCommitHead(block.Hash()); err != nil {
+		return err
+	}
+	atomic.StoreInt32(&d.committed, 1)
+
+	// If we had a bloom filter for the state sync, deallocate it now. Note, we only
+	// deallocate internally, but keep the empty wrapper. This ensures that if we do
+	// a rollback after committing the pivot and restarting fast sync, we don't end
+	// up using a nil bloom. Empty bloom is fine, it just returns that it does not
+	// have the info we need, so reach down to the database instead.
+	if d.stateBloom != nil {
+		d.stateBloom.Close()
+	}
+	return nil
+}
+
 // DeliverHeaders injects a new batch of block headers received from a remote
 // node into the download schedule.
 func (d *Downloader) DeliverHeaders(id string, headers []*types.Header) (err error) {

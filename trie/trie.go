@@ -48,6 +48,8 @@ type Trie struct {
 	newHasherFunc func() *hasher
 
 	Version uint8
+
+	binary bool
 }
 
 // New creates a trie with an existing root node from db.
@@ -64,6 +66,12 @@ func New(root common.Hash) *Trie {
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
 	}
+	return trie
+}
+
+func NewBinary(root common.Hash) *Trie {
+	trie := New(root)
+	trie.binary = true
 	return trie
 }
 
@@ -91,6 +99,9 @@ func (t *Trie) Get(key []byte) (value []byte, gotValue bool) {
 	}
 
 	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 	return t.get(t.root, hex, 0)
 }
 
@@ -100,6 +111,9 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 	}
 
 	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode != nil {
@@ -202,6 +216,9 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Update(key, value []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 
 	if t.root == nil {
 		newnode := &shortNode{Key: hex, Val: valueNode(value)}
@@ -217,6 +234,9 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	value.Copy(acc)
 
 	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 	if t.root == nil {
 		var newnode node
 		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
@@ -274,6 +294,9 @@ func (rr *ResolveRequest) String() string {
 func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *ResolveRequest) {
 	var nd = t.root
 	hex := keybytesToHex(storageKey)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 	pos := 0
 	var incarnation uint64
 	for {
@@ -358,7 +381,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			return updated, origAccN
 		}
 
-		return true, value
+		// replacing nodes except accounts
+		if !origNok {
+			return true, value
+		}
 	}
 
 	switch n := origNode.(type) {
@@ -588,7 +614,7 @@ func (t *Trie) hook(hex []byte, n node) {
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	if _, ok := nd.(hashNode); !ok {
+	if _, ok := nd.(hashNode); !ok && nd != nil {
 		return
 	}
 	t.touchAll(n, hex, false)
@@ -655,6 +681,9 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Delete(key []byte, blockNr uint64) {
 	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
 	_, t.root = t.delete(t.root, hex, 0)
 }
 
@@ -1054,6 +1083,9 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
 	hexPrefix := keybytesToHex(keyPrefix)
+	if t.binary {
+		hexPrefix = keyHexToBin(hexPrefix)
+	}
 	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
 }
 
@@ -1083,6 +1115,9 @@ func (t *Trie) Hash() common.Hash {
 // First returned value is `true` if the node with the specified prefix is found
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	hexPrefix := keybytesToHex(keyPrefix)
+	if t.binary {
+		hexPrefix = keyHexToBin(hexPrefix)
+	}
 	accNode, gotValue := t.getAccount(t.root, hexPrefix, 0)
 	if !gotValue {
 		return false, common.Hash{}

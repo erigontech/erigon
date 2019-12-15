@@ -51,9 +51,11 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -251,9 +253,11 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
-				EIP2027Block:        big.NewInt(2),
+				EIP2027Block:        big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -385,8 +389,10 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -572,9 +578,11 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -776,9 +784,11 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -962,9 +972,11 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -1141,6 +1153,7 @@ func TestSelfDestructReceive(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:        big.NewInt(1),
 				HomesteadBlock: new(big.Int),
+				EIP150Block:    new(big.Int),
 				EIP155Block:    new(big.Int),
 				EIP158Block:    big.NewInt(1),
 			},

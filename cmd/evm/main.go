@@ -79,6 +79,10 @@ var (
 		Name:  "input",
 		Usage: "input for the EVM",
 	}
+	InputFileFlag = cli.StringFlag{
+		Name:  "inputfile",
+		Usage: "file containing input for the EVM",
+	}
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
 		Usage: "sets the verbosity level",
@@ -130,6 +134,7 @@ func init() {
 		ValueFlag,
 		DumpFlag,
 		InputFlag,
+		InputFileFlag,
 		MemProfileFlag,
 		CPUProfileFlag,
 		StatDumpFlag,
@@ -147,6 +152,7 @@ func init() {
 		runCommand,
 		stateTestCommand,
 	}
+	cli.CommandHelpTemplate = utils.OriginCommandHelpTemplate
 }
 
 func main() {

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	mapset "github.com/deckarep/golang-set"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
@@ -170,6 +171,12 @@ type worker struct {
 	running int32 // The indicator whether the consensus engine is running or not.
 	newTxs  int32 // New arrival transaction count since last sealing work submitting.
 
+	hooks
+
+	initOnce sync.Once
+}
+
+type hooks struct {
 	// External functions
 	isLocalBlock func(block *types.Block) bool // Function used to determine whether the specified block is mined by local miner.
 
@@ -180,7 +187,7 @@ type worker struct {
 	resubmitHook func(time.Duration, time.Duration) // Method to call upon updating resubmitting interval.
 }
 
-func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, isLocalBlock func(*types.Block) bool) *worker {
+func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus.Engine, eth Backend, mux *event.TypeMux, h hooks, init bool) *worker {
 	worker := &worker{
 		config:             config,
 		chainConfig:        chainConfig,
@@ -188,14 +195,11 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		eth:                eth,
 		mux:                mux,
 		chain:              eth.BlockChain(),
-		isLocalBlock:       isLocalBlock,
+		hooks:              h,
 		localUncles:        make(map[common.Hash]*types.Block),
 		remoteUncles:       make(map[common.Hash]*types.Block),
 		unconfirmed:        newUnconfirmedBlocks(eth.BlockChain(), miningLogAtDepth),
 		pendingTasks:       make(map[common.Hash]*task),
-		txsCh:              make(chan core.NewTxsEvent, txChanSize),
-		chainHeadCh:        make(chan core.ChainHeadEvent, chainHeadChanSize),
-		chainSideCh:        make(chan core.ChainSideEvent, chainSideChanSize),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
 		resultCh:           make(chan *types.Block, resultQueueSize),
@@ -204,27 +208,11 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
 	}
-	// Subscribe NewTxsEvent for tx pool
-	worker.txsSub = eth.TxPool().SubscribeNewTxsEvent(worker.txsCh)
-	// Subscribe events for blockchain
-	worker.chainHeadSub = eth.BlockChain().SubscribeChainHeadEvent(worker.chainHeadCh)
-	worker.chainSideSub = eth.BlockChain().SubscribeChainSideEvent(worker.chainSideCh)
-
-	// Sanitize recommit interval if the user-specified one is too short.
-	recommit := worker.config.Recommit
-	if recommit < minRecommitInterval {
-		log.Warn("Sanitizing miner recommit interval", "provided", recommit, "updated", minRecommitInterval)
-		recommit = minRecommitInterval
-	}
-
-	go worker.mainLoop()
-	go worker.newWorkLoop(recommit)
-	go worker.resultLoop()
-	go worker.taskLoop()
 
 	// Submit first work to initialize pending state.
-	worker.startCh <- struct{}{}
-
+	if init {
+		worker.startCh <- struct{}{}
+	}
 	return worker
 }
 
@@ -255,8 +243,7 @@ func (w *worker) pending() (*types.Block, *state.IntraBlockState, *state.TrieDbS
 	if w.snapshotState == nil {
 		return nil, nil, nil
 	}
-	// FIXME: fix miner code
-	// https://github.com/ledgerwatch/turbo-geth/issues/131
+
 	return w.snapshotBlock, w.snapshotState, w.snapshotTds.Copy()
 }
 
@@ -268,9 +255,36 @@ func (w *worker) pendingBlock() *types.Block {
 	return w.snapshotBlock
 }
 
+func (w *worker) init() {
+	w.initOnce.Do(func() {
+		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
+		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
+		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
+
+		// Subscribe NewTxsEvent for tx pool
+		w.txsSub = w.eth.TxPool().SubscribeNewTxsEvent(w.txsCh)
+		// Subscribe events for blockchain
+		w.chainHeadSub = w.eth.BlockChain().SubscribeChainHeadEvent(w.chainHeadCh)
+		w.chainSideSub = w.eth.BlockChain().SubscribeChainSideEvent(w.chainSideCh)
+
+		// Sanitize recommit interval if the user-specified one is too short.
+		recommit := w.config.Recommit
+		if recommit < minRecommitInterval {
+			log.Warn("Sanitizing miner recommit interval", "provided", recommit, "updated", minRecommitInterval)
+			recommit = minRecommitInterval
+		}
+
+		go w.mainLoop()
+		go w.newWorkLoop(recommit)
+		go w.resultLoop()
+		go w.taskLoop()
+	})
+}
+
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
 	atomic.StoreInt32(&w.running, 1)
+	w.init()
 	w.startCh <- struct{}{}
 }
 
@@ -595,7 +609,7 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			stat, err := w.chain.WriteBlockWithState(block, receipts, task.state, task.tds)
+			_, err := w.chain.WriteBlockWithState(block, receipts, logs, task.state, task.tds, true)
 			if err != nil {
 				log.Error("Failed writing block to chain", "err", err)
 				continue
@@ -605,16 +619,6 @@ func (w *worker) resultLoop() {
 
 			// Broadcast the block and announce chain insertion event
 			w.mux.Post(core.NewMinedBlockEvent{Block: block})
-
-			var events []interface{}
-			switch stat {
-			case core.CanonStatTy:
-				events = append(events, core.ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
-				events = append(events, core.ChainHeadEvent{Block: block})
-			case core.SideStatTy:
-				events = append(events, core.ChainSideEvent{Block: block})
-			}
-			w.chain.PostChainEvents(events, logs)
 
 			// Insert the block into the set of pending ones to resultLoop for confirmations
 			w.unconfirmed.Insert(block.NumberU64(), block.Hash())
@@ -627,14 +631,24 @@ func (w *worker) resultLoop() {
 
 // makeCurrent creates a new environment for the current cycle.
 func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
-	state, _, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
+	stateV, _, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
+
+	tds, err := state.GetTrieDbState(parent.Root(), w.chain.ChainDb(), parent.NumberU64())
+	if err != nil {
+		return err
+	}
+
+	tds = tds.WithNewBuffer()
+	tds.SetResolveReads(false)
+	tds.SetNoHistory(true)
+
 	env := &environment{
 		signer:    types.NewEIP155Signer(w.chainConfig.ChainID),
-		state:     state,
-		tds:       nil,
+		state:     stateV,
+		tds:       tds,
 		ancestors: mapset.NewSet(),
 		family:    mapset.NewSet(),
 		uncles:    mapset.NewSet(),
@@ -705,9 +719,8 @@ func (w *worker) updateSnapshot() {
 		w.current.receipts,
 	)
 
-	// FIXME: fix miner code
-	// https://github.com/ledgerwatch/turbo-geth/issues/131
 	w.snapshotState = w.current.state
+	w.snapshotTds = w.current.tds.WithNewBuffer()
 }
 
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
@@ -856,6 +869,7 @@ func (w *worker) commitNewWork(interrupt *int32, noempty bool, timestamp int64) 
 	if now := time.Now().Unix(); timestamp > now+1 {
 		wait := time.Duration(timestamp-now) * time.Second
 		log.Info("Mining too far in the future", "wait", common.PrettyDuration(wait))
+		// fixme WTF
 		time.Sleep(wait)
 	}
 
@@ -977,10 +991,9 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		receipts[i] = new(types.Receipt)
 		*receipts[i] = *l
 	}
-	// FIXME: fix miner code
-	// https://github.com/ledgerwatch/turbo-geth/issues/131
-	s := w.current.state
-	tds := w.current.tds.Copy()
+
+	s := &(*w.current.state)
+
 	block, err := w.engine.FinalizeAndAssemble(w.chainConfig, w.current.header, s, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
 		return err
@@ -989,20 +1002,25 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	if err = s.FinalizeTx(ctx, w.current.tds.TrieStateWriter()); err != nil {
 		return err
 	}
-	roots, err := w.current.tds.ComputeTrieRoots()
+
+	if err = w.current.tds.ResolveStateTrie(); err != nil {
+		return err
+	}
+
+	root, err := w.current.tds.CalcTrieRoots(false)
 	if err != nil {
 		return err
 	}
-	for i, receipt := range w.current.receipts {
-		receipt.PostState = roots[i].Bytes()
-	}
-	w.current.header.Root = roots[len(roots)-1]
+
+	w.current.header.Root = root
+
 	if w.isRunning() {
 		if interval != nil {
 			interval()
 		}
+
 		select {
-		case w.taskCh <- &task{receipts: receipts, state: s, tds: tds, block: block, createdAt: time.Now()}:
+		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now()}:
 			w.unconfirmed.Shift(block.NumberU64() - 1)
 
 			feesWei := new(big.Int)
@@ -1022,4 +1040,12 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 		w.updateSnapshot()
 	}
 	return nil
+}
+
+// postSideBlock fires a side chain event, only use it for testing.
+func (w *worker) postSideBlock(event core.ChainSideEvent) {
+	select {
+	case w.chainSideCh <- event:
+	case <-w.exitCh:
+	}
 }

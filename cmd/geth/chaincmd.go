@@ -66,7 +66,7 @@ It expects the genesis file as argument.`,
 			utils.DataDirFlag,
 			utils.CacheFlag,
 			utils.SyncModeFlag,
-			utils.GCModeFlag,
+			utils.GCModePruningFlag,
 			utils.CacheDatabaseFlag,
 			utils.CacheGCFlag,
 		},
@@ -351,7 +351,7 @@ func exportPreimages(ctx *cli.Context) error {
 	return nil
 }
 
-// TODO [Andrew] BadgerDB
+// TODO [Issue 144] support BadgerDB
 func copyDb(ctx *cli.Context) error {
 	// Ensure we have a source chain directory to copy
 	if len(ctx.Args()) < 1 {

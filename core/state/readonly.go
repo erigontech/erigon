@@ -60,7 +60,6 @@ func (dbs *DbState) SetBlockNr(blockNr uint64) {
 	dbs.blockNr = blockNr
 }
 
-// TODO: support incarnations
 func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(key, seckey, value common.Hash) bool, maxResults int) {
 	addrHash, err := common.HashData(addr[:])
 	if err != nil {
@@ -71,6 +70,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
+	// TODO: [Issue 99] support incarnations
 	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(0))
 	copy(s[common.HashLength+IncarnationLength:], start)
 	var lastSecKey common.Hash
@@ -349,10 +349,10 @@ func (dbs *DbState) DefaultRawDump() Dump {
 // WalkStorageRange calls the walker for each storage item whose key starts with a given prefix,
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
-// TODO: Issue 99 [Boris] Support incarnations
 func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
+	// TODO: [Issue 99] Support incarnations
 	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(0))
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 

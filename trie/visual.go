@@ -24,7 +24,6 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
@@ -67,49 +66,6 @@ func Visual(t *Trie, w io.Writer, opts *VisualOpts) {
 	}
 }
 
-func visualCode(w io.Writer, hex []byte, code []byte, compressed bool) {
-	columns := 32
-	fmt.Fprintf(w,
-		`
-	c_%x [label=<
-	<table border="0" color="#000000" cellborder="1" cellspacing="0">
-	`, hex)
-	rows := (len(code) + columns - 1) / columns
-	row := 0
-	for rowStart := 0; rowStart < len(code); rowStart += columns {
-		if rows < 6 || !compressed || row < 2 || row > rows-3 {
-			fmt.Fprintf(w, "		<tr>")
-			col := 0
-			for ; rowStart+col < len(code) && col < columns; col++ {
-				if columns < 6 || !compressed || col < 2 || col > columns-3 {
-					h := code[rowStart+col]
-					fmt.Fprintf(w, `<td bgcolor="%s"></td>`, visual.HexIndexColors[h])
-				}
-				if compressed && columns >= 6 && col == 2 && (row == 0 || row == rows-2) {
-					fmt.Fprintf(w, `<td rowspan="2" border="0"></td>`)
-				}
-			}
-			if col < columns {
-				fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns-col)
-			}
-			fmt.Fprintf(w, `</tr>
-		`)
-		}
-		if compressed && rows >= 6 && row == 2 {
-			fmt.Fprintf(w, "		<tr>")
-			fmt.Fprintf(w, `<td colspan="%d" border="0"></td>`, columns)
-			fmt.Fprintf(w, `</tr>
-		`)
-		}
-		row++
-	}
-	fmt.Fprintf(w,
-		`
-	</table>
-	>];
-	`)
-}
-
 func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *VisualOpts,
 	leaves map[string]struct{}, hashes map[string]struct{}) {
 	switch n := nd.(type) {
@@ -150,7 +106,7 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 			if !a.IsEmptyCodeHash() {
 				codeHex := keybytesToHex(opts.CodeMap[a.CodeHash])
 				codeHex = codeHex[:len(codeHex)-1]
-				visualCode(w, accountHex, codeHex, opts.CodeCompressed)
+				visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)
 				fmt.Fprintf(w,
 					`e_%x -> c_%x;
 				`, accountHex, accountHex)
@@ -397,7 +353,7 @@ func fold(nd node, hexes [][]byte, h *hasher, isRoot bool) (bool, node) {
 // HexToQuad converts hexary trie to quad trie with the same set of keys
 func HexToQuad(t *Trie) *Trie {
 	newTrie := New(common.Hash{})
-	hexToQuad(t.root, []byte{}, newTrie)
+	transformSubTrie(t.root, []byte{}, newTrie, keyHexToQuad)
 	return newTrie
 }
 
@@ -432,51 +388,6 @@ func keyHexToQuad(hex []byte) []byte {
 		}
 	}
 	return quad
-}
-
-func hexToQuad(nd node, hex []byte, newTrie *Trie) {
-	switch n := nd.(type) {
-	case nil:
-		return
-	case valueNode:
-		nCopy := make(valueNode, len(n))
-		copy(nCopy, n)
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, nCopy)
-		return
-	case *accountNode:
-		accountCopy := accounts.NewAccount()
-		accountCopy.Copy(&n.Account)
-		_, newTrie.root = newTrie.insert(newTrie.root, keyHexToQuad(hex), 0, &accountNode{accountCopy, nil, true})
-		aHex := hex
-		if aHex[len(aHex)-1] == 16 {
-			aHex = aHex[:len(aHex)-1]
-		}
-		hexToQuad(n.storage, aHex, newTrie)
-	case hashNode:
-		return
-	case *shortNode:
-		var hexVal []byte
-		hexVal = concat(hex, n.Key...)
-		hexToQuad(n.Val, hexVal, newTrie)
-	case *duoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		hexToQuad(n.child1, hex1, newTrie)
-		hexToQuad(n.child2, hex2, newTrie)
-	case *fullNode:
-		for i, child := range n.Children {
-			if child != nil {
-				hexToQuad(child, concat(hex, byte(i)), newTrie)
-			}
-		}
-	default:
-		panic("")
-	}
 }
 
 // FullKeys construct the list of full keys (i.e. keys that can be accessed without resolution via DB) that are present in

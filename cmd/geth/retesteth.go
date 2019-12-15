@@ -494,7 +494,6 @@ func (api *RetestethAPI) mineBlock() error {
 	txCount := 0
 	var txs []*types.Transaction
 	var receipts []*types.Receipt
-	var coalescedLogs []*types.Log
 	var blockFull = gasPool.Gas() < params.TxGas
 	for address := range api.txSenders {
 		if blockFull {
@@ -522,7 +521,6 @@ func (api *RetestethAPI) mineBlock() error {
 				}
 				txs = append(txs, tx)
 				receipts = append(receipts, receipt)
-				coalescedLogs = append(coalescedLogs, receipt.Logs...)
 				delete(m, nonce)
 				if len(m) == 0 {
 					// Last tx for the sender
@@ -897,7 +895,7 @@ func retesteth(ctx *cli.Context) error {
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
 
-	abortChan := make(chan os.Signal)
+	abortChan := make(chan os.Signal, 11)
 	signal.Notify(abortChan, os.Interrupt)
 
 	sig := <-abortChan

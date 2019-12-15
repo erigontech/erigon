@@ -153,9 +153,9 @@ func (e *GenesisMismatchError) Error() string {
 //
 // The returned chain configuration is never nil.
 func SetupGenesisBlock(db ethdb.Database, genesis *Genesis) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil)
+	return SetupGenesisBlockWithOverride(db, genesis, nil, nil)
 }
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideIstanbul *big.Int) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideIstanbul *big.Int, overrideMuirGlacier *big.Int) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 
 	if genesis != nil && genesis.Config == nil {
@@ -193,6 +193,12 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 	newcfg := genesis.configOrDefault(stored)
 	if overrideIstanbul != nil {
 		newcfg.IstanbulBlock = overrideIstanbul
+	}
+	if overrideMuirGlacier != nil {
+		newcfg.MuirGlacierBlock = overrideMuirGlacier
+	}
+	if err := newcfg.CheckConfigForkOrder(); err != nil {
+		return newcfg, common.Hash{}, nil, err
 	}
 	storedcfg := rawdb.ReadChainConfig(db, stored)
 	if storedcfg == nil {
@@ -298,6 +304,13 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 	if block.Number().Sign() != 0 {
 		return nil, statedb, fmt.Errorf("can't commit genesis block with number > 0")
 	}
+	config := g.Config
+	if config == nil {
+		config = params.AllEthashProtocolChanges
+	}
+	if err := config.CheckConfigForkOrder(); err != nil {
+		return nil, nil, err
+	}
 	tds.SetBlockNr(0)
 	if err := statedb.CommitBlock(context.Background(), tds.DbStateWriter()); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
@@ -313,11 +326,6 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 	rawdb.WriteHeadBlockHash(db, block.Hash())
 	rawdb.WriteHeadFastBlockHash(db, block.Hash())
 	rawdb.WriteHeadHeaderHash(db, block.Hash())
-
-	config := g.Config
-	if config == nil {
-		config = params.AllEthashProtocolChanges
-	}
 	rawdb.WriteChainConfig(db, block.Hash(), config)
 	return block, statedb, nil
 }

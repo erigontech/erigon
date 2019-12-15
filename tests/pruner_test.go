@@ -42,9 +42,11 @@ func TestBasisAccountPruning(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -194,9 +196,11 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -346,9 +350,11 @@ func TestStoragePruning(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -539,9 +545,11 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				EIP2027Block:        big.NewInt(4),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -657,13 +665,13 @@ func getStat(db ethdb.Database) (stateStats, error) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple account suffix records")
 			}
-			stat.AccountSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+			stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
 		}
 		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
 			if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple storage suffix records")
 			}
-			stat.StorageSuffixRecordsByTimestamp[timestamp] = changedAccounts.KeyCount()
+			stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
 		}
 
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {

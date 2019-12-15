@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"fmt"
 	"math/big"
 	"os"
 	"os/user"
@@ -50,6 +51,7 @@ var DefaultConfig = Config{
 	TrieCleanCache:     256,
 	TrieDirtyCache:     256,
 	TrieTimeout:        60 * time.Minute,
+	StorageMode:        DefaultStorageMode,
 	Miner: miner.Config{
 		GasFloor: 8000000,
 		GasCeil:  8000000,
@@ -84,6 +86,52 @@ func init() {
 	}
 }
 
+type StorageMode struct {
+	History   bool
+	Receipts  bool
+	TxIndex   bool
+	Preimages bool
+}
+
+var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
+
+func (m StorageMode) ToString() string {
+	modeString := ""
+	if m.History {
+		modeString += "h"
+	}
+	if m.Preimages {
+		modeString += "p"
+	}
+	if m.Receipts {
+		modeString += "r"
+	}
+	if m.TxIndex {
+		modeString += "t"
+	}
+	return modeString
+}
+
+func StorageModeFromString(flags string) (StorageMode, error) {
+	mode := StorageMode{}
+	for _, flag := range flags {
+		switch flag {
+		case 'h':
+			mode.History = true
+		case 'r':
+			mode.Receipts = true
+		case 't':
+			mode.TxIndex = true
+		case 'p':
+			mode.Preimages = true
+		default:
+			return mode, fmt.Errorf("unexpected flag found: %c", flag)
+		}
+	}
+
+	return mode, nil
+}
+
 //go:generate gencodec -type Config -formats toml -out gen_config.go
 
 type Config struct {
@@ -98,7 +146,8 @@ type Config struct {
 	NoPruning  bool // Whether to disable pruning and flush everything to disk
 	NoPrefetch bool // Whether to disable prefetching and only load state on demand
 
-	NoHistory bool
+	StorageMode StorageMode
+
 	// DownloadOnly is set when the node does not need to process the blocks, but simply
 	// download them
 	DownloadOnly        bool
@@ -166,4 +215,7 @@ type Config struct {
 
 	// Istanbul block override (TODO: remove after the fork)
 	OverrideIstanbul *big.Int
+
+	// MuirGlacier block override (TODO: remove after the fork)
+	OverrideMuirGlacier *big.Int
 }

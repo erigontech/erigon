@@ -25,8 +25,12 @@ import (
 	"io"
 	"runtime"
 	"sort"
+	"sync"
+	"sync/atomic"
+	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -151,6 +155,7 @@ func (b *Buffer) merge(other *Buffer) {
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
 	t               *trie.Trie
+	tMu             *sync.Mutex
 	db              ethdb.Database
 	blockNr         uint64
 	buffers         []*Buffer
@@ -161,11 +166,55 @@ type TrieDbState struct {
 	historical      bool
 	noHistory       bool
 	resolveReads    bool
+	savePreimages   bool
 	pg              *trie.ProofGenerator
 	tp              *trie.TriePruning
 }
 
+var (
+	trieObj   = make(map[uint64]uintptr)
+	trieObjMu sync.RWMutex
+)
+
+func getTrieDBState(db ethdb.Database) *TrieDbState {
+	if db == nil {
+		return nil
+	}
+	trieObjMu.RLock()
+	tr, ok := trieObj[db.ID()]
+	trieObjMu.RUnlock()
+
+	if !ok {
+		return nil
+	}
+
+	return (*TrieDbState)(unsafe.Pointer(tr))
+}
+
+func setTrieDBState(tds *TrieDbState, id uint64) {
+	if tds == nil {
+		return
+	}
+
+	ptr := unsafe.Pointer(tds)
+
+	trieObjMu.Lock()
+	trieObj[id] = uintptr(ptr)
+	trieObjMu.Unlock()
+}
+
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+	tds, err := newTrieDbState(root, db, blockNr)
+	if err != nil {
+		return nil, err
+	}
+
+	setTrieDBState(tds, db.ID())
+
+	return tds, nil
+}
+
+func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -177,19 +226,36 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
-	tds := TrieDbState{
+	tds := &TrieDbState{
 		t:             t,
+		tMu:           new(sync.Mutex),
 		db:            db,
 		blockNr:       blockNr,
 		codeCache:     cc,
 		codeSizeCache: csc,
 		pg:            trie.NewProofGenerator(),
 		tp:            tp,
+		savePreimages: true,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})
-	return &tds, nil
+
+	return tds, nil
+}
+
+func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+	if tr := getTrieDBState(db); tr != nil {
+		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
+			return tr, nil
+		}
+	}
+
+	return newTrieDbState(root, db, blockNr)
+}
+
+func (tds *TrieDbState) EnablePreimages(ep bool) {
+	tds.savePreimages = ep
 }
 
 func (tds *TrieDbState) SetHistorical(h bool) {
@@ -205,14 +271,18 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
+	tds.tMu.Lock()
 	tcopy := *tds.t
+	tds.tMu.Unlock()
 
-	tp := trie.NewTriePruning(tds.blockNr)
+	n := tds.getBlockNr()
+	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
 		t:       &tcopy,
+		tMu:     new(sync.Mutex),
 		db:      tds.db,
-		blockNr: tds.blockNr,
+		blockNr: n,
 		tp:      tp,
 	}
 	return &cpy
@@ -240,7 +310,40 @@ func (tds *TrieDbState) StartNewBuffer() {
 	tds.buffers = append(tds.buffers, tds.currentBuffer)
 }
 
+func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
+	aggregateBuffer := &Buffer{}
+	aggregateBuffer.initialise()
+
+	currentBuffer := &Buffer{}
+	currentBuffer.initialise()
+
+	buffers := []*Buffer{currentBuffer}
+
+	tds.tMu.Lock()
+	t := &TrieDbState{
+		t:               tds.t,
+		tMu:             tds.tMu,
+		db:              tds.db,
+		blockNr:         tds.getBlockNr(),
+		buffers:         buffers,
+		aggregateBuffer: aggregateBuffer,
+		currentBuffer:   currentBuffer,
+		codeCache:       tds.codeCache,
+		codeSizeCache:   tds.codeSizeCache,
+		historical:      tds.historical,
+		noHistory:       tds.noHistory,
+		resolveReads:    tds.resolveReads,
+		pg:              tds.pg,
+		tp:              tds.tp,
+	}
+	tds.tMu.Unlock()
+
+	return t
+}
+
 func (tds *TrieDbState) LastRoot() common.Hash {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	return tds.t.Hash()
 }
 
@@ -256,13 +359,18 @@ func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
 // UpdateStateTrie assumes that the state trie is already fully resolved, i.e. any operations
 // will find necessary data inside the trie.
 func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	roots, err := tds.updateTrieRoots(true)
 	tds.clearUpdates()
 	return roots, err
 }
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
+	tds.tMu.Lock()
 	tds.t.Print(w)
+	tds.tMu.Unlock()
 	fmt.Fprintln(w, "") //nolint
 }
 
@@ -440,6 +548,9 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		return nil
 	}
 
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
 	storageTouches, _ := tds.buildStorageTouches(tds.resolveReads, false)
 
@@ -466,6 +577,9 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 
 // CalcTrieRoots calculates trie roots without modifying the state trie
 func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
 	// Retrive the list of inserted/updated/deleted storage items (keys and values)
 	storageKeys, sValues := tds.buildStorageTouches(false, true)
 	if trace {
@@ -641,9 +755,13 @@ func (tds *TrieDbState) clearUpdates() {
 }
 
 func (tds *TrieDbState) Rebuild() error {
-	if err := tds.Trie().Rebuild(tds.db, tds.blockNr); err != nil {
+	tds.tMu.Lock()
+	err := tds.t.Rebuild(tds.db, tds.blockNr)
+	tds.tMu.Unlock()
+	if err != nil {
 		return err
 	}
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
@@ -651,8 +769,12 @@ func (tds *TrieDbState) Rebuild() error {
 }
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
-	tds.blockNr = blockNr
+	tds.setBlockNr(blockNr)
 	tds.tp.SetBlockNr(blockNr)
+}
+
+func (tds *TrieDbState) GetBlockNr() uint64 {
+	return tds.getBlockNr()
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
@@ -708,6 +830,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	if err := tds.ResolveStateTrie(); err != nil {
 		return err
 	}
+
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	if _, err := tds.updateTrieRoots(false); err != nil {
 		return err
 	}
@@ -716,13 +841,16 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			return err
 		}
 	}
+
 	tds.clearUpdates()
-	tds.blockNr = blockNr
+	tds.setBlockNr(blockNr)
 	return nil
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
+	tds.tMu.Lock()
 	acc, ok := tds.t.GetAccount(addrHash[:])
+	tds.tMu.Unlock()
 	if ok {
 		return acc, nil
 	}
@@ -775,7 +903,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 }
 
 func (tds *TrieDbState) savePreimage(save bool, hash, preimage []byte) error {
-	if !save {
+	if !save || !tds.savePreimages {
 		return nil
 	}
 	// Following check is to minimise the overwriting the same value of preimage
@@ -846,7 +974,9 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 		}
 	}
 
+	tds.tMu.Lock()
 	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
+	defer tds.tMu.Unlock()
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
@@ -966,6 +1096,7 @@ type TrieStateWriter struct {
 }
 
 func (tds *TrieDbState) PruneTries(print bool) {
+	tds.tMu.Lock()
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
@@ -977,6 +1108,8 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
+	tds.tMu.Unlock()
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 	log.Info("Memory", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
@@ -1081,9 +1214,16 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStats, error) {
+func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitnessStats, error) {
 	bwb := trie.NewBlockWitnessBuilder(trace)
-	rs := trie.NewResolveSet(0)
+
+	var rs *trie.ResolveSet
+	if bin {
+		rs = trie.NewBinaryResolveSet(0)
+	} else {
+		rs = trie.NewResolveSet(0)
+	}
+
 	touches, storageTouches := tds.pg.ExtractTouches()
 	for _, touch := range touches {
 		rs.AddKey(touch)
@@ -1092,9 +1232,21 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStat
 		rs.AddKey(touch)
 	}
 	codeMap := tds.pg.ExtractCodeMap()
-	if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-		return nil, nil, err
+
+	tds.tMu.Lock()
+	if bin {
+		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
+			tds.tMu.Unlock()
+			return nil, nil, err
+		}
+	} else {
+		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
+			tds.tMu.Unlock()
+			return nil, nil, err
+		}
 	}
+	tds.tMu.Unlock()
+
 	var b bytes.Buffer
 
 	stats, err := bwb.WriteTo(&b)
@@ -1103,7 +1255,7 @@ func (tds *TrieDbState) ExtractWitness(trace bool) ([]byte, trie.WitnessTapeStat
 		return nil, nil, err
 	}
 
-	return b.Bytes(), stats, nil
+	return b.Bytes(), NewBlockWitnessStats(tds.blockNr, uint64(b.Len()), stats), nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
@@ -1117,4 +1269,12 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 
 func (tds *TrieDbState) TriePruningDebugDump() string {
 	return tds.tp.DebugDump()
+}
+
+func (tds *TrieDbState) getBlockNr() uint64 {
+	return atomic.LoadUint64(&tds.blockNr)
+}
+
+func (tds *TrieDbState) setBlockNr(n uint64) {
+	atomic.StoreUint64(&tds.blockNr, n)
 }

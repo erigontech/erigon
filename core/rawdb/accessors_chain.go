@@ -21,12 +21,11 @@ import (
 	"encoding/binary"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/params"
-
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -299,7 +298,7 @@ func ReadTdRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue 
 			//data, _ = db.Ancient(freezerDifficultyTable, number)
 		}
 	}
-	return data
+	return nil // Can't find the data anywhere.
 }
 
 // ReadTd retrieves a block's total difficulty corresponding to the hash.
@@ -357,7 +356,7 @@ func ReadReceiptsRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.Raw
 			//data, _ = db.Ancient(freezerReceiptTable, number)
 		}
 	}
-	return data
+	return nil // Can't find the data anywhere.
 }
 
 // ReadRawReceipts retrieves all the transaction receipts belonging to a block.

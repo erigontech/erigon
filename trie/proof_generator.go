@@ -30,10 +30,6 @@ import (
 
 type WitnessTapeStats map[string]int
 
-func (s WitnessTapeStats) GetOrZero(key string) int {
-	return s[key]
-}
-
 // TapeBuilder stores the sequence of values that is getting serialised using CBOR into a byte buffer
 type TapeBuilder struct {
 	buffer  bytes.Buffer     // Byte buffer where the CBOR-encoded values end up being written
@@ -298,13 +294,24 @@ func (bwb *BlockWitnessBuilder) emptyRoot() error {
 func (bwb *BlockWitnessBuilder) MakeBlockWitness(t *Trie, rs *ResolveSet, codeMap map[common.Hash][]byte) error {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
-	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeMap)
+	return bwb.makeBlockWitness(t.root, []byte{}, rs, hr, true, codeMap, expandKeyHex)
 }
+
+func expandKeyHex(hex []byte, nibble byte) []byte {
+	result := make([]byte, len(hex)+1)
+	copy(result, hex)
+	result[len(hex)] = nibble
+	return result
+}
+
+type expandKeyFunc func([]byte, byte) []byte
 
 func (bwb *BlockWitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, rs *ResolveSet, hr *hasher, force bool,
 	codeMap map[common.Hash][]byte,
+	expandKeyFunc expandKeyFunc,
 ) error {
+
 	switch n := nd.(type) {
 	case nil:
 		return nil
@@ -317,7 +324,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			h = h[:len(h)-1]
 		}
 		hexVal := concat(hex, h...)
-		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.Val, hexVal, rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
 		switch v := n.Val.(type) {
@@ -359,16 +366,11 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 			return bwb.hash(1)
 		}
 		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = i1
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = i2
-		if err := bwb.makeBlockWitness(n.child1, hex1, rs, hr, false, codeMap); err != nil {
+
+		if err := bwb.makeBlockWitness(n.child1, expandKeyFunc(hex, i1), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
-		if err := bwb.makeBlockWitness(n.child2, hex2, rs, hr, false, codeMap); err != nil {
+		if err := bwb.makeBlockWitness(n.child2, expandKeyFunc(hex, i2), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 			return err
 		}
 		return bwb.branch(n.mask)
@@ -385,7 +387,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 		var set uint32
 		for i, child := range n.Children {
 			if child != nil {
-				if err := bwb.makeBlockWitness(child, concat(hex, byte(i)), rs, hr, false, codeMap); err != nil {
+				if err := bwb.makeBlockWitness(child, expandKeyFunc(hex, byte(i)), rs, hr, false, codeMap, expandKeyFunc); err != nil {
 					return err
 				}
 				set |= (uint32(1) << uint(i))
@@ -416,7 +418,7 @@ func (bwb *BlockWitnessBuilder) makeBlockWitness(
 				}
 			} else {
 				// Here we substitute rs parameter for storageRs, because it needs to become the default
-				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap); err != nil {
+				if err := bwb.makeBlockWitness(n.storage, hex, rs, hr, true, codeMap, expandKeyFunc); err != nil {
 					return err
 				}
 			}
@@ -490,6 +492,7 @@ func (bwb *BlockWitnessBuilder) WriteTo(w io.Writer) (WitnessTapeStats, error) {
 	if _, err := bwb.Structure.buffer.WriteTo(w); err != nil {
 		return nil, err
 	}
+
 	return WitnessTapeStats(lens), nil
 }
 
@@ -577,6 +580,11 @@ func (cht *CborHashTape) Next() (common.Hash, error) {
 
 // BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
 func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, error) {
+	return BlockWitnessToTrieBin(bw, trace, false)
+}
+
+// BlockWitnessToTrie creates trie and code map, given serialised representation of block witness
+func BlockWitnessToTrieBin(bw []byte, trace bool, isBinary bool) (*Trie, map[common.Hash][]byte, error) {
 	codeMap := make(map[common.Hash][]byte)
 	var lens map[string]int
 	var handle codec.CborHandle
@@ -588,25 +596,27 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 	// It is important to read the tapes in the same order as they were written
 	startOffset := decoder.NumBytesRead()
 	endOffset := startOffset + lens[KeyTape]
-	hb.SetKeyTape(NewCborBytesTape(bw[startOffset:endOffset]))
+
+	keyTape := NewCborBytesTape(bw[startOffset:endOffset])
+
 	startOffset = endOffset
 	endOffset = startOffset + lens[ValueTape]
-	hb.SetValueTape(
-		NewRlpSerializableBytesTape(
-			NewCborBytesTape(bw[startOffset:endOffset])))
+	valueTape := NewRlpSerializableBytesTape(NewCborBytesTape(bw[startOffset:endOffset]))
 
 	startOffset = endOffset
 	endOffset = startOffset + lens[NonceTape]
-	hb.SetNonceTape(NewCborUint64Tape(bw[startOffset:endOffset]))
+	nonceTape := NewCborUint64Tape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[BalanceTape]
-	hb.SetBalanceTape(NewCborBigIntTape(bw[startOffset:endOffset]))
+	balanceTape := NewCborBigIntTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[HashesTape]
-	hb.SetHashTape(NewCborHashTape(bw[startOffset:endOffset]))
+
+	hashTape := NewCborHashTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[CodesTape]
-	hb.SetCodeTape(NewCborBytesTape(bw[startOffset:endOffset]))
+
+	codeTape := NewCborBytesTape(bw[startOffset:endOffset])
 	startOffset = endOffset
 	endOffset = startOffset + lens[StructureTape]
 	structureB := bw[startOffset:endOffset]
@@ -616,72 +626,91 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 		if err := decoder.Decode(&opcode); err != nil {
 			return nil, nil, err
 		}
+		hashOnly := false
 		switch opcode {
+		case OpLeafHash:
+			hashOnly = true
+			opcode = OpLeaf
+			fallthrough
 		case OpLeaf:
 			if trace {
-				fmt.Printf("LEAF ")
+				if hashOnly {
+					fmt.Printf("LEAFHASH ")
+				} else {
+					fmt.Printf("LEAF ")
+				}
 			}
 			var length int
 			if err := decoder.Decode(&length); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leaf(length); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
 				return nil, nil, err
 			}
-		case OpLeafHash:
-			if trace {
-				fmt.Printf("LEAFHASH ")
-			}
-			var length int
-			if err := decoder.Decode(&length); err != nil {
+			val, err := valueTape.Next()
+			if err != nil {
 				return nil, nil, err
 			}
-			if err := hb.leafHash(length); err != nil {
-				return nil, nil, err
-			}
-		case OpExtension:
-			if trace {
-				fmt.Printf("EXTENSION ")
-			}
-			var key []byte
-			if err := decoder.Decode(&key); err != nil {
-				return nil, nil, err
-			}
-			if err := hb.extension(key); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.leafHash(length, keyHex, val); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.leaf(length, keyHex, val); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpExtensionHash:
+			hashOnly = true
+			opcode = OpExtension
+			fallthrough
+		case OpExtension:
 			if trace {
-				fmt.Printf("EXTENSIONHASH ")
+				if hashOnly {
+					fmt.Printf("EXTENSIONHASH ")
+				} else {
+					fmt.Printf("EXTENSION ")
+				}
 			}
 			var key []byte
 			if err := decoder.Decode(&key); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.extensionHash(key); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.extensionHash(key); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.extension(key); err != nil {
+					return nil, nil, err
+				}
 			}
+
+		case OpBranchHash:
+			hashOnly = true
+			opcode = OpBranch
+			fallthrough
 		case OpBranch:
 			if trace {
-				fmt.Printf("BRANCH ")
+				if hashOnly {
+					fmt.Printf("BRANCHHASH ")
+				} else {
+					fmt.Printf("BRANCH ")
+				}
 			}
 			var set uint16
 			if err := decoder.Decode(&set); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.branch(set); err != nil {
-				return nil, nil, err
-			}
-		case OpBranchHash:
-			if trace {
-				fmt.Printf("BRANCHHASH ")
-			}
-			var set uint16
-			if err := decoder.Decode(&set); err != nil {
-				return nil, nil, err
-			}
-			if err := hb.branchHash(set); err != nil {
-				return nil, nil, err
+			if hashOnly {
+				if err := hb.branchHash(set); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.branch(set); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpHash:
 			if trace {
@@ -691,18 +720,33 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 			if err := decoder.Decode(&number); err != nil {
 				return nil, nil, err
 			}
-			if err := hb.hash(number); err != nil {
-				return nil, nil, err
+			for i := 0; i < number; i++ {
+				hash, err := hashTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
+				if err := hb.hash(hash); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpCode:
 			if trace {
 				fmt.Printf("CODE ")
 			}
-			if code, codeHash, err := hb.code(); err == nil {
+			code, err := codeTape.Next()
+			if err != nil {
+				return nil, nil, err
+			}
+			if codeHash, err := hb.code(code); err == nil {
 				codeMap[codeHash] = code
 			} else {
 				return nil, nil, err
 			}
+
+		case OpAccountLeafHash:
+			hashOnly = true
+			opcode = OpAccountLeaf
+			fallthrough
 		case OpAccountLeaf:
 			var length int
 			var fieldSet uint32
@@ -713,25 +757,39 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 				return nil, nil, err
 			}
 			if trace {
-				fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
+				if hashOnly {
+					fmt.Printf("ACCOUNTLEAFHASH (%b)", fieldSet)
+				} else {
+					fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
+				}
 			}
-			if err := hb.accountLeaf(length, fieldSet); err != nil {
+			keyHex, err := keyTape.Next()
+			if err != nil {
 				return nil, nil, err
 			}
-		case OpAccountLeafHash:
-			if trace {
-				fmt.Printf("ACCOUNTLEAFHASH ")
+			balance := big.NewInt(0)
+			if fieldSet&uint32(2) != 0 {
+				balance, err = balanceTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
 			}
-			var length int
-			var fieldSet uint32
-			if err := decoder.Decode(&length); err != nil {
-				return nil, nil, err
+			nonce := uint64(0)
+			if fieldSet&uint32(1) != 0 {
+				nonce, err = nonceTape.Next()
+				if err != nil {
+					return nil, nil, err
+				}
 			}
-			if err := decoder.Decode(&fieldSet); err != nil {
-				return nil, nil, err
-			}
-			if err := hb.accountLeafHash(length, fieldSet); err != nil {
-				return nil, nil, err
+			if hashOnly {
+
+				if err := hb.accountLeafHash(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
+					return nil, nil, err
+				}
+			} else {
+				if err := hb.accountLeaf(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
+					return nil, nil, err
+				}
 			}
 		case OpEmptyRoot:
 			if trace {
@@ -746,7 +804,12 @@ func BlockWitnessToTrie(bw []byte, trace bool) (*Trie, map[common.Hash][]byte, e
 		fmt.Printf("\n")
 	}
 	r := hb.root()
-	tr := New(hb.rootHash())
+	var tr *Trie
+	if isBinary {
+		tr = NewBinary(hb.rootHash())
+	} else {
+		tr = New(hb.rootHash())
+	}
 	tr.root = r
 	return tr, codeMap, nil
 }

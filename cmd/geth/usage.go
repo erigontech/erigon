@@ -22,8 +22,6 @@ import (
 	"io"
 	"sort"
 
-	"strings"
-
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/urfave/cli"
@@ -79,7 +77,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.GoerliFlag,
 			utils.SyncModeFlag,
 			utils.ExitWhenSyncedFlag,
-			utils.GCModeFlag,
+			utils.GCModePruningFlag,
 			utils.GCModeLimitFlag,
 			utils.GCModeBlockToPruneFlag,
 			utils.GCModeTickTimeout,
@@ -88,7 +86,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.LightKDFFlag,
 			utils.WhitelistFlag,
 			utils.DownloadOnlyFlag,
-			utils.NoHistory,
+			utils.StorageModeFlag,
 			utils.ArchiveSyncInterval,
 		},
 	},
@@ -122,16 +120,6 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.EthashDatasetsOnDiskFlag,
 		},
 	},
-	//{
-	//	Name: "DASHBOARD",
-	//	Flags: []cli.Flag{
-	//		utils.DashboardEnabledFlag,
-	//		utils.DashboardAddrFlag,
-	//		utils.DashboardPortFlag,
-	//		utils.DashboardRefreshFlag,
-	//		utils.DashboardAssetsFlag,
-	//	},
-	//},
 	{
 		Name: "TRANSACTION POOL",
 		Flags: []cli.Flag{
@@ -157,7 +145,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.CacheGCFlag,
 			utils.CacheNoPrefetchFlag,
 			utils.TrieCacheGenFlag,
-			utils.BadgerFlag,
+			utils.DatabaseFlag,
 		},
 	},
 	{
@@ -194,6 +182,7 @@ var AppHelpFlagGroups = []flagGroup{
 			utils.JSpathFlag,
 			utils.ExecFlag,
 			utils.PreloadJSFlag,
+			utils.RemoteDbListenAddress,
 		},
 	},
 	{
@@ -328,9 +317,6 @@ func init() {
 			var uncategorized []cli.Flag
 			for _, flag := range data.(*cli.App).Flags {
 				if _, ok := categorized[flag.String()]; !ok {
-					if strings.HasPrefix(flag.GetName(), "dashboard") {
-						continue
-					}
 					uncategorized = append(uncategorized, flag)
 				}
 			}

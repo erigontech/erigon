@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -362,35 +363,21 @@ func printBuckets(db *bolt.DB) {
 	}
 }
 
-func bucketStats(db *bolt.DB) {
+func bucketStats(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
 	bucketList := allBuckets(db)
-	storageStats := new(bolt.BucketStats)
-	hStorageStats := new(bolt.BucketStats)
 	fmt.Printf(",BranchPageN,BranchOverflowN,LeafPageN,LeafOverflowN,KeyN,Depth,BranchAlloc,BranchInuse,LeafAlloc,LeafInuse,BucketN,InlineBucketN,InlineBucketInuse\n")
 	db.View(func(tx *bolt.Tx) error {
 		for _, bucket := range bucketList {
 			b := tx.Bucket(bucket)
 			bs := b.Stats()
-			if len(bucket) == 20 {
-				storageStats.Add(bs)
-			} else if len(bucket) == 21 {
-				hStorageStats.Add(bs)
-			} else {
-				fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
-					bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-					bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-			}
+			fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", string(bucket),
+				bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
+				bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 		}
 		return nil
 	})
-	bs := *storageStats
-	fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", "Contract Storage",
-		bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
-	bs = *hStorageStats
-	fmt.Printf("%s,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", "Contract hStorage",
-		bs.BranchPageN, bs.BranchOverflowN, bs.LeafPageN, bs.LeafOverflowN, bs.KeyN, bs.Depth, bs.BranchAlloc, bs.BranchInuse,
-		bs.LeafAlloc, bs.LeafInuse, bs.BucketN, bs.InlineBucketN, bs.InlineBucketInuse)
 }
 
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
@@ -674,11 +661,8 @@ func extractTrie(block int) {
 	}
 }
 
-func testRewind(block, rewind int) {
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("statedb")
-	ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth//chaindata")
+func testRewind(chaindata string, block, rewind int) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -1093,13 +1077,16 @@ func printBranches(block uint64) {
 	}
 }
 
-func readAccount() {
-	ethDb, err := ethdb.NewBoltDatabase("statedb")
+func readAccount(chaindata string, account common.Address) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	accountBytes := common.FromHex(*account)
-	secKey := crypto.Keccak256(accountBytes)
+	secKey := crypto.Keccak256(account[:])
 	v, _ := ethDb.Get(dbutils.AccountsBucket, secKey)
-	fmt.Printf("%x:%x\n", secKey, v)
+	var a accounts.Account
+	if err = a.DecodeForStorage(v); err != nil {
+		panic(err)
+	}
+	fmt.Printf("%x:%x\n%x\n", secKey, v, a.Root)
 }
 
 func repairCurrent() {
@@ -1190,11 +1177,13 @@ func main() {
 	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	//check(err)
 	//defer db.Close()
-	//bucketStats(db)
+	if *action == "bucketStats" {
+		bucketStats(*chaindata)
+	}
 	//mychart()
 	//testRebuild()
 	if *action == "testRewind" {
-		testRewind(*block, *rewind)
+		testRewind(*chaindata, *block, *rewind)
 	}
 	//hashFile()
 	//buildHashFromFile()
@@ -1230,7 +1219,9 @@ func main() {
 	//execToBlock(*block)
 	//extractTrie(*block)
 	//repair()
-	//readAccount()
+	if *action == "readAccount" {
+		readAccount(*chaindata, common.HexToAddress(*account))
+	}
 	//repairCurrent()
 	//testMemBolt()
 	//fmt.Printf("\u00b3\n")

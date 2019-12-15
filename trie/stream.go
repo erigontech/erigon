@@ -23,6 +23,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 // StreamItem is an enum type for values that help distinguish different
@@ -179,21 +180,32 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	var succStorage bytes.Buffer
 	var currStorage OneBytesTape
 	var value OneBytesTape
-	var hashes TwoHashTape
+	var hashRef *common.Hash
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
 	var a accounts.Account
 	var fieldSet uint32
 	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
-	hb.SetKeyTape(&curr)
-	hb.SetValueTape(NewRlpSerializableBytesTape(&value))
-	hb.SetNonceTape((*OneUint64Tape)(&a.Nonce))
-	hb.SetBalanceTape((*OneBalanceTape)(&a.Balance))
-	hb.SetHashTape(&hashes)
-	hb.SetSSizeTape((*OneUint64Tape)(&a.StorageSize))
+
 	hb.Reset()
 	curr.Reset()
 	currStorage.Reset()
+
+	makeData := func(fieldSet uint32, hashRef *common.Hash) GenStructStepData {
+		if hashRef != nil {
+			return GenStructStepHashData{*hashRef}
+		} else if fieldSet == 0 {
+			return GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(value.Bytes())}
+		} else {
+			return GenStructStepAccountData{
+				FieldSet:    fieldSet,
+				StorageSize: a.StorageSize,
+				Balance:     &a.Balance,
+				Nonce:       a.Nonce,
+			}
+		}
+	}
+
 	hashOnly := func(_ []byte) bool { return !trace }
 	for ki < len(s.hexes) {
 		hex := s.hexes[ki]
@@ -205,9 +217,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				currStorage.Write(succStorage.Bytes())
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
-					hb.SetKeyTape(&currStorage)
 					var err error
-					sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
+					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -215,10 +226,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 					fieldSet += AccountFieldRootOnly
 				}
 			} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-				// Push the account root on the stack instead
-				hashes.hashes[0] = a.Root
-				hashes.idx = 0
-				if err := hb.hash(1); err != nil {
+				if err := hb.hash(a.Root); err != nil {
 					return common.Hash{}, err
 				}
 				fieldSet += AccountFieldRootOnly
@@ -228,9 +236,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succ.Reset()
 			succ.Write(hex)
 			if curr.Len() > 0 {
-				hb.SetKeyTape(&curr)
 				var err error
-				groups, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, groups)
+				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -249,18 +256,14 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				}
 				if !a.IsEmptyCodeHash() {
 					fieldSet += AccountFieldCodeHashOnly
-					// Load hashes onto the stack of the hashbuilder
-					hashes.hashes[0] = a.CodeHash // this will be just beneath the top of the stack
-					hashes.idx = 0                // Reset the counter
-					if err := hb.hash(1); err != nil {
+					if err := hb.hash(a.CodeHash); err != nil {
 						return common.Hash{}, err
 					}
 				}
 			case AHashStreamItem:
 				h := s.hashes[hi]
 				hi++
-				hashes.hashes[0] = h
-				hashes.idx = 0
+				hashRef = &h
 			}
 		} else {
 			currStorage.Reset()
@@ -268,9 +271,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succStorage.Reset()
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
-				hb.SetKeyTape(&currStorage)
 				var err error
-				sGroups, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
+				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -285,8 +287,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			case SHashStreamItem:
 				h := s.hashes[hi]
 				hi++
-				hashes.hashes[0] = h
-				hashes.idx = 0
+				hashRef = &h
 			}
 		}
 		ki++
@@ -297,9 +298,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		currStorage.Write(succStorage.Bytes())
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
-			hb.SetKeyTape(&currStorage)
 			var err error
-			_, err = GenStructStep(AccountFieldSetNotAccount, hashOnly, sItemType == SHashStreamItem, false, currStorage.Bytes(), succStorage.Bytes(), hb, sGroups)
+			sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -307,10 +307,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			fieldSet += AccountFieldRootOnly
 		}
 	} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-		// Push the account root on the stack instead
-		hashes.hashes[0] = a.Root
-		hashes.idx = 0
-		if err := hb.hash(1); err != nil {
+		if err := hb.hash(a.Root); err != nil {
 			return common.Hash{}, err
 		}
 		fieldSet += AccountFieldRootOnly
@@ -320,7 +317,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	succ.Reset()
 	if curr.Len() > 0 {
 		var err error
-		_, err = GenStructStep(fieldSet, hashOnly, itemType == AHashStreamItem, false, curr.Bytes(), succ.Bytes(), hb, groups)
+		groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
 		if err != nil {
 			return common.Hash{}, err
 		}

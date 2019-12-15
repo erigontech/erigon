@@ -186,11 +186,11 @@ func (m *mutation) Has(bucket, key []byte) (bool, error) {
 	return false, nil
 }
 
-func (m *mutation) Size() int {
+func (m *mutation) DiskSize() int64 {
 	if m.db == nil {
 		return 0
 	}
-	return m.db.Size()
+	return m.db.DiskSize()
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {
@@ -224,7 +224,11 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 		changeSet = dbutils.NewChangeSet()
 	}
 
-	changesByBucket[hBucketStr] = changeSet.Add(key,value)
+	err:=changeSet.Add(key,value)
+	if err!=nil {
+		return err
+	}
+	changesByBucket[hBucketStr] = changeSet
 	if noHistory {
 		return nil
 	}
@@ -367,8 +371,10 @@ func (m *mutation) Commit() (uint64, error) {
 					log.Error("DecodeChangeSet changeSet error on commit", "err", err)
 				}
 
-				changeSet = changeSet.MultiAdd(changes.Changes)
-				changedRLP, err := dbutils.EncodeChangeSet(changeSet)
+				if err = changeSet.MultiAdd(changes.Changes); err != nil {
+					return 0, err
+				}
+				changedRLP, err := changeSet.Encode()
 				if err != nil {
 					log.Error("EncodeChangeSet changeSet error on commit", "err", err)
 				}
@@ -463,6 +469,10 @@ func (m *mutation) panicOnEmptyDB()  {
 func (m *mutation) MemCopy() Database {
 	m.panicOnEmptyDB()
 	return m.db
+}
+
+func (m *mutation) ID() uint64 {
+	return m.db.ID()
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

@@ -46,19 +46,21 @@ type Stateless struct {
 // NewStateless creates a new instance of Stateless
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
-func NewStateless(stateRoot common.Hash, witness []byte, blockNr uint64, trace bool) (*Stateless, error) {
-	t, codeMap, err := trie.BlockWitnessToTrie(witness, trace)
+func NewStateless(stateRoot common.Hash, witness []byte, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
+	t, codeMap, err := trie.BlockWitnessToTrieBin(witness, trace, isBinary)
 	if err != nil {
 		return nil, err
 	}
-	if t.Hash() != stateRoot {
-		filename := fmt.Sprintf("root_%d.txt", blockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			defer f.Close()
-			t.Print(f)
+	if !isBinary {
+		if t.Hash() != stateRoot {
+			filename := fmt.Sprintf("root_%d.txt", blockNr)
+			f, err := os.Create(filename)
+			if err == nil {
+				defer f.Close()
+				t.Print(f)
+			}
+			return nil, fmt.Errorf("state root mistmatch when creating Stateless2, got %x, expected %x", t.Hash(), stateRoot)
 		}
-		return nil, fmt.Errorf("state root mistmatch when creating Stateless2, got %x, expected %x", t.Hash(), stateRoot)
 	}
 	return &Stateless{
 		t:              t,

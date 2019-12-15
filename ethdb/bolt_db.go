@@ -38,6 +38,7 @@ const HeapSize = 512 * 1024 * 1024
 type BoltDatabase struct {
 	db  *bolt.DB   // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
+	id  uint64
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -57,6 +58,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
+		id:  id(),
 	}, nil
 }
 
@@ -111,8 +113,11 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
-		sh = sh.Add(key, value)
-		dat, err = dbutils.EncodeChangeSet(sh)
+		err = sh.Add(key, value)
+		if err != nil {
+			return err
+		}
+		dat, err = sh.Encode()
 		if err != nil {
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
@@ -169,8 +174,8 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *BoltDatabase) Size() int {
-	return db.db.Size()
+func (db *BoltDatabase) DiskSize() int64 {
+	return int64(db.db.Size())
 }
 
 // Get returns the value for a given key if it's present.
@@ -715,6 +720,10 @@ func (db *BoltDatabase) Ancients() (uint64, error) {
 // TruncateAncients returns an error as we don't have a backing chain freezer.
 func (db *BoltDatabase) TruncateAncients(items uint64) error {
 	return errNotSupported
+}
+
+func (db *BoltDatabase) ID() uint64 {
+	return db.id
 }
 
 func InspectDatabase(db Database) error {

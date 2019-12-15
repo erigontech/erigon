@@ -70,10 +70,7 @@ var (
 		utils.NoUSBFlag,
 		utils.SmartCardDaemonPathFlag,
 		utils.OverrideIstanbulFlag,
-		utils.DashboardEnabledFlag,
-		utils.DashboardAddrFlag,
-		utils.DashboardPortFlag,
-		utils.DashboardRefreshFlag,
+		utils.OverrideMuirGlacierFlag,
 		utils.EthashCacheDirFlag,
 		utils.EthashCachesInMemoryFlag,
 		utils.EthashCachesOnDiskFlag,
@@ -93,7 +90,7 @@ var (
 		utils.TxPoolLifetimeFlag,
 		utils.SyncModeFlag,
 		utils.ExitWhenSyncedFlag,
-		utils.GCModeFlag,
+		utils.GCModePruningFlag,
 		utils.GCModeLimitFlag,
 		utils.GCModeBlockToPruneFlag,
 		utils.GCModeTickTimeout,
@@ -110,9 +107,10 @@ var (
 		utils.CacheGCFlag,
 		utils.TrieCacheGenFlag,
 		utils.DownloadOnlyFlag,
-		utils.NoHistory,
+		utils.StorageModeFlag,
 		utils.ArchiveSyncInterval,
-		utils.BadgerFlag,
+		utils.DatabaseFlag,
+		utils.RemoteDbListenAddress,
 		utils.ListenPortFlag,
 		utils.MaxPeersFlag,
 		utils.MaxPendingPeersFlag,
@@ -231,16 +229,8 @@ func init() {
 	app.Flags = append(app.Flags, metricsFlags...)
 
 	app.Before = func(ctx *cli.Context) error {
-		logdir := ""
-		if ctx.GlobalBool(utils.DashboardEnabledFlag.Name) {
-			logdir = (&node.Config{DataDir: utils.MakeDataDir(ctx)}).ResolvePath("logs")
-		}
-		if err := debug.Setup(ctx, logdir); err != nil {
-			return err
-		}
-		return nil
+		return debug.Setup(ctx, "")
 	}
-
 	app.After = func(ctx *cli.Context) error {
 		debug.Exit()
 		console.Stdin.Close() // Resets terminal mode.

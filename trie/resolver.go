@@ -3,16 +3,15 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 var emptyHash [32]byte
@@ -43,41 +42,6 @@ func (obt *OneBytesTape) Next() ([]byte, error) {
 	return obt.Bytes(), nil
 }
 
-// OneUint64Tape implements Uint64Tape and can only contain one number at a time
-type OneUint64Tape uint64
-
-// Next belongs to the Uint64Tape interface, and for this type it always returns
-// the currently set nonce
-func (out *OneUint64Tape) Next() (uint64, error) {
-	return uint64(*out), nil
-}
-
-// OneBalanceTape implements BigIntTape and can only contain one balance at a time
-type OneBalanceTape big.Int
-
-// Next belongs to the BigIntTape interface, and for this type it always returns
-// the currently set balance
-func (obt *OneBalanceTape) Next() (*big.Int, error) {
-	return (*big.Int)(obt), nil
-}
-
-// TwoHashTape implements HashTape and can only contain two hashes at a time
-type TwoHashTape struct {
-	hashes [2]common.Hash
-	idx    int
-}
-
-// Next belongs to the HashTape interface, and for this type it returns
-// the first hash on the first invocation, and the second hash on all
-// subsequent invocations
-func (tht *TwoHashTape) Next() (common.Hash, error) {
-	h := tht.hashes[tht.idx]
-	if tht.idx == 0 {
-		tht.idx = 1
-	}
-	return h, nil
-}
-
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
@@ -97,7 +61,6 @@ type Resolver struct {
 	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
 	value      OneBytesTape // Current value to be used as the value tape for the hash builder
-	hashes     TwoHashTape  // Current code hash and storage hash as the hash tape for the hash builder
 	groups     []uint16
 	a          accounts.Account
 }
@@ -111,12 +74,6 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		blockNr:    blockNr,
 		hb:         NewHashBuilder(false),
 	}
-	tr.hb.SetKeyTape(&tr.curr)
-	tr.hb.SetValueTape(NewRlpSerializableBytesTape(&tr.value))
-	tr.hb.SetNonceTape((*OneUint64Tape)(&tr.a.Nonce))
-	tr.hb.SetBalanceTape((*OneBalanceTape)(&tr.a.Balance))
-	tr.hb.SetHashTape(&tr.hashes)
-	tr.hb.SetSSizeTape((*OneUint64Tape)(&tr.a.StorageSize))
 	return &tr
 }
 
@@ -217,7 +174,18 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+		var data GenStructStepData
+		if tr.fieldSet == 0 {
+			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+		} else {
+			data = GenStructStepAccountData{
+				FieldSet:    tr.fieldSet,
+				StorageSize: tr.a.StorageSize,
+				Balance:     &tr.a.Balance,
+				Nonce:       tr.a.Nonce,
+			}
+		}
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -299,7 +267,18 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, tr.groups)
+			var data GenStructStepData
+			if tr.fieldSet == 0 {
+				data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+			} else {
+				data = GenStructStepAccountData{
+					FieldSet:    tr.fieldSet,
+					StorageSize: tr.a.StorageSize,
+					Balance:     &tr.a.Balance,
+					Nonce:       tr.a.Nonce,
+				}
+			}
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 			if err != nil {
 				return err
 			}
@@ -317,12 +296,11 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				} else {
 					tr.fieldSet = AccountFieldSetContract
 				}
-				// Load hashes onto the stack of the hashbuilder
-				tr.hashes.hashes[0] = tr.a.CodeHash // this will be just beneath the top of the stack
-				tr.hashes.hashes[1] = tr.a.Root     // this will end up on top of the stack
-				tr.hashes.idx = 0                   // Reset the counter
 				// the first item ends up deepest on the stack, the seccond item - on the top
-				if err := tr.hb.hash(2); err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash); err != nil {
+					return err
+				}
+				if err := tr.hb.hash(tr.a.Root); err != nil {
 					return err
 				}
 			}

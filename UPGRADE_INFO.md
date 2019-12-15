@@ -1,3 +1,14 @@
+# 2019-12-03 merge
+
+## geth
+
+commit 9318d4ce8cd86d26e78fca7fee343767ec272a3e
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Tue Nov 26 12:20:22 2019 +0200
+
+    params: release go-ethereum v1.9.8
+
+
 # 2019-10-11 merge
 
 

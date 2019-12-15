@@ -54,8 +54,10 @@ func TestCreate2Revive(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -221,8 +223,10 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -279,6 +283,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 	transactOptsLonger := bind.NewKeyedTransactor(key)
 	transactOptsLonger.GasLimit = 1000000
+
 	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 4, func(i int, block *core.BlockGen) {
 		var tx *types.Transaction
 
@@ -345,6 +350,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 }
 
+
 func TestReorgOverStateChange(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -356,8 +362,10 @@ func TestReorgOverStateChange(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:		 new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
@@ -656,8 +664,10 @@ func TestCreateOnExistingStorage(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{

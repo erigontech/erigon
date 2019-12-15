@@ -26,7 +26,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            int                    `toml:",omitempty"`
 		LightEgress             int                    `toml:",omitempty"`
-		NoHistory               bool
+		StorageMode             string
 		ArchiveSyncInterval     int
 		LightServ               int `toml:",omitempty"`
 		LightPeers              int `toml:",omitempty"`
@@ -57,7 +57,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.NoPruning = c.NoPruning
 	enc.NoPrefetch = c.NoPrefetch
 	enc.Whitelist = c.Whitelist
-	enc.NoHistory = c.NoHistory
+	enc.StorageMode = c.StorageMode.ToString()
 	enc.ArchiveSyncInterval = c.ArchiveSyncInterval
 	enc.LightServ = c.LightServ
 	enc.LightIngress = c.LightIngress
@@ -95,7 +95,7 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		Whitelist               map[uint64]common.Hash `toml:"-"`
 		LightIngress            *int                   `toml:",omitempty"`
 		LightEgress             *int                   `toml:",omitempty"`
-		NoHistory               *bool
+		Mode                    *string
 		ArchiveSyncInterval     *int
 		LightServ               *int `toml:",omitempty"`
 		LightPeers              *int `toml:",omitempty"`
@@ -141,8 +141,12 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	if dec.Whitelist != nil {
 		c.Whitelist = dec.Whitelist
 	}
-	if dec.NoHistory != nil {
-		c.NoHistory = *dec.NoHistory
+	if dec.Mode != nil {
+		mode, err := StorageModeFromString(*dec.Mode)
+		if err != nil {
+			return err
+		}
+		c.StorageMode = mode
 	}
 	if dec.ArchiveSyncInterval != nil {
 		c.ArchiveSyncInterval = *dec.ArchiveSyncInterval

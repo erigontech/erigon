@@ -267,7 +267,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			// Print progress logs if long enough time elapsed
 			if time.Since(logged) > 8*time.Second {
 				if number > origin {
-					log.Info("Tracing chain segment", "start", origin, "end", end.NumberU64(), "current", number, "transactions", traced, "elapsed", time.Since(begin), "memory", api.eth.ChainDb().Size())
+					log.Info("Tracing chain segment", "start", origin, "end", end.NumberU64(), "current", number, "transactions", traced, "elapsed", time.Since(begin), "database", api.eth.ChainDb().DiskSize())
 				} else {
 					log.Info("Preparing state for chain trace", "block", number, "start", origin, "elapsed", time.Since(begin))
 				}
