@@ -567,11 +567,6 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 
 	ch := make(chan bool, ServerMaxConnections)
 	defer close(ch)
-	go func() {
-		for _ = range time.Tick(5 * time.Second) {
-			fmt.Printf("chan: %d\n", len(ch))
-		}
-	}()
 	for {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
