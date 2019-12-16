@@ -683,6 +683,7 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 	db := &DB{
 		dialFunc:       dialFunc,
 		connectionPool: make(chan *conn, ClientMaxConnections),
+		reconnect:      make(chan struct{}, ClientMaxConnections),
 	}
 
 	connectionCtx, connectionCtxCancel := context.WithCancel(context.Background())
