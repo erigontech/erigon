@@ -301,7 +301,7 @@ func daemon(cfg Config) {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
 	}
-	dbgApiImpl, err := ConnectPrivateDebugAPIImpl(cfg.remoteDbAddress)
+	dbgAPIImpl, err := ConnectPrivateDebugAPIImpl(cfg.remoteDbAddress)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
@@ -320,7 +320,7 @@ func daemon(cfg Config) {
 			rpcAPI = append(rpcAPI, rpc.API{
 				Namespace: "debug",
 				Public:    true,
-				Service:   PrivateDebugAPI(dbgApiImpl),
+				Service:   PrivateDebugAPI(dbgAPIImpl),
 				Version:   "1.0",
 			})
 

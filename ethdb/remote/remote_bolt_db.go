@@ -28,22 +28,22 @@ import (
 
 // BoltDatabase is a wrapper over BoltDb,
 // compatible with the Database interface.
-type RemoteBoltDatabase struct {
+type BoltDatabase struct {
 	db  *DB        // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 }
 
 // NewRemoteBoltDatabase returns a BoltDB wrapper.
-func NewRemoteBoltDatabase(db *DB) *RemoteBoltDatabase {
+func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
 	logger := log.New()
 
-	return &RemoteBoltDatabase{
+	return &BoltDatabase{
 		db:  db,
 		log: logger,
 	}
 }
 
-func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
+func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
 	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b := tx.Bucket(bucket)
@@ -59,7 +59,7 @@ func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
 }
 
 // Get returns the value for a given key if it's present.
-func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
@@ -80,13 +80,13 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 // GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-func (db *RemoteBoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	return db.Get(hBucket, composite)
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
-func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
@@ -122,7 +122,7 @@ func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uin
 	return dat, err
 }
 
-func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b := tx.Bucket(bucket)
@@ -146,7 +146,7 @@ func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walk
 	return err
 }
 
-func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -202,7 +202,7 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 	return err
 }
 
-func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
@@ -280,7 +280,7 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 	return err
 }
 
-func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -409,11 +409,11 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 	return nil
 }
 
-func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
 	return ethdb.RewindData(db, timestampSrc, timestampDst, df)
 }
 
-func (db *RemoteBoltDatabase) Close() {
+func (db *BoltDatabase) Close() {
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 	} else {
