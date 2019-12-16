@@ -310,7 +310,7 @@ func (db *BadgerDatabase) Has(bucket, key []byte) (bool, error) {
 // walker is called for each eligible entry.
 // If walker returns false or an error, the walk stops.
 func (db *BadgerDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := bytesmask(fixedbits)
+	fixedbytes, mask := Bytesmask(fixedbits)
 	prefix := bucketKey(bucket, startkey)
 	err := db.db.View(func(tx *badger.Txn) error {
 		it := tx.NewIterator(badger.DefaultIteratorOptions)
@@ -351,7 +351,7 @@ func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 	}
 
 	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := bytesmask(fixedbits[rangeIdx])
+	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 
 	err := db.db.View(func(tx *badger.Txn) error {
@@ -393,7 +393,7 @@ func (db *BadgerDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = bytesmask(fixedbits[rangeIdx])
+						fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 					}
 				}
@@ -438,7 +438,7 @@ func (db *BadgerDatabase) MultiPut(triplets ...[]byte) (uint64, error) {
 }
 
 func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
-	return rewindData(db, timestampSrc, timestampDst, df)
+	return RewindData(db, timestampSrc, timestampDst, df)
 }
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
