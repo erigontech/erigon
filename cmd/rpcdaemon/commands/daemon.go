@@ -61,53 +61,58 @@ type PrivateDebugAPIImpl struct {
 	dbReader ethdb.Getter
 }
 
-// NewAPI returns APIImpl instance
-func NewAPI(db *remote.DB) *APIImpl {
+// ConnectAPIImpl connects to the remote DB and returns APIImpl instance
+func ConnectAPIImpl(remoteDbAddress string) (*APIImpl, error) {
+	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
+		return conn, conn, conn, err
+	}
+	db, err := remote.NewDB(dial)
+	if err != nil {
+		return nil, err
+	}
+
 	return &APIImpl{
 		db: db,
-	}
+	}, nil
 }
 
-// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db *remote.DB) *PrivateDebugAPIImpl {
+// ConnectAPIImpl connects to the remote DB and returns APIImpl instance
+func ConnectPrivateDebugAPIImpl(remoteDbAddress string) (*PrivateDebugAPIImpl, error) {
+	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+		dialer := net.Dialer{}
+		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
+		return conn, conn, conn, err
+	}
+	db, err := remote.NewDB(dial)
+	if err != nil {
+		return nil, err
+	}
+
 	return &PrivateDebugAPIImpl{
 		db:       db,
 		dbReader: remote.NewRemoteBoltDatabase(db),
-	}
+	}, nil
 }
 
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	var blockNumber uint64
 
 	err := api.db.View(ctx, func(tx *remote.Tx) error {
-		b, err := tx.Bucket(dbutils.HeadHeaderKey)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(dbutils.HeadHeaderKey)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
 		}
-		blockHashData, err := b.Get(dbutils.HeadHeaderKey)
-		if err != nil {
-			return err
-		}
+		blockHashData := b.Get(dbutils.HeadHeaderKey)
 		if len(blockHashData) != common.HashLength {
 			return fmt.Errorf("head header hash not found or wrong size: %x", blockHashData)
 		}
-		b1, err := tx.Bucket(dbutils.HeaderNumberPrefix)
-		if err != nil {
-			return err
-		}
-
+		b1 := tx.Bucket(dbutils.HeaderNumberPrefix)
 		if b1 == nil {
 			return fmt.Errorf("bucket %s not found", dbutils.HeaderNumberPrefix)
 		}
-		blockNumberData, err := b1.Get(blockHashData)
-		if err != nil {
-			return err
-		}
-
+		blockNumberData := b1.Get(blockHashData)
 		if len(blockNumberData) != 8 {
 			return fmt.Errorf("head block number not found or wrong size: %x", blockNumberData)
 		}
@@ -128,7 +133,6 @@ type powEngine struct {
 }
 
 func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Header, seal bool) error {
-
 	panic("must not be called")
 }
 func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
@@ -181,19 +185,12 @@ func (c *chainContext) Engine() consensus.Engine {
 // GetBlockByNumber see https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber
 // see internal/ethapi.PublicBlockChainAPI.GetBlockByNumber
 func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber, fullTx bool) (map[string]interface{}, error) {
-	var err error
 	var block *types.Block
 	additionalFields := make(map[string]interface{})
 
-	err = api.db.View(ctx, func(tx *remote.Tx) error {
-		block, err = remote.GetBlockByNumber(tx, uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
-		additionalFields["totalDifficulty"], err = remote.ReadTd(tx, block.Hash(), uint64(number.Int64()))
-		if err != nil {
-			return err
-		}
+	err := api.db.View(ctx, func(tx *remote.Tx) error {
+		block = remote.GetBlockByNumber(tx, uint64(number.Int64()))
+		additionalFields["totalDifficulty"] = remote.ReadTd(tx, block.Hash(), uint64(number.Int64()))
 		return nil
 	})
 	if err != nil {
@@ -297,24 +294,17 @@ func daemon(cfg Config) {
 	vhosts := splitAndTrim(cfg.rpcVirtualHost)
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
-
-	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", cfg.remoteDbAddress)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", cfg.remoteDbAddress, err)
-		}
-		return conn, conn, conn, nil
-	}
-	db, err := remote.NewDB(context.Background(), dial)
+	var rpcAPI = []rpc.API{}
+	apiImpl, err := ConnectAPIImpl(cfg.remoteDbAddress)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
 	}
-
-	var rpcAPI = []rpc.API{}
-	apiImpl := NewAPI(db)
-	dbgAPIImpl := NewPrivateDebugAPI(db)
+	dbgAPIImpl, err := ConnectPrivateDebugAPIImpl(cfg.remoteDbAddress)
+	if err != nil {
+		log.Error("Could not connect to remoteDb", "error", err)
+		return
+	}
 
 	for _, enabledAPI := range enabledApis {
 		switch enabledAPI {

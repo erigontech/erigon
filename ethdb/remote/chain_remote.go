@@ -2,150 +2,120 @@ package remote
 
 import (
 	"bytes"
-	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // ReadTd reimplemented rawdb.ReadTd
-func ReadTd(tx *Tx, hash common.Hash, number uint64) (*hexutil.Big, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return nil, err
-	}
-
+func ReadTd(tx *Tx, hash common.Hash, number uint64) *hexutil.Big {
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
-		return nil, nil
+		return nil
 	}
 
-	data, err := bucket.Get(dbutils.HeaderTDKey(number, hash))
-	if err != nil {
-		return nil, err
-	}
+	data := bucket.Get(dbutils.HeaderTDKey(number, hash))
 	if len(data) == 0 {
-		return nil, nil
+		return nil
 	}
 	td := new(big.Int)
 	if err := rlp.Decode(bytes.NewReader(data), td); err != nil {
-		return nil, fmt.Errorf("invalid block total difficulty RLP. Hash: %s. Err: %w", hash, err)
+		log.Error("Invalid block total difficulty RLP", "hash", hash, "err", err)
+		return nil
 	}
-	return (*hexutil.Big)(td), nil
+	return (*hexutil.Big)(td)
 }
 
 // ReadCanonicalHash reimplementation of rawdb.ReadCanonicalHash
-func ReadCanonicalHash(tx *Tx, number uint64) (common.Hash, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
+func ReadCanonicalHash(tx *Tx, number uint64) common.Hash {
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
-		return common.Hash{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
+		return common.Hash{}
+		//return fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
 	}
 
-	data, err := bucket.Get(dbutils.HeaderHashKey(number))
-	if err != nil {
-		return common.Hash{}, err
-	}
+	data := bucket.Get(dbutils.HeaderHashKey(number))
 	if len(data) == 0 {
-		return common.Hash{}, nil
+		return common.Hash{}
 	}
-	return common.BytesToHash(data), nil
+	return common.BytesToHash(data)
 }
 
 // GetBlockByNumber reimplementation of chain.GetBlockByNumber
-func GetBlockByNumber(tx *Tx, number uint64) (*types.Block, error) {
-	hash, err := ReadCanonicalHash(tx, number)
-	if err != nil {
-		return nil, err
-	}
+func GetBlockByNumber(tx *Tx, number uint64) *types.Block {
+	hash := ReadCanonicalHash(tx, number)
 	if hash == (common.Hash{}) {
-		return nil, nil
+		return nil
 	}
 	return ReadBlock(tx, hash, number)
 }
 
 // ReadBlock reimplementation of rawdb.ReadBlock
-func ReadBlock(tx *Tx, hash common.Hash, number uint64) (*types.Block, error) {
-	header, err := ReadHeader(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
+func ReadBlock(tx *Tx, hash common.Hash, number uint64) *types.Block {
+	header := ReadHeader(tx, hash, number)
 	if header == nil {
-		return nil, nil
+		return nil
 	}
-	body, err := ReadBody(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
+	body := ReadBody(tx, hash, number)
 	if body == nil {
-		return nil, nil
+		return nil
 	}
-	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles), nil
+	return types.NewBlockWithHeader(header).WithBody(body.Transactions, body.Uncles)
 }
 
 // ReadHeaderRLP reimplementation of rawdb.ReadHeaderRLP
-func ReadHeaderRLP(tx *Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return nil, err
-	}
-
+func ReadHeaderRLP(tx *Tx, hash common.Hash, number uint64) rlp.RawValue {
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
-		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
+		//return fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
+		log.Error("Bucket not founc", "error", dbutils.HeaderPrefix)
+		return rlp.RawValue{}
 	}
 	return bucket.Get(dbutils.HeaderKey(number, hash))
 }
 
 // ReadHeader reimplementation of rawdb.ReadHeader
-func ReadHeader(tx *Tx, hash common.Hash, number uint64) (*types.Header, error) {
-	data, err := ReadHeaderRLP(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
+func ReadHeader(tx *Tx, hash common.Hash, number uint64) *types.Header {
+	data := ReadHeaderRLP(tx, hash, number)
 	if len(data) == 0 {
-		return nil, err
+		return nil
 	}
 	header := new(types.Header)
 	if err := rlp.Decode(bytes.NewReader(data), header); err != nil {
-		return nil, fmt.Errorf("invalid block header RLP. Hash: %s. Err: %w", hash, err)
+		log.Error("Invalid block header RLP", "hash", hash, "err", err)
+		return nil
 	}
-	return header, nil
+	return header
 }
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
-func ReadBodyRLP(tx *Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	bucket, err := tx.Bucket(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return nil, err
-	}
-
+func ReadBodyRLP(tx *Tx, hash common.Hash, number uint64) rlp.RawValue {
+	bucket := tx.Bucket(dbutils.BlockBodyPrefix)
 	if bucket == nil {
-		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
+		//return fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
+		log.Error("Bucket not founc", "error", dbutils.BlockBodyPrefix)
+		return rlp.RawValue{}
 	}
 	return bucket.Get(dbutils.BlockBodyKey(number, hash))
 }
 
 // ReadBody reimplementation of rawdb.ReadBody
-func ReadBody(tx *Tx, hash common.Hash, number uint64) (*types.Body, error) {
-	data, err := ReadBodyRLP(tx, hash, number)
-	if err != nil {
-		return nil, err
-	}
-
+func ReadBody(tx *Tx, hash common.Hash, number uint64) *types.Body {
+	data := ReadBodyRLP(tx, hash, number)
 	if len(data) == 0 {
-		return nil, nil
+		return nil
 	}
 	body := new(types.Body)
 	if err := rlp.Decode(bytes.NewReader(data), body); err != nil {
-		return nil, fmt.Errorf("invalid block body RLP: %s, %w", hash, err)
+		log.Error("Invalid block body RLP", "hash", hash, "err", err)
+		return nil
 	}
 	// Post-processing
 	body.SendersToTxs()
-	return body, nil
+	return body
 }

@@ -51,10 +51,6 @@ The first 8 bytes of the key (or 16 nobbles, equaling to 0s here) encode the blo
 The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there were
 no transactions in the Genesis block, therefore, we have RLP encoding of an empty list, `0xC0`.
 
-Next bucket is "Transacqtion index":
-
-![genesis_db_history_of_accounts](changes_0_hAT_9.dot.gd.png)
-
 Next bucket is "History Of Accounts":
 
 ![genesis_db_history_of_accounts](changes_0_hAT_9.dot.gd.png)
@@ -85,6 +81,10 @@ The records of the third type have their keys composed of 8-byte encoding of the
 suffix `0x6E`, which is ASCII code for `n`. These records allow lookuping up header/block hash given block
 number. They are also called "canonical header" records, because there might be multiple headers for given
 block number, and only one of them is deemed "canonical" at a time.
+
+Next bucket is "Config", contains serialised chain parameters, like chain ID, block numbers for various
+forks etc. The key is the concatenation of the ASCII-ecoding of `ethereum-config-` and the hash of the
+genesis block.
 
 Next bucket is "Block Bodies":
 
@@ -212,142 +212,3 @@ leaf nodes are used like "pointers" to thoese nodes. Continuing the "pointer" an
 "dereferencing" these pointers mean fetching the corresponding records from this "Hashes" bucket. Using such
 "derederencing" process, one can traverse the state trie from the top to any leaf at the bottom. Each step in
 such traversal requires finding the corresponding record in the "Hashes" bucket.
-
-Block with 1 Ethereum transaction in Turbo-Geth
-------------------------------
-When the first block is inserted, we sign a transaction using the private key of the account with 9 ETH to address 0x1 with 0.001 ETH and then execute it.
-This is how the state trie after Block 1 is inserted looks like:
-
-![block1_state](state_2.dot.gd.png)
-
-First thing to note about the illustration of the state trie is that the nonce of the first account is now 1 since a transaction from that address has been executed and the amount of ETH of that account is now 8.999 since the transaction had a value of 0.001 ETH. Additionally, a new account has been generated in the state trie. it's the recipient of the transaction. In fact, it has only 0.001 ETH (the value of the transaction) and it's nonce is set to 0.
-how turbo-geth's database after such a block would be generated:
-
-![block1_db](changes_1.dot.gd.png)
-
-We have got now two more preimages:
-* the preimage of the recipient of the transaction (account 0x01)
-* the preimage of the signer
-
-![block1_db_preimages](changes_1_secure-key-_11.dot.gd.png)
-
-This happened because when the transaction was sent, a new entry for the account of the recipient (that didn't exist before) was generated and along with it his preimage.
-
-![block1_db_receipts](changes_1_r_10.dot.gd.png)
-
-The first 8 bytes of the key (or 16 nobbles, equaling to 0s here) encode the block number, which value increased to 1 in this case (the first 15 nibbles are 0s and the 16th nibble is 1);
-The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, instead of having `0XC0` (that repressent an empty list) we have `0xcbc501825208c0` that his the receipt for the 0.001 ETH transaction.
-
-Next bucket is "History Of Accounts":
-
-![block1_db_history_of_accounts](changes_1_hAT_8.dot.gd.png)
-
-First of all, a new entry has been added and is the concatenation of the preimage of the account that sent the transaction with the block suffix. the first thing to notice is that the new entry has a block suffix of `0x21` instead of `0x20` since the change didn't occur in block Additionally, now the key has a value associated since before the changes the account changed existed actually existed. 
-
-The value has the following meaning:
-
-* the first two nibbles are the RLP prefix `0xCB`
-* the following two nibbles repressent the nonce of the transaction `0x80` (0)
-* the next 18 nibble is the balance BEFORE the transaction of the address `0x887ce66c50e2840000` 
-  * the balance has a prefix of `0x88` that indicate there are 8 bytes ahead
-  * the balance without the suffix is `0x7ce66c50e2840000` that is 9000000000000000000 WEI or 9.00 ETH.
-
-**Note** The history of accounts records how the accounts changed at each block. But, instead of recording,
-at each change, the value that the accounts had AFTER the change, it records what value the accounts
-had BEFORE the change.
-
-Next bucket is "Headers"
-
-![block1_db_headers](changes_1_h_7.dot.gd.png)
-
-A new headers has been generated since a new block has been mined.
-As a matter of fact, In the keys for the first two records start with a block number of 1 followed by
-the block hash (or header hash, which is the same thing) that is different than the Genesis Block. Additionally, these two records for the new block that respectively repressent the values in the headers and the mining difficulty differs from the Genesis Block.
-
-Next bucket is "Block Bodies":
-
-![block1_db_block_bodies](changes_1_b_6.dot.gd.png)
-
-The keys in this bucket are concatenations of 8-byte encoding of the block number and 32-byte block hash.
-The new record is the repressentation of block 1.
-
-![genesis_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
-
-Bucket "Change Sets" recorded the change in account that occurred BEFORE the 0.001 ETH transaction. you can notice that unlike the genesis block, this time the key has a prefix of `0x21` since now the blockchain is 1 block apart from the Genesis block.
-
-**Note**
-it records what value the accounts (or storage slots)
-had BEFORE the change. In fact, it just store the existence of the address generated AFTER the genesis block.
-
-**Reminder**
-The encoding of the values in the records is tailored for fast access and binary search. It has 5 parts:
-1. Number of keys-value pairs, encoded as a 4-byte (32-bit) number. In this example, it is `0x00000003`, which means
-there are 3 key-value pairs
-2. Size of each key, also encoded as a 32-bit number. All keys are the same size, which makes it possible to
-access them without deserialisation. In this example, it is `0x00000020`, which 32, meaning that all keys are
-32 bytes long.
-3. Keys themselves. In our examples, these are the coloured boxes before the streak of white 0s. Keys are sorted
-lexicographically. This, together with the keys being the same size, allows binary search without desearialision,
-as well as linear-time merge of multiple changesets.
-4. Value offsets. These offsets mark the beginning of the next, 5th part as offset 0. First value has offset 0.
-In our example, all values are empty strings, therefore we see 3 zero offsets (24 white boxes with zeros in them).
-1. Values themselves. The values are the concated list of the accounts keys that changed and the concatenated list of the accounts values associated.
-
-The next bucket is "Accounts":
-
-![genesis_db_accounts](changes_1_AT_0.dot.gd.png)
-
-The values are the current state of each account. In this case the accounts are still RLP Encoded but the third differs a bit because instead of having `0xCB` as a prefix, it has `0xCA`. 
-* in the first value we can see 3 nested structures following: `0x01`, `0x887ce2ded23dbd8000`, and `0x80`.
-The first one encodes nonce, which is 1, since this address is the sender of the transaction, the second one encodes balance. Prefix `0x88` means "byte array 8 bytes long".
-The value `0x7ce2ded23dbd8000` is the hexadecimal value for... .Start python and do this:
-````
-$ python
-Python 2.7.15
-Type "help", "copyright", "credits" or "license" for more information.
->>> 0x7ce2ded23dbd8000
-8999000000000000000
-````
-Which is 9 ETH - 0.001 ETH, this means that this account is the sender.
-* in the second value we can see 3 nested structures following: `0x80`, `0x88`, and `0x80`.
-The first one encodes nonce, which is 0, since this address is the miner of the block.
-The value `0x1bc16d674ec80000` is the hexadecimal value for... .Start python and do this:
-````
-$ python
-Python 2.7.15
-Type "help", "copyright", "credits" or "license" for more information.
->>> 0x1bc16d674ec80000
-2000000000000000000
-````
-Which is 2 ETH that probably repressent the mining reward.
-
-* in the third value we have prefix `0xCA`, meaning that this is still an RLP structure but has a length of 10 bytes instead of 11. we can see still see the 3 nested structures following: `0x80`, `0x87`, and `0x80`. you may notice that the prefix of the balance differs from the first two accounts as well. In fact, we have got `0x87` instead of `0x88`. This is because there 7 bytes needed for the balance instead of 8.
-The balance is `0x038d7ea4c68000` is the hexadecimal value for... .Start python and do this:
-````
-$ python
-Python 2.7.15
-Type "help", "copyright", "credits" or "license" for more information.
->>> 0x038d7ea4c68000
-1000000000000000
-````
-Which is 0.01 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
-
-Block 1 in go-ethereum
-------------------------------
-
-Now we will create the same Transaction for go-ethereum.
-
-![geth_block1_db](geth_changes_1.dot.gd.png)
-
-The buckets "Preimages", "Receipts", "Headers", "Config", "Last Header", "Last Fast", "Last Block", all look identical
-to those in the turbo-geth database. We will walk through the ones that are different.
-
-In the bucket "Block Bodies", the value is slightly different:
-
-![geth_block1_block_bodies](geth_changes_1_b_4.dot.gd.png)
-
-The difference is that the block body miss the sender address since the send in go-ethereum is computed and in turbo-geth is stored. for the rest in this case the same changes occurs in terms of block number and block hash.
-
-![geth_block1_hashes](geth_changes_1_hashes_5.dot.gd.png)
-
-First of all a new branch node has been generated for the block. that's the first record because it contains in its value the key of the other key records. The three leaf nodes contains the `Keccak256` of the change in states of the account of the recipient, sender and miner of the block.

@@ -17,12 +17,12 @@ var gasLimitsCmd = &cobra.Command{
 	Use:   "gasLimits",
 	Short: "gasLimits",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		ctx := getContext()
-		reporter, err := stateless.NewReporter(ctx, remoteDbAddress)
+		reporter, err := stateless.NewReporter(remoteDbAddress)
 		if err != nil {
 			return err
 		}
 
+		ctx := getContext()
 		fmt.Println("Processing started...")
 		reporter.GasLimits(ctx)
 		return nil
