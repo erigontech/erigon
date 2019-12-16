@@ -128,6 +128,7 @@ type powEngine struct {
 }
 
 func (c *powEngine) VerifyHeader(chain consensus.ChainReader, header *types.Header, seal bool) error {
+
 	panic("must not be called")
 }
 func (c *powEngine) VerifyHeaders(chain consensus.ChainReader, headers []*types.Header, seals []bool) (chan<- struct{}, <-chan error) {
