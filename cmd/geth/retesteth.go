@@ -483,7 +483,7 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	statedb, _, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
+	statedb, ibs, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return err
 	}
@@ -495,6 +495,7 @@ func (api *RetestethAPI) mineBlock() error {
 	var txs []*types.Transaction
 	var receipts []*types.Receipt
 	var blockFull = gasPool.Gas() < params.TxGas
+
 	for address := range api.txSenders {
 		if blockFull {
 			break
@@ -512,7 +513,7 @@ func (api *RetestethAPI) mineBlock() error {
 					&api.author,
 					gasPool,
 					statedb,
-					nil,
+					ibs,
 					header, tx, &header.GasUsed, *api.blockchain.GetVMConfig(),
 				)
 				if err != nil {
