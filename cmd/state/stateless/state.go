@@ -132,7 +132,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 	// Go through the history of account first
-	err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if err != nil {
 			return err
@@ -167,11 +167,12 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		}
 		check(c.Err())
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		check(err)
+	}
 
 	// Go through the current state
-	err = r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		pre, err := tx.Bucket(dbutils.PreimagePrefix)
 		if err != nil {
 			return err
@@ -204,8 +205,9 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		}
 		check(c.Err())
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		check(err)
+	}
 
 	for _, lt := range lastTimestamps {
 		if lt < maxTimestamp {
@@ -249,7 +251,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
-	err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
 		if err != nil {
 			return err
@@ -300,11 +302,12 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		}
 		check(c.Err())
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 
 	// Go through the current state
-	err = r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageBucket)
 		if err != nil {
 			return err
@@ -334,8 +337,9 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		}
 		check(c.Err())
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
 
 	for address, l := range lastTimestamps {
 		for _, lt := range l {
@@ -379,8 +383,8 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 }
 
 func (r *Reporter) GasLimits(ctx context.Context) {
-	f, err := os.Create("gas_limits.csv")
-	check(err)
+	f, ferr := os.Create("gas_limits.csv")
+	check(ferr)
 	defer f.Close()
 	w := bufio.NewWriter(f)
 	defer w.Flush()
@@ -389,7 +393,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 
 	mainHashes := make(map[string]struct{}, 10*000*000)
 
-	err = r.db.View(ctx, func(tx *remote.Tx) error {
+	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
 		if err != nil {
 			return err

@@ -198,14 +198,13 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 }
 
 func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	var err error
 	if len(startkeys) == 0 {
 		return nil
 	}
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	err = db.db.View(context.Background(), func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -353,10 +352,10 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				}
 			}
 		}
-		if hC.Err != nil {
+		if hC.Err() != nil {
 			return hC.Err()
 		}
-		if c.Err != nil {
+		if c.Err() != nil {
 			return c.Err()
 		}
 
@@ -512,13 +511,13 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		if err != nil {
 			return err
 		}
-		if c.Err != nil {
+		if c.Err() != nil {
 			return c.Err()
 		}
-		if hC.Err != nil {
+		if hC.Err() != nil {
 			return hC.Err()
 		}
-		if hC1.Err != nil {
+		if hC1.Err() != nil {
 			return hC1.Err()
 		}
 		return nil
