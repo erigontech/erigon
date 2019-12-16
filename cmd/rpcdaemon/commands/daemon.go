@@ -61,15 +61,15 @@ type PrivateDebugAPIImpl struct {
 	dbReader ethdb.Getter
 }
 
-// ConnectAPIImpl connects to the remote DB and returns APIImpl instance
-func ConnectAPIImpl(db *remote.DB) *APIImpl {
+// NewAPI returns APIImpl instance
+func NewAPI(db *remote.DB) *APIImpl {
 	return &APIImpl{
 		db: db,
 	}
 }
 
-// ConnectAPIImpl connects to the remote DB and returns APIImpl instance
-func ConnectPrivateDebugAPIImpl(db *remote.DB) *PrivateDebugAPIImpl {
+// NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
+func NewPrivateDebugAPI(db *remote.DB) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		db:       db,
 		dbReader: remote.NewRemoteBoltDatabase(db),
@@ -313,8 +313,8 @@ func daemon(cfg Config) {
 	}
 
 	var rpcAPI = []rpc.API{}
-	apiImpl := ConnectAPIImpl(db)
-	dbgAPIImpl := ConnectPrivateDebugAPIImpl(db)
+	apiImpl := NewAPI(db)
+	dbgAPIImpl := NewPrivateDebugAPI(db)
 
 	for _, enabledAPI := range enabledApis {
 		switch enabledAPI {
