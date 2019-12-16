@@ -698,6 +698,8 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 	}
 
 	go func() { // reconnect, regular ping
+		pingTicker := time.NewTicker(10 * time.Second)
+		defer pingTicker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
@@ -710,7 +712,7 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 					return
 				}
 				db.returnConn(ctx, newIn, newOut, newCloser)
-			case <-time.Tick(10 * time.Second):
+			case <-pingTicker.C:
 				if err := db.ping(ctx); err != nil {
 					log.Error("ping failed", "err", err)
 				}
