@@ -127,8 +127,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 type chainContext struct {
-	db     rawdb.DatabaseReader
-	engine consensus.Engine
+	db rawdb.DatabaseReader
 }
 type powEngine struct {
 }
