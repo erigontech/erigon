@@ -1395,9 +1395,11 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	}
 	ctx := bc.WithContext(context.Background(), chain[0].Number())
 	bc.chainmu.Lock()
+	defer func() {
+		bc.chainmu.Unlock()
+		bc.doneJob()
+	}()
 	n, err := bc.insertChain(ctx, chain, true)
-	bc.chainmu.Unlock()
-	bc.doneJob()
 
 	return n, err
 }
