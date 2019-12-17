@@ -37,7 +37,7 @@ func TestBlockchain(t *testing.T) {
 	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
 	bt.slow(`.*/bcWalletTest/`)
 
-	//bt.whitelist("TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/gasLimitTooLowExactBound.json")
+	bt.whitelist("InvalidBlocks/bcForgedTest/bcForkBlockTest.json")
 
 	// Very slow test
 	bt.skipLoad(`.*/stTimeConsuming/.*`)

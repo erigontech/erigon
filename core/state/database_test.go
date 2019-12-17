@@ -802,3 +802,107 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("Expected empty list of prunables, got:\n %s", prunables)
 	}
 }
+
+func TestWrongIncarnation(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:        big.NewInt(1),
+				HomesteadBlock: new(big.Int),
+				EIP150Block:    new(big.Int),
+				EIP155Block:    new(big.Int),
+				EIP158Block:    big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+	)
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var changer *contracts.Changer
+
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 2, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, tx, changer, err = contracts.DeployChanger(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			tx, err = changer.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+	})
+
+	st, _, _ := blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+	if st.Exist(contractAddress) {
+		t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+	}
+
+	// BLOCK 1
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, _ = blockchain.State()
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+	}
+
+	// Reload blockchain from the database
+	blockchain, err = core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// BLOCKS 2
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+		t.Fatal(err)
+	}
+	addrHash := crypto.Keccak256(contractAddress[:])
+	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
+	fmt.Printf("%x:%x\n", addrHash, v)
+	var acc accounts.Account
+	acc.DecodeForStorage(v)
+	fmt.Printf("%x:%d\n", addrHash, acc.Incarnation)
+	var startKey [common.HashLength + 8 + common.HashLength]byte
+	copy(startKey[:], addrHash)
+	err = db.Walk(dbutils.StorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
+		fmt.Printf("%x: %x\n", k, v)
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
