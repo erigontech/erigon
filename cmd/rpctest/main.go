@@ -3,12 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"path"
 	"strings"
 	"time"
 
@@ -167,18 +169,18 @@ type EthLogs struct {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	start := time.Now()
+	//start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return err
 	}
+	defer r.Body.Close()
 	if r.StatusCode != 200 {
-		return fmt.Errorf("Status %s", r.Status)
+		return fmt.Errorf("status %s", r.Status)
 	}
 	decoder := json.NewDecoder(r.Body)
-	defer r.Body.Close()
 	err = decoder.Decode(response)
-	fmt.Printf("%s %s %f\n", url, request, time.Since(start).Seconds())
+	// fmt.Printf("%s %s %f\n", url, request, time.Since(start).Seconds())
 	return err
 }
 
@@ -451,19 +453,184 @@ func compareLogs(logs, logsg *EthLogs) bool {
 	return true
 }
 
-func bench1() {
+const Geth = "geth"
+const TurboGeth = "turbo_geth"
+
+var routes = map[string]string{
+	//Geth:      "http://192.168.1.96:8545",
+	Geth:      "http://localhost:8545",
+	TurboGeth: "http://localhost:9545",
+}
+
+type CallResult struct {
+	Target      string
+	Took        time.Duration
+	RequestID   int
+	Method      string
+	RequestBody string
+	Err         error
+}
+type RequestGenerator struct {
+	reqID  int
+	client *http.Client
+}
+
+func (g *RequestGenerator) blockNumber() string {
+	const template = `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
+	return fmt.Sprintf(template, g.reqID)
+}
+func (g *RequestGenerator) getBlockByNumber(blockNum int) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
+	return fmt.Sprintf(template, blockNum, g.reqID)
+}
+
+func (g *RequestGenerator) storageRangeAt(hash common.Hash, i int, to *common.Address, nextKey common.Hash) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
+	return fmt.Sprintf(template, hash, i, to, nextKey, 1024, g.reqID)
+}
+
+func (g *RequestGenerator) traceTransaction(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID)
+}
+
+func (g *RequestGenerator) getTransactionReceipt(hash string) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}`
+	return fmt.Sprintf(template, hash, g.reqID)
+}
+
+func (g *RequestGenerator) getBalance(miner common.Address, bn int) string {
+	const template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x", "0x%x"],"id":%d}`
+	return fmt.Sprintf(template, miner, bn, g.reqID)
+}
+
+func (g *RequestGenerator) getModifiedAccountsByNumber(prevBn int, bn int) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, g.reqID)
+}
+
+func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) string {
+	const template = `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
+	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
+}
+
+func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
+	start := time.Now()
+	var err error
+
+	if method != "debug_storageRangeAt" {
+		err = post(g.client, routes[target], body, response)
+	}
+	return CallResult{
+		RequestBody: body,
+		Target:      target,
+		Took:        time.Since(start),
+		RequestID:   g.reqID,
+		Method:      method,
+		Err:         err,
+	}
+}
+func (g *RequestGenerator) Geth(method, body string, response interface{}) CallResult {
+	return g.call(Geth, method, body, response)
+}
+
+func (g *RequestGenerator) TurboGeth(method, body string, response interface{}) CallResult {
+	return g.call(TurboGeth, method, body, response)
+}
+
+// bench1 compares response of TurboGeth with Geth
+// but also can be used for comparing RPCDaemon with Geth
+// parameters:
+// needCompare - if false - doesn't call TurboGeth and doesn't compare responses
+// 		use false value - to generate vegeta files, it's faster but we can generate vegeta files for Geth and Turbogeth
+// fullTest - if false - then call only methods which RPCDaemon currently supports
+func bench1(needCompare bool, fullTest bool) {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	req_id := 0
-	//geth_url := "http://192.168.1.96:8545"
-	geth_url := "http://localhost:8545"
-	turbogeth_url := "http://localhost:9545"
-	req_id++
-	template := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
+
+	resultsCh := make(chan CallResult, 1000)
+	defer close(resultsCh)
+
+	// This goroutine writing results of server calls into several files:
+	// results to /$tmp$/turbo_geth_stress_test/results_*.csv
+	// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
+	go func() {
+		var err error
+		files := map[string]map[string]*os.File{
+			Geth:      make(map[string]*os.File),
+			TurboGeth: make(map[string]*os.File),
+		}
+		vegetaFiles := map[string]map[string]*os.File{
+			Geth:      make(map[string]*os.File),
+			TurboGeth: make(map[string]*os.File),
+		}
+		tmpDir := os.TempDir()
+		fmt.Printf("tmp dir is: %s\n", tmpDir)
+		dir := path.Join(tmpDir, "turbo_geth_stress_test")
+		if err = os.MkdirAll(dir, 0770); err != nil {
+			panic(err)
+		}
+
+		for _, route := range []string{Geth, TurboGeth} {
+			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+				file := path.Join(dir, "results_"+route+"_"+method+".csv")
+				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+
+		for _, route := range []string{Geth, TurboGeth} {
+			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
+				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+
+		for res := range resultsCh {
+			if res.Err != nil {
+				fmt.Printf("error response. target: %s, err: %s\n", res.Target, res.Err)
+			}
+			// files with call stats
+			if f, ok := files[res.Target][res.Method]; ok {
+				row := fmt.Sprintf("%d, %s, %d\n", res.RequestID, res.Method, res.Took.Microseconds())
+				if _, err := fmt.Fprint(f, row); err != nil {
+					panic(err)
+				}
+			}
+
+			// vegeta files, write into all target files
+			// because if "needCompare" is false - then we don't have responses from TurboGeth
+			// but we still have enough information to build vegeta file for TurboGeth
+			for _, target := range []string{Geth, TurboGeth} {
+				if f, ok := vegetaFiles[target][res.Method]; ok {
+					template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
+					row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))
+
+					if _, err := fmt.Fprint(f, row+"\n"); err != nil {
+						panic(err)
+					}
+				}
+			}
+		}
+	}()
+
+	var res CallResult
+	reqGen := &RequestGenerator{
+		client: client,
+	}
+
+	reqGen.reqID++
 	var blockNumber EthBlockNumber
-	if err := post(client, turbogeth_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
-		fmt.Printf("Could not get block number: %v\n", err)
+	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
+	resultsCh <- res
+	if res.Err != nil {
+		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
 	}
 	if blockNumber.Error != nil {
@@ -473,33 +640,41 @@ func bench1() {
 	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1808208
+	firstBn := 1250001
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
-		req_id++
-		template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
+		reqGen.reqID++
 		var b EthBlockByNumber
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
-			fmt.Printf("Could not retrieve block %d: %v\n", bn, err)
+		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
+		resultsCh <- res
+		if res.Err != nil {
+			fmt.Printf("Could not retrieve block %d: %v\n", bn, res.Err)
 			return
 		}
+
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
 		}
-		var bg EthBlockByNumber
-		if err := post(client, geth_url, fmt.Sprintf(template, bn, req_id), &bg); err != nil {
-			fmt.Printf("Could not retrieve block g %d: %v\n", bn, err)
-			return
+
+		if needCompare {
+			var bg EthBlockByNumber
+			res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
+			resultsCh <- res
+			if res.Err != nil {
+				fmt.Printf("Could not retrieve block g %d: %v\n", bn, res.Err)
+				return
+			}
+			if bg.Error != nil {
+				fmt.Printf("Error retrieving block g: %d %s\n", bg.Error.Code, bg.Error.Message)
+				return
+			}
+			if !compareBlocks(&b, &bg) {
+				fmt.Printf("Block difference for %d\n", bn)
+				return
+			}
 		}
-		if bg.Error != nil {
-			fmt.Printf("Error retrieving block g: %d %s\n", bg.Error.Code, bg.Error.Message)
-			return
-		}
-		if !compareBlocks(&b, &bg) {
-			fmt.Printf("Block difference for %d\n", bn)
-			return
-		}
+
 		accounts[b.Result.Miner] = struct{}{}
 
 		for i, tx := range b.Result.Transactions {
@@ -512,14 +687,15 @@ func bench1() {
 				storageCounter++
 				if storageCounter == 100 {
 					storageCounter = 0
-					req_id++
-					template = `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}`
+					reqGen.reqID++
 					sm := make(map[common.Hash]storageEntry)
 					nextKey := &common.Hash{}
 					for nextKey != nil {
 						var sr DebugStorageRange
-						if err := post(client, turbogeth_url, fmt.Sprintf(template, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &sr); err != nil {
-							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, err)
+						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
+						resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
 							return
 						}
 						if sr.Error != nil {
@@ -532,165 +708,206 @@ func bench1() {
 							}
 						}
 					}
-					fmt.Printf("storageRange: %d\n", len(sm))
-					smg := make(map[common.Hash]storageEntry)
-					nextKey = &common.Hash{}
-					for nextKey != nil {
-						var srg DebugStorageRange
-						if err := post(client, geth_url, fmt.Sprintf(template, b.Result.Hash, i, tx.To, *nextKey, 1024, req_id), &srg); err != nil {
-							fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, err)
-							return
-						}
-						if srg.Error != nil {
-							fmt.Printf("Error getting storageRange g: %d %s\n", srg.Error.Code, srg.Error.Message)
-							break
-						} else {
-							nextKey = srg.Result.NextKey
-							for k, v := range srg.Result.Storage {
-								smg[k] = v
+
+					//fmt.Printf("storageRange: %d\n", len(sm))
+					if needCompare {
+						smg := make(map[common.Hash]storageEntry)
+						nextKey = &common.Hash{}
+						for nextKey != nil {
+							var srg DebugStorageRange
+							res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &srg)
+							resultsCh <- res
+							if res.Err != nil {
+								fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, res.Err)
+								return
+							}
+							if srg.Error != nil {
+								fmt.Printf("Error getting storageRange g: %d %s\n", srg.Error.Code, srg.Error.Message)
+								break
+							} else {
+								nextKey = srg.Result.NextKey
+								for k, v := range srg.Result.Storage {
+									smg[k] = v
+								}
 							}
 						}
+
+						//fmt.Printf("storageRange g: %d\n", len(smg))
+						if !compareStorageRanges(sm, smg) {
+							fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
+							return
+						}
 					}
-					fmt.Printf("storageRange g: %d\n", len(smg))
-					if !compareStorageRanges(sm, smg) {
-						fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
-						return
-					}
+
 				}
 			}
-			req_id++
 
-			template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
+			if !fullTest {
+				continue // TODO: remove me
+			}
+
+			reqGen.reqID++
+
 			var trace EthTxTrace
-			if err := post(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id), &trace); err != nil {
-				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, err)
-				print(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id))
+			res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
+			resultsCh <- res
+			if res.Err != nil {
+				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
 				return
 			}
+
 			if trace.Error != nil {
 				fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
-			var traceg EthTxTrace
-			if err := post(client, geth_url, fmt.Sprintf(template, tx.Hash, req_id), &traceg); err != nil {
-				fmt.Printf("Could not trace transaction g %s: %v\n", tx.Hash, err)
-				print(client, geth_url, fmt.Sprintf(template, tx.Hash, req_id))
-				return
+
+			if needCompare {
+				var traceg EthTxTrace
+				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
+				resultsCh <- res
+				if res.Err != nil {
+					fmt.Printf("Could not trace transaction g %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
+					return
+				}
+				if traceg.Error != nil {
+					fmt.Printf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
+					return
+				}
+				if !compareTraces(&trace, &traceg) {
+					fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
+					return
+				}
 			}
-			if traceg.Error != nil {
-				fmt.Printf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
-				return
-			}
-			if !compareTraces(&trace, &traceg) {
-				fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
-				return
-			}
-			req_id++
-			template = `{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}`
+			reqGen.reqID++
+
 			var receipt EthReceipt
-			if err := post(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id), &receipt); err != nil {
-				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, err)
-				print(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id))
+			res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
+			resultsCh <- res
+			if res.Err != nil {
+				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, res.Err)
+				print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
 				return
 			}
 			if receipt.Error != nil {
 				fmt.Printf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
 				return
 			}
-			var receiptg EthReceipt
-			if err := post(client, geth_url, fmt.Sprintf(template, tx.Hash, req_id), &receiptg); err != nil {
-				fmt.Printf("Count not get receipt g: %s: %v\n", tx.Hash, err)
-				print(client, geth_url, fmt.Sprintf(template, tx.Hash, req_id))
-				return
-			}
-			if receiptg.Error != nil {
-				fmt.Printf("Error getting receipt g: %d %s\n", receiptg.Error.Code, receiptg.Error.Message)
-				return
-			}
-			if !compareReceipts(&receipt, &receiptg) {
-				fmt.Printf("Different receipts block %d, tx %s\n", bn, tx.Hash)
-				print(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id))
-				print(client, geth_url, fmt.Sprintf(template, tx.Hash, req_id))
-				return
+			if needCompare {
+				var receiptg EthReceipt
+				res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
+				resultsCh <- res
+				if res.Err != nil {
+					fmt.Printf("Count not get receipt g: %s: %v\n", tx.Hash, res.Err)
+					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
+					return
+				}
+				if receiptg.Error != nil {
+					fmt.Printf("Error getting receipt g: %d %s\n", receiptg.Error.Code, receiptg.Error.Message)
+					return
+				}
+				if !compareReceipts(&receipt, &receiptg) {
+					fmt.Printf("Different receipts block %d, tx %s\n", bn, tx.Hash)
+					print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
+					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
+					return
+				}
 			}
 		}
-		req_id++
-		template = `{"jsonrpc":"2.0","method":"eth_getBalance","params":["0x%x", "0x%x"],"id":%d}`
+		reqGen.reqID++
+
 		var balance EthBalance
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, b.Result.Miner, bn, req_id), &balance); err != nil {
-			fmt.Printf("Could not get account balance: %v\n", err)
+		res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
+		resultsCh <- res
+		if res.Err != nil {
+			fmt.Printf("Could not get account balance: %v\n", res.Err)
 			return
 		}
 		if balance.Error != nil {
 			fmt.Printf("Error getting account balance: %d %s", balance.Error.Code, balance.Error.Message)
 			return
 		}
-		var balanceg EthBalance
-		if err := post(client, geth_url, fmt.Sprintf(template, b.Result.Miner, bn, req_id), &balanceg); err != nil {
-			fmt.Printf("Could not get account balance g: %v\n", err)
-			return
+		if needCompare {
+			var balanceg EthBalance
+			res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
+			resultsCh <- res
+			if res.Err != nil {
+				fmt.Printf("Could not get account balance g: %v\n", res.Err)
+				return
+			}
+			if balanceg.Error != nil {
+				fmt.Printf("Error getting account balance g: %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
+				return
+			}
+			if !compareBalances(&balance, &balanceg) {
+				fmt.Printf("Miner %x balance difference for block %d\n", b.Result.Miner, bn)
+				return
+			}
 		}
-		if balanceg.Error != nil {
-			fmt.Printf("Error getting account balance g: %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
-			return
-		}
-		if !compareBalances(&balance, &balanceg) {
-			fmt.Printf("Miner %x balance difference for block %d\n", b.Result.Miner, bn)
-			return
-		}
+
 		if prevBn < bn && bn%100 == 0 {
 			// Checking modified accounts
-			req_id++
-			template = `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}`
+			reqGen.reqID++
 			var ma DebugModifiedAccounts
-			if err := post(client, turbogeth_url, fmt.Sprintf(template, prevBn, bn, req_id), &ma); err != nil {
-				fmt.Printf("Could not get modified accounts: %v\n", err)
+			res = reqGen.Geth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma)
+			resultsCh <- res
+			if res.Err != nil {
+				fmt.Printf("Could not get modified accounts: %v\n", res.Err)
 				return
 			}
 			if ma.Error != nil {
 				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
 				return
 			}
-			var mag DebugModifiedAccounts
-			if err := post(client, geth_url, fmt.Sprintf(template, prevBn, bn, req_id), &mag); err != nil {
-				fmt.Printf("Could not get modified accounts g: %v\n", err)
-				return
+			if needCompare {
+				var mag DebugModifiedAccounts
+				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
+				resultsCh <- res
+				if res.Err != nil {
+					fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
+					return
+				}
+				if mag.Error != nil {
+					fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
+					return
+				}
+				ok, accountSet := compareModifiedAccounts(&ma, &mag)
+				if !ok {
+					fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
+					return
+				}
+
+				reqGen.reqID++
+				for account := range accountSet {
+					var logs EthLogs
+					res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
+					resultsCh <- res
+					if res.Err != nil {
+						fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
+						return
+					}
+					if logs.Error != nil {
+						fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
+						return
+					}
+					var logsg EthLogs
+					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
+					resultsCh <- res
+					if res.Err != nil {
+						fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
+						return
+					}
+					if logsg.Error != nil {
+						fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
+						return
+					}
+					if !compareLogs(&logs, &logsg) {
+						fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
+						return
+					}
+				}
+				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
-			if mag.Error != nil {
-				fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
-				return
-			}
-			ok, accountSet := compareModifiedAccounts(&ma, &mag)
-			if !ok {
-				fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
-				return
-			}
-			req_id++
-			template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
-			for account := range accountSet {
-				var logs EthLogs
-				if err := post(client, turbogeth_url, fmt.Sprintf(template, prevBn, bn, account, req_id), &logs); err != nil {
-					fmt.Printf("Could not get logs for account %x: %v\n", account, err)
-					return
-				}
-				if logs.Error != nil {
-					fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
-					return
-				}
-				var logsg EthLogs
-				if err := post(client, geth_url, fmt.Sprintf(template, prevBn, bn, account, req_id), &logsg); err != nil {
-					fmt.Printf("Could not get logs for account g %x: %v\n", account, err)
-					return
-				}
-				if logsg.Error != nil {
-					fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-					return
-				}
-				if !compareLogs(&logs, &logsg) {
-					fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-					return
-				}
-			}
-			fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			prevBn = bn
 		}
 	}
@@ -1046,6 +1263,7 @@ func bench6() {
 }
 
 func main() {
+
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -1068,6 +1286,6 @@ func main() {
 	case "fixState":
 		fixState(*chaindata, *url)
 	case "bench1":
-		bench1()
+		bench1(false, false)
 	}
 }
