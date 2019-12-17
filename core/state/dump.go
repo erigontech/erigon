@@ -90,7 +90,7 @@ func (d iterativeDump) onRoot(root common.Hash) {
 	}{root})
 }
 func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMissingPreimages bool) {
-	emptyAddress := (common.Address{})
+	emptyAddress := common.Address{}
 	missingPreimages := 0
 
 	tds.tMu.Lock()
