@@ -41,12 +41,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 
-	cli "github.com/urfave/cli"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -244,7 +245,6 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 		return e.inner.FinalizeAndAssemble(chainConfig, header, statedb, txs, uncles, receipts)
 	} else {
 		e.accumulateRewards(chainConfig, statedb, header, uncles)
-		//header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
 		// Header seems complete, assemble into a block and return
 		return types.NewBlock(header, txs, uncles, receipts), nil
@@ -439,13 +439,13 @@ func (api *RetestethAPI) SendRawTransaction(ctx context.Context, rawTx hexutil.B
 	return tx.Hash(), nil
 }
 
-func (api *RetestethAPI) MineBlocks(ctx context.Context, number uint64) (bool, error) {
+func (api *RetestethAPI) MineBlocks(_ context.Context, number uint64) (bool, error) {
 	for i := 0; i < int(number); i++ {
 		if err := api.mineBlock(); err != nil {
 			return false, err
 		}
 	}
-	fmt.Printf("Mined %d blocks\n", number)
+	fmt.Printf("Mined %d blocks\n____________________________________________________________\n\n\n", number)
 	return true, nil
 }
 
@@ -483,10 +483,12 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	statedb, ibs, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
+
+	statedb, tds, err := miner.GetState(api.blockchain, parent)
 	if err != nil {
 		return err
 	}
+
 	if api.chainConfig.DAOForkSupport && api.chainConfig.DAOForkBlock != nil && api.chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
@@ -513,7 +515,7 @@ func (api *RetestethAPI) mineBlock() error {
 					&api.author,
 					gasPool,
 					statedb,
-					ibs,
+					tds.TrieStateWriter(),
 					header, tx, &header.GasUsed, *api.blockchain.GetVMConfig(),
 				)
 				if err != nil {
@@ -538,11 +540,31 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	block, err := api.engine.FinalizeAndAssemble(api.blockchain.Config(), header, statedb, txs, []*types.Header{}, receipts)
+
+	block, err := miner.MineBlock(api.engine, statedb, tds, api.blockchain.Config(), header, txs, []*types.Header{}, receipts)
 	if err != nil {
 		return err
 	}
+
 	return api.importBlock(block)
+}
+
+func (api *RetestethAPI) getState(parent *types.Block) (*state.IntraBlockState, *state.TrieDbState, error) {
+	statedb, _, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tds, err := state.GetTrieDbState(parent.Root(), api.blockchain.ChainDb(), parent.NumberU64())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tds = tds.WithNewBuffer()
+	tds.SetResolveReads(false)
+	tds.SetNoHistory(true)
+
+	return statedb, tds, nil
 }
 
 func (api *RetestethAPI) importBlock(block *types.Block) error {
@@ -579,7 +601,7 @@ func (api *RetestethAPI) RewindToBlock(ctx context.Context, newHead uint64) (boo
 	return true, nil
 }
 
-var emptyListHash common.Hash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+var emptyListHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 
 func (api *RetestethAPI) GetLogHash(ctx context.Context, txHash common.Hash) (common.Hash, error) {
 	receipt, _, _, _ := rawdb.ReadReceipt(api.ethDb, txHash, api.chainConfig)
