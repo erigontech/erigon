@@ -20,6 +20,7 @@ package remote
 import (
 	"bytes"
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -43,14 +44,24 @@ func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
 	}
 }
 
+// Has checks if the value exists
+//
+// Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
 	err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			has = false
 		} else {
-			v := b.Get(key)
+			v, err := b.Get(key)
+			if err != nil {
+				return err
+			}
 			has = v != nil
 		}
 		return nil
@@ -59,17 +70,28 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 }
 
 // Get returns the value for a given key if it's present.
+//
+// Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
-		if b != nil {
-			v := b.Get(key)
-			if v != nil {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-			}
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
+		if b == nil {
+			return fmt.Errorf("bucket not found, %s", bucket)
+		}
+
+		v, err := b.Get(key)
+		if err != nil {
+			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
+		}
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
 		}
 		return nil
 	})
@@ -91,29 +113,51 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
 		{
-			hB := tx.Bucket(hBucket)
+			hB, err := tx.Bucket(hBucket)
+			if err != nil {
+				return err
+			}
+
 			if hB == nil {
 				return ethdb.ErrKeyNotFound
 			}
-			hC := hB.Cursor()
+			hC, err := hB.Cursor()
+			if err != nil {
+				return err
+			}
+
 			hK, hV := hC.Seek(composite)
 			if hK != nil && bytes.HasPrefix(hK, key) {
 				dat = make([]byte, len(hV))
 				copy(dat, hV)
 				return nil
 			}
+			if hC.Err() != nil {
+				return hC.Err()
+			}
 		}
 		{
-			b := tx.Bucket(bucket)
+			b, err := tx.Bucket(bucket)
+			if err != nil {
+				return err
+			}
+
 			if b == nil {
 				return ethdb.ErrKeyNotFound
 			}
-			c := b.Cursor()
+			c, err := b.Cursor()
+			if err != nil {
+				return err
+			}
+
 			k, v := c.Seek(key)
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
 				copy(dat, v)
 				return nil
+			}
+			if c.Err() != nil {
+				return c.Err()
 			}
 		}
 
@@ -125,11 +169,18 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
 		k, v := c.Seek(startkey)
 		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
 			goOn, err := walker(k, v)
@@ -141,7 +192,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 			}
 			k, v = c.Next()
 		}
-		return nil
+		return c.Err()
 	})
 	return err
 }
@@ -154,11 +205,19 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
 		k, v := c.Seek(startkey)
 		for k != nil {
 			// Adjust rangeIdx if needed
@@ -178,7 +237,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						if k == nil {
-							return nil
+							return c.Err()
 						}
 					} else if cmp > 0 {
 						rangeIdx++
@@ -197,7 +256,8 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 			}
 			k, v = c.Next()
 		}
-		return nil
+
+		return c.Err()
 	})
 	return err
 }
@@ -209,20 +269,36 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
 	err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
+		var err error
+
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		hB := tx.Bucket(hBucket)
+		hB, err := tx.Bucket(hBucket)
+		if err != nil {
+			return err
+		}
+
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
 		k, v := c.Seek(startkey)
 		hK, hV := hC.Seek(startkey)
 		goOn := true
-		var err error
 		for goOn {
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
 				k = nil
@@ -243,13 +319,13 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
+
 				continue
 			}
 
 			var cmp int
 			if k == nil {
 				if hK == nil {
-					goOn = false
 					break
 				} else {
 					cmp = 1
@@ -275,6 +351,13 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				}
 			}
 		}
+		if hC.Err() != nil {
+			return hC.Err()
+		}
+		if c.Err() != nil {
+			return c.Err()
+		}
+
 		return err
 	})
 	return err
@@ -292,21 +375,41 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
 	if err := db.db.View(context.Background(), func(tx *Tx) error {
-		b := tx.Bucket(bucket)
+		var err error
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		hB := tx.Bucket(hBucket)
+		hB, err := tx.Bucket(hBucket)
+		if err != nil {
+			return err
+		}
+
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
-		hC1 := hB.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC1, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
+
 		k, v := c.Seek(startkey)
 		hK, hV := hC.Seek(startkey)
 		goOn := true
-		var err error
 		for goOn { // k != nil
 			fit := k != nil
 			hKFit := hK != nil
@@ -345,6 +448,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						}
 						if hCmp < 0 {
 							hK, hV = hC.SeekTo(startkey)
+
 							if hK == nil {
 								hCmp = 1
 							}
@@ -366,12 +470,12 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
+
 				continue
 			}
 			var cmp int
 			if !fit {
 				if !hKFit {
-					goOn = false
 					break
 				} else {
 					cmp = 1
@@ -402,7 +506,19 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				}
 			}
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if c.Err() != nil {
+			return c.Err()
+		}
+		if hC.Err() != nil {
+			return hC.Err()
+		}
+		if hC1.Err() != nil {
+			return hC1.Err()
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
