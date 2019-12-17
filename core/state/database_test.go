@@ -499,9 +499,9 @@ func TestEip2200Gas(t *testing.T) {
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				ByzantiumBlock:      big.NewInt(1),
-				PetersburgBlock: big.NewInt(1),
+				PetersburgBlock:     big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
-				IstanbulBlock: big.NewInt(1),
+				IstanbulBlock:       big.NewInt(1),
 			},
 			Alloc: core.GenesisAlloc{
 				address: {Balance: funds},
