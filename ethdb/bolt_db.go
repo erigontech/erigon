@@ -366,7 +366,6 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			var cmp int
 			if k == nil {
 				if hK == nil {
-					goOn = false
 					break
 				} else {
 					cmp = 1
@@ -488,7 +487,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			var cmp int
 			if !fit {
 				if !hKFit {
-					goOn = false
 					break
 				} else {
 					cmp = 1
