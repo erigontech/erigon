@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
@@ -86,7 +88,18 @@ const (
 const DefaultCursorBatchSize uint64 = 100 * 1000
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ServerMaxConnections uint64 = 1024
-const ClientMaxConnections uint64 = 128
+const ClientMaxConnections uint64 = 256
+
+// tracing enable by evn GODEBUG=remotedb.debug=1
+var tracing bool
+
+func init() {
+	for _, f := range strings.Split(os.Getenv("GODEBUG"), ",") {
+		if f == "remotedb.debug=1" {
+			tracing = true
+		}
+	}
+}
 
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)
@@ -567,6 +580,22 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 
 	ch := make(chan bool, ServerMaxConnections)
 	defer close(ch)
+
+	if tracing {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					log.Info("remote db: connections", "amount", len(ch))
+				case <-ctx.Done():
+				}
+			}
+		}()
+	}
+
 	for {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
@@ -633,7 +662,7 @@ func (db *DB) ping(ctx context.Context) error {
 	var err error
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return fmt.Errorf("ping failed: %w", err)
+		return fmt.Errorf("remote db: ping failed: %w", err)
 	}
 	defer func() {
 		if err != nil { // reconnect on error
@@ -714,7 +743,7 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 				db.returnConn(ctx, newIn, newOut, newCloser)
 			case <-pingTicker.C:
 				if err := db.ping(ctx); err != nil {
-					log.Error("ping failed", "err", err)
+					log.Error("remote db: ping failed", "err", err)
 				}
 			}
 		}
@@ -722,6 +751,21 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 
 	if err := db.ping(ctx); err != nil {
 		return nil, err
+	}
+
+	if tracing {
+		go func() {
+			ticker := time.NewTicker(2 * time.Second)
+			defer ticker.Stop()
+
+			for {
+				select {
+				case <-ticker.C:
+					log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
+				case <-ctx.Done():
+				}
+			}
+		}()
 	}
 
 	return db, nil
