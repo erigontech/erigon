@@ -353,7 +353,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	// TODO: [Issue 99] Support incarnations
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(0))
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8

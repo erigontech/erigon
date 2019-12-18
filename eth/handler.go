@@ -960,7 +960,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
 					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
-					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(0))
+					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(1))
 					// TODO [Issue 99] support incarnations
 					storagePrefix := req.Prefixes[i]
 					rr := tr.NewResolveRequest(contractPrefix, storagePrefix.ToHex(), storagePrefix.Nibbles(), nil)
