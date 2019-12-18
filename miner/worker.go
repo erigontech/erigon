@@ -985,7 +985,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 
 	s := &(*w.current.state)
 
-	block, err := MineBlock(w.engine, s, w.current.tds, w.chain.Config(), w.current.header, w.current.txs, uncles, w.current.receipts)
+	block, err := NewBlock(w.engine, s, w.current.tds, w.chain.Config(), w.current.header, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
 		return err
 	}
@@ -1020,7 +1020,7 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	return nil
 }
 
-func MineBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
 	block, err := engine.FinalizeAndAssemble(chainConfig, header, s, txs, uncles, receipts)
 	if err != nil {
 		return nil, err
@@ -1064,10 +1064,3 @@ func GetState(blockchain *core.BlockChain, parent *types.Block) (*state.IntraBlo
 	return statedb, tds, nil
 }
 
-// postSideBlock fires a side chain event, only use it for testing.
-func (w *worker) postSideBlock(event core.ChainSideEvent) {
-	select {
-	case w.chainSideCh <- event:
-	case <-w.exitCh:
-	}
-}

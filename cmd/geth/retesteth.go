@@ -542,7 +542,7 @@ func (api *RetestethAPI) mineBlock() error {
 		}
 	}
 
-	block, err := miner.MineBlock(api.engine, statedb, tds, api.blockchain.Config(), header, txs, []*types.Header{}, receipts)
+	block, err := miner.NewBlock(api.engine, statedb, tds, api.blockchain.Config(), header, txs, []*types.Header{}, receipts)
 	if err != nil {
 		return err
 	}
