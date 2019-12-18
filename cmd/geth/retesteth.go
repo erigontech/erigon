@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/miner"
@@ -654,19 +655,25 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		block = api.blockchain.GetBlockByNumber(blockNumber)
 		//fmt.Printf("Account range: %d, txIndex %d, start: %x, maxResults: %d\n", blockNumber, txIndex, common.BigToHash((*big.Int)(addressHash)), maxResults)
 	}
+
+	if api.chainConfig != nil {
+		ctx = api.chainConfig.WithEIPsFlags(ctx, block.Number())
+	}
+
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
 	var statedb *state.IntraBlockState
+	var dbState *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		statedb, dbState, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
 	} else {
 		root = parentHeader.Root
-		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
+		statedb, dbState, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
@@ -686,10 +693,10 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			//root = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				//err = statedb.CommitBlock(api.chainConfig.IsEIP158(block.Number()), nil)
-				//if err != nil {
-				//	return AccountRangeResult{}, err
-				//}
+				err = statedb.CommitBlock(ctx, dbState)
+				if err != nil {
+					return AccountRangeResult{}, err
+				}
 				break
 			}
 		}
@@ -701,7 +708,9 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 		it := trie.NewIterator(accountTrie.NodeIterator(common.BigToHash((*big.Int)(addressHash)).Bytes()))
 	*/
+
 	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
+
 	/*
 		for i := 0; i < int(maxResults) && it.Next(); i++ {
 			if preimage := accountTrie.GetKey(it.Key); preimage != nil {
@@ -718,6 +727,23 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			result.NextKey = next
 		}
 	*/
+
+	acchash := common.BigToHash((*big.Int)(addressHash))
+	rangeResult, err := eth.AccountRange(dbState, &acchash, int(maxResults))
+	if err != nil {
+		return result, err
+	}
+
+	result.NextKey = rangeResult.Next
+
+	for k, v := range rangeResult.Accounts {
+		if v == nil {
+			result.AddressMap[k] = common.Address{}
+		} else {
+			result.AddressMap[k] = *v
+		}
+	}
+
 	return result, nil
 }
 
@@ -771,19 +797,25 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		//fmt.Printf("Storage range: %d, txIndex %d, addr: %x, start: %x, maxResults: %d\n",
 		//	blockNumber, txIndex, address, common.BigToHash((*big.Int)(begin)), maxResults)
 	}
+
+	if api.chainConfig != nil {
+		ctx = api.chainConfig.WithEIPsFlags(ctx, block.Number())
+	}
+
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
 	var statedb *state.IntraBlockState
+	var dbstate *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		statedb, dbstate, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
 	} else {
 		root = parentHeader.Root
-		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
+		statedb, dbstate, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
@@ -803,7 +835,7 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			//_ = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				//_, err = statedb.Commit(vmenv.ChainConfig().IsEIP158(block.Number()))
+				err = statedb.CommitBlock(ctx, dbstate)
 				if err != nil {
 					return StorageRangeResult{}, err
 				}
@@ -814,7 +846,9 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		storageTrie := statedb.StorageTrie(address)
 		it := trie.NewIterator(storageTrie.NodeIterator(common.BigToHash((*big.Int)(begin)).Bytes()))
 	*/
+
 	result := StorageRangeResult{Storage: make(map[common.Hash]SRItem)}
+
 	/*
 		for i := 0; i < int(maxResults) && it.Next(); i++ {
 			if preimage := storageTrie.GetKey(it.Key); preimage != nil {
@@ -847,6 +881,22 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			result.Complete = true
 		}
 	*/
+
+	beginHash := common.BigToHash((*big.Int)(begin))
+
+	rangeResults, err := eth.StorageRangeAt(dbstate, address, beginHash.Bytes(), int(maxResults))
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+
+	if rangeResults.NextKey == nil {
+		result.Complete = true
+	}
+
+	for h, entry := range rangeResults.Storage {
+		result.Storage[h] = SRItem{entry.Key.Hex(), entry.Value.Hex()}
+	}
+
 	return result, nil
 }
 

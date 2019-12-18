@@ -351,7 +351,7 @@ type AccountRangeResult struct {
 	Next     common.Hash                     `json:"next"`
 }
 
-func accountRange(dbstate *state.DbState, start *common.Hash, maxResults int) (AccountRangeResult, error) {
+func AccountRange(dbstate *state.DbState, start *common.Hash, maxResults int) (AccountRangeResult, error) {
 	if start == nil {
 		start = &common.Hash{0}
 	}
@@ -388,7 +388,7 @@ func (api *PrivateDebugAPI) AccountRange(ctx context.Context, start *common.Hash
 		return AccountRangeResult{}, err
 	}
 
-	return accountRange(dbstate, start, maxResults)
+	return AccountRange(dbstate, start, maxResults)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
@@ -416,10 +416,10 @@ func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common
 	}
 	//dbstate.SetBlockNr(block.NumberU64())
 	//statedb.CommitBlock(api.eth.chainConfig.IsEIP158(block.Number()), dbstate)
-	return storageRangeAt(dbstate, contractAddress, keyStart, maxResult)
+	return StorageRangeAt(dbstate, contractAddress, keyStart, maxResult)
 }
 
-func storageRangeAt(dbstate *state.DbState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
+func StorageRangeAt(dbstate *state.DbState, contractAddress common.Address, start []byte, maxResult int) (StorageRangeResult, error) {
 	account, err := dbstate.ReadAccountData(contractAddress)
 	if err != nil {
 		return StorageRangeResult{}, fmt.Errorf("error reading account %x: %v", contractAddress, err)

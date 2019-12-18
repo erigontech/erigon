@@ -36,7 +36,7 @@ import (
 var dumper = spew.ConfigState{Indent: "    "}
 
 func accountRangeTest(t *testing.T, statedb *state.DbState, start *common.Hash, requestedNum int, expectedNum int) AccountRangeResult {
-	result, err := accountRange(statedb, start, requestedNum)
+	result, err := AccountRange(statedb, start, requestedNum)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestEmptyAccountRange(t *testing.T) {
 		statedb = state.NewDbState(ethdb.NewMemDatabase(), 0)
 	)
 
-	results, err := accountRange(statedb, &common.Hash{0x0}, AccountRangeMaxResults)
+	results, err := AccountRange(statedb, &common.Hash{0x0}, AccountRangeMaxResults)
 	if err != nil {
 		t.Fatalf("Empty results should not trigger an error: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestStorageRangeAt(t *testing.T) {
 	}
 	dbs := state.NewDbState(db, 1)
 	for _, test := range tests {
-		result, err := storageRangeAt(dbs, addr, test.start, test.limit)
+		result, err := StorageRangeAt(dbs, addr, test.start, test.limit)
 		if err != nil {
 			t.Error(err)
 		}
