@@ -80,12 +80,9 @@ PoolSize=128, CursorBatchSize=10K -> 95-Latency 30s (eat all conns in pool)
 PoolSize=128, CursorBatchSize=1K -> 95-Latency 6s (eat 50 conns in pool)
 PoolSize=128, CursorBatchSize=100 -> 95-Latency 600ms (eat 5 conns in pool)
 ```
- 
- 
 
 RPC daemon known problems: 
-- if call .Cursor().Seek() it will allocate `cursor batch cash` and wont use it.
-- we doing a lot of .Encode calls (for each cmd/key/value) - "maybe" .Encode perform syscall to send data. 
-Maybe we need buffered io.Writer or encode struct{cmd,key,value} at once.   
+- we call .Encode for each cmd/key/value - "maybe" it does syscall to send data. 
+Maybe need buffered io.Writer or encode struct{cmd,key,value} at once. Need to write benchmark.   
 
 
