@@ -72,6 +72,16 @@ Rate 10:
 - Geth Behind RPC Daemon: 200% of CPU
 - RPC Daemon: 230% of CPU, 95-Latency 7s
 ```
+Reason is: often usage of `.GetAsOf()` - this method does much `.Next()` and `.Seek()` calls. 
+Each `.Seek()` call invalidate internal batch cache of `.Next()` method and remote_db does read `CursorBatchSize` amount of keys again.
+
+```
+PoolSize=128, CursorBatchSize=10K -> 95-Latency 30s (eat all conns in pool)
+PoolSize=128, CursorBatchSize=1K -> 95-Latency 6s (eat 50 conns in pool)
+PoolSize=128, CursorBatchSize=100 -> 95-Latency 600ms (eat 5 conns in pool)
+```
+ 
+ 
 
 RPC daemon known problems: 
 - if call .Cursor().Seek() it will allocate `cursor batch cash` and wont use it.
