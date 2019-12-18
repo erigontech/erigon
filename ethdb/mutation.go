@@ -314,25 +314,25 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			return false, err
 		}
 		if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
+			innerErr := changedAccounts.Walk(func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(hBucketStr, composite)
 				return nil
 			})
 
-			if err != nil {
-				return false, err
+			if innerErr != nil {
+				return false, innerErr
 			}
 			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		} else {
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
+			innerErr := changedAccounts.Walk(func(kk, _ []byte) error {
 				acc, err := m.getNoLock(dbutils.AccountsHistoryBucket, kk)
 				if err != nil {
 					return nil
 				}
-				v, isEmpty, err := RemoveFromIndex(acc, timestamp)
-				if err != nil {
-					return nil
+				v, isEmpty, removeErr := RemoveFromIndex(acc, timestamp)
+				if removeErr != nil {
+					return removeErr
 				}
 				if isEmpty {
 					m.puts.DeleteStr(hBucketStr, kk)
@@ -341,6 +341,9 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 				}
 				return nil
 			})
+			if innerErr != nil {
+				return false, innerErr
+			}
 			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		}
 		return true, nil

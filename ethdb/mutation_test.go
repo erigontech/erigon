@@ -64,9 +64,9 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 
 	} else {
 		compositeKey, _ := dbutils.CompositeKeySuffix(addrHashes[0].Bytes(), 1)
-		csData, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
-		if err != nil {
-			t.Fatal(err)
+		_, innerErr := db.Get(dbutils.AccountsHistoryBucket, compositeKey)
+		if innerErr != nil {
+			t.Fatal(innerErr)
 		}
 	}
 
@@ -79,19 +79,19 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	csData, err = db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
+	_, err = db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
 	if err != ErrKeyNotFound {
 		t.Fatal("changeset must be deleted")
 	}
 
 	if debug.IsThinHistory() {
-		csData, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
+		_, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
 		if err != ErrKeyNotFound {
 			t.Fatal("account must be deleted")
 		}
 	} else {
 		compositeKey, _ := dbutils.CompositeKeySuffix(addrHashes[0].Bytes(), 1)
-		csData, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
+		_, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
 		if err != ErrKeyNotFound {
 			t.Fatal("account must be deleted")
 		}
