@@ -21,8 +21,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
+	"net/http"
+	"net/http/pprof"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -87,8 +91,8 @@ const (
 
 const DefaultCursorBatchSize uint64 = 100 * 1000
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
-const ServerMaxConnections uint64 = 1024
-const ClientMaxConnections uint64 = 256
+const ServerMaxConnections uint64 = 2048
+const ClientMaxConnections uint64 = 128
 
 // tracing enable by evn GODEBUG=remotedb.debug=1
 var tracing bool
@@ -99,6 +103,20 @@ func init() {
 			tracing = true
 		}
 	}
+
+	// go tool pprof -http=:8081 http://localhost:6060/
+	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
+	go func() {
+		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+		randomPort := func(min, max int) string {
+			return strconv.Itoa(r.Intn(min-max) + min)
+		}
+		port := randomPort(6000, 7000)
+		httpPort := randomPort(8081, 8900)
+
+		fmt.Println("Profiling enabled: go tool pprof -http=:" + httpPort + " http://127.0.0.1:" + port)
+		fmt.Println(http.ListenAndServe("127.0.0.1:"+port, nil))
+	}()
 }
 
 // Pool of decoders
@@ -384,6 +402,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				log.Error("could not encode value in response to CmdGet", "error", err)
 				return err
 			}
+
 		case CmdCursor:
 			var bucketHandle uint64
 			if err := decoder.Decode(&bucketHandle); err != nil {
@@ -791,6 +810,13 @@ type Tx struct {
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
+	//t := time.Now()
+	//defer func() {
+	//	if tracing {
+	//		log.Info("remote db: .View()", "took", time.Since(t))
+	//	}
+	//}()
+
 	var err error
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
@@ -940,6 +966,13 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 // Get reads a value corresponding to the given key, from the bucket
 // return nil if they key is not present
 func (b *Bucket) Get(key []byte) ([]byte, error) {
+	//t := time.Now()
+	//defer func() {
+	//	if tracing {
+	//		log.Info("remote db: .Get()", "took", time.Since(t))
+	//	}
+	//}()
+
 	select {
 	default:
 	case <-b.ctx.Done():
@@ -1025,9 +1058,7 @@ func (b *Bucket) Cursor() (*Cursor, error) {
 		out:          b.out,
 		cursorHandle: cursorHandle,
 
-		batchSize:   DefaultCursorBatchSize,
-		cacheKeys:   make([][]byte, DefaultCursorBatchSize),
-		cacheValues: make([][]byte, DefaultCursorBatchSize),
+		batchSize: DefaultCursorBatchSize,
 	}
 
 	return cursor, nil
@@ -1190,6 +1221,11 @@ func (c *Cursor) Next() (keys []byte, values []byte) {
 }
 
 func (c *Cursor) fetchPage(cmd Command) error {
+	if c.cacheKeys == nil {
+		c.cacheKeys = make([][]byte, c.batchSize)
+		c.cacheValues = make([][]byte, c.batchSize)
+	}
+
 	decoder := newDecoder(c.in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(c.out)

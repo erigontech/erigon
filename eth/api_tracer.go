@@ -628,7 +628,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, _, err := api.computeTxEnv(blockHash, int(index))
+	msg, vmctx, statedb, _, _, err := api.computeTxEnv(ctx, blockHash, int(index))
 	if err != nil {
 		return nil, err
 	}
@@ -699,7 +699,7 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
 	// Create the parent state database
 	block := api.eth.blockchain.GetBlockByHash(blockHash)
 	if block == nil {
@@ -714,6 +714,12 @@ func (api *PrivateDebugAPI) computeTxEnv(blockHash common.Hash, txIndex int) (co
 	signer := types.MakeSigner(api.eth.blockchain.Config(), block.Number())
 
 	for idx, tx := range block.Transactions() {
+		select {
+		default:
+		case <-ctx.Done():
+			return nil, vm.Context{}, nil, nil, 0, ctx.Err()
+		}
+
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
 		EVMcontext := core.NewEVMContext(msg, block.Header(), api.eth.blockchain, nil)
