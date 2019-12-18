@@ -43,16 +43,23 @@ On simple requests `eth_getBlockByNumber` RPC Daemon looks well:
 cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s | vegeta report
 
 Rate 300: 
-- Geth Alone: 80% of CPU
+- Geth Alone: 80% of CPU, 95-Latency 2ms
 
 - Geth Behind RPC Daemon: 25% of CPU
-- RPC Daemon: 45% of CPU
+- RPC Daemon: 45% of CPU, 95-Latency 3ms
 
 Rate 1000: 
-- Geth Alone: 200% of CPU
+- Geth Alone: 200% of CPU, 95-Latency 3ms
 
 - Geth Behind RPC Daemon: 50% of CPU
-- RPC Daemon: 120% of CPU
+- RPC Daemon: 120% of CPU, 95-Latency 6ms
+
+Rate 2000: 
+- Geth Alone: 400% of CPU, 95-Latency 15ms
+
+- Geth Behind RPC Daemon: 100% of CPU
+- RPC Daemon: 250% of CPU, 95-Latency 10ms
+
 ```
 
 On complex request - `debug_storageRangeAt` producing >600 db.View calls with twice more .Bucket/.Cursor/.Seek calls:
