@@ -606,17 +606,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
-			incarnation, err := tds.nextIncarnation(addrHash)
-			//fmt.Println("b.created",addrHash.String(), incarnation)
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].SetIncarnation(incarnation)
-			}
-			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].SetIncarnation(incarnation)
-			}
-			if err != nil {
-				return nil, err
-			}
 			// Prevent repeated storage clearouts
 			if _, ok := alreadyCreated[addrHash]; ok {
 				continue
@@ -1259,6 +1248,13 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 		return err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
+	incarnation, err := tsw.tds.nextIncarnation(addrHash)
+	if err != nil {
+		return err
+	}
+	if account, ok := tsw.tds.currentBuffer.accountUpdates[addrHash]; ok && account != nil {
+		account.SetIncarnation(incarnation)
+	}
 	return nil
 }
 

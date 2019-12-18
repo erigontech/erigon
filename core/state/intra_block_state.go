@@ -861,16 +861,16 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 					return err
 				}
 			}
-			if stateObject.created {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
+			}
+			if stateObject.created {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
 			}
 		}
 		sdb.stateObjectsDirty[addr] = struct{}{}
@@ -911,17 +911,18 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 				}
 			}
 
-			if stateObject.created {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-			}
 			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
 				return err
 			}
 
 			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
 				return err
+			}
+
+			if stateObject.created {
+				if err := stateWriter.CreateContract(addr); err != nil {
+					return err
+				}
 			}
 		}
 	}
