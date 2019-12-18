@@ -15,145 +15,53 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethdb defines the interfaces for an Ethereum data store.
-package ethdb
+package remote
 
 import (
 	"bytes"
-	"os"
-	"path"
+	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-
-	"github.com/ledgerwatch/bolt"
 )
-
-var OpenFileLimit = 64
-
-const HeapSize = 512 * 1024 * 1024
 
 // BoltDatabase is a wrapper over BoltDb,
 // compatible with the Database interface.
 type BoltDatabase struct {
-	db  *bolt.DB   // BoltDB instance
+	db  *DB        // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
-	id  uint64
 }
 
-// NewBoltDatabase returns a BoltDB wrapper.
-func NewBoltDatabase(file string) (*BoltDatabase, error) {
-	logger := log.New("database", file)
+// NewRemoteBoltDatabase returns a BoltDB wrapper.
+func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
+	logger := log.New()
 
-	// Create necessary directories
-	if err := os.MkdirAll(path.Dir(file), os.ModePerm); err != nil {
-		return nil, err
-	}
-	// Open the db and recover any potential corruptions
-	db, err := bolt.Open(file, 0600, &bolt.Options{})
-	// (Re)check for errors and abort if opening of the db failed
-	if err != nil {
-		return nil, err
-	}
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
-		id:  id(),
-	}, nil
-}
-
-// Put inserts or updates a single entry.
-func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucket, true)
-		if err != nil {
-			return err
-		}
-		return b.Put(key, value)
-	})
-	return err
-}
-
-// PutS adds a new entry to the historical buckets:
-// hBucket (unless changeSetBucketOnly) and ChangeSet.
-func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
-	changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		if !changeSetBucketOnly {
-			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
-			if err != nil {
-				return err
-			}
-			if err = hb.Put(composite, value); err != nil {
-				return err
-			}
-		}
-
-		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetBucket, true)
-		if err != nil {
-			return err
-		}
-
-		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.Decode(dat)
-		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
-			return err
-		}
-		err = sh.Add(key, value)
-		if err != nil {
-			return err
-		}
-		dat, err = sh.Encode()
-		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
-			return err
-		}
-
-		return sb.Put(changeSetKey, dat)
-	})
-	return err
-}
-
-func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
-	var savedTx *bolt.Tx
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		for bucketStart := 0; bucketStart < len(tuples); {
-			bucketEnd := bucketStart
-			for ; bucketEnd < len(tuples) && bytes.Equal(tuples[bucketEnd], tuples[bucketStart]); bucketEnd += 3 {
-			}
-			b, err := tx.CreateBucketIfNotExists(tuples[bucketStart], false)
-			if err != nil {
-				return err
-			}
-			l := (bucketEnd - bucketStart) / 3
-			pairs := make([][]byte, 2*l)
-			for i := 0; i < l; i++ {
-				pairs[2*i] = tuples[bucketStart+3*i+1]
-				pairs[2*i+1] = tuples[bucketStart+3*i+2]
-			}
-			if err := b.MultiPut(pairs...); err != nil {
-				return err
-			}
-			bucketStart = bucketEnd
-		}
-		savedTx = tx
-		return nil
-	})
-	if err != nil {
-		return 0, err
 	}
-	return uint64(savedTx.Stats().Write), nil
 }
 
+// Has checks if the value exists
+//
+// Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
-	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
+	err := db.db.View(context.Background(), func(tx *Tx) error {
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			has = false
 		} else {
-			v, _ := b.Get(key)
+			v, err := b.Get(key)
+			if err != nil {
+				return err
+			}
 			has = v != nil
 		}
 		return nil
@@ -161,27 +69,34 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	return has, err
 }
 
-func (db *BoltDatabase) DiskSize() int64 {
-	return int64(db.db.Size())
-}
-
 // Get returns the value for a given key if it's present.
+//
+// Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
-		if b != nil {
-			v, _ := b.Get(key)
-			if v != nil {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-			}
+	err := db.db.View(context.Background(), func(tx *Tx) error {
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
+		if b == nil {
+			return fmt.Errorf("bucket not found, %s", bucket)
+		}
+
+		v, err := b.Get(key)
+		if err != nil {
+			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
+		}
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
 		}
 		return nil
 	})
 	if dat == nil {
-		return nil, ErrKeyNotFound
+		return nil, ethdb.ErrKeyNotFound
 	}
 	return dat, err
 }
@@ -196,57 +111,76 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
-	err := db.db.View(func(tx *bolt.Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		{
-			hB := tx.Bucket(hBucket)
-			if hB == nil {
-				return ErrKeyNotFound
+			hB, err := tx.Bucket(hBucket)
+			if err != nil {
+				return err
 			}
-			hC := hB.Cursor()
+
+			if hB == nil {
+				return ethdb.ErrKeyNotFound
+			}
+			hC, err := hB.Cursor()
+			if err != nil {
+				return err
+			}
+
 			hK, hV := hC.Seek(composite)
 			if hK != nil && bytes.HasPrefix(hK, key) {
 				dat = make([]byte, len(hV))
 				copy(dat, hV)
 				return nil
 			}
+			if hC.Err() != nil {
+				return hC.Err()
+			}
 		}
 		{
-			b := tx.Bucket(bucket)
-			if b == nil {
-				return ErrKeyNotFound
+			b, err := tx.Bucket(bucket)
+			if err != nil {
+				return err
 			}
-			c := b.Cursor()
+
+			if b == nil {
+				return ethdb.ErrKeyNotFound
+			}
+			c, err := b.Cursor()
+			if err != nil {
+				return err
+			}
+
 			k, v := c.Seek(key)
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
 				copy(dat, v)
 				return nil
 			}
+			if c.Err() != nil {
+				return c.Err()
+			}
 		}
 
-		return ErrKeyNotFound
+		return ethdb.ErrKeyNotFound
 	})
 	return dat, err
 }
 
-func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {
-	fixedbytes = int((fixedbits + 7) / 8)
-	shiftbits := fixedbits & 7
-	mask = byte(0xff)
-	if shiftbits != 0 {
-		mask = 0xff << (8 - shiftbits)
-	}
-	return fixedbytes, mask
-}
-
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := Bytesmask(fixedbits)
-	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
+	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
+	err := db.db.View(context.Background(), func(tx *Tx) error {
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
 		k, v := c.Seek(startkey)
 		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
 			goOn, err := walker(k, v)
@@ -258,7 +192,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 			}
 			k, v = c.Next()
 		}
-		return nil
+		return c.Err()
 	})
 	return err
 }
@@ -268,14 +202,22 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 		return nil
 	}
 	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
+	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
+	err := db.db.View(context.Background(), func(tx *Tx) error {
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
 		k, v := c.Seek(startkey)
 		for k != nil {
 			// Adjust rangeIdx if needed
@@ -295,14 +237,14 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						if k == nil {
-							return nil
+							return c.Err()
 						}
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
+						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 					}
 				}
@@ -314,32 +256,49 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 			}
 			k, v = c.Next()
 		}
-		return nil
+
+		return c.Err()
 	})
 	return err
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	fixedbytes, mask := Bytesmask(fixedbits)
+	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
-	keyBuffer := make([]byte, l+len(EndSuffix))
-	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
+	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
+	err := db.db.View(context.Background(), func(tx *Tx) error {
+		var err error
+
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		hB := tx.Bucket(hBucket)
+		hB, err := tx.Bucket(hBucket)
+		if err != nil {
+			return err
+		}
+
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
 		k, v := c.Seek(startkey)
 		hK, hV := hC.Seek(startkey)
 		goOn := true
-		var err error
 		for goOn {
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
 				k = nil
@@ -360,6 +319,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
+
 				continue
 			}
 
@@ -386,11 +346,18 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
-					copy(keyBuffer[l:], EndSuffix)
+					copy(keyBuffer[l:], ethdb.EndSuffix)
 					hK, hV = hC.SeekTo(keyBuffer)
 				}
 			}
 		}
+		if hC.Err() != nil {
+			return hC.Err()
+		}
+		if c.Err() != nil {
+			return c.Err()
+		}
+
 		return err
 	})
 	return err
@@ -401,28 +368,48 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		return nil
 	}
 	keyIdx := 0 // What is the current key we are extracting
-	fixedbytes, mask := Bytesmask(fixedbits[keyIdx])
+	fixedbytes, mask := ethdb.Bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
-	keyBuffer := make([]byte, l+len(EndSuffix))
-	if err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
+	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
+	if err := db.db.View(context.Background(), func(tx *Tx) error {
+		var err error
+		b, err := tx.Bucket(bucket)
+		if err != nil {
+			return err
+		}
+
 		if b == nil {
 			return nil
 		}
-		hB := tx.Bucket(hBucket)
+		hB, err := tx.Bucket(hBucket)
+		if err != nil {
+			return err
+		}
+
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
-		hC1 := hB.Cursor()
+		c, err := b.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
+
+		hC1, err := hB.Cursor()
+		if err != nil {
+			return err
+		}
+
 		k, v := c.Seek(startkey)
 		hK, hV := hC.Seek(startkey)
 		goOn := true
-		var err error
 		for goOn { // k != nil
 			fit := k != nil
 			hKFit := hK != nil
@@ -461,6 +448,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						}
 						if hCmp < 0 {
 							hK, hV = hC.SeekTo(startkey)
+
 							if hK == nil {
 								hCmp = 1
 							}
@@ -471,7 +459,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						if keyIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = Bytesmask(fixedbits[keyIdx])
+						fixedbytes, mask = ethdb.Bytesmask(fixedbits[keyIdx])
 						startkey = startkeys[keyIdx]
 					}
 				}
@@ -482,6 +470,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				hK, hV = hC.SeekTo(keyBuffer[:sl])
+
 				continue
 			}
 			var cmp int
@@ -512,12 +501,24 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
-					copy(keyBuffer[l:], EndSuffix)
+					copy(keyBuffer[l:], ethdb.EndSuffix)
 					hK, hV = hC.SeekTo(keyBuffer)
 				}
 			}
 		}
-		return err
+		if err != nil {
+			return err
+		}
+		if c.Err() != nil {
+			return c.Err()
+		}
+		if hC.Err() != nil {
+			return hC.Err()
+		}
+		if hC1.Err() != nil {
+			return hC1.Err()
+		}
+		return nil
 	}); err != nil {
 		return err
 	}
@@ -525,71 +526,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 }
 
 func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return RewindData(db, timestampSrc, timestampDst, df)
-}
-
-// Delete deletes the key from the queue and database
-func (db *BoltDatabase) Delete(bucket, key []byte) error {
-	// Execute the actual operation
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket(bucket)
-		if b != nil {
-			return b.Delete(key)
-		} else {
-			return nil
-		}
-	})
-	return err
-}
-
-// DeleteTimestamp removes data for a given timestamp (block number)
-// from all historical buckets (incl. ChangeSet).
-func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
-	encodedTS := dbutils.EncodeTimestamp(timestamp)
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(dbutils.ChangeSetBucket)
-		if sb == nil {
-			return nil
-		}
-		var keys [][]byte
-		c := sb.Cursor()
-		for k, v := c.Seek(encodedTS); k != nil && bytes.HasPrefix(k, encodedTS); k, v = c.Next() {
-			// k = encodedTS + hBucket
-			hb := tx.Bucket(k[len(encodedTS):])
-			if hb == nil {
-				return nil
-			}
-			changedAccounts, err := dbutils.Decode(v)
-			if err != nil {
-				return err
-			}
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				kk = append(kk, encodedTS...)
-				return hb.Delete(kk)
-			})
-			if err != nil {
-				return err
-			}
-			keys = append(keys, k)
-		}
-		for _, k := range keys {
-			if err := sb.Delete(k); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	return err
-}
-
-func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		if err := tx.DeleteBucket(bucket); err != nil {
-			return err
-		}
-		return nil
-	})
-	return err
+	return ethdb.RewindData(db, timestampSrc, timestampDst, df)
 }
 
 func (db *BoltDatabase) Close() {
@@ -598,68 +535,4 @@ func (db *BoltDatabase) Close() {
 	} else {
 		db.log.Error("Failed to close database", "err", err)
 	}
-}
-
-func (db *BoltDatabase) Keys() ([][]byte, error) {
-	var keys [][]byte
-	err := db.db.View(func(tx *bolt.Tx) error {
-		return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
-			var nameCopy = make([]byte, len(name))
-			copy(nameCopy, name)
-			return b.ForEach(func(k, _ []byte) error {
-				var kCopy = make([]byte, len(k))
-				copy(kCopy, k)
-				keys = append(append(keys, nameCopy), kCopy)
-				return nil
-			})
-		})
-	})
-	if err != nil {
-		return nil, err
-	}
-	return keys, err
-}
-
-func (db *BoltDatabase) DB() *bolt.DB {
-	return db.db
-}
-
-func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
-	m := &mutation{
-		db:               db,
-		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
-	}
-	return m
-}
-
-// IdealBatchSize defines the size of the data batches should ideally add in one write.
-func (db *BoltDatabase) IdealBatchSize() int {
-	return 100 * 1024
-}
-
-// [TURBO-GETH] Freezer support (not implemented yet)
-// Ancients returns an error as we don't have a backing chain freezer.
-func (db *BoltDatabase) Ancients() (uint64, error) {
-	return 0, errNotSupported
-}
-
-// TruncateAncients returns an error as we don't have a backing chain freezer.
-func (db *BoltDatabase) TruncateAncients(items uint64) error {
-	return errNotSupported
-}
-
-func (db *BoltDatabase) ID() uint64 {
-	return db.id
-}
-
-func InspectDatabase(db Database) error {
-	// FIXME: implement in Turbo-Geth
-	// see https://github.com/ethereum/go-ethereum/blob/f5d89cdb72c1e82e9deb54754bef8dd20bf12591/core/rawdb/database.go#L224
-	return errNotSupported
-}
-
-func NewDatabaseWithFreezer(db Database, dir, suffix string) (Database, error) {
-	// FIXME: implement freezer in Turbo-Geth
-	return db, nil
 }

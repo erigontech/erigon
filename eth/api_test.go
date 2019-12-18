@@ -188,7 +188,7 @@ func TestStorageRangeAt(t *testing.T) {
 			common.HexToHash("48078cfed56339ea54962e72c37c7f588fc4f8e5bc173827ba75cb10a63a96a5"),
 			common.HexToHash("5723d2c3a83af9b735e3b7f21531e5623d183a9095a56604ead41f3582fdfb75"),
 		}
-		storage = storageMap{
+		storage = StorageMap{
 			keys[0]: {Key: &common.Hash{0x02}, Value: common.Hash{0x01}},
 			keys[1]: {Key: &common.Hash{0x04}, Value: common.Hash{0x02}},
 			keys[2]: {Key: &common.Hash{0x01}, Value: common.Hash{0x03}},
@@ -225,7 +225,7 @@ func TestStorageRangeAt(t *testing.T) {
 	}{
 		{
 			start: []byte{}, limit: 0,
-			want: StorageRangeResult{storageMap{}, &keys[0]},
+			want: StorageRangeResult{StorageMap{}, &keys[0]},
 		},
 		{
 			start: []byte{}, limit: 100,
@@ -233,7 +233,7 @@ func TestStorageRangeAt(t *testing.T) {
 		},
 		{
 			start: []byte{}, limit: 2,
-			want: StorageRangeResult{storageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
+			want: StorageRangeResult{StorageMap{keys[0]: storage[keys[0]], keys[1]: storage[keys[1]]}, &keys[2]},
 		},
 		{
 			start: []byte{0x00}, limit: 4,
@@ -241,7 +241,7 @@ func TestStorageRangeAt(t *testing.T) {
 		},
 		{
 			start: []byte{0x40}, limit: 2,
-			want: StorageRangeResult{storageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
+			want: StorageRangeResult{StorageMap{keys[1]: storage[keys[1]], keys[2]: storage[keys[2]]}, &keys[3]},
 		},
 	}
 	dbs := state.NewDbState(db, 1)

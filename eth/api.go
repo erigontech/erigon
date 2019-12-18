@@ -393,13 +393,13 @@ func (api *PrivateDebugAPI) AccountRange(ctx context.Context, start *common.Hash
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.
 type StorageRangeResult struct {
-	Storage storageMap   `json:"storage"`
+	Storage StorageMap   `json:"storage"`
 	NextKey *common.Hash `json:"nextKey"` // nil if Storage includes the last key in the trie.
 }
 
-type storageMap map[common.Hash]storageEntry
+type StorageMap map[common.Hash]StorageEntry
 
-type storageEntry struct {
+type StorageEntry struct {
 	Key   *common.Hash `json:"key"`
 	Value common.Hash  `json:"value"`
 }
@@ -427,11 +427,12 @@ func StorageRangeAt(dbstate *state.DbState, contractAddress common.Address, star
 	if account == nil {
 		return StorageRangeResult{}, fmt.Errorf("account %x doesn't exist", contractAddress)
 	}
-	result := StorageRangeResult{Storage: storageMap{}}
+	result := StorageRangeResult{Storage: StorageMap{}}
 	resultCount := 0
+
 	dbstate.ForEachStorage(contractAddress, start, func(key, seckey, value common.Hash) bool {
 		if resultCount < maxResult {
-			result.Storage[seckey] = storageEntry{Key: &key, Value: value}
+			result.Storage[seckey] = StorageEntry{Key: &key, Value: value}
 		} else {
 			result.NextKey = &seckey
 		}

@@ -3,16 +3,15 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"math/big"
 	"runtime/debug"
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 var emptyHash [32]byte
@@ -43,64 +42,27 @@ func (obt *OneBytesTape) Next() ([]byte, error) {
 	return obt.Bytes(), nil
 }
 
-// OneUint64Tape implements Uint64Tape and can only contain one number at a time
-type OneUint64Tape uint64
-
-// Next belongs to the Uint64Tape interface, and for this type it always returns
-// the currently set nonce
-func (out *OneUint64Tape) Next() (uint64, error) {
-	return uint64(*out), nil
-}
-
-// OneBalanceTape implements BigIntTape and can only contain one balance at a time
-type OneBalanceTape big.Int
-
-// Next belongs to the BigIntTape interface, and for this type it always returns
-// the currently set balance
-func (obt *OneBalanceTape) Next() (*big.Int, error) {
-	return (*big.Int)(obt), nil
-}
-
-// TwoHashTape implements HashTape and can only contain two hashes at a time
-type TwoHashTape struct {
-	hashes [2]common.Hash
-	idx    int
-}
-
-// Next belongs to the HashTape interface, and for this type it returns
-// the first hash on the first invocation, and the second hash on all
-// subsequent invocations
-func (tht *TwoHashTape) Next() (common.Hash, error) {
-	h := tht.hashes[tht.idx]
-	if tht.idx == 0 {
-		tht.idx = 1
-	}
-	return h, nil
-}
-
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts     bool // Is this a resolver for accounts or for storage
-	topLevels    int  // How many top levels of the trie to keep (not roll into hashes)
-	requests     []*ResolveRequest
-	reqIndices   []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	keyIdx       int
-	currentReq   *ResolveRequest // Request currently being handled
-	currentRs    *ResolveSet     // ResolveSet currently being used
-	historical   bool
-	blockNr      uint64
-	hb           *HashBuilder
-	fieldSet     uint32 // fieldSet for the next invocation of genStructStep
-	rss          []*ResolveSet
-	curr         OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ         bytes.Buffer
-	value        OneBytesTape // Current value to be used as the value tape for the hash builder
-	hashes       TwoHashTape  // Current code hash and storage hash as the hash tape for the hash builder
-	groups       []uint16
-	a            accounts.Account
-	rlpValueTape RlpSerializableTape
+	accounts   bool // Is this a resolver for accounts or for storage
+	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
+	requests   []*ResolveRequest
+	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	keyIdx     int
+	currentReq *ResolveRequest // Request currently being handled
+	currentRs  *ResolveSet     // ResolveSet currently being used
+	historical bool
+	blockNr    uint64
+	hb         *HashBuilder
+	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
+	rss        []*ResolveSet
+	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ       bytes.Buffer
+	value      OneBytesTape // Current value to be used as the value tape for the hash builder
+	groups     []uint16
+	a          accounts.Account
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -112,7 +74,6 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		blockNr:    blockNr,
 		hb:         NewHashBuilder(false),
 	}
-	tr.rlpValueTape = NewRlpSerializableBytesTape(&tr.value)
 	return &tr
 }
 
@@ -213,8 +174,18 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.succ.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
-		tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce),
-			tr.rlpValueTape, tr.groups)
+		var data GenStructStepData
+		if tr.fieldSet == 0 {
+			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+		} else {
+			data = GenStructStepAccountData{
+				FieldSet:    tr.fieldSet,
+				StorageSize: tr.a.StorageSize,
+				Balance:     &tr.a.Balance,
+				Nonce:       tr.a.Nonce,
+			}
+		}
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 		if err != nil {
 			return err
 		}
@@ -296,7 +267,18 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.WriteByte(16)
 		if tr.curr.Len() > 0 {
 			var err error
-			tr.groups, err = GenStructStep(tr.fieldSet, tr.currentRs.HashOnly, false, false, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, &tr.curr, &tr.hashes, tr.a.StorageSize, (*OneBalanceTape)(&tr.a.Balance), (*OneUint64Tape)(&tr.a.Nonce), tr.rlpValueTape, tr.groups)
+			var data GenStructStepData
+			if tr.fieldSet == 0 {
+				data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+			} else {
+				data = GenStructStepAccountData{
+					FieldSet:    tr.fieldSet,
+					StorageSize: tr.a.StorageSize,
+					Balance:     &tr.a.Balance,
+					Nonce:       tr.a.Nonce,
+				}
+			}
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
 			if err != nil {
 				return err
 			}
