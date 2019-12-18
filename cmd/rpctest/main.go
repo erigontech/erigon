@@ -38,7 +38,7 @@ type CommonResponse struct {
 
 type EthBlockNumber struct {
 	CommonResponse
-	Number hexutil.Big `json:"result"`
+	Number hexutil.Uint64 `json:"result"`
 }
 
 type EthBalance struct {
@@ -470,10 +470,10 @@ func bench1() {
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := blockNumber.Number.ToInt().Int64()
+	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 5250001
+	firstBn := 1808208
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
@@ -501,11 +501,13 @@ func bench1() {
 			return
 		}
 		accounts[b.Result.Miner] = struct{}{}
+
 		for i, tx := range b.Result.Transactions {
 			accounts[tx.From] = struct{}{}
 			if tx.To != nil {
 				accounts[*tx.To] = struct{}{}
 			}
+
 			if tx.To != nil && tx.Gas.ToInt().Uint64() > 21000 {
 				storageCounter++
 				if storageCounter == 100 {
@@ -557,6 +559,7 @@ func bench1() {
 				}
 			}
 			req_id++
+
 			template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 			var trace EthTxTrace
 			if err := post(client, turbogeth_url, fmt.Sprintf(template, tx.Hash, req_id), &trace); err != nil {
@@ -712,7 +715,7 @@ func bench2() {
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := blockNumber.Number.ToInt().Int64()
+	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	firstBn := 1720000 - 2
 	prevBn := firstBn
@@ -1001,7 +1004,7 @@ func bench6() {
 		fmt.Printf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
 		return
 	}
-	lastBlock := blockNumber.Number.ToInt().Int64()
+	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
 	firstBn := 100000
@@ -1059,10 +1062,12 @@ func main() {
 	glogger.Verbosity(log.Lvl(3)) // 3 == verbosity INFO
 
 	flag.Parse()
-	if *action == "proofs" {
+	switch *action {
+	case "proofs":
 		proofs(*chaindata, *url, *block)
-	}
-	if *action == "fixState" {
+	case "fixState":
 		fixState(*chaindata, *url)
+	case "bench1":
+		bench1()
 	}
 }

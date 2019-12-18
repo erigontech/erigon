@@ -289,7 +289,7 @@ func (m *mutation) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fix
 }
 
 func (m *mutation) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return rewindData(m, timestampSrc, timestampDst, df)
+	return RewindData(m, timestampSrc, timestampDst, df)
 }
 
 func (m *mutation) Delete(bucket, key []byte) error {

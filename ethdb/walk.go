@@ -28,7 +28,7 @@ var EndSuffix = []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}
 
 // Generates rewind data for all buckets between the timestamp
 // timestapSrc is the current timestamp, and timestamp Dst is where we rewind
-func rewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
+func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, key, value []byte) error) error {
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
