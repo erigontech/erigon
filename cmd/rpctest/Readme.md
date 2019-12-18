@@ -42,19 +42,19 @@ On simple requests `eth_getBlockByNumber` RPC Daemon looks well:
 ```
 cat /tmp/turbo_geth_stress_test/vegeta_turbo_geth_eth_getBlockByNumber.txt | vegeta attack -rate=1000 -format=json -duration=20s | vegeta report
 
-Rate 300: 
+300rps: 
 - Geth Alone: 80% of CPU, 95-Latency 2ms
 
 - Geth Behind RPC Daemon: 25% of CPU
 - RPC Daemon: 45% of CPU, 95-Latency 3ms
 
-Rate 1000: 
+1000rps: 
 - Geth Alone: 200% of CPU, 95-Latency 3ms
 
 - Geth Behind RPC Daemon: 50% of CPU
 - RPC Daemon: 120% of CPU, 95-Latency 6ms
 
-Rate 2000: 
+2000rps: 
 - Geth Alone: 400% of CPU, 95-Latency 15ms
 
 - Geth Behind RPC Daemon: 100% of CPU
@@ -66,11 +66,17 @@ On complex request - `debug_storageRangeAt` producing >600 db.View calls with tw
 ```
 echo "POST http://localhost:9545 \n Content-Type: application/json \n @$(pwd)/cmd/rpctest/heavyStorageRangeAt.json" | vegeta attack -rate=20 -duration=20s | vegeta report
 
-Rate 10:
+10rps, batchSize 10K:
 - Geth Alone: 100% of CPU, 95-Latency 15ms 
 
 - Geth Behind RPC Daemon: 200% of CPU
 - RPC Daemon: 230% of CPU, 95-Latency 7s
+
+10rps, batchSize 10:
+- Geth Alone: 100% of CPU, 95-Latency 15ms 
+
+- Geth Behind RPC Daemon: 110% of CPU
+- RPC Daemon: 100% of CPU, 95-Latency 230ms
 ```
 Reason is: often usage of `.GetAsOf()` - this method does much `.Next()` and `.Seek()` calls. 
 Each `.Seek()` call invalidate internal batch cache of `.Next()` method and remote_db does read `CursorBatchSize` amount of keys again.
