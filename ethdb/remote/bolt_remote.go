@@ -109,7 +109,7 @@ func init() {
 	go func() {
 		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
 		randomPort := func(min, max int) string {
-			return strconv.Itoa(r.Intn(min-max) + min)
+			return strconv.Itoa(r.Intn(max-min) + min)
 		}
 		port := randomPort(6000, 7000)
 		httpPort := randomPort(8081, 8900)
@@ -1089,6 +1089,8 @@ func (c *Cursor) First() (key []byte, value []byte) {
 }
 
 func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+
 	select {
 	default:
 	case <-c.ctx.Done():
@@ -1141,6 +1143,8 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
 }
 
 func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+
 	select {
 	default:
 	case <-c.ctx.Done():
