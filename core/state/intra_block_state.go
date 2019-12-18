@@ -723,7 +723,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	//fmt.Printf("CREATE %x\n", addr[:])
 	prev = previous
 	account := new(accounts.Account)
-	original := new(accounts.Account)
+	var original *accounts.Account
 	if previous == nil {
 		account = &accounts.Account{}
 		account.Root.SetBytes(trie.EmptyRoot[:])

@@ -231,17 +231,6 @@ func (so *stateObject) setState(key, value common.Hash) {
 	so.dirtyStorage[key] = value
 }
 
-// finalise moves all dirty storage slots into the pending area to be hashed or
-// committed later. It is invoked at the end of every transaction.
-func (so *stateObject) finalise() {
-	for key, value := range so.dirtyStorage {
-		so.pendingStorage[key] = value
-	}
-	if len(so.dirtyStorage) > 0 {
-		so.dirtyStorage = make(Storage)
-	}
-}
-
 // updateTrie writes cached storage modifications into the object's storage trie.
 func (so *stateObject) updateTrie(ctx context.Context, stateWriter StateWriter) error {
 	for key, value := range so.dirtyStorage {

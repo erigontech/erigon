@@ -19,7 +19,6 @@ package state_test
 import (
 	"bytes"
 	"context"
-	"crypto/ecdsa"
 	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -487,7 +486,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	numOfContracts := 10
 	txPerBlock := 10
 	numOfBlocks := 10
-	var keys []*ecdsa.PrivateKey
 	var addresses []common.Address
 	var transactOpts []*bind.TransactOpts
 	for i := 0; i < numOfContracts; i++ {
@@ -495,7 +493,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		keys = append(keys, key)
 		addresses = append(addresses, crypto.PubkeyToAddress(key.PublicKey))
 		transactOpt := bind.NewKeyedTransactor(key)
 		transactOpt.GasLimit = 1000000
@@ -894,7 +891,10 @@ func TestWrongIncarnation(t *testing.T) {
 	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
 	fmt.Printf("%x:%x\n", addrHash, v)
 	var acc accounts.Account
-	acc.DecodeForStorage(v)
+	err = acc.DecodeForStorage(v)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fmt.Printf("%x:%d\n", addrHash, acc.Incarnation)
 	var startKey [common.HashLength + 8 + common.HashLength]byte
 	copy(startKey[:], addrHash)

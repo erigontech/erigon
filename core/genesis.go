@@ -260,7 +260,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 			statedb.SetState(addr, key, value)
 		}
 
-		if len(account.Code)>0 || len(account.Storage)>0 {
+		if len(account.Code) > 0 || len(account.Storage) > 0 {
 			statedb.SetIncarnation(addr, 1)
 		}
 	}
