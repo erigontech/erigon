@@ -333,7 +333,7 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 	var resStr string
 	if res != nil {
 		var length = len(res.String())
-		if  length > 200 {
+		if length > 200 {
 			length = 200
 		}
 		resStr = res.String()[:length]

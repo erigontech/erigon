@@ -47,7 +47,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-
 	"github.com/urfave/cli"
 )
 
@@ -246,6 +245,7 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 		return e.inner.FinalizeAndAssemble(chainConfig, header, statedb, txs, uncles, receipts)
 	} else {
 		e.accumulateRewards(chainConfig, statedb, header, uncles)
+		//header.Root = statedb.IntermediateRoot(chain.Config().IsEIP158(header.Number))
 
 		// Header seems complete, assemble into a block and return
 		return types.NewBlock(header, txs, uncles, receipts), nil
@@ -272,7 +272,7 @@ func (e *NoRewardEngine) Close() error {
 	return e.inner.Close()
 }
 
-func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainParams) (bool, error) {
+func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainParams) (bool, error) {
 	// Clean up
 	if api.blockchain != nil {
 		api.blockchain.Stop()
@@ -418,7 +418,7 @@ func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainPa
 	return true, nil
 }
 
-func (api *RetestethAPI) SendRawTransaction(ctx context.Context, rawTx hexutil.Bytes) (common.Hash, error) {
+func (api *RetestethAPI) SendRawTransaction(_ context.Context, rawTx hexutil.Bytes) (common.Hash, error) {
 	tx := new(types.Transaction)
 	if err := rlp.DecodeBytes(rawTx, tx); err != nil {
 		// Return nil is not by mistake - some tests include sending transaction where gasLimit overflows uint64
@@ -550,24 +550,6 @@ func (api *RetestethAPI) mineBlock() error {
 	return api.importBlock(block)
 }
 
-func (api *RetestethAPI) getState(parent *types.Block) (*state.IntraBlockState, *state.TrieDbState, error) {
-	statedb, _, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
-	if err != nil {
-		return nil, nil, err
-	}
-
-	tds, err := state.GetTrieDbState(parent.Root(), api.blockchain.ChainDb(), parent.NumberU64())
-	if err != nil {
-		return nil, nil, err
-	}
-
-	tds = tds.WithNewBuffer()
-	tds.SetResolveReads(false)
-	tds.SetNoHistory(true)
-
-	return statedb, tds, nil
-}
-
 func (api *RetestethAPI) importBlock(block *types.Block) error {
 	if _, err := api.blockchain.InsertChain([]*types.Block{block}); err != nil {
 		return err
@@ -577,12 +559,12 @@ func (api *RetestethAPI) importBlock(block *types.Block) error {
 	return nil
 }
 
-func (api *RetestethAPI) ModifyTimestamp(ctx context.Context, interval uint64) (bool, error) {
+func (api *RetestethAPI) ModifyTimestamp(_ context.Context, interval uint64) (bool, error) {
 	api.blockInterval = interval
 	return true, nil
 }
 
-func (api *RetestethAPI) ImportRawBlock(ctx context.Context, rawBlock hexutil.Bytes) (common.Hash, error) {
+func (api *RetestethAPI) ImportRawBlock(_ context.Context, rawBlock hexutil.Bytes) (common.Hash, error) {
 	block := new(types.Block)
 	if err := rlp.DecodeBytes(rawBlock, block); err != nil {
 		return common.Hash{}, err
@@ -594,7 +576,7 @@ func (api *RetestethAPI) ImportRawBlock(ctx context.Context, rawBlock hexutil.By
 	return block.Hash(), nil
 }
 
-func (api *RetestethAPI) RewindToBlock(ctx context.Context, newHead uint64) (bool, error) {
+func (api *RetestethAPI) RewindToBlock(_ context.Context, newHead uint64) (bool, error) {
 	if err := api.blockchain.SetHead(newHead); err != nil {
 		return false, err
 	}
@@ -604,7 +586,7 @@ func (api *RetestethAPI) RewindToBlock(ctx context.Context, newHead uint64) (boo
 
 var emptyListHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 
-func (api *RetestethAPI) GetLogHash(ctx context.Context, txHash common.Hash) (common.Hash, error) {
+func (api *RetestethAPI) GetLogHash(_ context.Context, txHash common.Hash) (common.Hash, error) {
 	receipt, _, _, _ := rawdb.ReadReceipt(api.ethDb, txHash, api.chainConfig)
 	if receipt == nil {
 		return emptyListHash, nil
@@ -617,12 +599,12 @@ func (api *RetestethAPI) GetLogHash(ctx context.Context, txHash common.Hash) (co
 	}
 }
 
-func (api *RetestethAPI) BlockNumber(ctx context.Context) (uint64, error) {
+func (api *RetestethAPI) BlockNumber(_ context.Context) (uint64, error) {
 	//fmt.Printf("BlockNumber, response: %d\n", api.blockNumber)
 	return api.blockNumber, nil
 }
 
-func (api *RetestethAPI) GetBlockByNumber(ctx context.Context, blockNr math.HexOrDecimal64, fullTx bool) (map[string]interface{}, error) {
+func (api *RetestethAPI) GetBlockByNumber(_ context.Context, blockNr math.HexOrDecimal64, fullTx bool) (map[string]interface{}, error) {
 	block := api.blockchain.GetBlockByNumber(uint64(blockNr))
 	if block != nil {
 		response, err := RPCMarshalBlock(block, true, fullTx)
@@ -662,16 +644,16 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.IntraBlockState
 	var dbState *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, dbState, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		_, dbState, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
 	} else {
+		var statedb *state.IntraBlockState
 		root = parentHeader.Root
 		statedb, dbState, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
@@ -747,7 +729,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 	return result, nil
 }
 
-func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
+func (api *RetestethAPI) GetBalance(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
@@ -757,7 +739,7 @@ func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address,
 	return (*math.HexOrDecimal256)(statedb.GetBalance(address)), nil
 }
 
-func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
+func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
@@ -766,7 +748,7 @@ func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, bl
 	return statedb.GetCode(address), nil
 }
 
-func (api *RetestethAPI) GetTransactionCount(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
+func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
@@ -804,16 +786,16 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.IntraBlockState
 	var dbstate *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, dbstate, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		_, dbstate, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
 	} else {
+		var statedb *state.IntraBlockState
 		root = parentHeader.Root
 		statedb, dbstate, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
@@ -900,7 +882,7 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 	return result, nil
 }
 
-func (api *RetestethAPI) ClientVersion(ctx context.Context) (string, error) {
+func (api *RetestethAPI) ClientVersion(_ context.Context) (string, error) {
 	return "Geth-" + params.VersionWithCommit(gitCommit, gitDate), nil
 }
 

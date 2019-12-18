@@ -343,16 +343,9 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
-	if tds == nil {
-		fmt.Println("*********************** 1")
-	}
-	if tds.tMu == nil {
-		fmt.Println("*********************** 2")
-	}
 	tds.tMu.Lock()
-	h := tds.t.Hash()
-	tds.tMu.Unlock()
-	return h
+	defer tds.tMu.Unlock()
+	return tds.t.Hash()
 }
 
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
