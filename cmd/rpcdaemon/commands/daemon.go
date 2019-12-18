@@ -225,7 +225,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", block.ParentHash())
 	}
 
-	_, _, _, dbstate, _, err := api.computeTxEnv(block.Hash(), len(block.Transactions())-1)
+	_, _, _, dbstate, _, err := api.computeTxEnv(ctx, block.Hash(), len(block.Transactions())-1)
 	if err != nil {
 		return eth.StorageRangeResult{}, err
 	}
@@ -236,7 +236,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPIImpl) computeTxEnv(blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPIImpl) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
 	// Create the parent state database
 	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
 	if block == nil {
@@ -251,6 +251,12 @@ func (api *PrivateDebugAPIImpl) computeTxEnv(blockHash common.Hash, txIndex int)
 	signer := types.MakeSigner(params.MainnetChainConfig, block.Number())
 
 	for idx, tx := range block.Transactions() {
+		select {
+		default:
+		case <-ctx.Done():
+			return nil, vm.Context{}, nil, nil, 0, ctx.Err()
+		}
+
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
 		EVMcontext := core.NewEVMContext(msg, block.Header(), &chainContext{db: api.dbReader}, nil)
