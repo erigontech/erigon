@@ -563,6 +563,14 @@ func (sdb *IntraBlockState) SetStorage(addr common.Address, storage map[common.H
 	}
 }
 
+// SetIncarnation sets incarnation for account if account exists
+func (sdb *IntraBlockState) SetIncarnation(addr common.Address, incarnation uint64) {
+	stateObject := sdb.GetOrNewStateObject(addr)
+	if stateObject != nil {
+		stateObject.setIncarnation(incarnation)
+	}
+}
+
 // Suicide marks the given account as suicided.
 // This clears the account balance.
 //
