@@ -1063,4 +1063,3 @@ func GetState(blockchain *core.BlockChain, parent *types.Block) (*state.IntraBlo
 
 	return statedb, tds, nil
 }
-
