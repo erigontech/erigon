@@ -207,8 +207,8 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	accCopy.Copy(&hb.acc)
 
 	//fixme[https://github.com/ledgerwatch/turbo-geth/issues/221] we start usisng incarnation for contracts started from 1
-	if accCopy.Root!=EmptyRoot && accCopy.CodeHash!=emptyHash {
-		accCopy.Incarnation=1
+	if accCopy.Root != EmptyRoot && accCopy.CodeHash != emptyHash {
+		accCopy.Incarnation = 1
 	}
 	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,

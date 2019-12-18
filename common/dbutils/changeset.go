@@ -10,9 +10,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-func NewChangeSet() *ChangeSet  {
+func NewChangeSet() *ChangeSet {
 	return &ChangeSet{
-		Changes:make([]Change,0),
+		Changes: make([]Change, 0),
 	}
 }
 
@@ -152,7 +152,6 @@ func DecodeChangeSet(b []byte) (*ChangeSet, error) {
 	return h, nil
 }
 
-
 func (s *ChangeSet) KeySize() int {
 	for _, c := range s.Changes {
 		return len(c.Key)
@@ -211,7 +210,7 @@ func (s *ChangeSet) Walk(f func(k, v []byte) error) error {
 	return nil
 }
 
-func (s *ChangeSet) FindFirst(k []byte) ([]byte,error) {
+func (s *ChangeSet) FindFirst(k []byte) ([]byte, error) {
 	for i := range s.Changes {
 		if bytes.Equal(k, s.Changes[i].Key) {
 			return s.Changes[i].Value, nil
@@ -220,8 +219,8 @@ func (s *ChangeSet) FindFirst(k []byte) ([]byte,error) {
 	return nil, errors.New("not found")
 }
 
-func (s *ChangeSet) FindLast(k []byte) ([]byte,error) {
-	for i:= len(s.Changes)-1; i>=0; i--{
+func (s *ChangeSet) FindLast(k []byte) ([]byte, error) {
+	for i := len(s.Changes) - 1; i >= 0; i-- {
 		if bytes.Equal(k, s.Changes[i].Key) {
 			return s.Changes[i].Value, nil
 		}
@@ -229,10 +228,10 @@ func (s *ChangeSet) FindLast(k []byte) ([]byte,error) {
 	return nil, errors.New("not found")
 }
 
-func (s *ChangeSet) ChangedKeys() (map[string]struct{}) {
-	m:=make(map[string]struct{}, len(s.Changes))
+func (s *ChangeSet) ChangedKeys() map[string]struct{} {
+	m := make(map[string]struct{}, len(s.Changes))
 	for i := range s.Changes {
-		m[string(s.Changes[i].Key)]= struct{}{}
+		m[string(s.Changes[i].Key)] = struct{}{}
 	}
 	return m
 }

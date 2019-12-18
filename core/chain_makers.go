@@ -250,11 +250,9 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	if err != nil {
 		panic(err)
 	}
-
 	if err := tds.Rebuild(); err != nil {
 		panic(err)
 	}
-
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
 		block, receipt := genblock(i, parent, statedb, tds)

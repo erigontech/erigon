@@ -122,11 +122,11 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
-	bucketMap, ok:=m.changeSetByBlock[timestamp]
+	bucketMap, ok := m.changeSetByBlock[timestamp]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
-	changeSet,ok:=bucketMap[string(bucket)]
+	changeSet, ok := bucketMap[string(bucket)]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
@@ -141,11 +141,11 @@ func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	}
 
 	m.mu.RLock()
-	chs, err:=m.getChangeSetByBlockNoLock(hBucket, timestamp)
+	chs, err := m.getChangeSetByBlockNoLock(hBucket, timestamp)
 	m.mu.Unlock()
-	if err!=nil {
-		if m.db!=nil {
-			return m.db.GetS(hBucket,key,timestamp)
+	if err != nil {
+		if m.db != nil {
+			return m.db.GetS(hBucket, key, timestamp)
 		}
 		return nil, err
 	}
@@ -213,7 +213,7 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	hBucketStr :=string(hBucket)
+	hBucketStr := string(hBucket)
 	changesByBucket, ok := m.changeSetByBlock[timestamp]
 	if !ok {
 		changesByBucket = make(map[string]*dbutils.ChangeSet)
@@ -224,8 +224,8 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 		changeSet = dbutils.NewChangeSet()
 	}
 
-	err:=changeSet.Add(key,value)
-	if err!=nil {
+	err := changeSet.Add(key, value)
+	if err != nil {
 		return err
 	}
 	changesByBucket[hBucketStr] = changeSet
@@ -307,7 +307,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 
 	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
 		// k = encodedTS + hBucket
-		hBucket:=k[len(encodedTS):]
+		hBucket := k[len(encodedTS):]
 		hBucketStr := string(hBucket)
 		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
@@ -315,8 +315,8 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		}
 		if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				composite,_:=dbutils.CompositeKeySuffix(kk, timestamp)
-				m.puts.DeleteStr(hBucketStr,composite)
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				m.puts.DeleteStr(hBucketStr, composite)
 				return nil
 			})
 
@@ -326,16 +326,16 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		} else {
 			err = changedAccounts.Walk(func(kk, _ []byte) error {
-				acc,err:=m.getNoLock(dbutils.AccountsHistoryBucket, kk)
-				if err!=nil {
+				acc, err := m.getNoLock(dbutils.AccountsHistoryBucket, kk)
+				if err != nil {
 					return nil
 				}
-				v, isEmpty, err:=RemoveFromIndex(acc, timestamp)
-				if err!=nil {
+				v, isEmpty, err := RemoveFromIndex(acc, timestamp)
+				if err != nil {
 					return nil
 				}
 				if isEmpty {
-					m.puts.DeleteStr(hBucketStr,kk)
+					m.puts.DeleteStr(hBucketStr, kk)
 				} else {
 					m.puts.SetStr(hBucketStr, kk, v)
 				}
@@ -379,20 +379,20 @@ func (m *mutation) Commit() (uint64, error) {
 					log.Error("EncodeChangeSet changeSet error on commit", "err", err)
 				}
 				if debug.IsThinHistory() {
-					changedKeys:= changeSet.ChangedKeys()
-					for k:=range changedKeys {
+					changedKeys := changeSet.ChangedKeys()
+					for k := range changedKeys {
 						value, err := m.getNoLock(hBucket, []byte(k))
-						if err==ErrKeyNotFound {
+						if err == ErrKeyNotFound {
 							if m.db != nil {
-								value,err=m.db.Get(hBucket, []byte(k))
-								if err!= nil && err!=ErrKeyNotFound {
+								value, err = m.db.Get(hBucket, []byte(k))
+								if err != nil && err != ErrKeyNotFound {
 									return 0, err
 								}
 							}
 						}
-						v,err:=AppendToIndex(value, timestamp)
-						if err!=nil {
-							log.Error("mutation, append to index", "err", err, "timestamp",timestamp, )
+						v, err := AppendToIndex(value, timestamp)
+						if err != nil {
+							log.Error("mutation, append to index", "err", err, "timestamp", timestamp)
 							continue
 						}
 						m.puts.SetStr(hBucketStr, []byte(k), v)
@@ -460,7 +460,7 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	return mm
 }
 
-func (m *mutation) panicOnEmptyDB()  {
+func (m *mutation) panicOnEmptyDB() {
 	if m.db == nil {
 		panic("Not implemented")
 	}
@@ -486,55 +486,55 @@ func (m *mutation) TruncateAncients(items uint64) error {
 	return errNotSupported
 }
 
-
-func NewRWDecorator(db Database) *RWCounterDecorator  {
-	return &RWCounterDecorator {
+func NewRWDecorator(db Database) *RWCounterDecorator {
+	return &RWCounterDecorator{
 		db,
 		DBCounterStats{},
 	}
 }
+
 type RWCounterDecorator struct {
 	Database
 	DBCounterStats
 }
 
 type DBCounterStats struct {
-	Put uint64
-	PutS uint64
-	Get uint64
-	GetS uint64
-	GetAsOf uint64
-	Has uint64
-	Walk uint64
-	WalkAsOf uint64
-	MultiWalk uint64
-	MultiWalkAsOf uint64
-	Delete uint64
+	Put             uint64
+	PutS            uint64
+	Get             uint64
+	GetS            uint64
+	GetAsOf         uint64
+	Has             uint64
+	Walk            uint64
+	WalkAsOf        uint64
+	MultiWalk       uint64
+	MultiWalkAsOf   uint64
+	Delete          uint64
 	DeleteTimestamp uint64
-	MultiPut uint64
+	MultiPut        uint64
 }
 
 func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Put, 1)
 	fmt.Println("PUT", string(bucket), key)
-	return d.Database.Put(bucket,key,value)
+	return d.Database.Put(bucket, key, value)
 }
 
-func (d *RWCounterDecorator) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error{
+func (d *RWCounterDecorator) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
 	atomic.AddUint64(&d.DBCounterStats.PutS, 1)
-	return d.Database.PutS(hBucket,key,value,timestamp,changeSetBucketOnly)
+	return d.Database.PutS(hBucket, key, value, timestamp, changeSetBucketOnly)
 }
 func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.Get, 1)
-	return d.Database.Get(bucket,key)
+	return d.Database.Get(bucket, key)
 }
 func (d *RWCounterDecorator) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.GetS, 1)
-	return d.Database.GetS(hBucket,key, timestamp)
+	return d.Database.GetS(hBucket, key, timestamp)
 }
 func (d *RWCounterDecorator) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.GetAsOf, 1)
-	return d.Database.GetAsOf(bucket,hBucket,key,timestamp)
+	return d.Database.GetAsOf(bucket, hBucket, key, timestamp)
 }
 func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
 	atomic.AddUint64(&d.DBCounterStats.Has, 1)
@@ -542,23 +542,23 @@ func (d *RWCounterDecorator) Has(bucket, key []byte) (bool, error) {
 }
 func (d *RWCounterDecorator) Walk(bucket, startkey []byte, fixedbits uint, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.Walk, 1)
-	return d.Database.Walk(bucket,startkey,fixedbits,walker)
+	return d.Database.Walk(bucket, startkey, fixedbits, walker)
 }
 func (d *RWCounterDecorator) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	atomic.AddUint64(&d.DBCounterStats.MultiWalk, 1)
-	return d.Database.MultiWalk(bucket,startkeys,fixedbits,walker)
+	return d.Database.MultiWalk(bucket, startkeys, fixedbits, walker)
 }
 func (d *RWCounterDecorator) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
 	atomic.AddUint64(&d.DBCounterStats.WalkAsOf, 1)
-	return d.Database.WalkAsOf(bucket,hBucket,startkey,fixedbits,timestamp,walker)
+	return d.Database.WalkAsOf(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 }
 func (d *RWCounterDecorator) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	atomic.AddUint64(&d.DBCounterStats.MultiWalkAsOf, 1)
-	return d.Database.MultiWalkAsOf(bucket,hBucket,startkeys,fixedbits,timestamp,walker)
+	return d.Database.MultiWalkAsOf(bucket, hBucket, startkeys, fixedbits, timestamp, walker)
 }
 func (d *RWCounterDecorator) Delete(bucket, key []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Delete, 1)
-	return d.Database.Delete(bucket,key)
+	return d.Database.Delete(bucket, key)
 }
 func (d *RWCounterDecorator) DeleteTimestamp(timestamp uint64) error {
 	atomic.AddUint64(&d.DBCounterStats.DeleteTimestamp, 1)

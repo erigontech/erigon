@@ -41,8 +41,8 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		// and we don't need root in history requests
 		testAcc := original.SelfCopy()
 		if debug.IsThinHistory() {
-			testAcc.CodeHash= common.BytesToHash(emptyCodeHash)
-			testAcc.Root=trie.EmptyRoot
+			testAcc.CodeHash = common.BytesToHash(emptyCodeHash)
+			testAcc.Root = trie.EmptyRoot
 		}
 
 		originalDataLen := testAcc.EncodingLengthForStorage()
@@ -77,12 +77,12 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 
 func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	//save contract code mapping
-	if err:= dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err!=nil {
+	if err := dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
 	if debug.IsThinHistory() {
 		//save contract to codeHash mapping
-		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash,incarnation), codeHash.Bytes())
+		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, incarnation), codeHash.Bytes())
 	}
 	return nil
 }
@@ -125,4 +125,3 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 	return nil
 }
-

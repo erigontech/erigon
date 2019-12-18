@@ -85,10 +85,10 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if debug.IsThinHistory()&&bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
-				b,_:=hb.Get(key)
-				b,err = AppendToIndex(b, timestamp)
-				if err!=nil {
+			if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+				b, _ := hb.Get(key)
+				b, err = AppendToIndex(b, timestamp)
+				if err != nil {
 					log.Error("PutS AppendChangedOnIndex err", "err", err)
 					return err
 				}
@@ -206,13 +206,13 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 		return db.Get(hBucket, composite)
 	}
 
-	chs, err:=db.GetChangeSetByBlock(hBucket, timestamp)
-	if err!=nil {
+	chs, err := db.GetChangeSetByBlock(hBucket, timestamp)
+	if err != nil {
 		return nil, err
 	}
 
-	res,err:=chs.FindLast(key)
-	if err!=nil {
+	res, err := chs.FindLast(key)
+	if err != nil {
 		return nil, ErrKeyNotFound
 	}
 	return res, nil
@@ -220,7 +220,7 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
-	key:=dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
+	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.ChangeSetBucket)
@@ -235,7 +235,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 		}
 		return nil
 	})
-	if err!=nil {
+	if err != nil {
 		return nil, err
 	}
 	return dbutils.DecodeChangeSet(dat)
@@ -246,13 +246,13 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
 		if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
-			v, err:=BoltDBFindByHistory(tx, hBucket, key, timestamp)
-			if err==nil {
+			v, err := BoltDBFindByHistory(tx, hBucket, key, timestamp)
+			if err != nil {
+				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
+			} else {
 				dat = make([]byte, len(v))
 				copy(dat, v)
 				return nil
-			} else {
-				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
 			}
 		} else {
 			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)

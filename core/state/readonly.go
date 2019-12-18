@@ -174,8 +174,8 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 		return nil, err
 	}
 	if debug.IsThinHistory() {
-		codeHash,err:=dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
-		if err!=nil {
+		codeHash, err := dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+		if err != nil {
 			acc.CodeHash = common.BytesToHash(codeHash)
 		} else {
 			log.Error("ReadAccountData Get code hash is incorrect")

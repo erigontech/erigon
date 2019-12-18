@@ -607,6 +607,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		// that might be remaining in the trie and figure out the next incarnations
 		for addrHash := range b.created {
 			incarnation, err := tds.nextIncarnation(addrHash)
+			//fmt.Println("b.created",addrHash.String(), incarnation)
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 				b.accountUpdates[addrHash].SetIncarnation(incarnation)
 			}
@@ -634,6 +635,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
+				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
@@ -695,30 +697,29 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 			} else {
-					// Simply comparing the correctness of the storageRoot computations
-					if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-						ok, h := tds.t.DeepHash(addrHash[:])
-						if !ok {
-							h = trie.EmptyRoot
-						}
-
-						if account.Root != h {
-							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-						}
+				// Simply comparing the correctness of the storageRoot computations
+				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+					ok, h := tds.t.DeepHash(addrHash[:])
+					if !ok {
+						h = trie.EmptyRoot
 					}
-					if account, ok := accountUpdates[addrHash]; ok && account != nil {
-						ok, h := tds.t.DeepHash(addrHash[:])
-						if !ok {
-							h = trie.EmptyRoot
-						}
 
-						if account.Root != h {
-							return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-						}
+					if account.Root != h {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
+					}
+				}
+				if account, ok := accountUpdates[addrHash]; ok && account != nil {
+					ok, h := tds.t.DeepHash(addrHash[:])
+					if !ok {
+						h = trie.EmptyRoot
+					}
+
+					if account.Root != h {
+						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
 					}
 				}
 			}
-
+		}
 
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
@@ -878,8 +879,8 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	}
 
 	if tds.historical && debug.IsThinHistory() {
-		codeHash,err:=tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
-		if err==nil {
+		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)
 		} else {
 			log.Error("Get code hash is incorrect", "err", err)
@@ -1118,7 +1119,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	}
 }
 
-
 func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
@@ -1165,7 +1165,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	return nil
 }
 
-
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != err {
@@ -1177,14 +1176,12 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	return nil
 }
 
-
 func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.pg.CreateCode(codeHash, code)
 	}
 	return nil
 }
-
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
@@ -1210,8 +1207,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
 }
-
-
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
 func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitnessStats, error) {

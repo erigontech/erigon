@@ -273,7 +273,7 @@ func (a *Account) Copy(image *Account) {
 	a.Incarnation = image.Incarnation
 }
 func (a *Account) SelfCopy() *Account {
-	newAcc:=NewAccount()
+	newAcc := NewAccount()
 	newAcc.Copy(a)
 	return &newAcc
 }

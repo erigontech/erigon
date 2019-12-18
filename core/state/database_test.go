@@ -350,7 +350,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 }
 
-
 func TestReorgOverStateChange(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -362,7 +361,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
-				EIP150Block:		 new(big.Int),
+				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
 				ByzantiumBlock:      big.NewInt(1),
@@ -410,7 +409,7 @@ func TestReorgOverStateChange(t *testing.T) {
 			block.AddTx(tx)
 		}
 		contractBackend.Commit()
-		fmt.Println("commited i=",i)
+		fmt.Println("commited i=", i)
 	})
 
 	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
@@ -485,39 +484,39 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		t.Skip()
 	}
 	// Configure and generate a sample block chain
-	numOfContracts:=10
-	txPerBlock:=10
-	numOfBlocks:=10
+	numOfContracts := 10
+	txPerBlock := 10
+	numOfBlocks := 10
 	var keys []*ecdsa.PrivateKey
 	var addresses []common.Address
 	var transactOpts []*bind.TransactOpts
-	for i:=0;i<numOfContracts; i++ {
-		key,err:=crypto.GenerateKey()
-		if err!=nil {
+	for i := 0; i < numOfContracts; i++ {
+		key, err := crypto.GenerateKey()
+		if err != nil {
 			t.Fatal(err)
 		}
-		keys=append(keys, key)
-		addresses=append(addresses, crypto.PubkeyToAddress(key.PublicKey))
+		keys = append(keys, key)
+		addresses = append(addresses, crypto.PubkeyToAddress(key.PublicKey))
 		transactOpt := bind.NewKeyedTransactor(key)
 		transactOpt.GasLimit = 1000000
-		transactOpts=append(transactOpts, transactOpt)
+		transactOpts = append(transactOpts, transactOpt)
 
 	}
-	funds   := big.NewInt(1000000000)
-	alloc:=core.GenesisAlloc{}
-	for _,v:=range addresses {
-		alloc[v]=core.GenesisAccount{Balance:funds}
+	funds := big.NewInt(1000000000)
+	alloc := core.GenesisAlloc{}
+	for _, v := range addresses {
+		alloc[v] = core.GenesisAccount{Balance: funds}
 	}
 	var (
-		db      = ethdb.NewRWDecorator(ethdb.NewMemDatabase())
-		gspec   = &core.Genesis{
+		db    = ethdb.NewRWDecorator(ethdb.NewMemDatabase())
+		gspec = &core.Genesis{
 			Config: &params.ChainConfig{
 				ChainID:             big.NewInt(1),
 				HomesteadBlock:      new(big.Int),
 				EIP150Block:         new(big.Int),
 				EIP155Block:         new(big.Int),
 				EIP158Block:         big.NewInt(1),
-				ByzantiumBlock:         big.NewInt(1),
+				ByzantiumBlock:      big.NewInt(1),
 				ConstantinopleBlock: big.NewInt(1),
 			},
 			Alloc: alloc,
@@ -535,7 +534,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
 
-	var selfDestruct =make([]*contracts.Selfdestruct,numOfContracts)
+	var selfDestruct = make([]*contracts.Selfdestruct, numOfContracts)
 
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
@@ -545,16 +544,16 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 		switch i {
 		case 0:
-			for i:=0;i<numOfContracts; i++ {
+			for i := 0; i < numOfContracts; i++ {
 				_, tx, selfDestruct[i], err = contracts.DeploySelfdestruct(transactOpts[i], contractBackend)
 				if err != nil {
 					t.Fatal(err)
 				}
 				block.AddTx(tx)
 			}
-		case numOfBlocks -1:
-			for i:=0;i<numOfContracts; i++ {
-				for j:=0; j<txPerBlock; j++ {
+		case numOfBlocks - 1:
+			for i := 0; i < numOfContracts; i++ {
+				for j := 0; j < txPerBlock; j++ {
 					tx, err = selfDestruct[i].Destruct(transactOpts[i])
 					if err != nil {
 						t.Fatal(err)
@@ -563,8 +562,8 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 				}
 			}
 		default:
-			for i:=0;i<numOfContracts; i++ {
-				for j:=0; j<txPerBlock; j++ {
+			for i := 0; i < numOfContracts; i++ {
+				for j := 0; j < txPerBlock; j++ {
 					tx, err = selfDestruct[i].Change(transactOpts[i])
 					if err != nil {
 						t.Fatal(err)
@@ -578,61 +577,71 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		//fmt.Println("commited i=",i)
 	})
 
-
-
 	if _, err = blockchain.InsertChain(blocks); err != nil {
 		t.Fatal(err)
 	}
 
-	stats:= BucketsStats{}
-
+	stats := BucketsStats{}
 
 	fmt.Println("==========================ACCOUNT===========================")
-	err=blockchain.ChainDb().Walk(dbutils.AccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		acc:=&accounts.Account{}
-		err:=acc.DecodeForStorage(v)
-		if err!=nil {
-			fmt.Println(err)
+	err = blockchain.ChainDb().Walk(dbutils.AccountsBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		acc := &accounts.Account{}
+		innerErr := acc.DecodeForStorage(v)
+		if innerErr != nil {
+			t.Fatal(innerErr)
 		}
-		stats.Accounts+=uint64(len(v))
+		stats.Accounts += uint64(len(v))
 		return true, nil
 	})
-	if err!=nil {
+	if err != nil {
 		fmt.Println(err)
 	}
 
 	fmt.Println("==========================ACCOUNTHISTORY===========================")
-	blockchain.ChainDb().Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.HAT+=uint64(len(v))
+	err = blockchain.ChainDb().Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		stats.HAT += uint64(len(v))
 		return true, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	fmt.Println("==========================STORAGE===========================")
-	blockchain.ChainDb().Walk(dbutils.StorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.Storage+=uint64(len(v))
+	err = blockchain.ChainDb().Walk(dbutils.StorageBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		stats.Storage += uint64(len(v))
 		return true, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	fmt.Println("==========================StorageHISTORY===========================")
-	blockchain.ChainDb().Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		stats.HST+=uint64(len(v))
+	err = blockchain.ChainDb().Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		stats.HST += uint64(len(v))
 		return true, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	fmt.Println("==========================CHANGESET===========================")
-	blockchain.ChainDb().Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+	err = blockchain.ChainDb().Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
 		if bytes.HasSuffix(k, dbutils.AccountsHistoryBucket) {
-			stats.ChangeSetHAT+=uint64(len(v))
+			stats.ChangeSetHAT += uint64(len(v))
 		}
 		if bytes.HasSuffix(k, dbutils.StorageHistoryBucket) {
-			stats.ChangeSetHST+=uint64(len(v))
+			stats.ChangeSetHST += uint64(len(v))
 		}
-		cs,err:=dbutils.DecodeChangeSet(v)
-		if err!=nil {
-			fmt.Println(err)
+		cs, innerErr := dbutils.DecodeChangeSet(v)
+		if innerErr != nil {
+			fmt.Println(innerErr)
 		}
-		_=cs
+		_ = cs
 		return true, nil
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	spew.Dump(stats)
 	spew.Dump(db.DBCounterStats)
@@ -640,18 +649,17 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 }
 
 type BucketsStats struct {
-	Accounts uint64
-	Storage uint64
+	Accounts     uint64
+	Storage      uint64
 	ChangeSetHAT uint64
 	ChangeSetHST uint64
-	HAT uint64
-	HST uint64
+	HAT          uint64
+	HST          uint64
 }
 
 func (b BucketsStats) Size() uint64 {
-	return b.ChangeSetHST+b.ChangeSetHAT+b.HST+b.Storage+b.HAT+b.Accounts
+	return b.ChangeSetHST + b.ChangeSetHAT + b.HST + b.Storage + b.HAT + b.Accounts
 }
-
 
 func TestCreateOnExistingStorage(t *testing.T) {
 	// Configure and generate a sample block chain
@@ -794,4 +802,3 @@ func TestReproduceCrash(t *testing.T) {
 		t.Errorf("Expected empty list of prunables, got:\n %s", prunables)
 	}
 }
-

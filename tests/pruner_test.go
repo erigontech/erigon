@@ -265,7 +265,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 	}
 	expected := stateStats{
 		ErrAccountsInHistory:          30, //not in history
-		NumOfChangesInAccountsHistory: 3, // exists in history
+		NumOfChangesInAccountsHistory: 3,  // exists in history
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{
 			0:  3,
 			1:  3,
@@ -321,7 +321,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 	}
 	expected = stateStats{
 		ErrAccountsInHistory:            0,
-		NumOfChangesInAccountsHistory: 0,
+		NumOfChangesInAccountsHistory:   0,
 		AccountSuffixRecordsByTimestamp: map[uint64]uint32{},
 		StorageSuffixRecordsByTimestamp: map[uint64]uint32{},
 		AccountsInState:                 5,
@@ -641,7 +641,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 }
 
 type stateStats struct {
-	NumOfChangesInAccountsHistory uint64
+	NumOfChangesInAccountsHistory   uint64
 	ErrAccountsInHistory            uint64
 	AccountSuffixRecordsByTimestamp map[uint64]uint32
 	StorageSuffixRecordsByTimestamp map[uint64]uint32

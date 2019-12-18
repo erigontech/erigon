@@ -21,7 +21,7 @@ import (
 )
 
 func TestBlockchain(t *testing.T) {
-	t.Parallel()
+	//t.Parallel()
 
 	bt := new(testMatcher)
 	// General state tests are 'exported' as blockchain tests, but we can run them natively.
@@ -36,6 +36,8 @@ func TestBlockchain(t *testing.T) {
 	bt.slow(`.*/bcForkStressTest/`)
 	bt.slow(`.*/bcGasPricerTest/RPC_API_Test.json`)
 	bt.slow(`.*/bcWalletTest/`)
+
+	//bt.whitelist("TestBlockchain/InvalidBlocks/bcUncleHeaderValidity/gasLimitTooLowExactBound.json")
 
 	// Very slow test
 	bt.skipLoad(`.*/stTimeConsuming/.*`)

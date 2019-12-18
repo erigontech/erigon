@@ -714,15 +714,15 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj, prev *stateObject) {
 	//fmt.Printf("CREATE %x\n", addr[:])
 	prev = previous
-	account:=new(accounts.Account)
-	original:=new(accounts.Account)
+	account := new(accounts.Account)
+	original := new(accounts.Account)
 	if previous == nil {
 		account = &accounts.Account{}
 		account.Root.SetBytes(trie.EmptyRoot[:])
 		original = &accounts.Account{}
 	} else {
 		account.Copy(&previous.data)
-		account.Incarnation=0
+		account.Incarnation = 0
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
@@ -844,12 +844,12 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 		} else {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
-				addrHash,err:=common.HashData(addr.Bytes())
-				if err!=nil {
+				addrHash, err := common.HashData(addr.Bytes())
+				if err != nil {
 					log.Error("Hashing address error", "err", err)
 					return err
 				}
-				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation,common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
 					return err
 				}
 			}
@@ -893,8 +893,8 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		} else if isDirty {
 			// Write any contract code associated with the state object
 			if stateObject.code != nil && stateObject.dirtyCode {
-				addrHash,err:=common.HashData(stateObject.Address().Bytes())
-				if err!=nil {
+				addrHash, err := common.HashData(stateObject.Address().Bytes())
+				if err != nil {
 					log.Error("Hashing address error", "err", err)
 					return err
 				}
