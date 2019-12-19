@@ -328,7 +328,18 @@ func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage) *jsonrpcMessage 
 		return msg.errorResponse(&invalidParamsError{err.Error()})
 	}
 
-	return h.runMethod(cp.ctx, msg, callb, args)
+	res := h.runMethod(cp.ctx, msg, callb, args)
+
+	var resStr string
+	if res != nil {
+		var length = len(res.String())
+		if length > 200 {
+			length = 200
+		}
+		resStr = res.String()[:length]
+	}
+	log.Debug("RPC call", "method", msg, "params", args, "result", resStr)
+	return res
 }
 
 // handleSubscribe processes *_subscribe method calls.

@@ -370,8 +370,8 @@ func (tds *TrieDbState) UpdateStateTrie() ([]common.Hash, error) {
 
 func (tds *TrieDbState) PrintTrie(w io.Writer) {
 	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	tds.t.Print(w)
-	tds.tMu.Unlock()
 	fmt.Fprintln(w, "") //nolint
 }
 
@@ -748,8 +748,8 @@ func (tds *TrieDbState) clearUpdates() {
 
 func (tds *TrieDbState) Rebuild() error {
 	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	err := tds.t.Rebuild(tds.db, tds.blockNr)
-	tds.tMu.Unlock()
 	if err != nil {
 		return err
 	}
@@ -840,10 +840,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 }
 
 func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.Account, error) {
-	tds.tMu.Lock()
-	acc, ok := tds.t.GetAccount(addrHash[:])
-	tds.tMu.Unlock()
-	if ok {
+	if acc, ok := tds.GetAccount(addrHash); ok {
 		return acc, nil
 	}
 
@@ -869,6 +866,13 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 	return &a, nil
+}
+
+func (tds *TrieDbState) GetAccount(addrHash common.Hash) (*accounts.Account, bool) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	acc, ok := tds.t.GetAccount(addrHash[:])
+	return acc, ok
 }
 
 func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Account, error) {
@@ -1079,6 +1083,7 @@ type TrieStateWriter struct {
 
 func (tds *TrieDbState) PruneTries(print bool) {
 	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
@@ -1090,7 +1095,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
-	tds.tMu.Unlock()
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -1302,19 +1306,10 @@ func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitn
 	}
 	codeMap := tds.pg.ExtractCodeMap()
 
-	tds.tMu.Lock()
-	if bin {
-		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
-			tds.tMu.Unlock()
-			return nil, nil, err
-		}
-	} else {
-		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-			tds.tMu.Unlock()
-			return nil, nil, err
-		}
+	err := tds.makeBlockWitness(bwb, rs, codeMap, bin)
+	if err != nil {
+		return nil, nil, err
 	}
-	tds.tMu.Unlock()
 
 	var b bytes.Buffer
 
@@ -1325,6 +1320,22 @@ func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitn
 	}
 
 	return b.Bytes(), NewBlockWitnessStats(tds.blockNr, uint64(b.Len()), stats), nil
+}
+
+func (tds *TrieDbState) makeBlockWitness(bwb *trie.BlockWitnessBuilder, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, bin bool) error {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	if bin {
+		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
+			return err
+		}
+	} else {
+		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

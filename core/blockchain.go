@@ -31,6 +31,7 @@ import (
 	lru "github.com/hashicorp/golang-lru"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/mclock"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -2040,8 +2041,9 @@ Hash: 0x%x
 %v
 
 Error: %v
+Callers: %v
 ##############################
-`, bc.chainConfig, block.Number(), block.Hash(), receiptString, err))
+`, bc.chainConfig, block.Number(), block.Hash(), receiptString, err, debug.Callers(20)))
 }
 
 // InsertHeaderChain attempts to insert the given header chain in to the local
