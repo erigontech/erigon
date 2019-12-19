@@ -516,11 +516,7 @@ func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) s
 
 func (g *RequestGenerator) call(target string, method, body string, response interface{}) CallResult {
 	start := time.Now()
-	var err error
-
-	if method != "debug_storageRangeAt" {
-		err = post(g.client, routes[target], body, response)
-	}
+	err := post(g.client, routes[target], body, response)
 	return CallResult{
 		RequestBody: body,
 		Target:      target,
@@ -815,6 +811,10 @@ func bench1(needCompare bool, fullTest bool) {
 			}
 		}
 		reqGen.reqID++
+
+		if !fullTest {
+			continue // TODO: remove me
+		}
 
 		var balance EthBalance
 		res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
