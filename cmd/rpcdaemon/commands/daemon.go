@@ -225,7 +225,7 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", block.ParentHash())
 	}
 
-	_, _, _, dbstate, _, err := api.computeTxEnv(ctx, block.Hash(), len(block.Transactions())-1)
+	_, _, _, dbstate, err := api.computeTxEnv(ctx, block.Hash(), len(block.Transactions())-1)
 	if err != nil {
 		return eth.StorageRangeResult{}, err
 	}
@@ -236,15 +236,15 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPIImpl) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPIImpl) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
 	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
 	if block == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("block %x not found", blockHash)
+		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}
 	parent := rawdb.ReadBlock(api.dbReader, block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("parent %x not found", block.ParentHash())
+		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Recompute transactions up to the target index.
@@ -254,25 +254,25 @@ func (api *PrivateDebugAPIImpl) computeTxEnv(ctx context.Context, blockHash comm
 		select {
 		default:
 		case <-ctx.Done():
-			return nil, vm.Context{}, nil, nil, 0, ctx.Err()
+			return nil, vm.Context{}, nil, nil, ctx.Err()
 		}
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
 		EVMcontext := core.NewEVMContext(msg, block.Header(), &chainContext{db: api.dbReader}, nil)
 		if idx == txIndex {
-			return msg, EVMcontext, statedb, dbstate, parent.NumberU64(), nil
+			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, params.MainnetChainConfig, vm.Config{})
 		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-			return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
+			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
 		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
-	return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
+	return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }
 
 // computeIntraBlockState retrieves the state database associated with a certain block.

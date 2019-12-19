@@ -548,8 +548,7 @@ func ServeCmdBucket(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 	}
 
 	// Open the bucket
-	var bucket *bolt.Bucket
-	bucket = tx.Bucket(name)
+	bucket := tx.Bucket(name)
 	if bucket == nil {
 		encodeErr(encoder, fmt.Errorf("bucket not found: %s", name))
 		return nil
