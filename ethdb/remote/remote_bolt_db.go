@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -50,8 +49,7 @@ func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -77,8 +75,7 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -112,11 +109,9 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
-
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		{
 			hB, err := tx.Bucket(hBucket)
 			if err != nil {
@@ -172,9 +167,8 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 }
 
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -207,14 +201,13 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 }
 
 func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
 	if len(startkeys) == 0 {
 		return nil
 	}
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -276,13 +269,12 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
-	err := db.db.View(ctx, func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *Tx) error {
 		var err error
 
 		b, err := tx.Bucket(bucket)
@@ -375,7 +367,6 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 }
 
 func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
-	ctx, _ := context.WithTimeout(context.Background(), 1*time.Minute)
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -386,7 +377,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	l := len(startkey)
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
-	if err := db.db.View(ctx, func(tx *Tx) error {
+	if err := db.db.View(context.Background(), func(tx *Tx) error {
 		var err error
 		b, err := tx.Bucket(bucket)
 		if err != nil {
