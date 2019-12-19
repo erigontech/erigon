@@ -211,6 +211,10 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 	cursorsByBucket := make(map[uint64][]uint64)
 	var c Command
 	for {
+		// Make sure we are not blocking the resizing of the memory map
+		for _, tx := range transactions {
+			tx.Yield()
+		}
 		if err := decoder.Decode(&c); err != nil {
 			if err == io.EOF {
 				// Graceful termination when the end of the input is reached
