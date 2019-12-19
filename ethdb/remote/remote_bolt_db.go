@@ -196,9 +196,12 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 			if !goOn {
 				break
 			}
-			k, v = c.Next()
+			k, v, err = c.Next()
+			if err != nil {
+				return err
+			}
 		}
-		return c.Err()
+		return nil
 	})
 	return err
 }
@@ -261,10 +264,13 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 					return err
 				}
 			}
-			k, v = c.Next()
+			k, v, err = c.Next()
+			if err != nil {
+				return nil
+			}
 		}
 
-		return c.Err()
+		return nil
 	})
 	return err
 }
@@ -351,7 +357,10 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v, err = c.Next()
+					if err != nil {
+						return err
+					}
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
@@ -360,13 +369,6 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				}
 			}
 		}
-		if hC.Err() != nil {
-			return hC.Err()
-		}
-		if c.Err() != nil {
-			return c.Err()
-		}
-
 		return err
 	})
 	return err
@@ -507,7 +509,10 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v, err = c.Next()
+					if err != nil {
+						return err
+					}
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
@@ -518,15 +523,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		}
 		if err != nil {
 			return err
-		}
-		if c.Err() != nil {
-			return c.Err()
-		}
-		if hC.Err() != nil {
-			return hC.Err()
-		}
-		if hC1.Err() != nil {
-			return hC1.Err()
 		}
 		return nil
 	}); err != nil {

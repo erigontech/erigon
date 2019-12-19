@@ -87,6 +87,23 @@ PoolSize=128, CursorBatchSize=1K -> 95-Latency 6s (eat 50 conns in pool)
 PoolSize=128, CursorBatchSize=100 -> 95-Latency 600ms (eat 5 conns in pool)
 ```
 
+
+### Batch experiments
+Time to iterate over 1M dbutils.HeaderPrefix keys with different BatchSize:
+```
+BatchSize: 10 -> Time: 1m
+BatchSize: 1K -> Time: 30s
+BatchSize: 10K -> Time: 20s
+BatchSize: 100K -> Time: 20s
+```
+
+
+Time to iterate over 1M dbutils.HeaderPrefix keys with different Encode/Decode implementations
+```
+BatchSize: 10K, .Encode one-by-one -> Time: 30s
+BatchSize: 10K, .Encode all-at-once -> Time: 20s
+```
+
 RPC daemon known problems: 
 - we call .Encode for each cmd/key/value - "maybe" it does syscall to send data. 
 Maybe need buffered io.Writer or encode struct{cmd,key,value} at once. Need to write benchmark.   
