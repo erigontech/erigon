@@ -625,7 +625,7 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	if err := bc.hc.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty()); err != nil {
 		log.Crit("Failed to write genesis block TD", "err", err)
 	}
-	rawdb.WriteBlock(bc.db, genesis)
+	rawdb.WriteBlock(context.Background(), bc.db, genesis)
 
 	bc.genesisBlock = genesis
 	bc.insert(bc.genesisBlock)
@@ -1177,7 +1177,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				continue
 			}
 			// Write all the data out into the database
-			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
+			rawdb.WriteBody(context.Background(), batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
 			if bc.enableTxLookupIndex {
 				rawdb.WriteTxLookupEntries(batch, block)
@@ -1235,7 +1235,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 }
 
 // WriteBlockWithState writes the block and all associated state to the database.
-func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1244,12 +1244,12 @@ func (bc *BlockChain) WriteBlockWithState(block *types.Block, receipts []*types.
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	return bc.writeBlockWithState(block, receipts, logs, state, tds, emitHeadEvent)
+	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
 }
 
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
-func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
@@ -1262,22 +1262,31 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	externTd := new(big.Int).Add(block.Difficulty(), ptd)
 
 	// Irrelevant of the canonical status, write the block itself to the database
+	if common.IsCanceled(ctx) {
+		return NonStatTy, ctx.Err()
+	}
 	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
 		return NonStatTy, err
 	}
-	rawdb.WriteBlock(bc.db, block)
+	rawdb.WriteBlock(ctx, bc.db, block)
 
 	if tds != nil {
+		if common.IsCanceled(ctx) {
+			return NonStatTy, ctx.Err()
+		}
 		tds.SetBlockNr(block.NumberU64())
 	}
 
-	ctx := bc.WithContext(context.Background(), block.Number())
+	ctx = bc.WithContext(ctx, block.Number())
 	if stateDb != nil {
 		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 			return NonStatTy, err
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
+		if common.IsCanceled(ctx) {
+			return NonStatTy, ctx.Err()
+		}
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1302,15 +1311,24 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	//if reorg {
 	// Reorganise the chain if the parent is not the head block
 	if block.ParentHash() != currentBlock.Hash() {
+		if common.IsCanceled(ctx) {
+			return NonStatTy, ctx.Err()
+		}
 		if err := bc.reorg(currentBlock, block); err != nil {
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
+		if common.IsCanceled(ctx) {
+			return NonStatTy, ctx.Err()
+		}
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
+		if common.IsCanceled(ctx) {
+			return NonStatTy, ctx.Err()
+		}
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
@@ -1472,7 +1490,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		for _, block := range chain {
 			log.Warn("Saving", "block", block.NumberU64(), "hash", block.Hash())
 			td = new(big.Int).Add(block.Difficulty(), td)
-			rawdb.WriteBlock(bc.db, block)
+			rawdb.WriteBlock(ctx, bc.db, block)
 			rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), td)
 		}
 		return 0, nil
@@ -1678,7 +1696,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			blockValidationTimer.Update(time.Since(substart) - (statedb.AccountHashes + statedb.StorageHashes - triehash))
 		*/
 		// Write the block to the chain and get the status.
-		status, err := bc.writeBlockWithState(block, receipts, logs, stateDB, bc.trieDbState, false)
+		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false)
 		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
@@ -2078,7 +2096,7 @@ func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (i
 	defer bc.doneJob()
 
 	whFunc := func(header *types.Header) error {
-		_, err := bc.hc.WriteHeader(header)
+		_, err := bc.hc.WriteHeader(context.Background(), header)
 		return err
 	}
 	return bc.hc.InsertHeaderChain(chain, whFunc, start)

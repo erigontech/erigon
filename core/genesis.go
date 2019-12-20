@@ -324,7 +324,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 	}
 	//fmt.Printf("Generated genesis\n")
 	rawdb.WriteTd(db, block.Hash(), block.NumberU64(), g.Difficulty)
-	rawdb.WriteBlock(db, block)
+	rawdb.WriteBlock(context.Background(), db, block)
 	rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), nil)
 	rawdb.WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 	rawdb.WriteHeadBlockHash(db, block.Hash())

@@ -21,12 +21,15 @@ package main
 
 import (
 	"crypto/ecdsa"
+	"fmt"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -39,6 +42,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -169,25 +173,28 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	ethConfig := &eth.Config{
+		Genesis:         genesis,
+		NetworkID:       genesis.Config.ChainID.Uint64(),
+		SyncMode:        downloader.FullSync,
+		DatabaseCache:   256,
+		DatabaseHandles: 256,
+		TxPool:          core.DefaultTxPoolConfig,
+		GPO:             eth.DefaultConfig.GPO,
+		Ethash:          eth.DefaultConfig.Ethash,
+		Miner: miner.Config{
+			GasFloor: genesis.GasLimit * 9 / 10,
+			GasCeil:  genesis.GasLimit * 11 / 10,
+			GasPrice: big.NewInt(1),
+			Recommit: time.Second,
+		},
+	}
+
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return eth.New(ctx, &eth.Config{
-			Genesis:         genesis,
-			NetworkID:       genesis.Config.ChainID.Uint64(),
-			SyncMode:        downloader.FullSync,
-			DatabaseCache:   256,
-			DatabaseHandles: 256,
-			TxPool:          core.DefaultTxPoolConfig,
-			GPO:             eth.DefaultConfig.GPO,
-			Ethash:          eth.DefaultConfig.Ethash,
-			Miner: Config{
-				GasFloor: genesis.GasLimit * 9 / 10,
-				GasCeil:  genesis.GasLimit * 11 / 10,
-				GasPrice: big.NewInt(1),
-				Recommit: time.Second,
-			},
-		})
+		return eth.New(ctx, ethConfig)
 	}); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, fmt.Sprintf("cannot register stress test miner. config %v", ethConfig))
 	}
 	// Start the node and return if successful
 	return stack, stack.Start()

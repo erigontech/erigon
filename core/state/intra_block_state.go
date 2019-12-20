@@ -890,6 +890,9 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
+		if common.IsCanceled(ctx) {
+			return ctx.Err()
+		}
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 

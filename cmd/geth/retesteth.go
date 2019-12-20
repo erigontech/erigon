@@ -252,8 +252,8 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 	}
 }
 
-func (e *NoRewardEngine) Seal(chain consensus.ChainReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return e.inner.Seal(chain, block, results, stop)
+func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+	return e.inner.Seal(ctx, chain, block, results, stop)
 }
 
 func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
