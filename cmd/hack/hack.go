@@ -136,10 +136,10 @@ func days() []chart.GridLine {
 }
 
 func mychart() {
-	blocks, hours, dbsize, trienodes, heap := readData("geth.csv")
-	//blocks0, hours0, _, _, _ := readData("geth.csv")
+	blocks, hours, dbsize, trienodes, heap := readData("bolt.csv")
+	blocks0, hours0, dbsize0, _, _ := readData("badger.csv")
 	mainSeries := &chart.ContinuousSeries{
-		Name: "Cumulative sync time (SSD)",
+		Name: "Cumulative sync time (bolt)",
 		Style: chart.Style{
 			Show:        true,
 			StrokeColor: chart.ColorBlue,
@@ -148,20 +148,18 @@ func mychart() {
 		XValues: blocks,
 		YValues: hours,
 	}
-	/*
-		hddSeries := &chart.ContinuousSeries{
-			Name: "Cumulative sync time (HDD)",
-			Style: chart.Style{
-				Show:        true,
-				StrokeColor: chart.ColorRed,
-				FillColor:   chart.ColorRed.WithAlpha(100),
-			},
-			XValues: blocks0,
-			YValues: hours0,
-		}
-	*/
+	badgerSeries := &chart.ContinuousSeries{
+		Name: "Cumulative sync time (badger)",
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorRed,
+			FillColor:   chart.ColorRed.WithAlpha(100),
+		},
+		XValues: blocks0,
+		YValues: hours0,
+	}
 	dbsizeSeries := &chart.ContinuousSeries{
-		Name: "Database size",
+		Name: "Database size (bolt)",
 		Style: chart.Style{
 			Show:        true,
 			StrokeColor: chart.ColorBlack,
@@ -169,6 +167,16 @@ func mychart() {
 		YAxis:   chart.YAxisSecondary,
 		XValues: blocks,
 		YValues: dbsize,
+	}
+	dbsizeSeries0 := &chart.ContinuousSeries{
+		Name: "Database size (badger)",
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorOrange,
+		},
+		YAxis:   chart.YAxisSecondary,
+		XValues: blocks,
+		YValues: dbsize0,
 	}
 
 	graph1 := chart.Chart{
@@ -223,8 +231,9 @@ func mychart() {
 		},
 		Series: []chart.Series{
 			mainSeries,
-			//hddSeries,
+			badgerSeries,
 			dbsizeSeries,
+			dbsizeSeries0,
 		},
 	}
 
@@ -1180,7 +1189,9 @@ func main() {
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}
-	//mychart()
+	if *action == "syncChart" {
+		mychart()
+	}
 	//testRebuild()
 	if *action == "testRewind" {
 		testRewind(*chaindata, *block, *rewind)
