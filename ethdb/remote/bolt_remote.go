@@ -606,7 +606,7 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 
 	if tracing {
 		go func() {
-			ticker := time.NewTicker(2 * time.Second)
+			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 
 			for {
@@ -614,6 +614,7 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 				case <-ticker.C:
 					log.Info("remote db: connections", "amount", len(ch))
 				case <-ctx.Done():
+					return
 				}
 			}
 		}()
@@ -778,7 +779,7 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 
 	if tracing {
 		go func() {
-			ticker := time.NewTicker(2 * time.Second)
+			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
 
 			for {
@@ -786,6 +787,7 @@ func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
 				case <-ticker.C:
 					log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
 				case <-ctx.Done():
+					return
 				}
 			}
 		}()
