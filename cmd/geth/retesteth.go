@@ -39,14 +39,15 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-
-	cli "github.com/urfave/cli"
+	"github.com/urfave/cli"
 )
 
 var (
@@ -271,7 +272,7 @@ func (e *NoRewardEngine) Close() error {
 	return e.inner.Close()
 }
 
-func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainParams) (bool, error) {
+func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainParams) (bool, error) {
 	// Clean up
 	if api.blockchain != nil {
 		api.blockchain.Stop()
@@ -417,7 +418,7 @@ func (api *RetestethAPI) SetChainParams(ctx context.Context, chainParams ChainPa
 	return true, nil
 }
 
-func (api *RetestethAPI) SendRawTransaction(ctx context.Context, rawTx hexutil.Bytes) (common.Hash, error) {
+func (api *RetestethAPI) SendRawTransaction(_ context.Context, rawTx hexutil.Bytes) (common.Hash, error) {
 	tx := new(types.Transaction)
 	if err := rlp.DecodeBytes(rawTx, tx); err != nil {
 		// Return nil is not by mistake - some tests include sending transaction where gasLimit overflows uint64
@@ -439,13 +440,13 @@ func (api *RetestethAPI) SendRawTransaction(ctx context.Context, rawTx hexutil.B
 	return tx.Hash(), nil
 }
 
-func (api *RetestethAPI) MineBlocks(ctx context.Context, number uint64) (bool, error) {
+func (api *RetestethAPI) MineBlocks(_ context.Context, number uint64) (bool, error) {
 	for i := 0; i < int(number); i++ {
 		if err := api.mineBlock(); err != nil {
 			return false, err
 		}
 	}
-	fmt.Printf("Mined %d blocks\n", number)
+	fmt.Printf("Mined %d blocks\n____________________________________________________________\n\n\n", number)
 	return true, nil
 }
 
@@ -483,10 +484,12 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	statedb, _, err := api.blockchain.StateAt(parent.Root(), parent.NumberU64())
+
+	statedb, tds, err := miner.GetState(api.blockchain, parent)
 	if err != nil {
 		return err
 	}
+
 	if api.chainConfig.DAOForkSupport && api.chainConfig.DAOForkBlock != nil && api.chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
 		misc.ApplyDAOHardFork(statedb)
 	}
@@ -495,6 +498,7 @@ func (api *RetestethAPI) mineBlock() error {
 	var txs []*types.Transaction
 	var receipts []*types.Receipt
 	var blockFull = gasPool.Gas() < params.TxGas
+
 	for address := range api.txSenders {
 		if blockFull {
 			break
@@ -512,7 +516,7 @@ func (api *RetestethAPI) mineBlock() error {
 					&api.author,
 					gasPool,
 					statedb,
-					nil,
+					tds.TrieStateWriter(),
 					header, tx, &header.GasUsed, *api.blockchain.GetVMConfig(),
 				)
 				if err != nil {
@@ -537,10 +541,12 @@ func (api *RetestethAPI) mineBlock() error {
 			}
 		}
 	}
-	block, err := api.engine.FinalizeAndAssemble(api.blockchain.Config(), header, statedb, txs, []*types.Header{}, receipts)
+
+	block, err := miner.NewBlock(api.engine, statedb, tds, api.blockchain.Config(), header, txs, []*types.Header{}, receipts)
 	if err != nil {
 		return err
 	}
+
 	return api.importBlock(block)
 }
 
@@ -553,12 +559,12 @@ func (api *RetestethAPI) importBlock(block *types.Block) error {
 	return nil
 }
 
-func (api *RetestethAPI) ModifyTimestamp(ctx context.Context, interval uint64) (bool, error) {
+func (api *RetestethAPI) ModifyTimestamp(_ context.Context, interval uint64) (bool, error) {
 	api.blockInterval = interval
 	return true, nil
 }
 
-func (api *RetestethAPI) ImportRawBlock(ctx context.Context, rawBlock hexutil.Bytes) (common.Hash, error) {
+func (api *RetestethAPI) ImportRawBlock(_ context.Context, rawBlock hexutil.Bytes) (common.Hash, error) {
 	block := new(types.Block)
 	if err := rlp.DecodeBytes(rawBlock, block); err != nil {
 		return common.Hash{}, err
@@ -570,7 +576,7 @@ func (api *RetestethAPI) ImportRawBlock(ctx context.Context, rawBlock hexutil.By
 	return block.Hash(), nil
 }
 
-func (api *RetestethAPI) RewindToBlock(ctx context.Context, newHead uint64) (bool, error) {
+func (api *RetestethAPI) RewindToBlock(_ context.Context, newHead uint64) (bool, error) {
 	if err := api.blockchain.SetHead(newHead); err != nil {
 		return false, err
 	}
@@ -578,9 +584,9 @@ func (api *RetestethAPI) RewindToBlock(ctx context.Context, newHead uint64) (boo
 	return true, nil
 }
 
-var emptyListHash common.Hash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
+var emptyListHash = common.HexToHash("0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347")
 
-func (api *RetestethAPI) GetLogHash(ctx context.Context, txHash common.Hash) (common.Hash, error) {
+func (api *RetestethAPI) GetLogHash(_ context.Context, txHash common.Hash) (common.Hash, error) {
 	receipt, _, _, _ := rawdb.ReadReceipt(api.ethDb, txHash, api.chainConfig)
 	if receipt == nil {
 		return emptyListHash, nil
@@ -593,12 +599,12 @@ func (api *RetestethAPI) GetLogHash(ctx context.Context, txHash common.Hash) (co
 	}
 }
 
-func (api *RetestethAPI) BlockNumber(ctx context.Context) (uint64, error) {
+func (api *RetestethAPI) BlockNumber(_ context.Context) (uint64, error) {
 	//fmt.Printf("BlockNumber, response: %d\n", api.blockNumber)
 	return api.blockNumber, nil
 }
 
-func (api *RetestethAPI) GetBlockByNumber(ctx context.Context, blockNr math.HexOrDecimal64, fullTx bool) (map[string]interface{}, error) {
+func (api *RetestethAPI) GetBlockByNumber(_ context.Context, blockNr math.HexOrDecimal64, fullTx bool) (map[string]interface{}, error) {
 	block := api.blockchain.GetBlockByNumber(uint64(blockNr))
 	if block != nil {
 		response, err := RPCMarshalBlock(block, true, fullTx)
@@ -631,19 +637,25 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		block = api.blockchain.GetBlockByNumber(blockNumber)
 		//fmt.Printf("Account range: %d, txIndex %d, start: %x, maxResults: %d\n", blockNumber, txIndex, common.BigToHash((*big.Int)(addressHash)), maxResults)
 	}
+
+	if api.chainConfig != nil {
+		ctx = api.chainConfig.WithEIPsFlags(ctx, block.Number())
+	}
+
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.IntraBlockState
+	var dbState *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		_, dbState, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
 	} else {
+		var statedb *state.IntraBlockState
 		root = parentHeader.Root
-		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
+		statedb, dbState, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return AccountRangeResult{}, err
 		}
@@ -663,10 +675,10 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			//root = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				//err = statedb.CommitBlock(api.chainConfig.IsEIP158(block.Number()), nil)
-				//if err != nil {
-				//	return AccountRangeResult{}, err
-				//}
+				err = statedb.CommitBlock(ctx, dbState)
+				if err != nil {
+					return AccountRangeResult{}, err
+				}
 				break
 			}
 		}
@@ -678,7 +690,9 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 		it := trie.NewIterator(accountTrie.NodeIterator(common.BigToHash((*big.Int)(addressHash)).Bytes()))
 	*/
+
 	result := AccountRangeResult{AddressMap: make(map[common.Hash]common.Address)}
+
 	/*
 		for i := 0; i < int(maxResults) && it.Next(); i++ {
 			if preimage := accountTrie.GetKey(it.Key); preimage != nil {
@@ -695,10 +709,27 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 			result.NextKey = next
 		}
 	*/
+
+	acchash := common.BigToHash((*big.Int)(addressHash))
+	rangeResult, err := eth.AccountRange(dbState, &acchash, int(maxResults))
+	if err != nil {
+		return result, err
+	}
+
+	result.NextKey = rangeResult.Next
+
+	for k, v := range rangeResult.Accounts {
+		if v == nil {
+			result.AddressMap[k] = common.Address{}
+		} else {
+			result.AddressMap[k] = *v
+		}
+	}
+
 	return result, nil
 }
 
-func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
+func (api *RetestethAPI) GetBalance(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
@@ -708,7 +739,7 @@ func (api *RetestethAPI) GetBalance(ctx context.Context, address common.Address,
 	return (*math.HexOrDecimal256)(statedb.GetBalance(address)), nil
 }
 
-func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
+func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (hexutil.Bytes, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
@@ -717,7 +748,7 @@ func (api *RetestethAPI) GetCode(ctx context.Context, address common.Address, bl
 	return statedb.GetCode(address), nil
 }
 
-func (api *RetestethAPI) GetTransactionCount(ctx context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
+func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
 	if err != nil {
@@ -748,19 +779,25 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		//fmt.Printf("Storage range: %d, txIndex %d, addr: %x, start: %x, maxResults: %d\n",
 		//	blockNumber, txIndex, address, common.BigToHash((*big.Int)(begin)), maxResults)
 	}
+
+	if api.chainConfig != nil {
+		ctx = api.chainConfig.WithEIPsFlags(ctx, block.Number())
+	}
+
 	parentHeader := api.blockchain.GetHeaderByHash(header.ParentHash)
 	var root common.Hash
-	var statedb *state.IntraBlockState
+	var dbstate *state.DbState
 	var err error
 	if parentHeader == nil || int(txIndex) >= len(block.Transactions()) {
 		root = header.Root
-		statedb, _, err = api.blockchain.StateAt(root, header.Number.Uint64())
+		_, dbstate, err = api.blockchain.StateAt(root, header.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
 	} else {
+		var statedb *state.IntraBlockState
 		root = parentHeader.Root
-		statedb, _, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
+		statedb, dbstate, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
 		if err != nil {
 			return StorageRangeResult{}, err
 		}
@@ -780,7 +817,7 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			//_ = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
 			if idx == int(txIndex) {
 				// This is to make sure root can be opened by OpenTrie
-				//_, err = statedb.Commit(vmenv.ChainConfig().IsEIP158(block.Number()))
+				err = statedb.CommitBlock(ctx, dbstate)
 				if err != nil {
 					return StorageRangeResult{}, err
 				}
@@ -791,7 +828,9 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 		storageTrie := statedb.StorageTrie(address)
 		it := trie.NewIterator(storageTrie.NodeIterator(common.BigToHash((*big.Int)(begin)).Bytes()))
 	*/
+
 	result := StorageRangeResult{Storage: make(map[common.Hash]SRItem)}
+
 	/*
 		for i := 0; i < int(maxResults) && it.Next(); i++ {
 			if preimage := storageTrie.GetKey(it.Key); preimage != nil {
@@ -824,10 +863,26 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			result.Complete = true
 		}
 	*/
+
+	beginHash := common.BigToHash((*big.Int)(begin))
+
+	rangeResults, err := eth.StorageRangeAt(dbstate, address, beginHash.Bytes(), int(maxResults))
+	if err != nil {
+		return StorageRangeResult{}, err
+	}
+
+	if rangeResults.NextKey == nil {
+		result.Complete = true
+	}
+
+	for h, entry := range rangeResults.Storage {
+		result.Storage[h] = SRItem{entry.Key.Hex(), entry.Value.Hex()}
+	}
+
 	return result, nil
 }
 
-func (api *RetestethAPI) ClientVersion(ctx context.Context) (string, error) {
+func (api *RetestethAPI) ClientVersion(_ context.Context) (string, error) {
 	return "Geth-" + params.VersionWithCommit(gitCommit, gitDate), nil
 }
 

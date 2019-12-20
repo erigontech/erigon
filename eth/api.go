@@ -351,7 +351,7 @@ type AccountRangeResult struct {
 	Next     common.Hash                     `json:"next"`
 }
 
-func accountRange(dbstate *state.DbState, start *common.Hash, maxResults int) (AccountRangeResult, error) {
+func AccountRange(dbstate *state.DbState, start *common.Hash, maxResults int) (AccountRangeResult, error) {
 	if start == nil {
 		start = &common.Hash{0}
 	}
@@ -388,7 +388,7 @@ func (api *PrivateDebugAPI) AccountRange(ctx context.Context, start *common.Hash
 		return AccountRangeResult{}, err
 	}
 
-	return accountRange(dbstate, start, maxResults)
+	return AccountRange(dbstate, start, maxResults)
 }
 
 // StorageRangeResult is the result of a debug_storageRangeAt API call.

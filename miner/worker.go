@@ -631,19 +631,10 @@ func (w *worker) resultLoop() {
 
 // makeCurrent creates a new environment for the current cycle.
 func (w *worker) makeCurrent(parent *types.Block, header *types.Header) error {
-	stateV, _, err := w.chain.StateAt(parent.Root(), parent.NumberU64())
+	stateV, tds, err := GetState(w.chain, parent)
 	if err != nil {
 		return err
 	}
-
-	tds, err := state.GetTrieDbState(parent.Root(), w.chain.ChainDb(), parent.NumberU64())
-	if err != nil {
-		return err
-	}
-
-	tds = tds.WithNewBuffer()
-	tds.SetResolveReads(false)
-	tds.SetNoHistory(true)
 
 	env := &environment{
 		signer:    types.NewEIP155Signer(w.chainConfig.ChainID),
@@ -994,25 +985,12 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 
 	s := &(*w.current.state)
 
-	block, err := w.engine.FinalizeAndAssemble(w.chainConfig, w.current.header, s, w.current.txs, uncles, w.current.receipts)
-	if err != nil {
-		return err
-	}
-	ctx := w.chain.Config().WithEIPsFlags(context.Background(), w.current.header.Number)
-	if err = s.FinalizeTx(ctx, w.current.tds.TrieStateWriter()); err != nil {
-		return err
-	}
-
-	if err = w.current.tds.ResolveStateTrie(); err != nil {
-		return err
-	}
-
-	root, err := w.current.tds.CalcTrieRoots(false)
+	block, err := NewBlock(w.engine, s, w.current.tds, w.chain.Config(), w.current.header, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
 		return err
 	}
 
-	w.current.header.Root = root
+	w.current.header = block.Header()
 
 	if w.isRunning() {
 		if interval != nil {
@@ -1042,10 +1020,46 @@ func (w *worker) commit(uncles []*types.Header, interval func(), update bool, st
 	return nil
 }
 
-// postSideBlock fires a side chain event, only use it for testing.
-func (w *worker) postSideBlock(event core.ChainSideEvent) {
-	select {
-	case w.chainSideCh <- event:
-	case <-w.exitCh:
+func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+	block, err := engine.FinalizeAndAssemble(chainConfig, header, s, txs, uncles, receipts)
+	if err != nil {
+		return nil, err
 	}
+
+	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+	if err = s.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		return nil, err
+	}
+
+	if err = tds.ResolveStateTrie(); err != nil {
+		return nil, err
+	}
+
+	root, err := tds.CalcTrieRoots(false)
+	if err != nil {
+		return nil, err
+	}
+
+	header = block.Header()
+	header.Root = root
+
+	return types.NewBlock(header, txs, uncles, receipts), nil
+}
+
+func GetState(blockchain *core.BlockChain, parent *types.Block) (*state.IntraBlockState, *state.TrieDbState, error) {
+	statedb, _, err := blockchain.StateAt(parent.Root(), parent.NumberU64())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tds, err := state.GetTrieDbState(parent.Root(), blockchain.ChainDb(), parent.NumberU64())
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tds = tds.WithNewBuffer()
+	tds.SetResolveReads(false)
+	tds.SetNoHistory(true)
+
+	return statedb, tds, nil
 }

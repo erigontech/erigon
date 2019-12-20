@@ -19,6 +19,7 @@ package remote
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
@@ -535,4 +536,53 @@ func TestCmdFirst(t *testing.T) {
 	assert.Nil(t, key, "Unexpected key")
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, value, "Unexpected value")
+}
+
+func TestTxYield(t *testing.T) {
+	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
+	if err != nil {
+		t.Errorf("Could not create database: %v", err)
+	}
+	// Create bucket
+	if err = db.Update(func(tx *bolt.Tx) error {
+		_, err1 := tx.CreateBucket([]byte("bucket"), false)
+		return err1
+	}); err != nil {
+		t.Errorf("Could not create bucket: %v", err)
+	}
+	var readFinished bool
+	go func() {
+		// Long read-only transaction
+		if err1 := db.View(func(tx *bolt.Tx) error {
+			b := tx.Bucket([]byte("bucket"))
+			var keyBuf [8]byte
+			for i := 0; i < 100000; i++ {
+				binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
+				b.Get(keyBuf[:])
+				tx.Yield()
+			}
+			return nil
+		}); err1 != nil {
+			t.Fatal(err1)
+		}
+		readFinished = true
+	}()
+	// Expand the database
+	if err = db.Update(func(tx *bolt.Tx) error {
+		b := tx.Bucket([]byte("bucket"))
+		var keyBuf, valBuf [8]byte
+		for i := 0; i < 10000; i++ {
+			binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
+			binary.BigEndian.PutUint64(valBuf[:], uint64(i))
+			if err2 := b.Put(keyBuf[:], valBuf[:]); err2 != nil {
+				return err2
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Errorf("Could not execute update: %v", err)
+	}
+	if readFinished {
+		t.Errorf("Read should not finished here, if it did, it means the writes were blocked by it")
+	}
 }
