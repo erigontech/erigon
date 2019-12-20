@@ -69,6 +69,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		originalDataLen := original.EncodingLengthForStorage()
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
+		// We must keep root using thin history on deleting account as is
 	}
 
 	noHistory := dsw.tds.noHistory

@@ -571,7 +571,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 
 		}
 		contractBackend.Commit()
-		//fmt.Println("commited i=",i)
 	})
 
 	if _, err = blockchain.InsertChain(blocks); err != nil {
