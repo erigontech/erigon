@@ -176,6 +176,10 @@ type worker struct {
 	hooks
 
 	initOnce sync.Once
+	canonicalMining []consensus.Cancel
+	canonicalMiningMu sync.Mutex
+	sideMining []consensus.Cancel
+	sideMiningMu sync.Mutex
 }
 
 type hooks struct {
@@ -311,7 +315,7 @@ func (w *worker) close() {
 }
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
-func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.Duration, commit func(noempty bool, s int32)) {
+func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.Duration, commit func(ctx consensus.Cancel, noempty bool, s int32)) {
 	minRecommit := recommit // minimal resubmit interval specified by user.
 
 	// recalcRecommit recalculates the resubmitting interval upon feedback.
@@ -341,7 +345,7 @@ func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.
 		case <-w.startCh:
 			w.clearPending(w.chain.CurrentBlock().NumberU64())
 			atomic.StoreInt64(timestamp, time.Now().Unix())
-			commit(false, commitInterruptNewHead)
+			commit(consensus.StabCancel(), false, commitInterruptNewHead)
 
 		case <-timer.C:
 			// If mining is running resubmit a new work cycle periodically to pull in
@@ -352,7 +356,8 @@ func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.
 					timer.Reset(recommit)
 					continue
 				}
-				commit(true, commitInterruptResubmit)
+				//fixme: not sure about it
+				commit(consensus.StabCancel(), true, commitInterruptResubmit)
 			}
 
 		case interval := <-w.resubmitIntervalCh:
@@ -390,13 +395,13 @@ func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.
 	}
 }
 
-func (w *worker) getCommit(recommit time.Duration) (func(noempty bool, s int32), *int64, *time.Timer) {
+func (w *worker) getCommit(recommit time.Duration) (func(ctx consensus.Cancel, noempty bool, s int32), *int64, *time.Timer) {
 	interrupt := new(*int32)
 	timestamp := new(int64) // timestamp for each round of mining.
 	timer := time.NewTimer(0)
 	<-timer.C // discard the initial tick
 
-	return func(noempty bool, s int32) {
+	return func(ctx consensus.Cancel, noempty bool, s int32) {
 		if *interrupt != nil {
 			atomic.StoreInt32(*interrupt, s)
 		}
@@ -478,68 +483,75 @@ func (w *worker) mainLoop() {
 	}
 }
 
-func (w *worker) chainEvents(timestamp *int64, commit func(noempty bool, s int32)) {
+func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel, noempty bool, s int32)) {
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 
 	for {
 		select {
+		//fixme do we need side chain events?
 		case head := <-w.chainHeadCh:
-			w.clearPending(head.Block.NumberU64())
-			atomic.StoreInt64(timestamp, time.Now().Unix())
-			commit(false, commitInterruptNewHead)
+			go func(ctx consensus.Cancel) {
+				w.clearPending(head.Block.NumberU64())
+				w.clearCanonicalChainContext()
+
+				atomic.StoreInt64(timestamp, time.Now().Unix())
+
+				commit(ctx, false, commitInterruptNewHead)
+
+				ctx.CancelFunc()
+			}(w.getCanonicalChainContext())
 
 		case ev := <-w.chainSideCh:
-			// Short circuit for duplicate side blocks
-			if _, exist := w.localUncles[ev.Block.Hash()]; exist {
-				continue
-			}
-			if _, exist := w.remoteUncles[ev.Block.Hash()]; exist {
-				continue
-			}
-			// Add side block to possible uncle block set depending on the author.
-			if w.isLocalBlock != nil && w.isLocalBlock(ev.Block) {
-				w.localUncles[ev.Block.Hash()] = ev.Block
-			} else {
-				w.remoteUncles[ev.Block.Hash()] = ev.Block
-			}
-
-			ctx := consensus.NewCancel()
-
-			// If our mining block contains less than 2 uncle blocks,
-			// add the new uncle block if valid and regenerate a mining block.
-			if w.isRunning() && w.current != nil && w.current.uncles.Cardinality() < 2 {
-				start := time.Now()
-				if err := w.commitUncle(w.current, ev.Block.Header()); err != nil {
-					ctx.CancelFunc()
-					log.Debug("cannot commit uncle", "err", err)
-					continue
+			go func(ctx consensus.Cancel) {
+				defer ctx.CancelFunc()
+				// Short circuit for duplicate side blocks
+				if _, exist := w.localUncles[ev.Block.Hash()]; exist {
+					return
+				}
+				if _, exist := w.remoteUncles[ev.Block.Hash()]; exist {
+					return
+				}
+				// Add side block to possible uncle block set depending on the author.
+				if w.isLocalBlock != nil && w.isLocalBlock(ev.Block) {
+					w.localUncles[ev.Block.Hash()] = ev.Block
+				} else {
+					w.remoteUncles[ev.Block.Hash()] = ev.Block
 				}
 
-				var uncles []*types.Header
-				w.current.uncles.Each(func(item interface{}) bool {
-					hash, ok := item.(common.Hash)
-					if !ok {
-						return false
+				// If our mining block contains less than 2 uncle blocks,
+				// add the new uncle block if valid and regenerate a mining block.
+				if w.isRunning() && w.current != nil && w.current.uncles.Cardinality() < 2 {
+					start := time.Now()
+					if err := w.commitUncle(w.current, ev.Block.Header()); err != nil {
+						ctx.CancelFunc()
+						log.Debug("cannot commit uncle", "err", err)
+						return
 					}
-					uncle, exist := w.localUncles[hash]
-					if !exist {
-						uncle, exist = w.remoteUncles[hash]
-					}
-					if !exist {
-						return false
-					}
-					uncles = append(uncles, uncle.Header())
-					return false
-				})
 
-				if err := w.commit(ctx, uncles, nil, true, start); err != nil {
-					ctx.CancelFunc()
-					log.Debug("cannot commit a block", "err", err)
-					continue
+					var uncles []*types.Header
+					w.current.uncles.Each(func(item interface{}) bool {
+						hash, ok := item.(common.Hash)
+						if !ok {
+							return false
+						}
+						uncle, exist := w.localUncles[hash]
+						if !exist {
+							uncle, exist = w.remoteUncles[hash]
+						}
+						if !exist {
+							return false
+						}
+						uncles = append(uncles, uncle.Header())
+						return false
+					})
+
+					if err := w.commit(ctx, uncles, nil, true, start); err != nil {
+						ctx.CancelFunc()
+						log.Debug("cannot commit a block", "err", err)
+					}
 				}
-			}
-			ctx.CancelFunc()
+			}(w.getSideChainContext())
 
 		// System stopped
 		case <-w.exitCh:
@@ -1061,6 +1073,48 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 		w.updateSnapshot()
 	}
 	return nil
+}
+
+func (w *worker) getSideChainContext() consensus.Cancel {
+	ctx := consensus.NewCancel()
+
+	w.sideMiningMu.Lock()
+	w.sideMining = append(w.sideMining, ctx)
+	w.sideMiningMu.Unlock()
+
+	return ctx
+}
+
+func (w *worker) clearSideChainContext() {
+	w.sideMiningMu.Lock()
+	sideMining := w.sideMining
+	w.sideMiningMu.Unlock()
+	w.sideMining = nil
+
+	for _, ctx := range sideMining {
+		ctx.CancelFunc()
+	}
+}
+
+func (w *worker) getCanonicalChainContext() consensus.Cancel {
+	ctx := consensus.NewCancel()
+
+	w.canonicalMiningMu.Lock()
+	w.canonicalMining = append(w.canonicalMining, ctx)
+	w.canonicalMiningMu.Unlock()
+
+	return ctx
+}
+
+func (w *worker) clearCanonicalChainContext() {
+	w.canonicalMiningMu.Lock()
+	canonicalMining := w.canonicalMining
+	w.canonicalMiningMu.Unlock()
+	w.canonicalMining = nil
+
+	for _, ctx := range canonicalMining {
+		ctx.CancelFunc()
+	}
 }
 
 func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
