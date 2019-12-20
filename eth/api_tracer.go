@@ -628,7 +628,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, _, err := api.computeTxEnv(ctx, blockHash, int(index))
+	msg, vmctx, statedb, _, err := api.computeTxEnv(ctx, blockHash, int(index))
 	if err != nil {
 		return nil, err
 	}
@@ -699,15 +699,15 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
+func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
 	block := api.eth.blockchain.GetBlockByHash(blockHash)
 	if block == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("block %x not found", blockHash)
+		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}
 	parent := api.eth.blockchain.GetBlock(block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("parent %x not found", block.ParentHash())
+		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 	statedb, dbstate := api.computeIntraBlockState(parent)
 	// Recompute transactions up to the target index.
@@ -717,23 +717,23 @@ func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.H
 		select {
 		default:
 		case <-ctx.Done():
-			return nil, vm.Context{}, nil, nil, 0, ctx.Err()
+			return nil, vm.Context{}, nil, nil, ctx.Err()
 		}
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
 		EVMcontext := core.NewEVMContext(msg, block.Header(), api.eth.blockchain, nil)
 		if idx == txIndex {
-			return msg, EVMcontext, statedb, dbstate, parent.NumberU64(), nil
+			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
 		vmenv := vm.NewEVM(EVMcontext, statedb, api.eth.blockchain.Config(), vm.Config{})
 		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-			return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
+			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
 		// Ensure any modifications are committed to the state
 		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
 		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
 	}
-	return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
+	return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }
