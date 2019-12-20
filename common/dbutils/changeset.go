@@ -3,11 +3,18 @@ package dbutils
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
+
+func NewChangeSet() *ChangeSet {
+	return &ChangeSet{
+		Changes: make([]Change, 0),
+	}
+}
 
 type Change struct {
 	Key   []byte
@@ -98,8 +105,8 @@ func (s *ChangeSet) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func Decode(b []byte) (ChangeSet, error) {
-	h := ChangeSet{}
+func DecodeChangeSet(b []byte) (*ChangeSet, error) {
+	h := new(ChangeSet)
 	h.Changes = make([]Change, 0)
 	if len(b) == 0 {
 		return h, nil
@@ -141,6 +148,7 @@ func Decode(b []byte) (ChangeSet, error) {
 		h.Changes[i].Value = common.CopyBytes(val)
 	}
 
+	sort.Sort(h)
 	return h, nil
 }
 
@@ -171,8 +179,11 @@ func (s *ChangeSet) Add(key []byte, value []byte) error {
 		Key:   key,
 		Value: value,
 	})
-
 	return nil
+}
+
+func (s *ChangeSet) KeyCount() uint32 {
+	return uint32(len(s.Changes))
 }
 
 // MultiAdd adds multiple new entries to the ChangeSet.
@@ -197,4 +208,30 @@ func (s *ChangeSet) Walk(f func(k, v []byte) error) error {
 		}
 	}
 	return nil
+}
+
+func (s *ChangeSet) FindFirst(k []byte) ([]byte, error) {
+	for i := range s.Changes {
+		if bytes.Equal(k, s.Changes[i].Key) {
+			return s.Changes[i].Value, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+func (s *ChangeSet) FindLast(k []byte) ([]byte, error) {
+	for i := len(s.Changes) - 1; i >= 0; i-- {
+		if bytes.Equal(k, s.Changes[i].Key) {
+			return s.Changes[i].Value, nil
+		}
+	}
+	return nil, errors.New("not found")
+}
+
+func (s *ChangeSet) ChangedKeys() map[string]struct{} {
+	m := make(map[string]struct{}, len(s.Changes))
+	for i := range s.Changes {
+		m[string(s.Changes[i].Key)] = struct{}{}
+	}
+	return m
 }

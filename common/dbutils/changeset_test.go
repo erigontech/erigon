@@ -10,10 +10,10 @@ import (
 
 func TestEncoding(t *testing.T) {
 	// empty ChangeSet first
-	var ch ChangeSet
+	ch := NewChangeSet()
 	encoded, err := ch.Encode()
 	assert.NoError(t, err)
-	decoded, err := Decode(encoded)
+	decoded, err := DecodeChangeSet(encoded)
 	assert.NoError(t, err)
 	assert.Equal(t, 0, decoded.Len())
 
@@ -28,7 +28,7 @@ func TestEncoding(t *testing.T) {
 	// test Decode(Encode(ch)) == ch
 	encoded, err = ch.Encode()
 	assert.NoError(t, err)
-	decoded, err = Decode(encoded)
+	decoded, err = DecodeChangeSet(encoded)
 	assert.NoError(t, err)
 	assert.Equal(t, ch, decoded)
 }

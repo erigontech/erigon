@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"runtime"
 	"sort"
@@ -52,7 +53,7 @@ type StateReader interface {
 
 type StateWriter interface {
 	UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error
-	UpdateAccountCode(codeHash common.Hash, code []byte) error
+	UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error
 	DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error
 	WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error
 	CreateContract(address common.Address) error
@@ -73,7 +74,7 @@ func (nw *NoopWriter) DeleteAccount(_ context.Context, address common.Address, o
 	return nil
 }
 
-func (nw *NoopWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (nw *NoopWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
@@ -110,9 +111,7 @@ func (b *Buffer) initialise() {
 func (b *Buffer) detachAccounts() {
 	for addrHash, account := range b.accountUpdates {
 		if account != nil {
-			var c accounts.Account
-			c.Copy(account)
-			b.accountUpdates[addrHash] = &c
+			b.accountUpdates[addrHash] = account.SelfCopy()
 		}
 	}
 }
@@ -560,6 +559,7 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 	if err := tds.resolveAccountTouches(accountTouches); err != nil {
 		return err
 	}
+
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
 	}
@@ -597,11 +597,11 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 // forward is `false` if the function is used to rewind the state (for reorgs, for example)
 func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	accountUpdates := tds.aggregateBuffer.accountUpdates
-	// The following map is to prevent repeated clearouts of the storage
-	alreadyCreated := make(map[common.Hash]struct{})
 	// Perform actual updates on the tries, and compute one trie root per buffer
 	// These roots can be used to populate receipt.PostState on pre-Byzantium
 	roots := make([]common.Hash, len(tds.buffers))
+	// The following map is to prevent repeated clearouts of the storage
+	alreadyCreated := make(map[common.Hash]struct{})
 	for i, b := range tds.buffers {
 		// New contracts are being created at these addresses. Therefore, we need to clear the storage items
 		// that might be remaining in the trie and figure out the next incarnations
@@ -611,24 +611,20 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				continue
 			}
 			alreadyCreated[addrHash] = struct{}{}
-			incarnation, err := tds.nextIncarnation(addrHash)
-			if err != nil {
-				return nil, err
-			}
 			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
+				b.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
-			if account, ok := accountUpdates[addrHash]; ok && account != nil {
-				account.SetIncarnation(incarnation)
-				account.Root = trie.EmptyRoot
+			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
+				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
 		}
+
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
+				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:], tds.blockNr)
@@ -667,7 +663,8 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					}
 				}
 			}
-			if forward {
+
+			if forward || debug.IsThinHistory() {
 				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
 					ok, root := tds.t.DeepHash(addrHash[:])
 					if ok {
@@ -712,6 +709,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 		}
+
 		// For the contracts that got deleted
 		for addrHash := range b.deleted {
 			if _, ok := b.created[addrHash]; ok {
@@ -865,6 +863,15 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	if err := a.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
+
+	if tds.historical && debug.IsThinHistory() {
+		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+		if err == nil {
+			a.CodeHash = common.BytesToHash(codeHash)
+		} else {
+			log.Error("Get code hash is incorrect", "err", err)
+		}
+	}
 	return &a, nil
 }
 
@@ -885,6 +892,7 @@ func (tds *TrieDbState) ReadAccountData(address common.Address) (*accounts.Accou
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
 	}
+
 	return tds.readAccountDataByHash(addrHash)
 }
 
@@ -1072,7 +1080,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	if found {
 		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
-	return 0, nil
+	return 1, nil
 }
 
 var prevMemStats runtime.MemStats
@@ -1102,10 +1110,6 @@ func (tds *TrieDbState) PruneTries(print bool) {
 	if print {
 		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
-}
-
-type DbStateWriter struct {
-	tds *TrieDbState
 }
 
 func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
@@ -1154,35 +1158,6 @@ func (tsw *TrieStateWriter) UpdateAccountData(_ context.Context, address common.
 	return nil
 }
 
-func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	dataLen := account.EncodingLengthForStorage()
-	data := make([]byte, dataLen)
-	account.EncodeForStorage(data)
-
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
-	if err != nil {
-		return err
-	}
-	if err = dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data); err != nil {
-		return err
-	}
-	noHistory := dsw.tds.noHistory
-
-	// Don't write historical record if the account did not change
-	if accountsEqual(original, account) {
-		return nil
-	}
-	var originalData []byte
-	if !original.Initialised {
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
-}
-
 func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
 	addrHash, err := tsw.tds.HashAddress(address, false /*save*/)
 	if err != err {
@@ -1194,37 +1169,11 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 	return nil
 }
 
-func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	addrHash, err := dsw.tds.HashAddress(address, true /*save*/)
-	if err != nil {
-		return err
-	}
-	if err := dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:]); err != nil {
-		return err
-	}
-	noHistory := dsw.tds.noHistory
-
-	var originalData []byte
-	if !original.Initialised {
-		// Account has been created and deleted in the same block
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-	}
-	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
-}
-
-func (tsw *TrieStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
 		tsw.tds.pg.CreateCode(codeHash, code)
 	}
 	return nil
-}
-
-func (dsw *DbStateWriter) UpdateAccountCode(codeHash common.Hash, code []byte) error {
-	return dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code)
 }
 
 func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -1250,40 +1199,6 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 	}
 	//fmt.Printf("WriteAccountStorage %x %x: %x, buffer %d\n", addrHash, seckey, value, len(tsw.tds.buffers))
 	return nil
-}
-
-func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
-	if *original == *value {
-		return nil
-	}
-	seckey, err := dsw.tds.HashKey(key, true /*save*/)
-	if err != nil {
-		return err
-	}
-	v := bytes.TrimLeft(value[:], "\x00")
-	vv := make([]byte, len(v))
-	copy(vv, v)
-
-	addrHash, err := dsw.tds.HashAddress(address, false /*save*/)
-	if err != nil {
-		return err
-	}
-
-	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
-	if len(v) == 0 {
-		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
-	} else {
-		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
-	}
-	//fmt.Printf("WriteAccountStorage (db) %x %d %x: %x\n", address, incarnation, key, value)
-	if err != nil {
-		return err
-	}
-	noHistory := dsw.tds.noHistory
-	o := bytes.TrimLeft(original[:], "\x00")
-	oo := make([]byte, len(o))
-	copy(oo, o)
-	return dsw.tds.db.PutS(dbutils.StorageHistoryBucket, compositeKey, oo, dsw.tds.blockNr, noHistory)
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
@@ -1344,10 +1259,13 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 		return err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
-	return nil
-}
-
-func (dsw *DbStateWriter) CreateContract(address common.Address) error {
+	incarnation, err := tsw.tds.nextIncarnation(addrHash)
+	if err != nil {
+		return err
+	}
+	if account, ok := tsw.tds.currentBuffer.accountUpdates[addrHash]; ok && account != nil {
+		account.SetIncarnation(incarnation)
+	}
 	return nil
 }
 

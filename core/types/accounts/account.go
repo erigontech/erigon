@@ -268,10 +268,14 @@ func (a *Account) Copy(image *Account) {
 	a.Balance.Set(&image.Balance)
 	a.Root = image.Root
 	a.CodeHash = image.CodeHash
-	a.Incarnation = image.Incarnation
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
 	a.Incarnation = image.Incarnation
+}
+func (a *Account) SelfCopy() *Account {
+	newAcc := NewAccount()
+	newAcc.Copy(a)
+	return &newAcc
 }
 
 // Decodes length and determines whether it corresponds to a structure of a byte array

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -172,6 +173,14 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err := acc.DecodeForStorage(enc); err != nil {
 		return nil, err
 	}
+	if debug.IsThinHistory() {
+		codeHash, err := dbs.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+		if err != nil {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		} else {
+			log.Error("ReadAccountData Get code hash is incorrect")
+		}
+	}
 	return &acc, nil
 }
 
@@ -217,7 +226,7 @@ func (dbs *DbState) DeleteAccount(_ context.Context, address common.Address, ori
 	return nil
 }
 
-func (dbs *DbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
+func (dbs *DbState) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	return nil
 }
 
@@ -344,7 +353,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	// TODO: [Issue 99] Support incarnations
-	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(0))
+	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
 	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
 
 	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8

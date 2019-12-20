@@ -259,6 +259,10 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 		for key, value := range account.Storage {
 			statedb.SetState(addr, key, value)
 		}
+
+		if len(account.Code) > 0 || len(account.Storage) > 0 {
+			statedb.SetIncarnation(addr, 1)
+		}
 	}
 	err = statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {

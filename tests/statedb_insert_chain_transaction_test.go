@@ -715,7 +715,7 @@ func genBlocks(gspec *core.Genesis, txs map[int]tx) (*core.BlockChain, []*types.
 	})
 
 	if err != nil {
-		err = fmt.Errorf("block %d, error %w", blockNumber, err)
+		err = fmt.Errorf("block %d, error %v", blockNumber, err)
 	}
 
 	return blockchain, blocks, receipts, err

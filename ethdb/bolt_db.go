@@ -19,6 +19,7 @@ package ethdb
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"os"
 	"path"
 
@@ -84,8 +85,20 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if err = hb.Put(composite, value); err != nil {
-				return err
+			if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+				b, _ := hb.Get(key)
+				b, err = AppendToIndex(b, timestamp)
+				if err != nil {
+					log.Error("PutS AppendChangedOnIndex err", "err", err)
+					return err
+				}
+				if err = hb.Put(key, b); err != nil {
+					return err
+				}
+			} else {
+				if err = hb.Put(composite, value); err != nil {
+					return err
+				}
 			}
 		}
 
@@ -95,9 +108,9 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 		}
 
 		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.Decode(dat)
+		sh, err := dbutils.DecodeChangeSet(dat)
 		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
+			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
 		err = sh.Add(key, value)
@@ -106,7 +119,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 		}
 		dat, err = sh.Encode()
 		if err != nil {
-			log.Error("PutS Decode changeSet err", "err", err)
+			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
 
@@ -188,16 +201,61 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 // GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
 func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	return db.Get(hBucket, composite)
+	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
+		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+		return db.Get(hBucket, composite)
+	}
+
+	chs, err := db.GetChangeSetByBlock(hBucket, timestamp)
+	if err != nil {
+		return nil, err
+	}
+
+	res, err := chs.FindLast(key)
+	if err != nil {
+		return nil, ErrKeyNotFound
+	}
+	return res, nil
+}
+
+// getChangeSetByBlockNoLock returns changeset by block and bucket
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.ChangeSetBucket)
+		if b == nil {
+			return nil
+		}
+
+		v, _ := b.Get(key)
+		if v != nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return dbutils.DecodeChangeSet(dat)
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		{
+		if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+			v, err := BoltDBFindByHistory(tx, hBucket, key, timestamp)
+			if err != nil {
+				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
+			} else {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		} else {
+			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 			hB := tx.Bucket(hBucket)
 			if hB == nil {
 				return ErrKeyNotFound
@@ -216,6 +274,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				return ErrKeyNotFound
 			}
 			c := b.Cursor()
+
 			k, v := c.Seek(key)
 			if k != nil && bytes.Equal(k, key) {
 				dat = make([]byte, len(v))
@@ -319,7 +378,11 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	if debug.IsThinHistory() {
+		panic("WalkAsOf")
+	}
+
 	fixedbytes, mask := Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
@@ -334,13 +397,16 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
-		k, v := c.Seek(startkey)
-		hK, hV := hC.Seek(startkey)
+		//for state
+		mainCursor := b.Cursor()
+		//for historic data
+		historyCursor := hB.Cursor()
+		k, v := mainCursor.Seek(startkey)
+		hK, hV := historyCursor.Seek(startkey)
 		goOn := true
 		var err error
 		for goOn {
+			//exit or next conditions
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
 				k = nil
 			}
@@ -359,7 +425,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
-				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				hK, hV = historyCursor.SeekTo(keyBuffer[:sl])
 				continue
 			}
 
@@ -382,12 +448,12 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], EndSuffix)
-					hK, hV = hC.SeekTo(keyBuffer)
+					hK, hV = historyCursor.SeekTo(keyBuffer)
 				}
 			}
 		}
@@ -397,6 +463,10 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 }
 
 func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+	if debug.IsThinHistory() {
+		panic("MultiWalkAsOf")
+	}
+
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -416,11 +486,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor()
-		hC := hB.Cursor()
-		hC1 := hB.Cursor()
-		k, v := c.Seek(startkey)
-		hK, hV := hC.Seek(startkey)
+		mainCursor := b.Cursor()
+		historyCursor := hB.Cursor()
+		additionalHistoryCursor := hB.Cursor()
+		k, v := mainCursor.Seek(startkey)
+		hK, hV := historyCursor.Seek(startkey)
 		goOn := true
 		var err error
 		for goOn { // k != nil
@@ -442,7 +512,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 							}
 						}
 						if cmp < 0 {
-							k, v = c.SeekTo(startkey)
+							k, v = mainCursor.SeekTo(startkey)
 							if k == nil {
 								cmp = 1
 							}
@@ -460,7 +530,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 							}
 						}
 						if hCmp < 0 {
-							hK, hV = hC.SeekTo(startkey)
+							hK, hV = historyCursor.SeekTo(startkey)
 							if hK == nil {
 								hCmp = 1
 							}
@@ -481,7 +551,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			if hKFit && bytes.Compare(hK[l:], encodedTS) < 0 {
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
-				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				hK, hV = historyCursor.SeekTo(keyBuffer[:sl])
 				continue
 			}
 			var cmp int
@@ -497,7 +567,8 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				cmp = bytes.Compare(k, hK[:l])
 			}
 			if cmp < 0 {
-				hK1, _ := hC1.Seek(k)
+				//additional check to keep historyCursor on the same position
+				hK1, _ := additionalHistoryCursor.Seek(k)
 				if bytes.HasPrefix(hK1, k) {
 					err = walker(keyIdx, k, v)
 					goOn = err == nil
@@ -508,12 +579,12 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v = mainCursor.Next()
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], EndSuffix)
-					hK, hV = hC.SeekTo(keyBuffer)
+					hK, hV = historyCursor.SeekTo(keyBuffer)
 				}
 			}
 		}
@@ -559,7 +630,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts, err := dbutils.Decode(v)
+			changedAccounts, err := dbutils.DecodeChangeSet(v)
 			if err != nil {
 				return err
 			}
@@ -628,7 +699,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:               db,
 		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
 	return m
 }

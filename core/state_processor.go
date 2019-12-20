@@ -21,9 +21,8 @@ import (
 	"encoding/json"
 	"os"
 
-	"fmt"
-
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/math"

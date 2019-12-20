@@ -37,12 +37,13 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 		if timestamp > timestampSrc {
 			return false, nil
 		}
-		ca, err := dbutils.Decode(v)
+
+		changedAccounts, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}
 
-		if ca.Len() > 0 {
+		if changedAccounts.Len() > 0 {
 			bucketStr := string(common.CopyBytes(bucket))
 			var t map[string][]byte
 			var ok bool
@@ -51,7 +52,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				m[bucketStr] = t
 			}
 
-			err = ca.Walk(func(k, v []byte) error {
+			err = changedAccounts.Walk(func(k, v []byte) error {
 				if _, ok = t[string(k)]; !ok {
 					t[string(k)] = v
 				}
@@ -78,18 +79,18 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	return nil
 }
 
-func GetModifiedAccounts(db Getter, starttimestamp, endtimestamp uint64) ([]common.Address, error) {
+func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
 	var keys [][]byte
-	startCode := dbutils.EncodeTimestamp(starttimestamp)
+	startCode := dbutils.EncodeTimestamp(startTimestamp)
 	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := dbutils.DecodeTimestamp(k)
+		keyTimestamp, bucket := dbutils.DecodeTimestamp(k)
 		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			return true, nil
 		}
-		if timestamp > endtimestamp {
+		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
-		d, err := dbutils.Decode(v)
+		d, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}

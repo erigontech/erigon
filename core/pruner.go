@@ -145,7 +145,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 
 		keysToRemove.ChangeSet = append(keysToRemove.ChangeSet, key)
 
-		changedKeys, err := dbutils.Decode(v)
+		changedKeys, err := dbutils.DecodeChangeSet(v)
 		if err != nil {
 			return false, err
 		}

@@ -185,11 +185,11 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			return err
 		}
 
-		var sh dbutils.ChangeSet
+		var sh *dbutils.ChangeSet
 		if err == nil {
 			err = changeSetItem.Value(func(val []byte) error {
 				var err2 error
-				sh, err2 = dbutils.Decode(val)
+				sh, err2 = dbutils.DecodeChangeSet(val)
 				if err2 != nil {
 					log.Error("PutS Decode suffix err", "err", err2)
 					return err2
@@ -227,10 +227,10 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 			item := it.Item()
 			k := item.Key()
 
-			var changedAccounts dbutils.ChangeSet
+			var changedAccounts *dbutils.ChangeSet
 			err := item.Value(func(v []byte) error {
 				var err2 error
-				changedAccounts, err2 = dbutils.Decode(v)
+				changedAccounts, err2 = dbutils.DecodeChangeSet(v)
 				return err2
 			})
 			if err != nil {
@@ -445,7 +445,7 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:               db,
 		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string][]dbutils.Change),
+		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
 	}
 	return m
 }
