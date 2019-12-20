@@ -276,8 +276,12 @@ func (w *worker) init() {
 			recommit = minRecommitInterval
 		}
 
+		// commit aborts in-flight transaction execution with given signal and resubmits a new one.
+		commit, timestamp, timer := w.getCommit(recommit)
+
 		go w.mainLoop()
-		go w.newWorkLoop(recommit)
+		go w.newWorkLoop(timestamp, timer, recommit, commit)
+		go w.chainEvents(timestamp, commit)
 		go w.resultLoop()
 		go w.taskLoop()
 	})
@@ -307,27 +311,9 @@ func (w *worker) close() {
 }
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
-func (w *worker) newWorkLoop(recommit time.Duration) {
-	var (
-		interrupt   *int32
-		minRecommit = recommit // minimal resubmit interval specified by user.
-		timestamp   int64      // timestamp for each round of mining.
-	)
+func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.Duration, commit func(noempty bool, s int32)) {
+	minRecommit := recommit // minimal resubmit interval specified by user.
 
-	timer := time.NewTimer(0)
-	<-timer.C // discard the initial tick
-
-	// commit aborts in-flight transaction execution with given signal and resubmits a new one.
-	commit := func(noempty bool, s int32) {
-		if interrupt != nil {
-			atomic.StoreInt32(interrupt, s)
-		}
-		interrupt = new(int32)
-
-		w.newWorkCh <- &newWorkReq{interrupt: interrupt, noempty: noempty, timestamp: timestamp, cancel: consensus.NewCancel()}
-		timer.Reset(recommit)
-		atomic.StoreInt32(&w.newTxs, 0)
-	}
 	// recalcRecommit recalculates the resubmitting interval upon feedback.
 	recalcRecommit := func(target float64, inc bool) {
 		var (
@@ -349,27 +335,12 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 		}
 		recommit = time.Duration(int64(next))
 	}
-	// clearPending cleans the stale pending tasks.
-	clearPending := func(number uint64) {
-		w.pendingMu.Lock()
-		for h, t := range w.pendingTasks {
-			if t.block.NumberU64()+staleThreshold <= number {
-				delete(w.pendingTasks, h)
-			}
-		}
-		w.pendingMu.Unlock()
-	}
 
 	for {
 		select {
 		case <-w.startCh:
-			clearPending(w.chain.CurrentBlock().NumberU64())
-			timestamp = time.Now().Unix()
-			commit(false, commitInterruptNewHead)
-
-		case head := <-w.chainHeadCh:
-			clearPending(head.Block.NumberU64())
-			timestamp = time.Now().Unix()
+			w.clearPending(w.chain.CurrentBlock().NumberU64())
+			atomic.StoreInt64(timestamp, time.Now().Unix())
 			commit(false, commitInterruptNewHead)
 
 		case <-timer.C:
@@ -419,16 +390,104 @@ func (w *worker) newWorkLoop(recommit time.Duration) {
 	}
 }
 
+func (w *worker) getCommit(recommit time.Duration) (func(noempty bool, s int32), *int64, *time.Timer) {
+	interrupt := new(*int32)
+	timestamp := new(int64) // timestamp for each round of mining.
+	timer := time.NewTimer(0)
+	<-timer.C // discard the initial tick
+
+	return func(noempty bool, s int32) {
+		if *interrupt != nil {
+			atomic.StoreInt32(*interrupt, s)
+		}
+		*interrupt = new(int32)
+
+		w.newWorkCh <- &newWorkReq{interrupt: *interrupt, noempty: noempty, timestamp: atomic.LoadInt64(timestamp), cancel: consensus.NewCancel()}
+		timer.Reset(recommit)
+		atomic.StoreInt32(&w.newTxs, 0)
+	}, timestamp, timer
+}
+
+// clearPending cleans the stale pending tasks.
+func (w *worker) clearPending(number uint64) {
+	w.pendingMu.Lock()
+	for h, t := range w.pendingTasks {
+		if t.block.NumberU64()+staleThreshold <= number {
+			delete(w.pendingTasks, h)
+		}
+	}
+	w.pendingMu.Unlock()
+}
+
 // mainLoop is a standalone goroutine to regenerate the sealing task based on the received event.
 func (w *worker) mainLoop() {
 	defer w.txsSub.Unsubscribe()
-	defer w.chainHeadSub.Unsubscribe()
-	defer w.chainSideSub.Unsubscribe()
 
 	for {
 		select {
 		case req := <-w.newWorkCh:
 			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
+
+		case ev := <-w.txsCh:
+			// Apply transactions to the pending state if we're not mining.
+			//
+			// Note all transactions received may not be continuous with transactions
+			// already included in the current mining block. These transactions will
+			// be automatically eliminated.
+			if !w.isRunning() && w.current != nil {
+				// If block is already full, abort
+				if gp := w.current.gasPool; gp != nil && gp.Gas() < params.TxGas {
+					continue
+				}
+				w.mu.RLock()
+				coinbase := w.coinbase
+				w.mu.RUnlock()
+
+				txs := make(map[common.Address]types.Transactions)
+				for _, tx := range ev.Txs {
+					acc, _ := types.Sender(w.current.signer, tx)
+					txs[acc] = append(txs[acc], tx)
+				}
+				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs)
+				tcount := w.current.tcount
+				w.commitTransactions(txset, coinbase, nil)
+				// Only update the snapshot if any new transactons were added
+				// to the pending block
+				if tcount != w.current.tcount {
+					w.updateSnapshot()
+				}
+			} else {
+				// If clique is running in dev mode(period is 0), disable
+				// advance sealing here.
+				if w.chainConfig.Clique != nil && w.chainConfig.Clique.Period == 0 {
+					w.commitNewWork(consensus.StabCancel(), nil, true, time.Now().Unix())
+				}
+			}
+			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
+
+		// System stopped
+		case <-w.exitCh:
+			return
+		case <-w.txsSub.Err():
+			return
+		case <-w.chainHeadSub.Err():
+			return
+		case <-w.chainSideSub.Err():
+			return
+		}
+	}
+}
+
+func (w *worker) chainEvents(timestamp *int64, commit func(noempty bool, s int32)) {
+	defer w.chainHeadSub.Unsubscribe()
+	defer w.chainSideSub.Unsubscribe()
+
+	for {
+		select {
+		case head := <-w.chainHeadCh:
+			w.clearPending(head.Block.NumberU64())
+			atomic.StoreInt64(timestamp, time.Now().Unix())
+			commit(false, commitInterruptNewHead)
 
 		case ev := <-w.chainSideCh:
 			// Short circuit for duplicate side blocks
@@ -482,47 +541,8 @@ func (w *worker) mainLoop() {
 			}
 			ctx.CancelFunc()
 
-		case ev := <-w.txsCh:
-			// Apply transactions to the pending state if we're not mining.
-			//
-			// Note all transactions received may not be continuous with transactions
-			// already included in the current mining block. These transactions will
-			// be automatically eliminated.
-			if !w.isRunning() && w.current != nil {
-				// If block is already full, abort
-				if gp := w.current.gasPool; gp != nil && gp.Gas() < params.TxGas {
-					continue
-				}
-				w.mu.RLock()
-				coinbase := w.coinbase
-				w.mu.RUnlock()
-
-				txs := make(map[common.Address]types.Transactions)
-				for _, tx := range ev.Txs {
-					acc, _ := types.Sender(w.current.signer, tx)
-					txs[acc] = append(txs[acc], tx)
-				}
-				txset := types.NewTransactionsByPriceAndNonce(w.current.signer, txs)
-				tcount := w.current.tcount
-				w.commitTransactions(txset, coinbase, nil)
-				// Only update the snapshot if any new transactons were added
-				// to the pending block
-				if tcount != w.current.tcount {
-					w.updateSnapshot()
-				}
-			} else {
-				// If clique is running in dev mode(period is 0), disable
-				// advance sealing here.
-				if w.chainConfig.Clique != nil && w.chainConfig.Clique.Period == 0 {
-					w.commitNewWork(consensus.StabCancel(), nil, true, time.Now().Unix())
-				}
-			}
-			atomic.AddInt32(&w.newTxs, int32(len(ev.Txs)))
-
 		// System stopped
 		case <-w.exitCh:
-			return
-		case <-w.txsSub.Err():
 			return
 		case <-w.chainHeadSub.Err():
 			return
