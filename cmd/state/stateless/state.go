@@ -141,7 +141,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(10000)
 		if err != nil {
 			return err
 		}
@@ -189,7 +189,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(10000)
 		if err != nil {
 			return err
 		}
@@ -260,7 +260,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(10000)
 		if err != nil {
 			return err
 		}
@@ -316,7 +316,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(10000)
 		if err != nil {
 			return err
 		}
@@ -402,7 +402,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(10000)
 		if err != nil {
 			return err
 		}
