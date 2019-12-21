@@ -5,5 +5,5 @@ import (
 )
 
 func TestSemantics(t *testing.T) {
-	
+
 }
