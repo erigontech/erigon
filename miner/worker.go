@@ -175,11 +175,11 @@ type worker struct {
 
 	hooks
 
-	initOnce sync.Once
-	canonicalMining []consensus.Cancel
+	initOnce          sync.Once
+	canonicalMining   []consensus.Cancel
 	canonicalMiningMu sync.Mutex
-	sideMining []consensus.Cancel
-	sideMiningMu sync.Mutex
+	sideMining        []consensus.Cancel
+	sideMiningMu      sync.Mutex
 }
 
 type hooks struct {
