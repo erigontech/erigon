@@ -268,9 +268,9 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		case CmdBeginTx:
 			tx, err = db.Begin(false)
 			if err != nil {
-				err := fmt.Errorf("could not start transaction for CmdBeginTx: %w", err)
-				encodeErr(encoder, err)
-				return err
+				err2 := fmt.Errorf("could not start transaction for CmdBeginTx: %w", err)
+				encodeErr(encoder, err2)
+				return err2
 			}
 
 			if err := encoder.Encode(ResponseOk); err != nil {
@@ -278,7 +278,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 		case CmdEndTx:
 			// Remove all the buckets
-			for bucketHandle, _ := range buckets {
+			for bucketHandle := range buckets {
 				if cursorHandles, ok2 := cursorsByBucket[bucketHandle]; ok2 {
 					for _, cursorHandle := range cursorHandles {
 						delete(cursors, cursorHandle)
@@ -728,6 +728,7 @@ type Tx struct {
 }
 
 func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.Decoder) error {
+	_ = ctx
 	var responseCode ResponseCode
 
 	if err := encoder.Encode(CmdEndTx); err != nil {
@@ -786,7 +787,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 	}
 
 	if responseCode != ResponseOk {
-		err := decodeErr(decoder, responseCode)
+		err = decodeErr(decoder, responseCode)
 		return err
 	}
 

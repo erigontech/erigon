@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/bolt"
@@ -599,9 +598,6 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 			return err1
 		}
 
-		for i := 0; i < b.N; i++ {
-			fmt.Sprintf("hello")
-		}
 		if err1 = bucket.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
@@ -619,10 +615,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
-		if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-			panic(err)
-			b.Errorf("Error while calling Server: %v", err)
-		}
+		assert.Nil(b, Server(ctx, db, &inBuf, &outBuf, closer))
 	}()
 
 	var responseCode ResponseCode
@@ -630,49 +623,49 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Begin
-		encoder.Encode(CmdBeginTx)
-		decoder.Decode(&responseCode)
+		assert.Nil(b, encoder.Encode(CmdBeginTx))
+		assert.Nil(b, decoder.Decode(&responseCode))
 		if responseCode != ResponseOk {
 			panic("not Ok")
 		}
 
 		// Bucket
-		encoder.Encode(CmdBucket)
-		encoder.Encode(name)
+		assert.Nil(b, encoder.Encode(CmdBucket))
+		assert.Nil(b, encoder.Encode(name))
 
 		var bucketHandle uint64 = 0
-		decoder.Decode(&responseCode)
+		assert.Nil(b, decoder.Decode(&responseCode))
 		if responseCode != ResponseOk {
 			panic("not Ok")
 		}
-		decoder.Decode(&bucketHandle)
+		assert.Nil(b, decoder.Decode(&bucketHandle))
 
 		// Cursor
-		encoder.Encode(CmdCursor)
-		encoder.Encode(bucketHandle)
+		assert.Nil(b, encoder.Encode(CmdCursor))
+		assert.Nil(b, encoder.Encode(bucketHandle))
 		var cursorHandle uint64 = 0
-		decoder.Decode(&cursorHandle)
+		assert.Nil(b, decoder.Decode(&cursorHandle))
 
 		// .First()
-		encoder.Encode(CmdCursorFirst)
-		encoder.Encode(cursorHandle)
+		assert.Nil(b, encoder.Encode(CmdCursorFirst))
+		assert.Nil(b, encoder.Encode(cursorHandle))
 		var numberOfFirstKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
-		encoder.Encode(numberOfFirstKeys)
+		assert.Nil(b, encoder.Encode(numberOfFirstKeys))
 
 		// .First()
-		decoder.Decode(&responseCode)
-		decoder.Decode(&key)
-		decoder.Decode(&value)
+		assert.Nil(b, decoder.Decode(&responseCode))
+		assert.Nil(b, decoder.Decode(&key))
+		assert.Nil(b, decoder.Decode(&value))
 		// Results of CmdCursorNext
-		decoder.Decode(&key)
-		decoder.Decode(&value)
+		assert.Nil(b, decoder.Decode(&key))
+		assert.Nil(b, decoder.Decode(&value))
 		// Results of last CmdCursorNext
-		decoder.Decode(&key)
-		decoder.Decode(&value)
+		assert.Nil(b, decoder.Decode(&key))
+		assert.Nil(b, decoder.Decode(&value))
 
 		// .End()
-		encoder.Encode(CmdEndTx)
-		decoder.Decode(&responseCode)
+		check(encoder.Encode(CmdEndTx))
+		check(decoder.Decode(&responseCode))
 		if responseCode != ResponseOk {
 			panic("not Ok")
 		}
@@ -697,9 +690,6 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 			return err1
 		}
 
-		for i := 0; i < b.N; i++ {
-			fmt.Sprintf("hello")
-		}
 		if err1 = bucket.Put([]byte(key1), []byte(value1)); err1 != nil {
 			return err1
 		}
@@ -734,7 +724,7 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 			_ = v
 		}
 
-		tx.Rollback()
+		assert.Nil(b, tx.Rollback())
 	}
 
 }
