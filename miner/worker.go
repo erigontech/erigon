@@ -1075,6 +1075,7 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 	return nil
 }
 
+//nolint: unused
 func (w *worker) getSideChainContext() consensus.Cancel {
 	ctx := consensus.NewCancel()
 
@@ -1085,6 +1086,7 @@ func (w *worker) getSideChainContext() consensus.Cancel {
 	return ctx
 }
 
+//nolint: unused
 func (w *worker) clearSideChainContext() {
 	w.sideMiningMu.Lock()
 	sideMining := w.sideMining
