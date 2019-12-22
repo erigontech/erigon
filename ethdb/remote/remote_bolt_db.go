@@ -298,6 +298,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 		}
 		k, v := c.Seek(startkey)
 		hK, hV := hC.Seek(startkey)
+
 		goOn := true
 		for goOn {
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
