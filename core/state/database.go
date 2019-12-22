@@ -192,15 +192,15 @@ func getTrieDBState(db ethdb.Database) *TrieDbState {
 }
 
 func setTrieDBState(tds *TrieDbState, id uint64) {
+	trieObjMu.Lock()
+	defer trieObjMu.Unlock()
+
 	if tds == nil {
 		return
 	}
 
 	ptr := unsafe.Pointer(tds)
-
-	trieObjMu.Lock()
 	trieObj[id] = uintptr(ptr)
-	trieObjMu.Unlock()
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -248,6 +248,8 @@ func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	if tr := getTrieDBState(db); tr != nil {
 		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
 			return tr, nil
+		} else {
+			return nil. fmt.Errorf("TrieDBState expected %v, %v, got %v %v", blockNr, root, tr.getBlockNr(), tr.LastRoot())
 		}
 	}
 
