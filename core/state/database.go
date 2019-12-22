@@ -249,7 +249,7 @@ func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
 			return tr, nil
 		} else {
-			return nil. fmt.Errorf("TrieDBState expected %v, %v, got %v %v", blockNr, root, tr.getBlockNr(), tr.LastRoot())
+			return nil, fmt.Errorf("TrieDBState expected %v, %v, got %v %v", blockNr, root, tr.getBlockNr(), tr.LastRoot())
 		}
 	}
 
