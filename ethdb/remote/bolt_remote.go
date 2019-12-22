@@ -21,12 +21,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand"
 	"net"
-	"net/http"
-	"net/http/pprof"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -103,20 +99,6 @@ func init() {
 			tracing = true
 		}
 	}
-
-	// go tool pprof -http=:8081 http://localhost:6060/
-	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
-	go func() {
-		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
-		randomPort := func(min, max int) string {
-			return strconv.Itoa(r.Intn(max-min) + min)
-		}
-		port := randomPort(6000, 7000)
-		httpPort := randomPort(8081, 8900)
-
-		fmt.Println("Profiling enabled: go tool pprof -http=:" + httpPort + " http://127.0.0.1:" + port)
-		fmt.Println(http.ListenAndServe("127.0.0.1:"+port, nil))
-	}()
 }
 
 // Pool of decoders
