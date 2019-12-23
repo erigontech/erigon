@@ -320,13 +320,13 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		var innerErr error
 		bc.pruner, innerErr = NewBasicPruner(db, bc, bc.cacheConfig)
 		if innerErr != nil {
-			log.Error("Pruner init error", "err", err)
+			log.Error("Pruner init error", "err", innerErr)
 			return nil, innerErr
 		}
 
 		innerErr = bc.pruner.Start()
 		if innerErr != nil {
-			log.Error("Pruner start error", "err", err)
+			log.Error("Pruner start error", "err", innerErr)
 			return nil, innerErr
 		}
 	}

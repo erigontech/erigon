@@ -342,6 +342,9 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
+	if tds.tMu == nil {
+		return common.Hash{}
+	}
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.Hash()

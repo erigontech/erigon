@@ -189,6 +189,8 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 			GasPrice: big.NewInt(1),
 			Recommit: time.Second,
 		},
+		BlocksToPrune:  10,
+		PruningTimeout: time.Second,
 	}
 
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
