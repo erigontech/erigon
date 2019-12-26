@@ -1,5 +1,5 @@
 
-### Run
+### Create files with sample requests
 `go run ./cmd/rpctest --action=bench1` will print tmpDir. 
 And create in tmpDir `results_*.csv` and `vegeta_*.txt` files. 
 
@@ -14,8 +14,6 @@ Set `needCompare=true` to call Geth and TurboGeth nodes and compare results.
 
 ### Install Vegeta
 ```
-go get -u github.com/rs/jplot
-go get -u github.com/rs/jaggr
 go get -u github.com/tsenart/vegeta
 ```
 
@@ -25,7 +23,6 @@ tmpDir = "/var/folders/x_/1mnbt25s3291zr5_fxhjfnq9n86kng/T/"
 cat $(tmpDir)/turbo_geth_stress_test/vegeta_geth_debug_storageRangeAt.csv | vegeta attack -rate=600 -format=json -duration=20s | vegeta plot > plot.html
 open plot.html
 ```
-
 
 ### Mac environment changes
 [Change Open Files Limit](https://gist.github.com/tombigel/d503800a282fcadbee14b537735d202c)
@@ -78,6 +75,7 @@ echo "POST http://localhost:9545 \n Content-Type: application/json \n @$(pwd)/cm
 - Geth Behind RPC Daemon: 110% of CPU
 - RPC Daemon: 100% of CPU, 95-Latency 230ms
 ```
+
 Reason is: often usage of `.GetAsOf()` - this method does much `.Next()` and `.Seek()` calls. 
 Each `.Seek()` call invalidate internal batch cache of `.Next()` method and remote_db does read `CursorBatchSize` amount of keys again.
 
@@ -87,8 +85,18 @@ PoolSize=128, CursorBatchSize=1K -> 95-Latency 6s (eat 50 conns in pool)
 PoolSize=128, CursorBatchSize=100 -> 95-Latency 600ms (eat 5 conns in pool)
 ```
 
-RPC daemon known problems: 
-- we call .Encode for each cmd/key/value - "maybe" it does syscall to send data. 
-Maybe need buffered io.Writer or encode struct{cmd,key,value} at once. Need to write benchmark.   
+Idea to discuss: implement `CmdGetAsOf`  
+
+BenchmarkSerialize: 
+```
+BenchmarkSerialize/encodeKeyValue()-12         	 2723841	       500 ns/op	      18 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.Encode(&k)-12       	 2686837	       447 ns/op	      25 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.Encode(k)-12        	 2076069	       566 ns/op	      64 B/op	       2 allocs/op
+BenchmarkSerialize/encoder.MustEncode(&k)-12   	 5634414	       248 ns/op	      24 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.MustEncode(k)-12    	 2886832	       412 ns/op	      64 B/op	       2 allocs/op
+BenchmarkSerialize/Encode(struct)-12           	 2963176	       541 ns/op	      93 B/op	       0 allocs/op
+BenchmarkSerialize/10K_Encode(&k,_&v)-12       	     972	   1375965 ns/op	       8 B/op	       0 allocs/op
+BenchmarkSerialize/Encode([10K]k,_[10K]v)-12   	    1516	    739106 ns/op	  491584 B/op	       4 allocs/op
+```
 
 

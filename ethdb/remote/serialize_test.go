@@ -68,7 +68,7 @@ func BenchmarkSerialize(b *testing.B) {
 			encoder.MustEncode(v)
 		}
 	})
-	b.Run("encoder.MustEncode(struct)", func(b *testing.B) {
+	b.Run("Encode(struct)", func(b *testing.B) {
 		type kv struct {
 			K []byte
 			V []byte
