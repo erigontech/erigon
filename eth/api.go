@@ -383,7 +383,7 @@ func (api *PrivateDebugAPI) AccountRange(ctx context.Context, start *common.Hash
 	var err error
 	block := api.eth.blockchain.CurrentBlock()
 
-	_, _, _, dbstate, err = api.computeTxEnv(ctx, block.Hash(), len(block.Transactions())-1)
+	_, _, _, dbstate, err = ComputeTxEnv(ctx, api.eth.blockchain, api.eth.ChainDb(), block.Hash(), len(block.Transactions())-1)
 	if err != nil {
 		return AccountRangeResult{}, err
 	}
@@ -410,7 +410,7 @@ func (api *PrivateDebugAPI) StorageRangeAt(ctx context.Context, blockHash common
 	if block == nil {
 		return StorageRangeResult{}, fmt.Errorf("block %x not found", blockHash)
 	}
-	_, _, _, dbstate, err := api.computeTxEnv(ctx, blockHash, txIndex)
+	_, _, _, dbstate, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.ChainDb(), blockHash, txIndex)
 	if err != nil {
 		return StorageRangeResult{}, err
 	}

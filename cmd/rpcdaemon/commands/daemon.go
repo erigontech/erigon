@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"strings"
 
+	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
@@ -47,7 +48,9 @@ type EthAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	db *remote.DB
+	db           *remote.DB
+	dbReader     ethdb.Getter
+	chainContext core.ChainContext
 }
 
 // PrivateDebugAPI
@@ -57,22 +60,26 @@ type PrivateDebugAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
-	db       *remote.DB
-	dbReader ethdb.Getter
+	db           *remote.DB
+	dbReader     ethdb.Getter
+	chainContext core.ChainContext
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db *remote.DB) *APIImpl {
+func NewAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
 	return &APIImpl{
-		db: db,
+		db:           db,
+		dbReader:     dbReader,
+		chainContext: chainContext,
 	}
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db *remote.DB) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
-		db:       db,
-		dbReader: remote.NewRemoteBoltDatabase(db),
+		db:           db,
+		dbReader:     dbReader,
+		chainContext: chainContext,
 	}
 }
 
@@ -122,8 +129,20 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 }
 
 type chainContext struct {
+	headerCache *lru.Cache // Cache for the most recent block headers
+
 	db rawdb.DatabaseReader
 }
+
+func NewChainContext(db rawdb.DatabaseReader) *chainContext {
+	headerCache, _ := lru.New(512)
+	return &chainContext{
+		headerCache: headerCache,
+		db:          db,
+	}
+
+}
+
 type powEngine struct {
 }
 
@@ -172,8 +191,19 @@ func (c *powEngine) Author(header *types.Header) (common.Address, error) {
 }
 
 func (c *chainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
-	return rawdb.ReadHeader(c.db, hash, number)
+	// Short circuit if the header's already in the cache, retrieve otherwise
+	if header, ok := c.headerCache.Get(hash); ok {
+		return header.(*types.Header)
+	}
+	header := rawdb.ReadHeader(c.db, hash, number)
+	if header == nil {
+		return nil
+	}
+	// Cache the found header for next time and return
+	c.headerCache.Add(hash, header)
+	return header
 }
+
 func (c *chainContext) Engine() consensus.Engine {
 	return &powEngine{}
 }
@@ -319,8 +349,10 @@ func daemon(cfg Config) {
 	}
 
 	var rpcAPI = []rpc.API{}
-	apiImpl := NewAPI(db)
-	dbgAPIImpl := NewPrivateDebugAPI(db)
+	dbReader := remote.NewRemoteBoltDatabase(db)
+	chainContext := NewChainContext(dbReader)
+	apiImpl := NewAPI(db, dbReader, chainContext)
+	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)
 
 	for _, enabledAPI := range enabledApis {
 		switch enabledAPI {
