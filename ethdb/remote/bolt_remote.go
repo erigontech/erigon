@@ -819,12 +819,10 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	ctx           context.Context
-	in            io.Reader
-	out           io.Writer
-	cursorHandle  uint64
-	errWasChecked bool
-	err           error
+	ctx          context.Context
+	in           io.Reader
+	out          io.Writer
+	cursorHandle uint64
 
 	batchSize    uint64
 	cacheKeys    [][]byte
@@ -985,23 +983,15 @@ func (c *Cursor) SetBatchSize(batchSize uint64) {
 	c.cacheValues = nil
 }
 
-func (c *Cursor) Err() error {
-	c.errWasChecked = true // TODO: check this flag inside .View()
-	return c.err
-}
-
-func (c *Cursor) First() (key []byte, value []byte) {
+func (c *Cursor) First() (key []byte, value []byte, err error) {
 	select {
 	default:
 	case <-c.ctx.Done():
-		c.err = c.ctx.Err()
-		return nil, nil
+		return nil, nil, c.ctx.Err()
 	}
 
-	err := c.fetchPage(CmdCursorFirst)
-	if err != nil {
-		c.err = err
-		return nil, nil
+	if err := c.fetchPage(CmdCursorFirst); err != nil {
+		return nil, nil, err
 	}
 	c.cacheIdx = 0
 
@@ -1009,18 +999,17 @@ func (c *Cursor) First() (key []byte, value []byte) {
 
 	c.cacheIdx++
 
-	return k, v
+	return k, v, nil
 
 }
 
-func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
+func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
 
 	select {
 	default:
 	case <-c.ctx.Done():
-		c.err = c.ctx.Err()
-		return nil, nil
+		return nil, nil, c.ctx.Err()
 	}
 
 	decoder := newDecoder(c.in)
@@ -1029,52 +1018,44 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte) {
 	defer returnEncoderToPool(encoder)
 
 	if err := encoder.Encode(CmdCursorSeek); err != nil {
-		c.err = fmt.Errorf("could not encode CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode CmdCursorSeek: %w", err)
 	}
 	if err := encoder.Encode(c.cursorHandle); err != nil {
-		c.err = fmt.Errorf("could not encode cursorHandle for CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeek: %w", err)
 	}
 	if err := encoder.Encode(seek); err != nil {
-		c.err = fmt.Errorf("could not encode key for CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeek: %w", err)
 	}
 
 	var responseCode ResponseCode
 	if err := decoder.Decode(&responseCode); err != nil {
-		c.err = fmt.Errorf("could not decode ResponseCode for CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not decode ResponseCode for CmdCursorSeek: %w", err)
 	}
 
 	if responseCode != ResponseOk {
 		if err := decodeErr(decoder, responseCode); err != nil {
-			c.err = fmt.Errorf("could not decode errorMessage for CmdCursorSeek: %w", err)
-			return nil, nil
+			return nil, nil, fmt.Errorf("could not decode errorMessage for CmdCursorSeek: %w", err)
 		}
 	}
 
 	if err := decoder.Decode(&key); err != nil {
-		c.err = fmt.Errorf("could not decode key for CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not decode key for CmdCursorSeek: %w", err)
 	}
 
 	if err := decoder.Decode(&value); err != nil {
-		c.err = fmt.Errorf("could not decode value for CmdCursorSeek: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not decode value for CmdCursorSeek: %w", err)
 	}
 
-	return key, value
+	return key, value, nil
 }
 
-func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
+func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
 	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
 
 	select {
 	default:
 	case <-c.ctx.Done():
-		c.err = c.ctx.Err()
-		return nil, nil
+		return nil, nil, c.ctx.Err()
 	}
 
 	decoder := newDecoder(c.in)
@@ -1083,37 +1064,31 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte) {
 	defer returnEncoderToPool(encoder)
 
 	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
-		c.err = fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
 	}
 	if err := encoder.Encode(c.cursorHandle); err != nil {
-		c.err = fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
 	}
 	if err := encoder.Encode(seek); err != nil {
-		c.err = fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
 	}
 
 	var responseCode ResponseCode
 	if err := decoder.Decode(&responseCode); err != nil {
-		c.err = fmt.Errorf("could not decode ResponseCode for CmdCursorSeekTo: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not decode ResponseCode for CmdCursorSeekTo: %w", err)
 	}
 
 	if responseCode != ResponseOk {
 		if err := decodeErr(decoder, responseCode); err != nil {
-			c.err = fmt.Errorf("could not decode errorMessage for CmdCursorSeekTo: %w", err)
-			return nil, nil
+			return nil, nil, fmt.Errorf("could not decode errorMessage for CmdCursorSeekTo: %w", err)
 		}
 	}
 
 	if err := decodeKeyValue(decoder, &key, &value); err != nil {
-		c.err = fmt.Errorf("could not decode (key, value) for CmdCursorSeekTo: %w", err)
-		return nil, nil
+		return nil, nil, fmt.Errorf("could not decode (key, value) for CmdCursorSeekTo: %w", err)
 	}
 
-	return key, value
+	return key, value, nil
 }
 
 func (c *Cursor) needFetchNextPage() bool {
@@ -1122,12 +1097,11 @@ func (c *Cursor) needFetchNextPage() bool {
 	return res
 }
 
-func (c *Cursor) Next() (keys []byte, values []byte) {
+func (c *Cursor) Next() (keys []byte, values []byte, err error) {
 	if c.needFetchNextPage() {
 		err := c.fetchPage(CmdCursorNext)
 		if err != nil {
-			c.err = err
-			return nil, nil
+			return nil, nil, err
 		}
 		c.cacheIdx = 0
 	}
@@ -1135,14 +1109,13 @@ func (c *Cursor) Next() (keys []byte, values []byte) {
 	select {
 	default:
 	case <-c.ctx.Done():
-		c.err = c.ctx.Err()
-		return nil, nil
+		return nil, nil, err
 	}
 
 	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
 	c.cacheIdx++
 
-	return k, v
+	return k, v, nil
 }
 
 func (c *Cursor) fetchPage(cmd Command) error {
