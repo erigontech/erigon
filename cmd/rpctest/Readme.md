@@ -89,14 +89,14 @@ Idea to discuss: implement `CmdGetAsOf`
 
 BenchmarkSerialize: 
 ```
-BenchmarkSerialize/encodeKeyValue()-12         	 2723841	       500 ns/op	      18 B/op	       0 allocs/op
-BenchmarkSerialize/encoder.Encode(&k)-12       	 2686837	       447 ns/op	      25 B/op	       0 allocs/op
-BenchmarkSerialize/encoder.Encode(k)-12        	 2076069	       566 ns/op	      64 B/op	       2 allocs/op
-BenchmarkSerialize/encoder.MustEncode(&k)-12   	 5634414	       248 ns/op	      24 B/op	       0 allocs/op
-BenchmarkSerialize/encoder.MustEncode(k)-12    	 2886832	       412 ns/op	      64 B/op	       2 allocs/op
-BenchmarkSerialize/Encode(struct)-12           	 2963176	       541 ns/op	      93 B/op	       0 allocs/op
-BenchmarkSerialize/10K_Encode(&k,_&v)-12       	     972	   1375965 ns/op	       8 B/op	       0 allocs/op
-BenchmarkSerialize/Encode([10K]k,_[10K]v)-12   	    1516	    739106 ns/op	  491584 B/op	       4 allocs/op
+BenchmarkSerialize/encodeKeyValue()-12         	 4249026	       268 ns/op	      12 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.Encode(&k)-12       	 4702418	       258 ns/op	      14 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.Encode(k)-12        	 3382797	       350 ns/op	     104 B/op	       2 allocs/op
+BenchmarkSerialize/encoder.MustEncode(&k)-12   	 8431810	       140 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSerialize/encoder.MustEncode(k)-12    	 5446293	       262 ns/op	     114 B/op	       2 allocs/op
+BenchmarkSerialize/Encode(struct)-12           	 4160940	       266 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSerialize/10K_Encode(&k,_&v)-12       	    1368	   1089648 ns/op	  402976 B/op	       0 allocs/op
+BenchmarkSerialize/Encode([10K]k,_[10K]v)-12   	    1825	    548953 ns/op	  491584 B/op	       4 allocs/op
 ```
 
 
