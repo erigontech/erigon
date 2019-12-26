@@ -490,7 +490,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return ctx.Err()
 				}
 
-				if err := encodeKeyValue(encoder, &k, &v); err != nil {
+				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) in response to CmdCursorNext: %w", err)
 				}
 
