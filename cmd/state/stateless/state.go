@@ -131,6 +131,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	// For each timestamp, how many accounts were created in the state
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
+
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
