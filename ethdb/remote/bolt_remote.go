@@ -164,7 +164,7 @@ func returnEncoderToPool(e *codec.Encoder) {
 	}
 }
 
-func encodeKeyValue(encoder *codec.Encoder, key []byte, value []byte) error {
+func encodeKeyValue(encoder *codec.Encoder, key *[]byte, value *[]byte) error {
 	if err := encoder.Encode(key); err != nil {
 		return err
 	}
@@ -239,8 +239,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		}
 	}()
 
-	var err error
-
 	decoder := newDecoder(in)
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
@@ -298,6 +296,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdVersion: %w", err)
 			}
 		case CmdBeginTx:
+			var err error
 			tx, err = db.Begin(false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for CmdBeginTx: %w", err)
@@ -380,7 +379,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return err
 			}
 
-			if err := encoder.Encode(v); err != nil {
+			if err := encoder.Encode(&v); err != nil {
 				return fmt.Errorf("could not encode value in response for CmdGet: %w", err)
 			}
 
@@ -430,7 +429,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			if err := encoder.Encode(ResponseOk); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
-			if err := encodeKeyValue(encoder, k, v); err != nil {
+			if err := encodeKeyValue(encoder, &k, &v); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
 		case CmdCursorSeekTo:
@@ -454,7 +453,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdCursorSeek: %w", err)
 			}
 
-			if err := encodeKeyValue(encoder, k, v); err != nil {
+			if err := encodeKeyValue(encoder, &k, &v); err != nil {
 				return fmt.Errorf("could not encode (key,value) in response to CmdCursorSeekTo: %w", err)
 			}
 		case CmdCursorNext:
@@ -490,7 +489,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return ctx.Err()
 				}
 
-				if err := encodeKeyValue(encoder, k, v); err != nil {
+				if err := encodeKeyValue(encoder, &k, &v); err != nil {
 					return fmt.Errorf("could not encode (key,value) in response to CmdCursorNext: %w", err)
 				}
 
@@ -527,7 +526,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return ctx.Err()
 				}
 
-				if err := encodeKeyValue(encoder, k, v); err != nil {
+				if err := encodeKeyValue(encoder, &k, &v); err != nil {
 					return fmt.Errorf("could not encode (key,value) for CmdCursorFirst: %w", err)
 				}
 
@@ -1055,7 +1054,7 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 	if err := encoder.Encode(CmdBucket); err != nil {
 		return nil, fmt.Errorf("could not encode CmdBucket: %w", err)
 	}
-	if err := encoder.Encode(name); err != nil {
+	if err := encoder.Encode(&name); err != nil {
 		return nil, fmt.Errorf("could not encode name for CmdBucket: %w", err)
 	}
 
@@ -1102,7 +1101,7 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 	if err := encoder.Encode(b.bucketHandle); err != nil {
 		return nil, fmt.Errorf("could not encode bucketHandle for CmdGet: %w", err)
 	}
-	if err := encoder.Encode(key); err != nil {
+	if err := encoder.Encode(&key); err != nil {
 		return nil, fmt.Errorf("could not encode key for CmdGet: %w", err)
 	}
 
@@ -1241,7 +1240,7 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 	if err := encoder.Encode(c.cursorHandle); err != nil {
 		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeek: %w", err)
 	}
-	if err := encoder.Encode(seek); err != nil {
+	if err := encoder.Encode(&seek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeek: %w", err)
 	}
 
@@ -1287,7 +1286,7 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
 	if err := encoder.Encode(c.cursorHandle); err != nil {
 		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
 	}
-	if err := encoder.Encode(seek); err != nil {
+	if err := encoder.Encode(&seek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
 	}
 
