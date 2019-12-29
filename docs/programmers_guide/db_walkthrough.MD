@@ -155,7 +155,7 @@ the order in the fieldset is the following:
 * 5th Bit: Code Hash
 * 6th Bit: Storage Size
 
-Therefore, immediately after the fieldset we have the tag for balance (big number) that is `0xc2`. followed by the length in byte of the balance that is contained into the following byte: `0x48` (the length would be `0x48` - `0x40` = `8` bytes). the following 8 bytes (aka. 16 nibbles) contains the hexadecimal value of the balance that in the first record would be: `0x7ce66c50e2840000`.
+Therefore, immediately after the fieldset we have the length in byte of the balance: `0x48` (the length would be `0x48` - `0x40` = `8` bytes). the following 8 bytes (aka. 16 nibbles) contains the hexadecimal value of the balance that in the first record would be: `0x7ce66c50e2840000`.
 ````
 $ python
 Python 2.7.15
@@ -304,7 +304,7 @@ The next bucket is "Accounts":
 ![genesis_db_accounts](changes_1_AT_0.dot.gd.png)
 
 The values are the current state of each account. 
-* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. since the nonce is less than `24` it has no tag. therefore the nonce is store in the byte immediately after the field set: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
+* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. since the nonce is less than `24` it has no length byte. therefore the nonce is stored in the byte immediately after the field set: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
 The value `0x7ce2ded23dbd8000` is the hexadecimal value for:
 ````
 $ python
