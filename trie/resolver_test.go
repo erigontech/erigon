@@ -276,10 +276,10 @@ func TestTwoStorageItems(t *testing.T) {
 func TestTwoAccounts(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), common.Hex2Bytes("c8808502540be40080")); err != nil {
+	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), common.Hex2Bytes("024502540be400")); err != nil {
 		t.Error(err)
 	}
-	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("f845806480a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc")); err != nil {
+	if err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("1a4164582056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42158204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc")); err != nil {
 		t.Error(err)
 	}
 	req := &ResolveRequest{

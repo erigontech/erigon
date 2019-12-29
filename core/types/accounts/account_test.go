@@ -174,7 +174,6 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 			HasStorageSize: true,
 			StorageSize:    storageSize,
 		}
-
 		encodedLen := a.EncodingLengthForStorage()
 		encodedAccount := make([]byte, encodedLen)
 		a.EncodeForStorage(encodedAccount)

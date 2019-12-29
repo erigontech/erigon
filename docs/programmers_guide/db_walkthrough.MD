@@ -145,11 +145,17 @@ The next bucket is "Accounts":
 
 The keys of the records in this bucket are the same as in the bucket "Preimage", and they are also the same as
 the keys in the state trie. The values are the current state of each account. In this special case, all three
-accounts are RLP-encoded as the list of 3 nested structures. Lets take the first value and analyse.
-Prefix `0xCB` means that it is an RLP structure (list) of some number of nested structures with the total length
-of 11 bytes (`B` is 11). Then, we can see 3 nested structures following: `0x80`, `0x887ce66c50e2840000`, and `0x80`.
-The first one encodes nonce, which is 0, the second one encodes balance. Prefix `0x88` means "byte array 8 bytes long".
-The value `0x7ce66c50e2840000` is the hexadecimal value for... .Start python and do this:
+accounts are CBOR-encoded.
+They all start with a fieldset of `0x02`, for each bit set into the fieldSet a field is present. in this case `0x02` in binary is `10` meaning that only the second field is set (the balance).
+the order in the fieldset is the following:
+* 1st bit: Nonce
+* 2nd bit: Balance
+* 3rd Bit: Incarnation
+* 4th Bit: Root
+* 5th Bit: Code Hash
+* 6th Bit: Storage Size
+
+Therefore, immediately after the fieldset we have the tag for balance (big number) that is `0xc2`. followed by the length in byte of the balance that is contained into the following byte: `0x48` (the length would be `0x48` - `0x40` = `8` bytes). the following 8 bytes (aka. 16 nibbles) contains the hexadecimal value of the balance that in the first record would be: `0x7ce66c50e2840000`.
 ````
 $ python
 Python 2.7.15
@@ -159,10 +165,10 @@ Type "help", "copyright", "credits" or "license" for more information.
 ````
 Which is 9 followed by 18 zeros, which is 9 ETH (1 ETH = 10^18 wei).
 
-The third `0x80` is the encoding of accounts' incarnation. Incarnation is a turbo-geth specific attribute, which is
+In the third bit is contained Incarnation. The Incarnation is a turbo-geth specific attribute, which is
 used to make removal and revival of contract accounts (now possible with `CREATE2` since Constantinopole) efficient
 with turbo-geth's database layout. For now it will suffice to say that all non-contract accounts will have 
-incarnation 0, and all contract accounts will start their existence with incarnation 1.
+incarnation 0 (not set), and all contract accounts will start their existence with incarnation 1.
 
 Contract accounts may also contract code hash and storage root, and these two pieces of information would make the record
 in the "Accounts" bucket contain 5 instead of 3 fields.
@@ -297,10 +303,9 @@ The next bucket is "Accounts":
 
 ![genesis_db_accounts](changes_1_AT_0.dot.gd.png)
 
-The values are the current state of each account. In this case the accounts are still RLP Encoded but the third differs a bit because instead of having `0xCB` as a prefix, it has `0xCA`. 
-* in the first value we can see 3 nested structures following: `0x01`, `0x887ce2ded23dbd8000`, and `0x80`.
-The first one encodes nonce, which is 1, since this address is the sender of the transaction, the second one encodes balance. Prefix `0x88` means "byte array 8 bytes long".
-The value `0x7ce2ded23dbd8000` is the hexadecimal value for... .Start python and do this:
+The values are the current state of each account. 
+* The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. since the nonce is less than `24` it has no tag. therefore the nonce is store in the byte immediately after the field set: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
+The value `0x7ce2ded23dbd8000` is the hexadecimal value for:
 ````
 $ python
 Python 2.7.15
@@ -309,9 +314,8 @@ Type "help", "copyright", "credits" or "license" for more information.
 8999000000000000000
 ````
 Which is 9 ETH - 0.001 ETH, this means that this account is the sender.
-* in the second value we can see 3 nested structures following: `0x80`, `0x88`, and `0x80`.
-The first one encodes nonce, which is 0, since this address is the miner of the block.
-The value `0x1bc16d674ec80000` is the hexadecimal value for... .Start python and do this:
+* in the second value the field set is `0x02` meaning that only the balance is set. 
+The value `0x1bc16d674ec80000` (balance) is the hexadecimal value for:
 ````
 $ python
 Python 2.7.15
@@ -321,8 +325,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 ````
 Which is 2 ETH that probably repressent the mining reward.
 
-* in the third value we have prefix `0xCA`, meaning that this is still an RLP structure but has a length of 10 bytes instead of 11. we can see still see the 3 nested structures following: `0x80`, `0x87`, and `0x80`. you may notice that the prefix of the balance differs from the first two accounts as well. In fact, we have got `0x87` instead of `0x88`. This is because there 7 bytes needed for the balance instead of 8.
-The balance is `0x038d7ea4c68000` is the hexadecimal value for... .Start python and do this:
+* in the third value we have prefix `0x06` (`110`), meaning that only balance and incarnation are set. the balance is now `0x038d7ea4c68000` .Start python and do this:
 ````
 $ python
 Python 2.7.15
@@ -330,7 +333,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x038d7ea4c68000
 1000000000000000
 ````
-Which is 0.01 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
+Which is 0.01 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction and the incarnation is set to `1`.
 
 Block 1 in go-ethereum
 ------------------------------
