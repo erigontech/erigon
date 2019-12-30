@@ -129,7 +129,6 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 	encoder := codec.NewEncoder(&buff, &ch)
 
 	var fieldSet = 0 // start with first bit set to 0
-	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
 	buffer[0] = 0
 
 	if a.Nonce > 0 {
@@ -167,7 +166,7 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 	}
 
 	// Encoding Root and CodeHash
-	if !nonContract {
+	if !(a.IsEmptyCodeHash() && a.IsEmptyRoot()) {
 		err := encoder.Encode(&a.Root)
 		if err != nil {
 			panic(err)
