@@ -961,6 +961,17 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	addrHash := crypto.Keccak256(contractAddress[:])
+	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
+	var acc accounts.Account
+	err = acc.DecodeForStorage(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc.Incarnation!=state.FirstContractIncarnation {
+		t.Fatal("Incorrect incarnation", acc.Incarnation)
+	}
+
 	st, _, _ = blockchain.State()
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -976,15 +987,16 @@ func TestWrongIncarnation(t *testing.T) {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	addrHash := crypto.Keccak256(contractAddress[:])
-	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
-	fmt.Printf("%x:%x\n", addrHash, v)
-	var acc accounts.Account
+	addrHash = crypto.Keccak256(contractAddress[:])
+	v, _ = db.Get(dbutils.AccountsBucket, addrHash)
 	err = acc.DecodeForStorage(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("%x:%d\n", addrHash, acc.Incarnation)
+	if acc.Incarnation!=state.FirstContractIncarnation {
+		t.Fatal("Incorrect incarnation", acc.Incarnation)
+	}
+
 	var startKey [common.HashLength + 8 + common.HashLength]byte
 	copy(startKey[:], addrHash)
 	err = db.Walk(dbutils.StorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {

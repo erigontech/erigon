@@ -730,7 +730,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &accounts.Account{}
 	} else {
 		account.Copy(&previous.data)
-		account.Incarnation = 0
+		account.Incarnation = AccountIncarnation
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
