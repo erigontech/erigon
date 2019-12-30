@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
@@ -30,6 +31,13 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 			var accountBucket *bolt.Bucket = tx.Bucket(dbutils.AccountsBucket)
 			c := accountBucket.Cursor()
 
+			if k == nil {
+				k, v = c.First()
+			} else {
+				k, v = c.Seek(k)
+				k, v = c.Next()
+			}
+
 			for k, v = c.Seek(k); k != nil; k, v = c.Next() {
 
 				enc, err := encodeToCBOR(v)
@@ -49,6 +57,7 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 			if k == nil {
 				done = true
 			}
+			k = common.CopyBytes(k)
 			return nil
 		})
 
