@@ -1,7 +1,6 @@
 package accounts
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"math/big"
@@ -43,41 +42,46 @@ func NewAccount() Account {
 
 func (a *Account) EncodingLengthForStorage() uint {
 	var structLength uint = 1 // 1 byte for fieldset
-	var nonContract = a.IsEmptyCodeHash() && a.IsEmptyRoot()
 
-	if !nonContract || a.Balance.Sign() != 0 || a.Nonce != 0 || a.Incarnation != 0 {
-		var balanceBytes int = ((a.Balance.BitLen() + 7) / 8)
-		if balanceBytes > 0 {
+	if b0.Cmp(&a.Balance) == -1 {
+		var balanceBytes int = ((a.Balance.BitLen() + 7) / 8) + 1
+		if balanceBytes > 23 {
 			balanceBytes++
-			if balanceBytes > 23 {
-				balanceBytes++
-			}
 		}
+		structLength += uint(balanceBytes)
+	}
+
+	if a.Nonce > 0 {
 		var nonceBytes int = (bits.Len64(a.Nonce) + 7) / 8
 		if a.Nonce > 0x17 {
 			nonceBytes++
 		}
-
-		structLength += uint(balanceBytes + nonceBytes)
+		structLength += uint(nonceBytes)
 	}
 
-	if !nonContract {
-		structLength += 68 // Two 32-byte arrays + 2 bytes for length each
+	if !a.IsEmptyRoot() {
+		structLength += 34 // 32-byte array + 2 bytes for length
+	}
+
+	if !a.IsEmptyCodeHash() {
+		structLength += 34 // 32-byte array + 2 bytes for length
 	}
 
 	if a.HasStorageSize {
 		var storageSizeBytes int = (bits.Len64(a.StorageSize) + 7) / 8
-		if a.StorageSize > 0x17 {
+		if a.StorageSize > 0x17 || (a.HasStorageSize && storageSizeBytes == 0) {
 			storageSizeBytes++
 		}
 		structLength += uint(storageSizeBytes)
 	}
 
-	var incarnationBytes int = (bits.Len64(a.Incarnation) + 7) / 8
-	if a.Incarnation > 0x17 || (a.HasStorageSize && incarnationBytes == 0) {
-		incarnationBytes++
+	if a.Incarnation > 0 {
+		var incarnationBytes int = (bits.Len64(a.Incarnation) + 7) / 8
+		if a.Incarnation > 0x17 {
+			incarnationBytes++
+		}
+		structLength += uint(incarnationBytes)
 	}
-	structLength += uint(incarnationBytes)
 
 	return structLength
 }
@@ -123,23 +127,16 @@ func (a *Account) EncodingLengthForHashing() uint {
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {
-	var pos = 1
+	// var pos = 1
 	var ch codec.CborHandle
-	var buff bytes.Buffer
-	encoder := codec.NewEncoder(&buff, &ch)
-
+	encoder := codec.NewEncoderBytes(&buffer, &ch)
 	var fieldSet = 0 // start with first bit set to 0
-	buffer[0] = 0
-
 	if a.Nonce > 0 {
 		fieldSet = 1
-		err := encoder.Encode(&a.Nonce)
+		err := encoder.Encode(a.Nonce)
 		if err != nil {
 			panic(err)
 		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		pos += buff.Len()
-		buff.Reset()
 	}
 
 	// Encoding balance
@@ -149,79 +146,45 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		if err != nil {
 			panic(err)
 		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		pos += buff.Len()
-		buff.Reset()
 	}
 
 	if a.Incarnation > 0 {
 		fieldSet |= 4
-		err := encoder.Encode(&a.Incarnation)
+		err := encoder.Encode(a.Incarnation)
 		if err != nil {
 			panic(err)
 		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		pos += buff.Len()
-		buff.Reset()
 	}
 
-	// Encoding Root and CodeHash
-	if !(a.IsEmptyCodeHash() && a.IsEmptyRoot()) {
-		err := encoder.Encode(&a.Root)
-		if err != nil {
-			panic(err)
-		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		pos += buff.Len()
+	// Encoding Root
+	if !a.IsEmptyRoot() {
 		fieldSet |= 8
-		buff.Reset()
-		err = encoder.Encode(&a.CodeHash)
+		err := encoder.Encode(a.Root.Bytes())
 		if err != nil {
 			panic(err)
 		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		pos += buff.Len()
+	}
+
+	// Encoding CodeHash
+	if !a.IsEmptyCodeHash() {
 		fieldSet |= 16
-		buff.Reset()
+		err := encoder.Encode(a.CodeHash.Bytes())
+		if err != nil {
+			panic(err)
+		}
 	}
 	// Encoding StorageSize
 	if a.HasStorageSize {
-		// Uint64 prefix for incarnation
 		fieldSet |= 32
-		err := encoder.Encode(&a.StorageSize)
+		err := encoder.Encode(a.StorageSize)
 		if err != nil {
 			panic(err)
 		}
-		copy(buffer[pos:], buff.Bytes()[:])
-		// pos += buff.Len()
 	}
-
+	// put fieldSet at beggining of buffer
+	buffer = append(buffer, 0)
+	copy(buffer[1:], buffer[:])
 	buffer[0] = byte(fieldSet)
-}
-
-func decodeLengthForStorage(enc []byte, pos int) (length, newPos int) {
-	switch firstByte := int(enc[pos]); {
-	case firstByte < 0x18:
-		length = 1
-		newPos = pos
-		return
-	case firstByte == 0x58:
-		length = int(enc[pos+1]-23) + 23
-		newPos = pos + 2
-		return
-	case firstByte > 0x40:
-		length = int(enc[pos] - 64)
-		newPos = pos + 1
-		return
-	case firstByte == 0x1b:
-		length = 8
-		newPos = pos + 1
-		return
-	default:
-		length = int(enc[pos] - 23)
-		newPos = pos + 1
-		return
-	}
 }
 
 // Decodes length and determines whether it corresponds to a structure of a byte array
@@ -557,7 +520,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 }
 
 func (a *Account) DecodeForStorage(enc []byte) error {
-	pos := 1
 	a.Initialised = true
 	a.Nonce = 0
 	a.Balance.SetInt64(0)
@@ -566,169 +528,87 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	a.StorageSize = 0
 	a.HasStorageSize = false
 
+	var fieldSet = enc[0]
 	var ch codec.CborHandle
-	var buffer bytes.Buffer
-	decoder := codec.NewDecoder(&buffer, &ch)
+
+	decoder := codec.NewDecoderBytes(enc[1:], &ch)
 	if len(enc) == 0 {
 		return nil
 	}
 
-	var fieldSet = enc[0]
 	if fieldSet&1 > 0 {
-		nonceBytes, newPos := decodeLengthForStorage(enc, pos)
-		if newPos+nonceBytes > len(enc) {
+		err := decoder.Decode(&a.Nonce)
+
+		if err != nil {
 			return fmt.Errorf(
-				"malformed CBOR for Account.Nonce(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, nonceBytes, len(enc)-pos,
+				"malformed CBOR for Account.Nonce: %s",
+				err,
 			)
 		}
-		_, err := buffer.Write(enc[pos : newPos+nonceBytes])
-		if err != nil {
-			return err
-		}
-
-		err = decoder.Decode(&a.Nonce)
-		if err != nil {
-			return err
-		}
-		buffer.Reset()
-		pos = newPos + nonceBytes
 	}
+
 	if fieldSet&2 > 0 {
-		balanceBytes, newPos := decodeLengthForStorage(enc, pos)
-		balance := make([]byte, balanceBytes)
+		var balanceBytes []byte
+		err := decoder.Decode(&balanceBytes)
+		a.Balance.SetBytes(balanceBytes)
 
-		if newPos+balanceBytes > len(enc) {
+		if err != nil {
 			return fmt.Errorf(
-				"malformed CBOR for Account.Balance(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, balanceBytes, len(enc)-pos,
+				"malformed CBOR for Account.Balance: %s",
+				err,
 			)
 		}
-		_, err := buffer.Write(enc[pos : newPos+balanceBytes])
-
-		if err != nil {
-			return err
-		}
-		err = decoder.Decode(balance)
-		a.Balance.SetBytes(balance)
-		if err != nil {
-			return err
-		}
-		pos = newPos + balanceBytes
-		buffer.Reset()
 	}
 
-	// Skip incarnation decoding if this is not read from storage
 	if fieldSet&4 > 0 {
-		incarnationBytes, newPos := decodeLengthForStorage(enc, pos)
+		err := decoder.Decode(&a.Incarnation)
 
-		if newPos+incarnationBytes > len(enc) {
+		if err != nil {
 			return fmt.Errorf(
-				"malformed CBOR for Account.Incarnation(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, incarnationBytes, len(enc)-pos,
+				"malformed CBOR for Account.Incarnation: %s",
+				err,
 			)
 		}
-		_, err := buffer.Write(enc[pos : newPos+incarnationBytes])
-
-		if err != nil {
-			return err
-		}
-
-		err = decoder.Decode(&a.Incarnation)
-		if err != nil {
-			return err
-		}
-		pos = newPos + incarnationBytes
-		buffer.Reset()
 	}
 
 	if fieldSet&8 > 0 {
-		rootBytes, newPos := decodeLengthForStorage(enc, pos)
-
-		if rootBytes != 32 {
-
-			return fmt.Errorf(
-				"encoding of Account.Root should have size 32, got %d",
-				rootBytes,
-			)
-		}
-
-		if newPos+rootBytes > len(enc) {
-			return fmt.Errorf(
-				"malformed CBOR for Account.Root(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, rootBytes, len(enc)-pos,
-			)
-		}
-		_, err := buffer.Write(enc[pos : newPos+rootBytes])
+		var rootBytes []byte
+		err := decoder.Decode(&rootBytes)
 
 		if err != nil {
-			return err
+			return fmt.Errorf(
+				"malformed CBOR for Account.Root: %s",
+				err,
+			)
 		}
-
-		err = decoder.Decode(&a.Root)
-		if err != nil {
-			return err
-		}
-		pos = newPos + rootBytes
-		buffer.Reset()
+		a.Root.SetBytes(rootBytes)
 	}
 
 	if fieldSet&16 > 0 {
-		codeHashBytes, newPos := decodeLengthForStorage(enc, pos)
-		if codeHashBytes != 32 {
+		var codeHashBytes []byte
+		err := decoder.Decode(&codeHashBytes)
+
+		if err != nil {
 			return fmt.Errorf(
-				"malformed CBOR for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, codeHashBytes, len(enc)-pos,
+				"malformed CBOR for Account.CodeHash: %s",
+				err,
 			)
 		}
-
-		if newPos+codeHashBytes > len(enc) {
-			return fmt.Errorf("malformed CBOR for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc,
-				newPos, codeHashBytes, len(enc),
-			)
-		}
-		_, err := buffer.Write(enc[pos : newPos+codeHashBytes])
-
-		if err != nil {
-			return err
-		}
-
-		err = decoder.Decode(&a.CodeHash)
-		if err != nil {
-			return err
-		}
-		pos = newPos + codeHashBytes
-		buffer.Reset()
+		a.CodeHash.SetBytes(codeHashBytes)
 	}
 
 	if fieldSet&32 > 0 {
-		storageSizeBytes, newPos := decodeLengthForStorage(enc, pos)
-		if newPos+storageSizeBytes > len(enc) {
+		err := decoder.Decode(&a.StorageSize)
+		a.HasStorageSize = true
+
+		if err != nil {
 			return fmt.Errorf(
-				"malformed CBOR for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:],
-				newPos-pos, storageSizeBytes, len(enc)-pos,
+				"malformed CBOR for Account.StorageSize: %s",
+				err,
 			)
 		}
-		_, err := buffer.Write(enc[pos : newPos+storageSizeBytes])
-
-		if err != nil {
-			return err
-		}
-
-		err = decoder.Decode(&a.StorageSize)
-		a.HasStorageSize = true
-		if err != nil {
-			return err
-		}
-		// pos = newPos + storageSizeBytes
 	}
+
 	return nil
 }
 

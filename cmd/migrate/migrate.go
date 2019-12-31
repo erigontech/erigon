@@ -38,7 +38,7 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 				k, v = c.Next()
 			}
 
-			for k, v = c.Seek(k); k != nil; k, v = c.Next() {
+			for ; k != nil; k, v = c.Next() {
 
 				enc, err := encodeToCBOR(v)
 				if err != nil {
