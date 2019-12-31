@@ -37,7 +37,7 @@ func TestMigrate(t *testing.T) {
 	}
 
 	expected1 := "024502540be400"
-	expected2 := "1a4164582056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b42158204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"
+	expected2 := "12416458204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"
 
 	if common.Bytes2Hex(val1) != expected1 {
 		t.Errorf("Expected %s, got %s", expected1, common.Bytes2Hex(val1))
