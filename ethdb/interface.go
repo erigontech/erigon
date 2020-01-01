@@ -42,10 +42,6 @@ type Getter interface {
 	// Get returns the value for a given key if it's present.
 	Get(bucket, key []byte) ([]byte, error)
 
-	// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-	// timestamp == block number
-	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
-
 	// GetAsOf returns the value valid as of a given timestamp.
 	// timestamp == block number
 	GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error)

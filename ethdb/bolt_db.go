@@ -199,24 +199,6 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-		return db.Get(hBucket, composite)
-	}
-
-	chs, err := db.GetChangeSetByBlock(hBucket, timestamp)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := chs.FindLast(key)
-	if err != nil {
-		return nil, ErrKeyNotFound
-	}
-	return res, nil
-}
 
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {

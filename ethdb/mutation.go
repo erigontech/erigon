@@ -134,24 +134,6 @@ func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*
 	return changeSet, nil
 }
 
-func (m *mutation) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-		return m.Get(hBucket, composite)
-	}
-
-	m.mu.RLock()
-	chs, err := m.getChangeSetByBlockNoLock(hBucket, timestamp)
-	m.mu.Unlock()
-	if err != nil {
-		if m.db != nil {
-			return m.db.GetS(hBucket, key, timestamp)
-		}
-		return nil, err
-	}
-	return chs.FindLast(key)
-}
-
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	if t, ok := m.puts[string(bucket)]; ok {
 		value, ok := t.Get(key)
@@ -531,10 +513,7 @@ func (d *RWCounterDecorator) Get(bucket, key []byte) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.Get, 1)
 	return d.Database.Get(bucket, key)
 }
-func (d *RWCounterDecorator) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	atomic.AddUint64(&d.DBCounterStats.GetS, 1)
-	return d.Database.GetS(hBucket, key, timestamp)
-}
+
 func (d *RWCounterDecorator) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	atomic.AddUint64(&d.DBCounterStats.GetAsOf, 1)
 	return d.Database.GetAsOf(bucket, hBucket, key, timestamp)
