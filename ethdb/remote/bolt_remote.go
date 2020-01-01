@@ -134,7 +134,9 @@ func returnDecoderToPool(d *codec.Decoder) {
 	select {
 	case decoderPool <- d:
 	default:
-		log.Warn("RemoteDb: Allowing decoder to be garbage collected, pool is full")
+		if tracing {
+			log.Info("RemoteDb: Allowing decoder to be garbage collected, pool is full")
+		}
 	}
 }
 
@@ -160,7 +162,9 @@ func returnEncoderToPool(e *codec.Encoder) {
 	select {
 	case encoderPool <- e:
 	default:
-		log.Warn("RemoteDb: Allowing encoder to be garbage collected, pool is full")
+		if tracing {
+			log.Info("RemoteDb: Allowing encoder to be garbage collected, pool is full")
+		}
 	}
 }
 
@@ -725,7 +729,11 @@ type conn struct {
 type DB struct {
 	dialFunc       DialFunc
 	connectionPool chan *conn
-	reconnect      chan struct{}
+	dialTimeout    time.Duration
+	pingTimeout    time.Duration
+	retryDialAfter time.Duration
+	doDial         chan struct{}
+	doPing         <-chan time.Time
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -736,7 +744,6 @@ func (db *DB) getConnection(ctx context.Context) (io.Reader, io.Writer, io.Close
 	var out io.Writer
 	var closer io.Closer
 	var err error
-
 	select {
 	case conn := <-db.connectionPool:
 		in, out, closer = conn.in, conn.out, conn.closer
@@ -754,16 +761,16 @@ func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, close
 	}
 }
 
-func (db *DB) ping(ctx context.Context) error {
-	var err error
+func (db *DB) ping(ctx context.Context) (err error) {
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return fmt.Errorf("remote db: ping failed: %w", err)
+		return
 	}
 	defer func() {
-		if err != nil { // reconnect on error
-			db.reconnect <- struct{}{}
-			closer.Close()
+		if err != nil {
+			if closeErr := closer.Close(); closeErr != nil {
+				log.Error("can't close connection", "err", closeErr)
+			}
 			return
 		}
 		db.returnConn(ctx, in, out, closer)
@@ -774,98 +781,124 @@ func (db *DB) ping(ctx context.Context) error {
 	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
 	// Check version
-	if err := encoder.Encode(CmdVersion); err != nil {
-		return err
+	err = encoder.Encode(CmdVersion)
+	if err != nil {
+		return
 	}
 
 	var responseCode ResponseCode
-	if err := decoder.Decode(&responseCode); err != nil {
-		return err
+	err = decoder.Decode(&responseCode)
+	if err != nil {
+		return
 	}
 
 	if responseCode != ResponseOk {
-		return decodeErr(decoder, responseCode)
+		err = decodeErr(decoder, responseCode)
+		return
 	}
 
 	var v uint64
-	if err := decoder.Decode(&v); err != nil {
-		return err
+	err = decoder.Decode(&v)
+	if err != nil {
+		return
 	}
 	if v != Version {
-		return fmt.Errorf("returned version %d, expected %d", v, Version)
+		err = fmt.Errorf("server protocol version %d, expected %d", v, Version)
+		return
 	}
 
-	return nil
+	return
+}
+
+type notifyOnClose struct {
+	internal io.Closer
+	notifyCh chan struct{}
+}
+
+func (closer notifyOnClose) Close() error {
+	closer.notifyCh <- struct{}{}
+	if closer.internal == nil {
+		return nil
+	}
+
+	return closer.internal.Close()
 }
 
 // NewDB creates a new instance of DB
-func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
+func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 	db := &DB{
 		dialFunc:       dialFunc,
 		connectionPool: make(chan *conn, ClientMaxConnections),
-		reconnect:      make(chan struct{}, ClientMaxConnections),
+		doDial:         make(chan struct{}, ClientMaxConnections),
+		dialTimeout:    2 * time.Second,
+		pingTimeout:    500 * time.Millisecond,
+		retryDialAfter: time.Second,
 	}
 
-	connectionCtx, connectionCtxCancel := context.WithCancel(context.Background())
+	for i := uint64(0); i < ClientMaxConnections; i++ {
+		db.doDial <- struct{}{}
+	}
+
+	ctx, cancelConnections := context.WithCancel(context.Background())
 	go func() {
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-		connectionCtxCancel()
+		<-parentCtx.Done()
+		cancelConnections()
 	}()
 
-	for i := 0; i < cap(db.connectionPool); i++ {
-		in, out, closer, err := db.dialFunc(connectionCtx)
-		if err != nil {
-			return nil, err
-		}
-
-		db.connectionPool <- &conn{in, out, closer}
-	}
-
-	go func() { // reconnect, regular ping
-		pingTicker := time.NewTicker(10 * time.Second)
+	pingTicker := time.NewTicker(1 * time.Second)
+	db.doPing = pingTicker.C
+	go func() {
 		defer pingTicker.Stop()
 		for {
 			select {
+			default:
 			case <-ctx.Done():
 				return
-			case <-db.reconnect:
-				// TODO: what to do if can't reconnect?
-				newIn, newOut, newCloser, dialErr := db.dialFunc(ctx)
-				if dialErr != nil {
-					log.Error("could not create new connection", "error", dialErr)
-					return
-				}
-				db.returnConn(ctx, newIn, newOut, newCloser)
-			case <-pingTicker.C:
-				if err := db.ping(ctx); err != nil {
-					log.Error("remote db: ping failed", "err", err)
-				}
 			}
+
+			db.autoReconnect(ctx)
 		}
 	}()
 
-	if err := db.ping(ctx); err != nil {
-		return nil, err
-	}
-
-	if tracing {
-		go func() {
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
 	return db, nil
+}
+
+func (db *DB) autoReconnect(ctx context.Context) {
+	select {
+	case <-db.doPing:
+		if tracing {
+			log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
+		}
+
+		// periodically ping to close broken connections
+		pingCtx, _ := context.WithTimeout(ctx, db.pingTimeout)
+		if err := db.ping(pingCtx); err != nil {
+			if !errors.Is(err, io.EOF) { // io.EOF means server gone
+				log.Warn("remote db: ping failed", "err", err)
+				break
+			}
+
+			// if server gone, then need re-check all connections by ping
+			for i := uint64(0); i < ClientMaxConnections; i++ {
+				pingCtx, _ := context.WithTimeout(ctx, db.pingTimeout)
+				_ = db.ping(pingCtx)
+			}
+		}
+	case <-db.doDial:
+		dialCtx, _ := context.WithTimeout(ctx, db.dialTimeout)
+		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
+		if err != nil {
+			log.Warn("remote db: could not create new connection", "error", err)
+			go func() {
+				<-time.After(db.retryDialAfter)
+				db.doDial <- struct{}{}
+			}()
+			break
+		}
+
+		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
+		db.returnConn(ctx, newIn, newOut, notifyCloser)
+	}
 }
 
 // Close closes DB by using the closer field
@@ -967,8 +1000,7 @@ func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, times
 
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
-func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
-	var err error
+func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	var opErr error
 	var endTxErr error
 
@@ -976,13 +1008,14 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return err
+		return
 	}
 
 	defer func() {
 		if err != nil || endTxErr != nil || opErr != nil {
-			db.reconnect <- struct{}{}
-			closer.Close()
+			if closeErr := closer.Close(); closeErr != nil {
+				log.Error("can't close connection", "err", closeErr)
+			}
 			return
 		}
 		db.returnConn(ctx, in, out, closer)
@@ -995,16 +1028,17 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 
 	err = encoder.Encode(CmdBeginTx)
 	if err != nil {
-		return fmt.Errorf("can't encode CmdBeginTx: %w", err)
+		err = fmt.Errorf("can't encode CmdBeginTx: %w", err)
+		return
 	}
 	err = decoder.Decode(&responseCode)
 	if err != nil {
-		return err
+		return
 	}
 
 	if responseCode != ResponseOk {
 		err = decodeErr(decoder, responseCode)
-		return err
+		return
 	}
 
 	tx := &Tx{ctx: ctx, in: in, out: out}
@@ -1012,7 +1046,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 
 	endTxErr = db.endTx(ctx, encoder, decoder)
 	if endTxErr != nil {
-		log.Error("remote db: could not finish tx", "err", err)
+		log.Warn("remote db: could not finish tx", "err", err)
 	}
 
 	return opErr

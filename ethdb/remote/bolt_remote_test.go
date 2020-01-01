@@ -20,7 +20,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/stretchr/testify/assert"
@@ -594,12 +597,9 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 		assert.Nil(b, decoder.Decode(&value))
 
 		// .End()
-		check(encoder.Encode(CmdEndTx))
-		check(decoder.Decode(&responseCode))
-		if responseCode != ResponseOk {
-			panic("not Ok")
-		}
-
+		assert.Nil(b, encoder.Encode(CmdEndTx))
+		assert.Nil(b, decoder.Decode(&responseCode))
+		assert.Equal(b, responseCode, ResponseOk)
 	}
 }
 
@@ -658,8 +658,69 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 
 }
 
-func check(e error) {
-	if e != nil {
-		panic(e)
+func TestReconnect(t *testing.T) {
+	// Prepare input buffer with one command CmdVersion
+	var inBuf bytes.Buffer
+	encoder := newEncoder(&inBuf)
+	defer returnEncoderToPool(encoder)
+	// output buffer to receive the result of the command
+	var outBuf bytes.Buffer
+	decoder := newDecoder(&outBuf)
+	defer returnDecoderToPool(decoder)
+
+	dialCallCounter := 0
+	ctx, _ := context.WithCancel(context.Background())
+	pingCh := make(chan time.Time, ClientMaxConnections)
+	db := &DB{
+		dialFunc: func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+			dialCallCounter++
+			if dialCallCounter%2 == 0 {
+				return &inBuf, &outBuf, nil, net.UnknownNetworkError("Oops")
+			}
+			return &inBuf, &outBuf, nil, nil
+		},
+		connectionPool: make(chan *conn, ClientMaxConnections),
+		doDial:         make(chan struct{}, ClientMaxConnections),
+		doPing:         pingCh,
+		dialTimeout:    time.Second,
+		pingTimeout:    time.Minute,
+		retryDialAfter: 0 * time.Nanosecond,
 	}
+
+	// no open connections by default
+	assert.Equal(t, 0, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open 1 connection and wait for it
+	db.doDial <- struct{}{}
+	db.autoReconnect(ctx)
+	<-db.connectionPool
+	assert.Equal(t, 1, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open 2nd connection - dialFunc will return err on 2nd call, but db must reconnect automatically
+	db.doDial <- struct{}{}
+	db.autoReconnect(ctx) // dial err
+	db.autoReconnect(ctx) // dial ok
+	<-db.connectionPool
+	assert.Equal(t, 3, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open conn and call ping on it
+	db.doDial <- struct{}{}
+	assert.Nil(t, encoder.Encode(ResponseOk))
+	assert.Nil(t, encoder.Encode(Version))
+	db.autoReconnect(ctx) // dial err
+	db.autoReconnect(ctx) // dial ok
+	assert.Equal(t, 5, dialCallCounter)
+	assert.Equal(t, 1, len(db.connectionPool))
+	pingCh <- time.Now()
+	db.autoReconnect(ctx)
+	var cmd Command
+	assert.Nil(t, decoder.Decode(&cmd))
+	assert.Equal(t, CmdVersion, cmd)
+
+	// TODO: cover case when ping receive io.EOF
+	// TODO: <-time.After(time.Second) is too long for test - need to move it to configuration
+
 }
