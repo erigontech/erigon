@@ -210,11 +210,11 @@ func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
 
 func encodeErr(encoder *codec.Encoder, mainError error) {
 	if err := encoder.Encode(ResponseErr); err != nil {
-		log.Error("could not encode ResponseErr", "error", err)
+		log.Error("could not encode ResponseErr", "err", err)
 		return
 	}
 	if err := encoder.Encode(mainError.Error()); err != nil {
-		log.Error("could not encode errCode", "error", err)
+		log.Error("could not encode errCode", "err", err)
 		return
 	}
 }
@@ -239,7 +239,7 @@ func decodeErr(decoder *codec.Decoder, responseCode ResponseCode) error {
 func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
-			log.Error("Could not close connection", "error", err1)
+			log.Error("Could not close connection", "err", err1)
 		}
 	}()
 
@@ -668,12 +668,12 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Error("Could not create listener", "address", address, "error", err)
+		log.Error("Could not create listener", "address", address, "err", err)
 		return
 	}
 	defer func() {
 		if err = ln.Close(); err != nil {
-			log.Error("Could not close listener", "error", err)
+			log.Error("Could not close listener", "err", err)
 		}
 	}()
 	log.Info("Remote DB interface listening on", "address", address)
@@ -733,6 +733,7 @@ type DB struct {
 	dialTimeout    time.Duration
 	pingTimeout    time.Duration
 	retryDialAfter time.Duration
+	pingEvery      time.Duration
 	doDial         chan struct{}
 	doPing         <-chan time.Time
 }
@@ -776,14 +777,15 @@ func (db *DB) ping(ctx context.Context) (err error) {
 	defer returnDecoderToPool(decoder)
 	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
+
 	// Check version
 	if err := encoder.Encode(CmdVersion); err != nil {
-		return
+		return fmt.Errorf("could not encode CmdVersion: %w", err)
 	}
 
 	var responseCode ResponseCode
 	if err := decoder.Decode(&responseCode); err != nil {
-		return
+		return fmt.Errorf("could not decode ResponseCode of CmdVersion: %w", err)
 	}
 
 	if responseCode != ResponseOk {
@@ -823,7 +825,8 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 		doDial:         make(chan struct{}, ClientMaxConnections),
 		dialTimeout:    3 * time.Second,
 		pingTimeout:    500 * time.Millisecond,
-		retryDialAfter: time.Second,
+		retryDialAfter: 1 * time.Second,
+		pingEvery:      1 * time.Second,
 	}
 
 	for i := uint64(0); i < ClientMaxConnections; i++ {
@@ -836,7 +839,7 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 		cancelConnections()
 	}()
 
-	pingTicker := time.NewTicker(1 * time.Second)
+	pingTicker := time.NewTicker(db.pingEvery)
 	db.doPing = pingTicker.C
 	go func() {
 		defer pingTicker.Stop()
@@ -856,6 +859,19 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 
 func (db *DB) autoReconnect(ctx context.Context) {
 	select {
+	case <-db.doDial:
+		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
+		defer cancel()
+		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
+		if err != nil {
+			log.Warn("remote db: dial failed", "err", err)
+			db.doDial <- struct{}{}
+			time.Sleep(db.retryDialAfter)
+			return
+		}
+
+		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
+		db.returnConn(ctx, newIn, newOut, notifyCloser)
 	case <-db.doPing:
 		if tracing {
 			log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
@@ -870,28 +886,13 @@ func (db *DB) autoReconnect(ctx context.Context) {
 				return
 			}
 
-			//// if server gone, then need re-check all connections by ping
-			//for i := uint64(0); i < ClientMaxConnections; i++ {
-			//	pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
-			//	_ = db.ping(pingCtx)
-			//	cancel()
-			//}
+			// if server gone, then need re-check all connections by ping. It will remove broken connections from pool.
+			for i := uint64(0); i < ClientMaxConnections-1; i++ {
+				pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+				_ = db.ping(pingCtx)
+				cancel()
+			}
 		}
-	case <-db.doDial:
-		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
-		defer cancel()
-		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
-		if err != nil {
-			log.Warn("remote db: could not create new connection", "error", err)
-			go func() {
-				db.doDial <- struct{}{}
-				<-time.After(db.retryDialAfter)
-			}()
-			return
-		}
-
-		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
-		db.returnConn(ctx, newIn, newOut, notifyCloser)
 	}
 }
 
@@ -999,7 +1000,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return
+		return err
 	}
 
 	defer func() {
@@ -1017,7 +1018,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
 
-	if err := encoder.Encode(CmdBeginTx); err != nil {
+	if err = encoder.Encode(CmdBeginTx); err != nil {
 		return fmt.Errorf("could not encode CmdBeginTx: %w", err)
 	}
 

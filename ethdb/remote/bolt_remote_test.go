@@ -459,58 +459,70 @@ func TestCursorOperations(t *testing.T) {
 
 func TestTxYield(t *testing.T) {
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
+	assert.Nil(t, err, "Could not create database")
+
 	// Create bucket
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket([]byte("bucket"), false)
 		return err1
-	}); err != nil {
-		t.Errorf("Could not create bucket: %v", err)
-	}
-	var readFinished bool
+	})
+	assert.Nil(t, err, "Could not create bucket")
+
 	errors := make(chan error, 10)
+	writeDoneNotify := make(chan struct{}, 1)
+	defer close(writeDoneNotify)
+	readDoneNotify := make(chan struct{}, 1)
 	go func() {
-		defer close(errors)
+		defer func() {
+			readDoneNotify <- struct{}{}
+			close(readDoneNotify)
+			close(errors)
+		}()
+
 		// Long read-only transaction
-		if err := db.View(func(tx *bolt.Tx) error {
+		if err = db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("bucket"))
 			var keyBuf [8]byte
-			for i := 0; i < 100000; i++ {
-				binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
+			var i uint64
+			for {
+				select { // do reads until write finish
+				case <-writeDoneNotify:
+					return nil
+				default:
+				}
+
+				i++
+				binary.BigEndian.PutUint64(keyBuf[:], i)
 				b.Get(keyBuf[:])
 				tx.Yield()
 			}
-			return nil
 		}); err != nil {
 			errors <- err
 		}
-		readFinished = true
 	}()
 
-	for err := range errors {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 	// Expand the database
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("bucket"))
 		var keyBuf, valBuf [8]byte
-		for i := 0; i < 10000; i++ {
-			binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
-			binary.BigEndian.PutUint64(valBuf[:], uint64(i))
+		for i := uint64(0); i < 10000; i++ {
+			binary.BigEndian.PutUint64(keyBuf[:], i)
+			binary.BigEndian.PutUint64(valBuf[:], i)
 			if err2 := b.Put(keyBuf[:], valBuf[:]); err2 != nil {
 				return err2
 			}
 		}
 		return nil
-	}); err != nil {
-		t.Errorf("Could not execute update: %v", err)
-	}
-	if readFinished {
-		t.Errorf("Read should not finished here, if it did, it means the writes were blocked by it")
+	})
+	assert.Nil(t, err, "Could not execute update")
+
+	// write must finish before read
+	assert.Equal(t, 0, len(readDoneNotify), "Read should not finished here, if it did, it means the writes were blocked by it")
+	writeDoneNotify <- struct{}{}
+	<-readDoneNotify
+
+	for err := range errors {
+		assert.Nil(t, err)
 	}
 }
 
@@ -694,6 +706,7 @@ func TestReconnect(t *testing.T) {
 		dialTimeout:    time.Second,
 		pingTimeout:    time.Minute,
 		retryDialAfter: 0 * time.Nanosecond,
+		pingEvery:      time.Second,
 	}
 
 	// no open connections by default
@@ -730,6 +743,4 @@ func TestReconnect(t *testing.T) {
 	assert.Equal(t, CmdVersion, cmd)
 
 	// TODO: cover case when ping receive io.EOF
-	// TODO: <-time.After(time.Second) is too long for test - need to move it to configuration
-
 }
