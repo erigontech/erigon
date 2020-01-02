@@ -71,7 +71,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	var s [common.HashLength + IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
 	// TODO: [Issue 99] support incarnations
-	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(0))
+	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(FirstContractIncarnation))
 	copy(s[common.HashLength+IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
