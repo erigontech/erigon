@@ -256,8 +256,9 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 	// anything
 	defer func() {
 		if tx != nil {
-			// nolint:errcheck
-			tx.Rollback()
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Warn("remote db: could not roll back", "err", rollbackErr)
+			}
 			tx = nil
 		}
 	}()
@@ -740,18 +741,12 @@ type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.
 
 // Pool of connections to server
 func (db *DB) getConnection(ctx context.Context) (io.Reader, io.Writer, io.Closer, error) {
-	var in io.Reader
-	var out io.Writer
-	var closer io.Closer
-	var err error
 	select {
-	case conn := <-db.connectionPool:
-		in, out, closer = conn.in, conn.out, conn.closer
 	case <-ctx.Done():
 		return nil, nil, nil, ctx.Err()
+	case conn := <-db.connectionPool:
+		return conn.in, conn.out, conn.closer, nil
 	}
-
-	return in, out, closer, err
 }
 
 func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, closer io.Closer) {
@@ -769,10 +764,11 @@ func (db *DB) ping(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			if closeErr := closer.Close(); closeErr != nil {
-				log.Error("can't close connection", "err", closeErr)
+				log.Error("remote db: can't close connection", "err", closeErr)
 			}
 			return
 		}
+
 		db.returnConn(ctx, in, out, closer)
 	}()
 
@@ -871,7 +867,8 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		}
 
 		// periodically ping to close broken connections
-		pingCtx, _ := context.WithTimeout(ctx, db.pingTimeout)
+		pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+		defer cancel()
 		if err := db.ping(pingCtx); err != nil {
 			if !errors.Is(err, io.EOF) { // io.EOF means server gone
 				log.Warn("remote db: ping failed", "err", err)
@@ -880,12 +877,14 @@ func (db *DB) autoReconnect(ctx context.Context) {
 
 			// if server gone, then need re-check all connections by ping
 			for i := uint64(0); i < ClientMaxConnections; i++ {
-				pingCtx, _ := context.WithTimeout(ctx, db.pingTimeout)
+				pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
 				_ = db.ping(pingCtx)
+				cancel()
 			}
 		}
 	case <-db.doDial:
-		dialCtx, _ := context.WithTimeout(ctx, db.dialTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
+		defer cancel()
 		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
 		if err != nil {
 			log.Warn("remote db: could not create new connection", "error", err)

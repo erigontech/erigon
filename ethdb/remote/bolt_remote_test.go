@@ -470,9 +470,11 @@ func TestTxYield(t *testing.T) {
 		t.Errorf("Could not create bucket: %v", err)
 	}
 	var readFinished bool
+	errors := make(chan error, 10)
 	go func() {
+		defer close(errors)
 		// Long read-only transaction
-		if err1 := db.View(func(tx *bolt.Tx) error {
+		if err := db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("bucket"))
 			var keyBuf [8]byte
 			for i := 0; i < 100000; i++ {
@@ -481,11 +483,17 @@ func TestTxYield(t *testing.T) {
 				tx.Yield()
 			}
 			return nil
-		}); err1 != nil {
-			t.Fatal(err1)
+		}); err != nil {
+			errors <- err
 		}
 		readFinished = true
 	}()
+
+	for err := range errors {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Expand the database
 	if err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("bucket"))
@@ -669,7 +677,8 @@ func TestReconnect(t *testing.T) {
 	defer returnDecoderToPool(decoder)
 
 	dialCallCounter := 0
-	ctx, _ := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pingCh := make(chan time.Time, ClientMaxConnections)
 	db := &DB{
 		dialFunc: func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
