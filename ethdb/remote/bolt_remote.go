@@ -759,7 +759,7 @@ func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, close
 func (db *DB) ping(ctx context.Context) (err error) {
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return
+		return err
 	}
 	defer func() {
 		if err != nil {
@@ -777,33 +777,28 @@ func (db *DB) ping(ctx context.Context) (err error) {
 	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
 	// Check version
-	err = encoder.Encode(CmdVersion)
-	if err != nil {
+	if err := encoder.Encode(CmdVersion); err != nil {
 		return
 	}
 
 	var responseCode ResponseCode
-	err = decoder.Decode(&responseCode)
-	if err != nil {
+	if err := decoder.Decode(&responseCode); err != nil {
 		return
 	}
 
 	if responseCode != ResponseOk {
-		err = decodeErr(decoder, responseCode)
-		return
+		return decodeErr(decoder, responseCode)
 	}
 
 	var v uint64
-	err = decoder.Decode(&v)
-	if err != nil {
-		return
+	if err := decoder.Decode(&v); err != nil {
+		return err
 	}
 	if v != Version {
-		err = fmt.Errorf("server protocol version %d, expected %d", v, Version)
-		return
+		return fmt.Errorf("server protocol version %d, expected %d", v, Version)
 	}
 
-	return
+	return nil
 }
 
 type notifyOnClose struct {
@@ -826,7 +821,7 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 		dialFunc:       dialFunc,
 		connectionPool: make(chan *conn, ClientMaxConnections),
 		doDial:         make(chan struct{}, ClientMaxConnections),
-		dialTimeout:    2 * time.Second,
+		dialTimeout:    3 * time.Second,
 		pingTimeout:    500 * time.Millisecond,
 		retryDialAfter: time.Second,
 	}
@@ -872,15 +867,15 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		if err := db.ping(pingCtx); err != nil {
 			if !errors.Is(err, io.EOF) { // io.EOF means server gone
 				log.Warn("remote db: ping failed", "err", err)
-				break
+				return
 			}
 
-			// if server gone, then need re-check all connections by ping
-			for i := uint64(0); i < ClientMaxConnections; i++ {
-				pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
-				_ = db.ping(pingCtx)
-				cancel()
-			}
+			//// if server gone, then need re-check all connections by ping
+			//for i := uint64(0); i < ClientMaxConnections; i++ {
+			//	pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+			//	_ = db.ping(pingCtx)
+			//	cancel()
+			//}
 		}
 	case <-db.doDial:
 		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
@@ -889,10 +884,10 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		if err != nil {
 			log.Warn("remote db: could not create new connection", "error", err)
 			go func() {
-				<-time.After(db.retryDialAfter)
 				db.doDial <- struct{}{}
+				<-time.After(db.retryDialAfter)
 			}()
-			break
+			return
 		}
 
 		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
@@ -917,19 +912,16 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 	var responseCode ResponseCode
 
 	if err := encoder.Encode(CmdEndTx); err != nil {
-		err = fmt.Errorf("could not encode CmdEndTx: %w", err)
-		return err
+		return fmt.Errorf("could not encode CmdEndTx: %w", err)
 	}
 
 	if err := decoder.Decode(&responseCode); err != nil {
-		err = fmt.Errorf("could not decode ResponseCode for CmdEndTx: %w", err)
-		return err
+		return fmt.Errorf("could not decode ResponseCode for CmdEndTx: %w", err)
 	}
 
 	if responseCode != ResponseOk {
 		if err := decodeErr(decoder, responseCode); err != nil {
-			err = fmt.Errorf("could not decode errorMessage for CmdEndTx: %w", err)
-			return err
+			return fmt.Errorf("could not decode errorMessage for CmdEndTx: %w", err)
 		}
 	}
 	return nil
@@ -1025,19 +1017,16 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	encoder := newEncoder(out)
 	defer returnEncoderToPool(encoder)
 
-	err = encoder.Encode(CmdBeginTx)
-	if err != nil {
-		err = fmt.Errorf("can't encode CmdBeginTx: %w", err)
-		return
+	if err := encoder.Encode(CmdBeginTx); err != nil {
+		return fmt.Errorf("could not encode CmdBeginTx: %w", err)
 	}
-	err = decoder.Decode(&responseCode)
-	if err != nil {
-		return
+
+	if err = decoder.Decode(&responseCode); err != nil {
+		return fmt.Errorf("could not decode response code of CmdBeginTx: %w", err)
 	}
 
 	if responseCode != ResponseOk {
-		err = decodeErr(decoder, responseCode)
-		return
+		return decodeErr(decoder, responseCode)
 	}
 
 	tx := &Tx{ctx: ctx, in: in, out: out}
