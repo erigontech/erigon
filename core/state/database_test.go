@@ -968,7 +968,7 @@ func TestWrongIncarnation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if acc.Incarnation!=state.FirstContractIncarnation {
+	if acc.Incarnation != state.FirstContractIncarnation {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
 	}
 
@@ -993,7 +993,7 @@ func TestWrongIncarnation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if acc.Incarnation!=state.FirstContractIncarnation {
+	if acc.Incarnation != state.FirstContractIncarnation {
 		t.Fatal("Incorrect incarnation", acc.Incarnation)
 	}
 

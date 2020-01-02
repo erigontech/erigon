@@ -45,9 +45,8 @@ var MaxTrieCacheGen = uint32(1024 * 1024)
 const (
 	IncarnationLength        = 8
 	FirstContractIncarnation = 1
-	AccountIncarnation = 0
+	AccountIncarnation       = 0
 )
-
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
