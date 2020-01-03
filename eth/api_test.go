@@ -22,6 +22,7 @@ import (
 	"math/big"
 	"reflect"
 	"sort"
+	"strconv"
 	"testing"
 
 	"context"
@@ -196,9 +197,12 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 	)
 	tds.StartNewBuffer()
+
 	for _, entry := range storage {
 		statedb.SetState(addr, *entry.Key, entry.Value)
 	}
+	//we are working with contract, so it need codehash&incarnation
+	statedb.SetIncarnation(addr, state.FirstContractIncarnation)
 
 	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
@@ -245,14 +249,17 @@ func TestStorageRangeAt(t *testing.T) {
 		},
 	}
 	dbs := state.NewDbState(db, 1)
-	for _, test := range tests {
-		result, err := StorageRangeAt(dbs, addr, test.start, test.limit)
-		if err != nil {
-			t.Error(err)
-		}
-		if !reflect.DeepEqual(result, test.want) {
-			t.Fatalf("wrong result for range 0x%x.., limit %d:\ngot %s\nwant %s",
-				test.start, test.limit, dumper.Sdump(result), dumper.Sdump(&test.want))
-		}
+	for i, test := range tests {
+		test := test
+		t.Run("test_"+strconv.Itoa(i), func(t *testing.T) {
+			result, err := StorageRangeAt(dbs, addr, test.start, test.limit)
+			if err != nil {
+				t.Error(err)
+			}
+			if !reflect.DeepEqual(result, test.want) {
+				t.Fatalf("wrong result for range 0x%x.., limit %d:\ngot %s\nwant %s",
+					test.start, test.limit, dumper.Sdump(result), dumper.Sdump(&test.want))
+			}
+		})
 	}
 }
