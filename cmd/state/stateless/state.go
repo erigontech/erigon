@@ -47,7 +47,7 @@ var emptyCodeHash = crypto.Keccak256(nil)
 
 const PrintProgressEvery = 1 * 1000 * 1000
 const PrintMemStatsEvery = 10 * 1000 * 1000
-const SaveSnapshotEvery = 1 * 1000 * 1000
+const SaveSnapshotEvery = 10 * 1000 * 1000
 
 func check(e error) {
 	if e != nil {
@@ -134,7 +134,7 @@ func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error)
 // It means that you can only continue execution of report from last snapshot.Save() checkpoint - read buckets forward from last key
 // But not re-read bucket
 func file(prefix string, version int) string {
-	return path.Join(dir(), fmt.Sprintf("%s_%s_v%d.cbor", prefix, time.Now().Format("2006-01-28"), version))
+	return path.Join(dir(), fmt.Sprintf("%s_%s_v%d.cbor", prefix, time.Now().Format("2006-01-02"), version))
 }
 
 func dir() string {
