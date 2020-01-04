@@ -45,6 +45,10 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
+const PrintProgressEvery = 1 * 1000 * 1000
+const PrintMemStatsEvery = 10 * 1000 * 1000
+const SaveSnapshotEvery = 1 * 1000 * 1000
+
 func check(e error) {
 	if e != nil {
 		panic(e)
@@ -125,16 +129,13 @@ func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error)
 	return &Reporter{db: db}, nil
 }
 
-const PrintProgressEvery = 1 * 1000 * 1000
-const PrintMemStatsEvery = 1 * 1000 * 1000
-
-type Snapshot struct {
-	version          string
-	MaxTimestamp     uint64
-	HistoryKey       []byte
-	AccountKey       []byte
-	LastTimestamps   *typedtree.RadixUint64 // For each address hash, when was it last accounted
-	CreationsByBlock map[uint64]int         // For each timestamp, how many accounts were created in the state
+// Generate name off the file for snapshot
+// Each day has it's own partition
+// It means that you can only continue execution of report from last snapshot.Save() checkpoint - read buckets forward from last key
+// But not re-read bucket
+func file(prefix string, version string) string {
+	y, m, d := time.Now().Date()
+	return path.Join(dir(), fmt.Sprintf("%s_%d%d%d_v%d.cbor", prefix, y, m, d, version))
 }
 
 func dir() string {
@@ -145,12 +146,11 @@ func dir() string {
 	return dir
 }
 
-func (s *Snapshot) Restore() {
+func restore(file string, snapshot interface{}) {
 	t := time.Now()
 	defer func() {
 		fmt.Println("Restore: " + time.Since(t).String())
 	}()
-	file := path.Join(dir(), "snapshot_v"+s.version+".cbor")
 	f, err := os.OpenFile(file, os.O_RDONLY|os.O_CREATE, 0644)
 	if err != nil {
 		panic(err)
@@ -158,21 +158,20 @@ func (s *Snapshot) Restore() {
 	defer f.Close()
 
 	var handle codec.CborHandle
-
-	if err := codec.NewDecoder(f, &handle).Decode(s); err != nil {
+	handle.ReaderBufferSize = 1024 * 1024
+	if err := codec.NewDecoder(f, &handle).Decode(snapshot); err != nil {
 		if err != io.EOF {
 			panic(err)
 		}
 	}
 }
 
-func (s *Snapshot) Save() {
+func save(file string, snapshot interface{}) {
 	t := time.Now()
 	defer func() {
 		fmt.Println("Save: " + time.Since(t).String())
 	}()
 
-	file := path.Join(dir(), "snapshot_v"+s.version+".cbor")
 	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		panic(err)
@@ -180,7 +179,27 @@ func (s *Snapshot) Save() {
 	defer f.Close()
 
 	var handle codec.CborHandle
-	codec.NewEncoder(f, &handle).MustEncode(s)
+	handle.WriterBufferSize = 1024 * 1024
+	codec.NewEncoder(f, &handle).MustEncode(snapshot)
+}
+
+type StateGrowth1Snapshot struct {
+	version          string
+	MaxTimestamp     uint64
+	HistoryKey       []byte
+	AccountKey       []byte
+	LastTimestamps   *typedtree.RadixUint64 // For each address hash, when was it last accounted
+	CreationsByBlock map[uint64]int         // For each timestamp, how many accounts were created in the state
+}
+
+var StateGrowth1SnapshotFile = file("StateGrowth1", "1")
+
+func (s *StateGrowth1Snapshot) Restore() {
+	restore(StateGrowth1SnapshotFile, s)
+}
+
+func (s *StateGrowth1Snapshot) Save() {
+	save(StateGrowth1SnapshotFile, s)
 }
 
 func PrintMemUsage() {
@@ -201,7 +220,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	var count int
 	var addrHash common.Hash
 
-	s := &Snapshot{
+	s := &StateGrowth1Snapshot{
 		version:          "5",
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
@@ -229,10 +248,16 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
+		skipFirst := len(s.HistoryKey) > 0 // snapshot stores last analyzed key
 		for s.HistoryKey, vIsEmpty, err = c.SeekKey(s.HistoryKey); s.HistoryKey != nil || err != nil; s.HistoryKey, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
+			if skipFirst {
+				skipFirst = false
+				continue
+			}
+
 			copy(addrHash[:], s.HistoryKey[:32])
 			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(s.HistoryKey[32:])
@@ -254,6 +279,9 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
+			if count%SaveSnapshotEvery == 0 {
+				s.Save()
+			}
 
 		}
 		return nil
@@ -261,7 +289,31 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		check(err)
 	}
 
-	//s.Save()
+	s.Save()
+	/*
+		var b bytes.Buffer
+		zw, err := zlib.NewWriterLevel(&b, zlib.BestSpeed)
+		if err != nil {
+			panic(err)
+		}
+
+		all := make([]byte, 10)
+		s.LastTimestamps.Walk(func(k string, _ uint64) bool {
+			all = append(all, k...)
+
+			_, err = zw.Write([]byte(fmt.Sprintf("%x", k)))
+			if err != nil {
+				panic(err)
+			}
+			return false
+		})
+		err = zw.Close()
+		if err != nil {
+			panic(err)
+		}
+		fmt.Println("Compress: ", len(b.Bytes())/1024)
+		fmt.Println("No Compress: ", len(all)/1024)
+	*/
 
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
@@ -286,9 +338,14 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
-		for s.AccountKey, _, err = c.FirstKey(); s.AccountKey != nil || err != nil; s.AccountKey, _, err = c.NextKey() {
+		skipFirst := len(s.AccountKey) > 0 // snapshot stores last analyzed key
+		for s.AccountKey, _, err = c.SeekKey(s.AccountKey); s.AccountKey != nil || err != nil; s.AccountKey, _, err = c.NextKey() {
 			if err != nil {
 				return err
+			}
+			if skipFirst {
+				skipFirst = false
+				continue
 			}
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], s.AccountKey[:32])
@@ -299,6 +356,9 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
+			}
+			if count%SaveSnapshotEvery == 0 {
+				s.Save()
 			}
 		}
 		return nil
@@ -318,7 +378,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	//	}
 	//}
 
-	//s.Save()
+	s.Save()
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Account history records: %d\n", count)
@@ -420,6 +480,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	}); err != nil {
 		panic(err)
 	}
+	fmt.Printf("lt: %d\n", lastTimestamps.Len())
 
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
