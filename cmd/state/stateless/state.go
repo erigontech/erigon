@@ -133,9 +133,8 @@ func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error)
 // Each day has it's own partition
 // It means that you can only continue execution of report from last snapshot.Save() checkpoint - read buckets forward from last key
 // But not re-read bucket
-func file(prefix string, version string) string {
-	y, m, d := time.Now().Date()
-	return path.Join(dir(), fmt.Sprintf("%s_%d%d%d_v%d.cbor", prefix, y, m, d, version))
+func file(prefix string, version int) string {
+	return path.Join(dir(), fmt.Sprintf("%s_%s_v%d.cbor", prefix, time.Now().Format("2006-01-28"), version))
 }
 
 func dir() string {
@@ -192,7 +191,7 @@ type StateGrowth1Snapshot struct {
 	CreationsByBlock map[uint64]int         // For each timestamp, how many accounts were created in the state
 }
 
-var StateGrowth1SnapshotFile = file("StateGrowth1", "1")
+var StateGrowth1SnapshotFile = file("StateGrowth1", 1)
 
 func (s *StateGrowth1Snapshot) Restore() {
 	restore(StateGrowth1SnapshotFile, s)
@@ -229,7 +228,8 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		CreationsByBlock: make(map[uint64]int),       // For each timestamp, how many accounts were created in the state
 	}
 
-	//s.Restore()
+	s.Restore()
+	fmt.Println("Len:", s.LastTimestamps.Len())
 
 	var vIsEmpty bool
 	var err error
