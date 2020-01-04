@@ -24,15 +24,15 @@ type TxTracer struct {
 	gasForCREATE         uint64
 	gasForEthSendingCALL uint64
 	currentBlock         uint64
+	measureCurrentGas    uint64
+	measureCreate        bool
+	trace                bool
+	measureDepth         int
 	sinceAccounts        map[common.Address]uint64
 	sinceStorage         map[common.Address]map[common.Hash]uint64
 	created              map[common.Address]struct{}
 	lastAccessedAccounts map[common.Address]uint64
 	lastAccessedStorage  map[common.Address]map[common.Hash]uint64
-	measureCreate        bool
-	measureDepth         int
-	measureCurrentGas    uint64
-	trace                bool
 }
 
 func NewTxTracer() *TxTracer {

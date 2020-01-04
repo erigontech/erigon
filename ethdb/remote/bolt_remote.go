@@ -86,6 +86,14 @@ const (
 	CmdCursorSeekTo
 	// CmdGetAsOf (bucket, hBucket, key []byte, timestamp uint64): (value)
 	CmdGetAsOf
+	// CmdCursorFirstKey (cursorHandle, number of keys): [(key, valueIsEmpty)]
+	// Moves given cursor to bucket start and streams back the (key, valueIsEmpty) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdCursorFirstKey
+	// CmdCursorNextKey (cursorHandle, number of keys): [(key, valueIsEmpty)]
+	// Moves given cursor over the next given number of keys and streams back the (key, valueIsEmpty) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdCursorNextKey
 )
 
 const DefaultCursorBatchSize uint64 = 1
@@ -169,6 +177,26 @@ func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) error {
 		return err
 	}
 	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	return nil
+}
+
+func encodeKey(encoder *codec.Encoder, key *[]byte, valueIsEmpty bool) error {
+	if err := encoder.Encode(key); err != nil {
+		return err
+	}
+	if err := encoder.Encode(valueIsEmpty); err != nil {
+		return err
+	}
+	return nil
+}
+
+func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
+	if err := decoder.Decode(key); err != nil {
+		return err
+	}
+	if err := decoder.Decode(valueIsEmpty); err != nil {
 		return err
 	}
 	return nil
@@ -499,6 +527,86 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 
 				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) for CmdCursorFirst: %w", err)
+				}
+
+				numberOfKeys--
+				if k == nil {
+					break
+				}
+			}
+		case CmdCursorNextKey:
+			var k = &[]byte{}
+			var v = &[]byte{}
+
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				return fmt.Errorf("could not decode cursorHandle for CmdCursorNextKey: %w", err)
+			}
+			var numberOfKeys uint64
+			if err := decoder.Decode(&numberOfKeys); err != nil {
+				return fmt.Errorf("could not decode numberOfKeys for CmdCursorNextKey: %w", err)
+			}
+
+			if numberOfKeys > CursorMaxBatchSize {
+				encodeErr(encoder, fmt.Errorf("requested numberOfKeys is too large: %d", numberOfKeys))
+				continue
+			}
+
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
+				continue
+			}
+
+			if err := encoder.Encode(ResponseOk); err != nil {
+				return fmt.Errorf("could not encode response to CmdCursorNextKey: %w", err)
+			}
+
+			for *k, *v = cursor.Next(); numberOfKeys > 0; *k, *v = cursor.Next() {
+				select {
+				default:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+
+				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+					return fmt.Errorf("could not encode (key,valueIsEmpty) in response to CmdCursorNextKey: %w", err)
+				}
+
+				numberOfKeys--
+				if *k == nil {
+					break
+				}
+			}
+		case CmdCursorFirstKey:
+			var k = &[]byte{}
+			var v = &[]byte{}
+
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirstKey: %w", err)
+			}
+			var numberOfKeys uint64
+			if err := decoder.Decode(&numberOfKeys); err != nil {
+				return fmt.Errorf("could not decode numberOfKeys for CmdCursorFirstKey: %w", err)
+			}
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
+				continue
+			}
+
+			if err := encoder.Encode(ResponseOk); err != nil {
+				return fmt.Errorf("could not encode response code for CmdCursorFirstKey: %w", err)
+			}
+
+			for *k, *v = cursor.First(); numberOfKeys > 0; *k, *v = cursor.Next() {
+				select {
+				default:
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+
+				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+					return fmt.Errorf("could not encode (key,valueIsEmpty) for CmdCursorFirstKey: %w", err)
 				}
 
 				numberOfKeys--
@@ -867,10 +975,6 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 	if err != nil {
 		return err
 	}
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
 
 	defer func() {
 		if err != nil || endTxErr != nil || opErr != nil {
@@ -880,6 +984,11 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 		}
 		db.returnConn(ctx, in, out, closer)
 	}()
+
+	decoder := newDecoder(in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(out)
+	defer returnEncoderToPool(encoder)
 
 	err = encoder.Encode(CmdBeginTx)
 	if err != nil {
@@ -920,11 +1029,12 @@ type Cursor struct {
 	out          io.Writer
 	cursorHandle uint64
 
-	batchSize    uint64
-	cacheKeys    [][]byte
-	cacheValues  [][]byte
-	cacheLastIdx uint64
-	cacheIdx     uint64
+	cacheLastIdx      uint64
+	cacheIdx          uint64
+	batchSize         uint64
+	cacheKeys         [][]byte
+	cacheValues       [][]byte
+	cacheValueIsEmpty []bool
 }
 
 // Bucket returns the handle to the bucket in remote DB
@@ -1080,23 +1190,34 @@ func (c *Cursor) SetBatchSize(batchSize uint64) {
 }
 
 func (c *Cursor) First() (key []byte, value []byte, err error) {
-	select {
-	default:
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	}
-
 	if err := c.fetchPage(CmdCursorFirst); err != nil {
 		return nil, nil, err
 	}
 	c.cacheIdx = 0
 
 	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
-
 	c.cacheIdx++
 
 	return k, v, nil
 
+}
+
+func (c *Cursor) FirstKey() (key []byte, vIsEmpty bool, err error) {
+	if err := c.fetchPage(CmdCursorFirstKey); err != nil {
+		return nil, false, err
+	}
+	c.cacheIdx = 0
+
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueIsEmpty[c.cacheIdx]
+	c.cacheIdx++
+
+	return k, v, nil
+}
+
+func (c *Cursor) SeekKey(seek []byte) (key []byte, vIsEmpty bool, err error) {
+	key, v, err := c.Seek(seek)
+	vIsEmpty = len(v) == 0
+	return key, vIsEmpty, err
 }
 
 func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
@@ -1202,13 +1323,22 @@ func (c *Cursor) Next() (keys []byte, values []byte, err error) {
 		c.cacheIdx = 0
 	}
 
-	select {
-	default:
-	case <-c.ctx.Done():
-		return nil, nil, err
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
+	c.cacheIdx++
+
+	return k, v, nil
+}
+
+func (c *Cursor) NextKey() (keys []byte, vIsEmpty bool, err error) {
+	if c.needFetchNextPage() {
+		err := c.fetchPage(CmdCursorNextKey)
+		if err != nil {
+			return nil, false, err
+		}
+		c.cacheIdx = 0
 	}
 
-	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueIsEmpty[c.cacheIdx]
 	c.cacheIdx++
 
 	return k, v, nil
@@ -1218,6 +1348,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 	if c.cacheKeys == nil {
 		c.cacheKeys = make([][]byte, c.batchSize)
 		c.cacheValues = make([][]byte, c.batchSize)
+		c.cacheValueIsEmpty = make([]bool, c.batchSize)
 	}
 
 	decoder := newDecoder(c.in)
@@ -1254,8 +1385,15 @@ func (c *Cursor) fetchPage(cmd Command) error {
 			return c.ctx.Err()
 		}
 
-		if err := decodeKeyValue(decoder, &c.cacheKeys[c.cacheLastIdx], &c.cacheValues[c.cacheLastIdx]); err != nil {
-			return fmt.Errorf("could not decode (key, value) for cmd %d: %w", cmd, err)
+		switch cmd {
+		case CmdCursorFirst, CmdCursorNext:
+			if err := decodeKeyValue(decoder, &c.cacheKeys[c.cacheLastIdx], &c.cacheValues[c.cacheLastIdx]); err != nil {
+				return fmt.Errorf("could not decode (key, value) for cmd %d: %w", cmd, err)
+			}
+		case CmdCursorFirstKey, CmdCursorNextKey:
+			if err := decodeKey(decoder, &c.cacheKeys[c.cacheLastIdx], &c.cacheValueIsEmpty[c.cacheLastIdx]); err != nil {
+				return fmt.Errorf("could not decode (key, valueIsEmpty) for cmd %d: %w", cmd, err)
+			}
 		}
 
 		if c.cacheKeys[c.cacheLastIdx] == nil {

@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,9 +20,11 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/typedtree"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ugorji/go/codec"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -121,17 +124,81 @@ func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error)
 	return &Reporter{db: db}, nil
 }
 
+type Snapshot struct {
+	version          string
+	MaxTimestamp     uint64
+	HistoryKey       []byte
+	AccountKey       []byte
+	LastTimestamps   *typedtree.RadixUint64 // For each address hash, when was it last accounted
+	CreationsByBlock map[uint64]int         // For each timestamp, how many accounts were created in the state
+}
+
+func dir() string {
+	dir := path.Join(os.TempDir(), "turbo_geth_reports")
+	if err := os.MkdirAll(dir, 0770); err != nil {
+		panic(err)
+	}
+	return dir
+}
+
+func (s *Snapshot) Restore() {
+	t := time.Now()
+	defer func() {
+		fmt.Println("Restore: " + time.Since(t).String())
+	}()
+	file := path.Join(dir(), "snapshot_v"+s.version+".cbor")
+	f, err := os.OpenFile(file, os.O_RDONLY|os.O_CREATE, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	var handle codec.CborHandle
+
+	if err := codec.NewDecoder(f, &handle).Decode(s); err != nil {
+		if err != io.EOF {
+			panic(err)
+		}
+	}
+}
+
+func (s *Snapshot) Save() {
+	t := time.Now()
+	defer func() {
+		fmt.Println("Save: " + time.Since(t).String())
+	}()
+
+	file := path.Join(dir(), "snapshot_v"+s.version+".cbor")
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+
+	var handle codec.CborHandle
+	codec.NewEncoder(f, &handle).MustEncode(s)
+}
+
 func (r *Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
 
 	var count int
-	var maxTimestamp uint64
-	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Hash]uint64)
-	// For each timestamp, how many accounts were created in the state
-	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
 
+	s := &Snapshot{
+		version:          "5",
+		HistoryKey:       []byte{},
+		AccountKey:       []byte{},
+		MaxTimestamp:     0,
+		LastTimestamps:   typedtree.NewUint64(), // For each address hash, when was it last accounted
+		CreationsByBlock: make(map[uint64]int),  // For each timestamp, how many accounts were created in the state
+	}
+
+	//s.Restore()
+
+	const MaxIteration = 1 * 1000 * 1000
+	var vIsEmpty bool
+	var err error
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
@@ -147,33 +214,35 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
-		t := time.Now()
-		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		for s.HistoryKey, vIsEmpty, err = c.SeekKey(s.HistoryKey); s.HistoryKey != nil || err != nil; s.HistoryKey, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
-			// First 32 bytes is the hash of the address, then timestamp encoding
-			copy(addrHash[:], k[:32])
-			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
-			if timestamp+1 > maxTimestamp {
-				maxTimestamp = timestamp + 1
+			copy(addrHash[:], s.HistoryKey[:32])
+			addr := string(addrHash.Bytes())
+			timestamp, _ := dbutils.DecodeTimestamp(s.HistoryKey[32:])
+			if timestamp+1 > s.MaxTimestamp {
+				s.MaxTimestamp = timestamp + 1
 			}
-			if len(v) == 0 {
-				creationsByBlock[timestamp]++
-				if lt, ok := lastTimestamps[addrHash]; ok {
-					creationsByBlock[lt]--
+			if vIsEmpty {
+				s.CreationsByBlock[timestamp]++
+				if lt, ok := s.LastTimestamps.Get(addr); ok {
+					s.CreationsByBlock[lt]--
 				}
 			}
-			lastTimestamps[addrHash] = timestamp
+
+			s.LastTimestamps.Set(addr, timestamp)
 			count++
 			if count%1000000 == 0 {
-				fmt.Printf("Processed %d account records. %s\n", count, time.Since(t))
+				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
 			}
 		}
 		return nil
 	}); err != nil {
 		check(err)
 	}
+
+	//s.Save()
 
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
@@ -198,17 +267,19 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
-		t := time.Now()
-		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+		for s.AccountKey, _, err = c.FirstKey(); s.AccountKey != nil || err != nil; s.AccountKey, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
 			// First 32 bytes is the hash of the address
-			copy(addrHash[:], k[:32])
-			lastTimestamps[addrHash] = maxTimestamp
+			copy(addrHash[:], s.AccountKey[:32])
+			s.LastTimestamps.Set(string(addrHash.Bytes()), s.MaxTimestamp)
 			count++
 			if count%1000000 == 0 {
-				fmt.Printf("Processed %d account records. %s\n", count, time.Since(t))
+				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
+			}
+			if count%10000000 == 0 {
+				//s.Save()
 			}
 		}
 		return nil
@@ -216,19 +287,27 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		check(err)
 	}
 
-	for _, lt := range lastTimestamps {
-		if lt < maxTimestamp {
-			creationsByBlock[lt]--
+	s.LastTimestamps.Walk(func(_ string, lt uint64) bool {
+		if lt < s.MaxTimestamp {
+			s.CreationsByBlock[lt]--
 		}
-	}
+		return false
+	})
+	//for _, lt := range s.LastTimestamps {
+	//	if lt < s.MaxTimestamp {
+	//		s.CreationsByBlock[lt]--
+	//	}
+	//}
+
+	//s.Save()
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Account history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
 	// Sort accounts by timestamp
-	tsi := NewTimeSorterInt(len(creationsByBlock))
+	tsi := NewTimeSorterInt(len(s.CreationsByBlock))
 	idx := 0
-	for timestamp, count := range creationsByBlock {
+	for timestamp, count := range s.CreationsByBlock {
 		tsi.timestamps[idx] = timestamp
 		tsi.values[idx] = count
 		idx++
@@ -251,10 +330,13 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 	startTime := time.Now()
 	var count int
 	var maxTimestamp uint64
+
 	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Hash]map[common.Hash]uint64)
+	lastTimestamps := typedtree.NewRadixMapHash2Uint64() // values are map[common.Hash]uint64
+
 	// For each timestamp, how many storage items were created
-	creationsByBlock := make(map[common.Hash]map[uint64]int)
+	creationsByBlock := typedtree.NewRadixMapUint642Int() // values are map[uint64]int
+
 	var addrHash common.Hash
 	var hash common.Hash
 	// Go through the history of account first
@@ -278,31 +360,32 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			}
 			// First 20 bytes is the address
 			copy(addrHash[:], k[:32])
+			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
 			if len(v) == 0 {
-				c, ok := creationsByBlock[addrHash]
+				c, ok := creationsByBlock.Get(addr)
 				if !ok {
 					c = make(map[uint64]int)
-					creationsByBlock[addrHash] = c
+					creationsByBlock.Set(addr, c)
 				}
 				c[timestamp]++
-				l, ok := lastTimestamps[addrHash]
+				l, ok := lastTimestamps.Get(addr)
 				if !ok {
 					l = make(map[common.Hash]uint64)
-					lastTimestamps[addrHash] = l
+					lastTimestamps.Set(addr, l)
 				}
 				if lt, ok := l[hash]; ok {
 					c[lt]--
 				}
 			}
-			l, ok := lastTimestamps[addrHash]
+			l, ok := lastTimestamps.Get(addr)
 			if !ok {
 				l = make(map[common.Hash]uint64)
-				lastTimestamps[addrHash] = l
+				lastTimestamps.Set(addr, l)
 			}
 			l[hash] = timestamp
 			count++
@@ -335,16 +418,17 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 				return err
 			}
 			copy(addrHash[:], k[:32])
+			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
-			l, ok := lastTimestamps[addrHash]
+			l, ok := lastTimestamps.Get(addr)
 			if !ok {
 				l = make(map[common.Hash]uint64)
-				lastTimestamps[addrHash] = l
+				lastTimestamps.Set(addr, l)
 			}
 			l[hash] = maxTimestamp
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
 			}
 		}
 		return nil
@@ -352,25 +436,37 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		panic(err)
 	}
 
-	for address, l := range lastTimestamps {
+	lastTimestamps.Walk(func(address string, l map[common.Hash]uint64) bool {
 		for _, lt := range l {
 			if lt < maxTimestamp {
-				creationsByBlock[address][lt]--
+				v, _ := creationsByBlock.Get(address)
+				v[lt]--
+				creationsByBlock.Set(address, v)
 			}
 		}
-	}
+		return false
+	})
+	//for address, l := range lastTimestamps {
+	//	for _, lt := range l {
+	//		if lt < maxTimestamp {
+	//			creationsByBlock[address][lt]--
+	//		}
+	//	}
+	//}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Storage history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
-	for _, c := range creationsByBlock {
+	creationsByBlock.Walk(func(_ string, c map[uint64]int) bool {
 		cumulative := 0
 		for timestamp, count := range c {
 			totalCreationsByBlock[timestamp] += count
 			cumulative += count
 		}
-	}
+		return false
+	})
+
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
 	idx := 0
@@ -394,6 +490,8 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 }
 
 func (r *Reporter) GasLimits(ctx context.Context) {
+	startTime := time.Now()
+
 	f, ferr := os.Create("gas_limits.csv")
 	check(ferr)
 	defer f.Close()
@@ -402,8 +500,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
 
-	mainHashes := make(map[string]struct{}, 10*000*000)
-	t := time.Now()
+	mainHashes := make(map[string]struct{}, 10*1000*1000)
 
 	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
@@ -436,7 +533,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 			mainHashes[string(v)] = struct{}{}
 
 			if i%1000000 == 0 {
-				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(t))
+				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(startTime))
 			}
 		}
 
@@ -462,7 +559,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
 			if blockNum%1000000 == 0 {
-				fmt.Printf("Processed %d blocks\n", blockNum)
+				fmt.Printf("Processed %d blocks, %s\n", blockNum, time.Since(startTime))
 			}
 
 			blockNum++
