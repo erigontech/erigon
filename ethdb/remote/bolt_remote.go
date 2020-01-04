@@ -99,7 +99,7 @@ const (
 const DefaultCursorBatchSize uint64 = 1
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ServerMaxConnections uint64 = 2048
-const ClientMaxConnections uint64 = 128
+const ClientMaxConnections uint64 = 32
 
 // tracing enable by evn GODEBUG=remotedb.debug=1
 var tracing bool
@@ -123,6 +123,7 @@ func newDecoder(r io.Reader) *codec.Decoder {
 	default:
 		{
 			var handle codec.CborHandle
+			handle.ReaderBufferSize = 64 * 1024
 			d = codec.NewDecoder(r, &handle)
 		}
 	}
@@ -148,6 +149,7 @@ func newEncoder(w io.Writer) *codec.Encoder {
 	default:
 		{
 			var handle codec.CborHandle
+			handle.WriterBufferSize = 64 * 1024
 			e = codec.NewEncoder(w, &handle)
 		}
 	}
