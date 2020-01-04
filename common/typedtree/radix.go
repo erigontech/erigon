@@ -19,6 +19,10 @@ func NewRadixMapHash2Uint64() *RadixMapHash2Uint64 {
 	}
 }
 
+func (t *RadixMapHash2Uint64) Len() int {
+	return t.tree.Len()
+}
+
 func (t *RadixMapHash2Uint64) Get(k string) (map[common.Hash]uint64, bool) {
 	v, ok := t.tree.Get(k)
 	if !ok {
@@ -77,6 +81,10 @@ func NewRadixMapUint642Int() *RadixMapUint642Int {
 	}
 }
 
+func (t *RadixMapUint642Int) Len() int {
+	return t.tree.Len()
+}
+
 func (t *RadixMapUint642Int) Get(k string) (map[uint64]int, bool) {
 	v, ok := t.tree.Get(k)
 	if !ok {
@@ -127,11 +135,15 @@ type RadixUint64 struct {
 	tree    *radix.Tree
 }
 
-func NewUint64() *RadixUint64 {
+func NewRadixUint64() *RadixUint64 {
 	return &RadixUint64{
 		version: "1",
 		tree:    radix.New(),
 	}
+}
+
+func (t *RadixUint64) Len() int {
+	return t.tree.Len()
 }
 
 func (t *RadixUint64) Get(k string) (uint64, bool) {

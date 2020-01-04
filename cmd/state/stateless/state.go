@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/signal"
 	"path"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -124,6 +125,9 @@ func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error)
 	return &Reporter{db: db}, nil
 }
 
+const PrintProgressEvery = 1 * 1000 * 1000
+const PrintMemStatsEvery = 1 * 1000 * 1000
+
 type Snapshot struct {
 	version          string
 	MaxTimestamp     uint64
@@ -179,8 +183,20 @@ func (s *Snapshot) Save() {
 	codec.NewEncoder(f, &handle).MustEncode(s)
 }
 
+func PrintMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
+	fmt.Printf("HeapInuse: %vMb, Alloc: %vMb, TotalAlloc: %vMb, Sys: %vMb, NumGC: %v, PauseNs: %d\n", bToMb(m.HeapInuse), bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC, m.PauseNs[(m.NumGC+255)%256])
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
 func (r *Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
+	const MaxIteration = 1 * 1000 * 1000
 
 	var count int
 	var addrHash common.Hash
@@ -190,13 +206,12 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
 		MaxTimestamp:     0,
-		LastTimestamps:   typedtree.NewUint64(), // For each address hash, when was it last accounted
-		CreationsByBlock: make(map[uint64]int),  // For each timestamp, how many accounts were created in the state
+		LastTimestamps:   typedtree.NewRadixUint64(), // For each address hash, when was it last accounted
+		CreationsByBlock: make(map[uint64]int),       // For each timestamp, how many accounts were created in the state
 	}
 
 	//s.Restore()
 
-	const MaxIteration = 1 * 1000 * 1000
 	var vIsEmpty bool
 	var err error
 	// Go through the history of account first
@@ -233,9 +248,13 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 
 			s.LastTimestamps.Set(addr, timestamp)
 			count++
-			if count%1000000 == 0 {
+			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
 			}
+			if count%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
+			}
+
 		}
 		return nil
 	}); err != nil {
@@ -275,11 +294,11 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			copy(addrHash[:], s.AccountKey[:32])
 			s.LastTimestamps.Set(string(addrHash.Bytes()), s.MaxTimestamp)
 			count++
-			if count%1000000 == 0 {
+			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
 			}
-			if count%10000000 == 0 {
-				//s.Save()
+			if count%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
 			}
 		}
 		return nil
@@ -354,7 +373,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			return err
 		}
 
-		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		for k, vIsEmpty, err := c.FirstKey(); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -366,7 +385,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			if timestamp+1 > maxTimestamp {
 				maxTimestamp = timestamp + 1
 			}
-			if len(v) == 0 {
+			if vIsEmpty {
 				c, ok := creationsByBlock.Get(addr)
 				if !ok {
 					c = make(map[uint64]int)
@@ -388,9 +407,13 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 				lastTimestamps.Set(addr, l)
 			}
 			l[hash] = timestamp
+
 			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+			if count%PrintProgressEvery == 0 {
+				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
+			}
+			if count%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
 			}
 		}
 		return nil
@@ -413,7 +436,7 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			return err
 		}
 
-		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+		for k, _, err := c.FirstKey(); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -427,8 +450,11 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			}
 			l[hash] = maxTimestamp
 			count++
-			if count%100000 == 0 {
+			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
+			}
+			if count%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
 			}
 		}
 		return nil
@@ -487,6 +513,8 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		cumulative += tsi.values[i]
 		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
+
+	PrintMemUsage()
 }
 
 func (r *Reporter) GasLimits(ctx context.Context) {
@@ -500,7 +528,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
 
-	mainHashes := make(map[string]struct{}, 10*1000*1000)
+	mainHashes := typedtree.NewRadixUint64()
 
 	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
@@ -530,14 +558,18 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 				continue
 			}
 
-			mainHashes[string(v)] = struct{}{}
+			mainHashes.Set(string(v), 0)
 
-			if i%1000000 == 0 {
+			if i%PrintProgressEvery == 0 {
 				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(startTime))
+			}
+			if i%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
 			}
 		}
 
-		fmt.Println("Preloaded: ", len(mainHashes))
+		fmt.Println("Preloaded: ", mainHashes.Len())
+		PrintMemUsage()
 
 		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -547,7 +579,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 				continue
 			}
 
-			if _, ok := mainHashes[string(k[common.BlockNumberLength:])]; !ok {
+			if _, ok := mainHashes.Get(string(k[common.BlockNumberLength:])); !ok {
 				continue
 			}
 
@@ -558,10 +590,12 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 			}
 
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
-			if blockNum%1000000 == 0 {
+			if blockNum%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %d blocks, %s\n", blockNum, time.Since(startTime))
 			}
-
+			if blockNum%PrintMemStatsEvery == 0 {
+				PrintMemUsage()
+			}
 			blockNum++
 		}
 		return nil
@@ -569,6 +603,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	check(err)
 
 	fmt.Printf("Finish processing %d blocks\n", blockNum)
+	PrintMemUsage()
 }
 
 func parseFloat64(str string) float64 {
