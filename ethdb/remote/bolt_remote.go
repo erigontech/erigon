@@ -99,7 +99,7 @@ const (
 const DefaultCursorBatchSize uint64 = 1
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ServerMaxConnections uint64 = 2048
-const ClientMaxConnections uint64 = 32
+const ClientMaxConnections uint64 = 128
 
 // tracing enable by evn GODEBUG=remotedb.debug=1
 var tracing bool
@@ -1199,7 +1199,6 @@ func (c *Cursor) First() (key []byte, value []byte, err error) {
 
 	k, v := c.cacheKeys[c.cacheIdx], c.cacheValues[c.cacheIdx]
 	c.cacheIdx++
-
 	return k, v, nil
 
 }

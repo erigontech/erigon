@@ -203,7 +203,6 @@ func NewStateGrowth1Reporter(ctx context.Context, db *remote.DB) *StateGrowth1Re
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
-	const MaxIteration = 1 * 1000 * 1000
 
 	var count int
 	var addrHash common.Hash
@@ -233,7 +232,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				continue
 			}
 
-			copy(addrHash[:], k[:32])
+			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
 			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > r.MaxTimestamp {
@@ -264,31 +263,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	}); err != nil {
 		check(err)
 	}
-
-	/*
-		var b bytes.Buffer
-		zw, err := zlib.NewWriterLevel(&b, zlib.BestSpeed)
-		if err != nil {
-			panic(err)
-		}
-
-		all := make([]byte, 10)
-		s.LastTimestamps.Walk(func(k string, _ uint64) bool {
-			all = append(all, k...)
-
-			_, err = zw.Write([]byte(fmt.Sprintf("%x", k)))
-			if err != nil {
-				panic(err)
-			}
-			return false
-		})
-		err = zw.Close()
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println("Compress: ", len(b.Bytes())/1024)
-		fmt.Println("No Compress: ", len(all)/1024)
-	*/
 
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
@@ -322,8 +296,8 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				skipFirst = false
 				continue
 			}
-			// First 32 bytes is the hash of the address
-			copy(addrHash[:], k[:32])
+
+			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
 			r.LastTimestamps.Set(string(addrHash.Bytes()), r.MaxTimestamp)
 			count++
 			if count%PrintProgressEvery == 0 {
@@ -348,11 +322,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		}
 		return false
 	})
-	//for _, lt := range s.LastTimestamps {
-	//	if lt < s.MaxTimestamp {
-	//		s.CreationsByBlock[lt]--
-	//	}
-	//}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Account history records: %d\n", count)
@@ -439,8 +408,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				continue
 			}
 
-			// First 20 bytes is the address
-			copy(addrHash[:], k[:32])
+			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
@@ -548,13 +516,6 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 		}
 		return false
 	})
-	//for address, l := range lastTimestamps {
-	//	for _, lt := range l {
-	//		if lt < maxTimestamp {
-	//			creationsByBlock[address][lt]--
-	//		}
-	//	}
-	//}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Storage history records: %d\n", count)
@@ -676,7 +637,6 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 		}
 
 		fmt.Println("Preloaded: ", r.MainHashes.Len())
-		PrintMemUsage()
 
 		skipFirst = len(r.HeaderPrefixKey2) > 0 // snapshot stores last analyzed key
 		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
