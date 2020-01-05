@@ -44,9 +44,13 @@ import (
 
 var emptyCodeHash = crypto.Keccak256(nil)
 
-const PrintProgressEvery = 1 * 1000 * 1000
-const PrintMemStatsEvery = 10 * 1000 * 1000
-const SaveSnapshotEvery = 10 * 1000 * 1000
+const (
+	PrintMemStatsEvery = 10 * 1000 * 1000
+	PrintProgressEvery = 1 * 1000 * 1000
+	SaveSnapshotEvery  = 10 * 1000 * 1000
+	MaxIterationsPerTx = 1 * 1000 * 100
+	CursorBatchSize    = 10 * 1000
+)
 
 func check(e error) {
 	if e != nil {
@@ -197,7 +201,6 @@ func NewStateGrowth1Reporter(ctx context.Context, db *remote.DB) *StateGrowth1Re
 		save(dumpFile, rep)
 	}
 	restore(dumpFile, rep)
-	fmt.Println("Restored:", rep.LastTimestamps.Len(), len(rep.CreationsByBlock))
 	return rep
 }
 
@@ -206,18 +209,20 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 
 	var count int
 	var addrHash common.Hash
+	var processingDone bool
+	var a = make(map[string]struct{}, 10)
 
+beginTx:
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if err != nil {
 			return err
 		}
-
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(10000)
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
@@ -233,6 +238,11 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
+			if _, ok := a[string(k)]; ok {
+				panic("repeated!")
+			} else {
+				a[string(k)] = struct{}{}
+			}
 			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > r.MaxTimestamp {
@@ -248,7 +258,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 			r.LastTimestamps.Set(addr, timestamp)
 			count++
 			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
+				fmt.Printf("Processed %dK account records. %s\n", count/1000, time.Since(startTime))
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -257,15 +267,30 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				r.HistoryKey = k
 				r.save(ctx)
 			}
-
+			if count%MaxIterationsPerTx == 0 {
+				r.HistoryKey = k
+				return nil
+			}
 		}
+		processingDone = true
 		return nil
 	}); err != nil {
 		check(err)
 	}
 
+	if !processingDone {
+		goto beginTx
+	}
+
+	processingDone = false
+
+beginTx2:
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+		defer func() {
+			processingDone = true
+		}()
+
 		pre, err := tx.Bucket(dbutils.PreimagePrefix)
 		if err != nil {
 			return err
@@ -282,7 +307,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(10000)
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
@@ -301,7 +326,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 			r.LastTimestamps.Set(string(addrHash.Bytes()), r.MaxTimestamp)
 			count++
 			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %d account records. %s\n", count, time.Since(startTime))
+				fmt.Printf("Processed %dK account records. %s\n", count/1000, time.Since(startTime))
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -310,10 +335,19 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				r.AccountKey = k
 				r.save(ctx)
 			}
+			if count%MaxIterationsPerTx == 0 {
+				r.AccountKey = k
+				return nil
+			}
 		}
+		processingDone = true
 		return nil
 	}); err != nil {
 		check(err)
+	}
+
+	if !processingDone {
+		goto beginTx2
 	}
 
 	r.LastTimestamps.Walk(func(_ string, lt uint64) bool {
@@ -372,7 +406,6 @@ func NewStateGrowth2Reporter(ctx context.Context, db *remote.DB) *StateGrowth2Re
 		save(dumpFile, rep)
 	}
 	restore(dumpFile, rep)
-	fmt.Println("Restored:", rep.LastTimestamps.Len(), rep.CreationsByBlock.Len())
 	return rep
 }
 
@@ -382,7 +415,9 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 	var addrHash common.Hash
 	var hash common.Hash
+	var processingDone bool
 
+beginTx:
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
@@ -393,7 +428,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(10000)
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
@@ -440,7 +475,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 			count++
 			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
+				fmt.Printf("Processed %dK storage records, %s\n", count/1000, time.Since(startTime))
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -449,12 +484,24 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				r.HistoryKey = k
 				r.save(ctx)
 			}
+			if count%MaxIterationsPerTx == 0 {
+				r.HistoryKey = k
+				return nil
+			}
 		}
+		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 
+	if !processingDone {
+		goto beginTx
+	}
+
+	processingDone = false
+
+beginTx2:
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageBucket)
@@ -465,7 +512,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(10000)
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
@@ -491,7 +538,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 			l[hash] = r.MaxTimestamp
 			count++
 			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
+				fmt.Printf("Processed %dK storage records, %s\n", count/1000, time.Since(startTime))
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -501,9 +548,14 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				r.save(ctx)
 			}
 		}
+		processingDone = false
 		return nil
 	}); err != nil {
 		panic(err)
+	}
+
+	if !processingDone {
+		goto beginTx2
 	}
 
 	r.LastTimestamps.Walk(func(address string, l map[common.Hash]uint64) bool {
@@ -574,7 +626,6 @@ func NewGasLimitReporter(ctx context.Context, db *remote.DB) *GasLimitReporter {
 		save(dumpFile, rep)
 	}
 	restore(dumpFile, rep)
-	fmt.Println("Restored:", rep.MainHashes.Len())
 	return rep
 }
 
@@ -588,7 +639,10 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	defer w.Flush()
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
+	i := 0
+	var processingDone bool
 
+beginTx:
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
 		if err != nil {
@@ -598,14 +652,13 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(10000)
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println("Preloading block numbers...")
 
-		i := 0
 		skipFirst := len(r.HeaderPrefixKey1) > 0 // snapshot stores last analyzed key
 		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -633,6 +686,10 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 			if i%SaveSnapshotEvery == 0 {
 				r.HeaderPrefixKey1 = k
 				r.save(ctx)
+			}
+			if i%MaxIterationsPerTx == 0 {
+				r.HeaderPrefixKey1 = k
+				return nil
 			}
 		}
 
@@ -664,7 +721,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
 			blockNum++
 			if blockNum%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %d blocks, %s\n", blockNum, time.Since(startTime))
+				fmt.Printf("Processed %dK blocks, %s\n", blockNum/1000, time.Since(startTime))
 			}
 			if blockNum%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -673,10 +730,19 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 				r.HeaderPrefixKey2 = k
 				r.save(ctx)
 			}
+			if i%MaxIterationsPerTx == 0 {
+				r.HeaderPrefixKey2 = k
+				return nil
+			}
 		}
+		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
+	}
+
+	if !processingDone {
+		goto beginTx
 	}
 
 	fmt.Printf("Finish processing %d blocks\n", blockNum)
@@ -1311,7 +1377,7 @@ func makeCreators(blockNum uint64) {
 		}
 		blockNum++
 		if blockNum%1000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
 		}
 		// Check for interrupts
 		select {
@@ -1382,7 +1448,7 @@ func storageUsage() {
 			leafSize += uint64(len(v))
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records, deleted contracts: %d\n", count, numDeleted)
+				fmt.Printf("Processed %dK storage records, deleted contracts: %d\n", count/1000, numDeleted)
 			}
 		}
 		return nil
@@ -1479,7 +1545,7 @@ func tokenUsage() {
 				itemsByAddress[addr]++
 				count++
 				if count%100000 == 0 {
-					fmt.Printf("Processed %d storage records\n", count)
+					fmt.Printf("Processed %dK storage records\n", count/1000)
 				}
 			}
 		}
@@ -1555,7 +1621,7 @@ func nonTokenUsage() {
 				itemsByAddress[addr]++
 				count++
 				if count%100000 == 0 {
-					fmt.Printf("Processed %d storage records\n", count)
+					fmt.Printf("Processed %dK storage records\n", count/1000)
 				}
 			}
 		}
@@ -1615,7 +1681,7 @@ func oldStorage() {
 			itemsByAddress[addr]++
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+				fmt.Printf("Processed %dK storage records\n", count/1000)
 			}
 		}
 		return nil
@@ -1700,7 +1766,7 @@ func dustEOA() {
 			}
 			thresholdMap[a.Balance.Uint64()]++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+				fmt.Printf("Processed %dK account records\n", count/1000)
 			}
 		}
 		return nil
@@ -1896,7 +1962,7 @@ func makeSha3Preimages(blockNum uint64) {
 		}
 		blockNum++
 		if blockNum%100 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
 			if err := tx.Commit(); err != nil {
 				panic(err)
 			}
