@@ -208,8 +208,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	var count int
 	var addrHash common.Hash
 
-	var vIsEmpty bool
-	var err error
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
@@ -226,7 +224,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		}
 
 		skipFirst := len(r.HistoryKey) > 0 // snapshot stores last analyzed key
-		for r.HistoryKey, vIsEmpty, err = c.SeekKey(r.HistoryKey); r.HistoryKey != nil || err != nil; r.HistoryKey, vIsEmpty, err = c.NextKey() {
+		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -235,9 +233,9 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				continue
 			}
 
-			copy(addrHash[:], r.HistoryKey[:32])
+			copy(addrHash[:], k[:32])
 			addr := string(addrHash.Bytes())
-			timestamp, _ := dbutils.DecodeTimestamp(r.HistoryKey[32:])
+			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
@@ -257,6 +255,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if count%SaveSnapshotEvery == 0 {
+				r.HistoryKey = k
 				r.save(ctx)
 			}
 
@@ -266,7 +265,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		check(err)
 	}
 
-	r.save(ctx)
 	/*
 		var b bytes.Buffer
 		zw, err := zlib.NewWriterLevel(&b, zlib.BestSpeed)
@@ -316,7 +314,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 		}
 
 		skipFirst := len(r.AccountKey) > 0 // snapshot stores last analyzed key
-		for r.AccountKey, _, err = c.SeekKey(r.AccountKey); r.AccountKey != nil || err != nil; r.AccountKey, _, err = c.NextKey() {
+		for k, _, err := c.SeekKey(r.AccountKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -325,7 +323,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				continue
 			}
 			// First 32 bytes is the hash of the address
-			copy(addrHash[:], r.AccountKey[:32])
+			copy(addrHash[:], k[:32])
 			r.LastTimestamps.Set(string(addrHash.Bytes()), r.MaxTimestamp)
 			count++
 			if count%PrintProgressEvery == 0 {
@@ -335,6 +333,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if count%SaveSnapshotEvery == 0 {
+				r.AccountKey = k
 				r.save(ctx)
 			}
 		}
@@ -355,8 +354,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	//	}
 	//}
 
-	r.save(ctx)
-
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Account history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
@@ -373,7 +370,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	f, err := os.Create("accounts_growth.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < tsi.length; i++ {
@@ -416,8 +413,6 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 	var addrHash common.Hash
 	var hash common.Hash
-	var vIsEmpty bool
-	var err error
 
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
@@ -435,7 +430,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 		}
 
 		skipFirst := len(r.HistoryKey) > 0 // snapshot stores last analyzed key
-		for r.HistoryKey, vIsEmpty, err = c.SeekKey(r.HistoryKey); r.HistoryKey != nil || err != nil; r.HistoryKey, vIsEmpty, err = c.NextKey() {
+		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -445,10 +440,10 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 			}
 
 			// First 20 bytes is the address
-			copy(addrHash[:], r.HistoryKey[:32])
+			copy(addrHash[:], k[:32])
 			addr := string(addrHash.Bytes())
-			copy(hash[:], r.HistoryKey[40:72])
-			timestamp, _ := dbutils.DecodeTimestamp(r.HistoryKey[72:])
+			copy(hash[:], k[40:72])
+			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
@@ -483,6 +478,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if count%SaveSnapshotEvery == 0 {
+				r.HistoryKey = k
 				r.save(ctx)
 			}
 		}
@@ -507,7 +503,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 		}
 
 		skipFirst := len(r.StorageKey) > 0 // snapshot stores last analyzed key
-		for r.StorageKey, _, err = c.SeekKey(r.StorageKey); r.StorageKey != nil || err != nil; r.StorageKey, _, err = c.NextKey() {
+		for k, _, err := c.SeekKey(r.StorageKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
@@ -516,9 +512,9 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				continue
 			}
 
-			copy(addrHash[:], r.StorageKey[:32])
+			copy(addrHash[:], k[:32])
 			addr := string(addrHash.Bytes())
-			copy(hash[:], r.StorageKey[40:72])
+			copy(hash[:], k[40:72])
 			l, ok := r.LastTimestamps.Get(addr)
 			if !ok {
 				l = make(map[common.Hash]uint64)
@@ -533,6 +529,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if count%SaveSnapshotEvery == 0 {
+				r.StorageKey = k
 				r.save(ctx)
 			}
 		}
@@ -585,7 +582,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	f, err := os.Create("storage_growth.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < tsi.length; i++ {
@@ -626,11 +623,10 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	f, ferr := os.Create("gas_limits.csv")
 	check(ferr)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
-	var v []byte
 
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
@@ -650,7 +646,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 
 		i := 0
 		skipFirst := len(r.HeaderPrefixKey1) > 0 // snapshot stores last analyzed key
-		for r.HeaderPrefixKey1, v, err = c.First(); r.HeaderPrefixKey1 != nil || err != nil; r.HeaderPrefixKey1, v, err = c.Next() {
+		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -661,7 +657,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 
 			i++
 			// skip bucket keys not useful for analysis
-			if !dbutils.IsHeaderHashKey(r.HeaderPrefixKey1) {
+			if !dbutils.IsHeaderHashKey(k) {
 				continue
 			}
 
@@ -674,6 +670,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if i%SaveSnapshotEvery == 0 {
+				r.HeaderPrefixKey1 = k
 				r.save(ctx)
 			}
 		}
@@ -682,7 +679,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 		PrintMemUsage()
 
 		skipFirst = len(r.HeaderPrefixKey2) > 0 // snapshot stores last analyzed key
-		for r.HeaderPrefixKey2, v, err = c.Seek(r.HeaderPrefixKey2); r.HeaderPrefixKey2 != nil || err != nil; r.HeaderPrefixKey2, v, err = c.Next() {
+		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -690,11 +687,11 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 				skipFirst = false
 				continue
 			}
-			if !dbutils.IsHeaderKey(r.HeaderPrefixKey2) {
+			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
 
-			if _, ok := r.MainHashes.Get(string(r.HeaderPrefixKey2[common.BlockNumberLength:])); !ok {
+			if _, ok := r.MainHashes.Get(string(k[common.BlockNumberLength:])); !ok {
 				continue
 			}
 
@@ -713,6 +710,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 				PrintMemUsage()
 			}
 			if blockNum%SaveSnapshotEvery == 0 {
+				r.HeaderPrefixKey2 = k
 				r.save(ctx)
 			}
 		}
@@ -1083,7 +1081,7 @@ func stateGrowthChart4() {
 	addrFile, err := os.Open("addresses.csv")
 	check(err)
 	defer addrFile.Close()
-	addrReader := csv.NewReader(bufio.NewReaderSize(addrFile, 1024*1024))
+	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[string]string)
 	for records, _ := addrReader.Read(); records != nil; records, _ = addrReader.Read() {
 		names[records[0]] = records[1]
@@ -1181,7 +1179,7 @@ func stateGrowthChart5() {
 	addrFile, err := os.Open("addresses.csv")
 	check(err)
 	defer addrFile.Close()
-	addrReader := csv.NewReader(bufio.NewReaderSize(addrFile, 1024*1024))
+	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[string]string)
 	for records, _ := addrReader.Read(); records != nil; records, _ = addrReader.Read() {
 		names[records[0]] = records[1]
@@ -1325,7 +1323,7 @@ func makeCreators(blockNum uint64) {
 	f, err := os.OpenFile("/Volumes/tb41/turbo-geth/creators.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	ct := NewCreationTracer(w)
 	chainConfig := params.MainnetChainConfig
@@ -1385,7 +1383,7 @@ func storageUsage() {
 	addrFile, err := os.Open("addresses.csv")
 	check(err)
 	defer addrFile.Close()
-	addrReader := csv.NewReader(bufio.NewReaderSize(addrFile, 1024*1024))
+	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
 	for records, _ := addrReader.Read(); records != nil; records, _ = addrReader.Read() {
 		names[common.HexToAddress(records[0])] = records[1]
@@ -1446,7 +1444,7 @@ func storageUsage() {
 	f, err := os.Create("/Volumes/tb4/turbo-geth/items_by_address.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < iba.length; i++ {
@@ -1491,7 +1489,7 @@ func tokenUsage() {
 	tokensFile, err := os.Open("tokens.csv")
 	check(err)
 	defer tokensFile.Close()
-	tokensReader := csv.NewReader(bufio.NewReaderSize(tokensFile, 1024*1024))
+	tokensReader := csv.NewReader(bufio.NewReader(tokensFile))
 	tokens := make(map[common.Address]struct{})
 	for records, _ := tokensReader.Read(); records != nil; records, _ = tokensReader.Read() {
 		tokens[common.HexToAddress(records[0])] = struct{}{}
@@ -1499,7 +1497,7 @@ func tokenUsage() {
 	addrFile, err := os.Open("addresses.csv")
 	check(err)
 	defer addrFile.Close()
-	addrReader := csv.NewReader(bufio.NewReaderSize(addrFile, 1024*1024))
+	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
 	for records, _ := addrReader.Read(); records != nil; records, _ = addrReader.Read() {
 		names[common.HexToAddress(records[0])] = records[1]
@@ -1543,7 +1541,7 @@ func tokenUsage() {
 	f, err := os.Create("items_by_token.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < iba.length; i++ {
@@ -1567,7 +1565,7 @@ func nonTokenUsage() {
 	tokensFile, err := os.Open("tokens.csv")
 	check(err)
 	defer tokensFile.Close()
-	tokensReader := csv.NewReader(bufio.NewReaderSize(tokensFile, 1024*1024))
+	tokensReader := csv.NewReader(bufio.NewReader(tokensFile))
 	tokens := make(map[common.Address]struct{})
 	for records, _ := tokensReader.Read(); records != nil; records, _ = tokensReader.Read() {
 		tokens[common.HexToAddress(records[0])] = struct{}{}
@@ -1575,7 +1573,7 @@ func nonTokenUsage() {
 	addrFile, err := os.Open("addresses.csv")
 	check(err)
 	defer addrFile.Close()
-	addrReader := csv.NewReader(bufio.NewReaderSize(addrFile, 1024*1024))
+	addrReader := csv.NewReader(bufio.NewReader(addrFile))
 	names := make(map[common.Address]string)
 	for records, _ := addrReader.Read(); records != nil; records, _ = addrReader.Read() {
 		names[common.HexToAddress(records[0])] = records[1]
@@ -1619,7 +1617,7 @@ func nonTokenUsage() {
 	f, err := os.Create("items_by_nontoken.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < iba.length; i++ {
@@ -1699,7 +1697,7 @@ func oldStorage() {
 	f, err := os.Create("items_by_address.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < iba.length; i++ {
@@ -1761,7 +1759,7 @@ func dustEOA() {
 	f, err := os.Create("dust_eoa.csv")
 	check(err)
 	defer f.Close()
-	w := bufio.NewWriterSize(f, 1024*1024)
+	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
 	for i := 0; i < tsi.length; i++ {
@@ -1776,7 +1774,7 @@ func dustChartEOA() {
 	dust_eoaFile, err := os.Open("dust_eoa.csv")
 	check(err)
 	defer dust_eoaFile.Close()
-	dust_eoaReader := csv.NewReader(bufio.NewReaderSize(dust_eoaFile, 1024*1024))
+	dust_eoaReader := csv.NewReader(bufio.NewReader(dust_eoaFile))
 	var thresholds, counts []float64
 	for records, _ := dust_eoaReader.Read(); records != nil; records, _ = dust_eoaReader.Read() {
 		thresholds = append(thresholds, parseFloat64(records[0]))
