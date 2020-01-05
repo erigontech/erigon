@@ -785,6 +785,11 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				if err := acc.DecodeForStorage(value); err != nil {
 					return err
 				}
+				// Fetch the code hash
+				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
+					codeHash, _ := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
+					copy(acc.CodeHash[:], codeHash)
+				}
 				b.accountUpdates[addrHash] = &acc
 				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
 					return err

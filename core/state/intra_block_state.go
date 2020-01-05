@@ -773,11 +773,15 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	if checkPrev {
 		previous = sdb.getStateObject(addr)
 	}
+
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
 	}
-	newObj.created = true
+
+	if checkPrev {
+		newObj.created = true
+	}
 }
 
 // Snapshot returns an identifier for the current revision of the state.
