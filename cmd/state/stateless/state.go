@@ -175,7 +175,6 @@ func bToMb(b uint64) uint64 {
 
 type StateGrowth1Reporter struct {
 	db               *remote.DB `codec:"-"`
-	version          string
 	save             func(ctx context.Context)
 	MaxTimestamp     uint64
 	HistoryKey       []byte
@@ -414,7 +413,6 @@ func NewStateGrowth2Reporter(ctx context.Context, db *remote.DB) *StateGrowth2Re
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	startTime := time.Now()
 	var count int
-	var maxTimestamp uint64
 
 	var addrHash common.Hash
 	var hash common.Hash
@@ -451,8 +449,8 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 			addr := string(addrHash.Bytes())
 			copy(hash[:], r.HistoryKey[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(r.HistoryKey[72:])
-			if timestamp+1 > maxTimestamp {
-				maxTimestamp = timestamp + 1
+			if timestamp+1 > r.MaxTimestamp {
+				r.MaxTimestamp = timestamp + 1
 			}
 			if vIsEmpty {
 				c, ok := r.CreationsByBlock.Get(addr)
@@ -526,7 +524,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 				l = make(map[common.Hash]uint64)
 				r.LastTimestamps.Set(addr, l)
 			}
-			l[hash] = maxTimestamp
+			l[hash] = r.MaxTimestamp
 			count++
 			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %d storage records, %s\n", count, time.Since(startTime))
@@ -545,7 +543,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 	r.LastTimestamps.Walk(func(address string, l map[common.Hash]uint64) bool {
 		for _, lt := range l {
-			if lt < maxTimestamp {
+			if lt < r.MaxTimestamp {
 				v, _ := r.CreationsByBlock.Get(address)
 				v[lt]--
 				r.CreationsByBlock.Set(address, v)
@@ -1773,6 +1771,7 @@ func dustEOA() {
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 }
 
+//nolint:deadcode,unused,golint,stylecheck
 func dustChartEOA() {
 	dust_eoaFile, err := os.Open("dust_eoa.csv")
 	check(err)
