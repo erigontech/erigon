@@ -12,9 +12,8 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
-	"github.com/spf13/cobra"
-
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/spf13/cobra"
 )
 
 var (
