@@ -13,14 +13,14 @@ func init() {
 		Short: "stateGrowth",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := getContext()
-			reporter, err := stateless.NewReporter(ctx, remoteDbAddress)
+			db, err := connectRemoteDb(ctx, remoteDbAddress)
 			if err != nil {
 				return err
 			}
 
 			fmt.Println("Processing started...")
-			reporter.StateGrowth1(ctx)
-			reporter.StateGrowth2(ctx)
+			stateless.NewStateGrowth1Reporter(ctx, db).StateGrowth1(ctx)
+			stateless.NewStateGrowth2Reporter(ctx, db).StateGrowth2(ctx)
 			return nil
 		},
 	}
