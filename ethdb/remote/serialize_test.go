@@ -18,29 +18,34 @@ package remote
 
 import (
 	"bytes"
-	"strconv"
 	"testing"
+
+	"github.com/ugorji/go/codec"
 )
 
 func BenchmarkSerialize(b *testing.B) {
-	k := []byte(strconv.Itoa(1))
-	v := []byte(strconv.Itoa(1))
-	var r, w bytes.Buffer
+	k := make([]byte, 50)
+	v := make([]byte, 500)
+	var w bytes.Buffer
+	var handle codec.CborHandle
+	handle.WriterBufferSize = 1024
+	encoder := codec.NewEncoder(&w, &handle)
 
-	encoder := newEncoder(&w)
-	defer returnEncoderToPool(encoder)
-	// output buffer to receive the result of the command
-	decoder := newDecoder(&r)
-	defer returnDecoderToPool(decoder)
-
-	b.ResetTimer()
 	b.Run("encodeKeyValue()", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			_ = encoder.Encode(ResponseOk)
 			_ = encodeKeyValue(encoder, &k, &v)
 		}
 	})
 	b.Run("encoder.Encode(&k)", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			_ = encoder.Encode(ResponseOk)
 			_ = encoder.Encode(&k)
@@ -48,6 +53,10 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 	b.Run("encoder.Encode(k)", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			_ = encoder.Encode(ResponseOk)
 			_ = encoder.Encode(k)
@@ -55,6 +64,10 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 	b.Run("encoder.MustEncode(&k)", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			encoder.MustEncode(ResponseOk)
 			encoder.MustEncode(&k)
@@ -62,6 +75,10 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 	b.Run("encoder.MustEncode(k)", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			encoder.MustEncode(ResponseOk)
 			encoder.MustEncode(k)
@@ -69,6 +86,10 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 	b.Run("Encode(struct)", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		type kv struct {
 			K []byte
 			V []byte
@@ -87,8 +108,12 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 
-	b.Run("10K Encode(&k, &v)", func(b *testing.B) {
-		M := 10 * 1000
+	M := 10 * 1000
+	b.Run("10K Encode(&k, &v) nobuf", func(b *testing.B) {
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			encoder.MustEncode(ResponseOk)
 			for i := 0; i < M; i++ {
@@ -98,7 +123,10 @@ func BenchmarkSerialize(b *testing.B) {
 		}
 	})
 	b.Run("Encode([10K]k, [10K]v)", func(b *testing.B) {
-		M := 10 * 1000
+		encoder.Reset(&w)
+		w.Reset()
+		b.ResetTimer()
+
 		for i := 0; i < b.N; i++ {
 			keys := make([][]byte, M)
 			values := make([][]byte, M)
@@ -107,8 +135,8 @@ func BenchmarkSerialize(b *testing.B) {
 				values[i] = v
 			}
 			encoder.MustEncode(ResponseOk)
-			encoder.MustEncode(keys)
-			encoder.MustEncode(values)
+			encoder.MustEncode(&keys)
+			encoder.MustEncode(&values)
 		}
 	})
 }
