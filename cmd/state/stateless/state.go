@@ -210,7 +210,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	var count int
 	var addrHash common.Hash
 	var processingDone bool
-	var a = make(map[string]struct{}, 10)
 
 beginTx:
 	// Go through the history of account first
@@ -238,11 +237,6 @@ beginTx:
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
-			if _, ok := a[string(k)]; ok {
-				panic("repeated!")
-			} else {
-				a[string(k)] = struct{}{}
-			}
 			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > r.MaxTimestamp {
