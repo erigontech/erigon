@@ -326,7 +326,7 @@ func TestCmdSeek(t *testing.T) {
 	assert.Equal(t, value2, string(value), "Unexpected value")
 }
 
-func TestCmdNext(t *testing.T) {
+func TestCursorOperations(t *testing.T) {
 	// ---------- Start of boilerplate code
 	ctx := context.Background()
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
@@ -368,6 +368,8 @@ func TestCmdNext(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
 	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
 
+	// Logic of test: .Seek(), .Next(), .First(), .Next(), .FirstKey(), .NextKey()
+
 	var cursorHandle uint64 = 2
 	var seekKey = []byte("key1") // Should find key1
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
@@ -375,9 +377,31 @@ func TestCmdNext(t *testing.T) {
 	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
 
 	var numberOfKeys uint64 = 2 // Trying to get 2 keys, but will get 1 + nil
+	// .Next()
 	assert.Nil(t, encoder.Encode(CmdCursorNext), "Could not encode CmdCursorNext")
 	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
 	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
+
+	// .First()
+	assert.Nil(t, encoder.Encode(CmdCursorFirst), "Could not encode CmdCursorFirst")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorFirst")
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorFirst")
+
+	// .Next()
+	assert.Nil(t, encoder.Encode(CmdCursorNext), "Could not encode CmdCursorNext")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
+
+	// .FirstKey()
+	assert.Nil(t, encoder.Encode(CmdCursorFirstKey), "Could not encode CmdCursorFirstKey")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorFirstKey")
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorFirstKey")
+
+	// .NextKey()
+	assert.Nil(t, encoder.Encode(CmdCursorNextKey), "Could not encode CmdCursorNextKey")
+	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNextKey")
+	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNextKey")
+
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -398,8 +422,10 @@ func TestCmdNext(t *testing.T) {
 	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 	assert.Nil(t, decoder.Decode(&cursorHandle), "Could not decode response from CmdCursor")
 	assert.Equal(t, uint64(2), cursorHandle, "Unexpected cursorHandle")
-	// Results of CmdCursorSeek
+
 	var key, value []byte
+
+	// Results of CmdCursorSeek
 	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
 	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 	// first
@@ -409,7 +435,7 @@ func TestCmdNext(t *testing.T) {
 	assert.Equal(t, value1, string(value), "Unexpected value")
 
 	// Results of CmdCursorNext
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNext")
 	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
 	assert.Equal(t, key2, string(key), "Unexpected key")
@@ -421,107 +447,51 @@ func TestCmdNext(t *testing.T) {
 	assert.Nil(t, key, "Unexpected key")
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, value, "Unexpected value")
-}
-
-func TestCmdFirst(t *testing.T) {
-	// ---------- Start of boilerplate code
-	ctx := context.Background()
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
-	// Prepare input buffer with one command CmdVersion
-	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
-	// output buffer to receive the result of the command
-	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
-	// ---------- End of boilerplate code
-	// Create a bucket and populate some values
-	var name = []byte("testbucket")
-	if err = db.Update(func(tx *bolt.Tx) error {
-		b, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
-		return nil
-	}); err != nil {
-		t.Errorf("Could not create and populate a bucket: %v", err)
-	}
-
-	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
-
-	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
-
-	var bucketHandle uint64 = 1
-	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
-	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
-
-	var cursorHandle uint64 = 2
-	var numberOfFirstKeys uint64 = 2 // Trying to get 2 keys
-	assert.Nil(t, encoder.Encode(CmdCursorFirst), "Could not encode CmdCursorFirst")
-	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorFirst")
-	assert.Nil(t, encoder.Encode(numberOfFirstKeys), "Could not encode numberOfFirstKeys for CmdCursorFirst")
-
-	var numberOfKeys uint64 = 2 // Trying to get 2 keys, but will get nil
-	assert.Nil(t, encoder.Encode(CmdCursorNext), "Could not encode CmdCursorNext")
-	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
-	assert.Nil(t, encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
-	// By now we constructed all input requests, now we call the
-	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
-	// And then we interpret the results
-	// Results of CmdBeginTx
-	var responseCode ResponseCode
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-
-	// Results of CmdBucket
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&bucketHandle), "Could not decode response from CmdBucket")
-	assert.Equal(t, uint64(1), bucketHandle, "Unexpected bucketHandle")
-
-	// Results of CmdCursor
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdBeginTx")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&cursorHandle), "Could not decode response from CmdCursor")
-	assert.Equal(t, uint64(2), cursorHandle, "Unexpected cursorHandle")
 
 	// Results of CmdCursorFirst
-	var key, value []byte
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected responseCode")
-	// first
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirst")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	// first result
 	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
 	assert.Equal(t, key1, string(key), "Unexpected key")
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
 	assert.Equal(t, value1, string(value), "Unexpected value")
-
-	// second
+	// second result
 	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
 	assert.Equal(t, key2, string(key), "Unexpected key")
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
 	assert.Equal(t, value2, string(value), "Unexpected value")
 
-	// Results of last CmdCursorNext
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected responseCode")
+	// Results of CmdCursorNext must be nil
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNext")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
 	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, key, "Unexpected key")
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, value, "Unexpected value")
+
+	var vIsEmpty bool
+	// Results of CmdCursorFirstKey
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirstKey")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	// first result
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
+	assert.Equal(t, key1, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
+	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
+	// second result
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
+	assert.Equal(t, key2, string(key), "Unexpected key")
+	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
+	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
+
+	// Results of CmdCursorNextKey must be nil
+	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNextKey")
+	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
+	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNextKey")
+	assert.Nil(t, key, "Unexpected key")
+	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorNextKey")
+	assert.True(t, vIsEmpty, "Unexpected vIsEmpty")
 }
 
 func TestTxYield(t *testing.T) {
@@ -671,7 +641,6 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 		}
 
 	}
-
 }
 
 func BenchmarkBoltCursorFirst(b *testing.B) {
