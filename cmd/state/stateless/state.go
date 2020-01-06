@@ -1781,7 +1781,7 @@ func dustEOA() {
 		idx++
 	}
 	sort.Sort(tsi)
-	fmt.Printf("Writing dataset...")
+	fmt.Printf("Writing dataset...\n")
 	f, err := os.Create("dust_eoa.csv")
 	check(err)
 	defer f.Close()
