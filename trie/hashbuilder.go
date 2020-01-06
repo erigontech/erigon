@@ -47,7 +47,7 @@ func (hb *HashBuilder) Reset() {
 	hb.nodeStack = hb.nodeStack[:0]
 }
 
-func (hb *HashBuilder) leaf(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
 	}
@@ -67,7 +67,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val RlpSerializable) erro
 }
 
 // To be called internally
-func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializable) error {
 	var hash [hashStackStride]byte // RLP representation of hash (or of un-hashed value if short)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
@@ -112,7 +112,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val rlphacks.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 
@@ -162,7 +162,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
 	}

@@ -17,6 +17,10 @@
 package types
 
 import (
+	"bytes"
+	"fmt"
+	"io"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -33,9 +37,9 @@ func DeriveSha(list DerivableList) common.Hash {
 		return trie.EmptyRoot
 	}
 
-	curr := &trie.OneBytesTape{}
-	succ := &trie.OneBytesTape{}
-	value := &trie.OneBytesTape{}
+	var curr bytes.Buffer
+	var succ bytes.Buffer
+	var value bytes.Buffer
 
 	hb := trie.NewHashBuilder(false)
 
@@ -43,7 +47,7 @@ func DeriveSha(list DerivableList) common.Hash {
 	curr.Reset()
 	succ.Reset()
 
-	hexWriter := &hexTapeWriter{succ}
+	hexWriter := &hexWriter{&succ}
 
 	var groups []uint16
 
@@ -54,7 +58,9 @@ func DeriveSha(list DerivableList) common.Hash {
 
 		if next >= 0 {
 			encodeUint(uint(next), hexWriter)
-			hexWriter.Commit()
+			if err := hexWriter.Commit(); err != nil {
+				panic(fmt.Errorf("fatal in DeriveSha: %w", err))
+			}
 		}
 
 		value.Reset()
@@ -74,18 +80,19 @@ type bytesWriter interface {
 }
 
 // hexTapeWriter hex-encodes data and writes it directly to a tape.
-type hexTapeWriter struct {
-	tape *trie.OneBytesTape
+type hexWriter struct {
+	w io.ByteWriter
 }
 
-func (w *hexTapeWriter) WriteByte(b byte) error {
-	w.tape.WriteByte(b / 16)
-	w.tape.WriteByte(b % 16)
-	return nil
+func (w *hexWriter) WriteByte(b byte) error {
+	if err := w.w.WriteByte(b / 16); err != nil {
+		return err
+	}
+	return w.w.WriteByte(b % 16)
 }
 
-func (w *hexTapeWriter) Commit() {
-	w.tape.WriteByte(16)
+func (w *hexWriter) Commit() error {
+	return w.w.WriteByte(16)
 }
 
 func adjustIndex(i int, l int) int {

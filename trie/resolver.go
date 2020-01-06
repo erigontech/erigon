@@ -31,17 +31,6 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	return nil
 }
 
-// OneBytesTape implements BytesTape and can only contain one binary string at the time
-type OneBytesTape struct {
-	bytes.Buffer
-}
-
-// Next belongs to the BytesTape interface, and for this type it always returns the
-// content of the buffer
-func (obt *OneBytesTape) Next() ([]byte, error) {
-	return obt.Bytes(), nil
-}
-
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
@@ -58,9 +47,9 @@ type Resolver struct {
 	hb         *HashBuilder
 	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
 	rss        []*ResolveSet
-	curr       OneBytesTape // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
-	value      OneBytesTape // Current value to be used as the value tape for the hash builder
+	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groups     []uint16
 	a          accounts.Account
 }
@@ -305,8 +294,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				}
 			}
 		} else {
-			tr.value.Buffer.Reset()
-			tr.value.Buffer.Write(v)
+			tr.value.Reset()
+			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}

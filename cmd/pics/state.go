@@ -605,20 +605,21 @@ func initialState1() error {
 		rs.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
-	bwb := trie.NewBlockWitnessBuilder(false)
+
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if err = bwb.MakeBlockWitness(quadTrie, rs, codeMap); err != nil {
+
+	var witness *trie.Witness
+
+	if witness, err = quadTrie.ExtractWitness(0, false, rs, codeMap); err != nil {
 		return err
 	}
-	var witness bytes.Buffer
-	if _, err = bwb.WriteTo(&witness); err != nil {
-		return err
-	}
+
 	var witnessTrie *trie.Trie
 	var witnessCodeMap map[common.Hash][]byte
-	if witnessTrie, witnessCodeMap, err = trie.BlockWitnessToTrie(witness.Bytes(), false); err != nil {
+
+	if witnessTrie, witnessCodeMap, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
 		return err
 	}
 	if _, err = statePicture(witnessTrie, witnessCodeMap, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
