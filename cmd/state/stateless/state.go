@@ -48,7 +48,7 @@ const (
 	PrintMemStatsEvery = 1 * 1000 * 1000
 	PrintProgressEvery = 100 * 1000
 	SaveSnapshotEvery  = 1 * 1000 * 1000
-	MaxIterationsPerTx = 1 * 1000 * 1000
+	MaxIterationsPerTx = 10 * 1000 * 1000
 	CursorBatchSize    = 10 * 1000
 )
 
