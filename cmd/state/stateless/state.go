@@ -548,7 +548,7 @@ beginTx2:
 				r.save(ctx)
 			}
 		}
-		processingDone = false
+		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
