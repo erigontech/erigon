@@ -29,14 +29,14 @@ typedef struct {
 state_hash_type* state_hashes[MAX_TERMS];
 
 // Gas counters
-uint64_t gas_counters[MAX_TERMS];
+__uint64_t gas_counters[MAX_TERMS];
 
 // Actual bytes for the InputByte terms
 char input_bytes[MAX_TERMS];
 
 // Initialises the sequence with given state root and transaction data
 // Returns 0 if the initialisation is successful, otherwise error code
-int initialise(void* state_root, int tx_data_len, void* tx_data, uint64_t gas) {
+int initialise(void* state_root, void *from_address, void *to_address, __uint128_t value, int tx_data_len, void* tx_data, __uint64_t gas_price, __uint64_t gas) {
     if (2 + tx_data_len > MAX_TERMS) {
         // First term is to state root
         // Second term is for gas counter
