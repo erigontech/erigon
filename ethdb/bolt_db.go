@@ -19,9 +19,10 @@ package ethdb
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"os"
 	"path"
+
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -39,6 +40,16 @@ type BoltDatabase struct {
 	db  *bolt.DB   // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 	id  uint64
+}
+
+// NewBoltDatabase returns a BoltDB wrapper.
+func NewWrapperBoltDatabase(db *bolt.DB) *BoltDatabase {
+	logger := log.New()
+	return &BoltDatabase{
+		db:  db,
+		log: logger,
+		id:  id(),
+	}
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.

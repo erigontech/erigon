@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
@@ -83,6 +84,8 @@ const (
 	// CmdCursorSeekTo (cursorHandle, seekKey): (key, value)
 	// Moves given cursor to the seekKey, or to the next key after seekKey
 	CmdCursorSeekTo
+	// CmdGetAsOf (bucket, hBucket, key []byte, timestamp uint64): (value)
+	CmdGetAsOf
 )
 
 const DefaultCursorBatchSize uint64 = 1
@@ -503,6 +506,37 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					break
 				}
 			}
+		case CmdGetAsOf:
+			var bucket, hBucket, key, v []byte
+			var timestamp uint64
+			if err := decoder.Decode(&bucket); err != nil {
+				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
+			}
+			if err := decoder.Decode(&hBucket); err != nil {
+				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
+			}
+			if err := decoder.Decode(&key); err != nil {
+				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
+			}
+			if err := decoder.Decode(&timestamp); err != nil {
+				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
+			}
+
+			d := ethdb.NewWrapperBoltDatabase(db)
+
+			var err error
+			v, err = d.GetAsOf(bucket, hBucket, key, timestamp)
+			if err != nil {
+				encodeErr(encoder, err)
+			}
+
+			if err := encoder.Encode(ResponseOk); err != nil {
+				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
+			}
+
+			if err := encoder.Encode(&v); err != nil {
+				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
+			}
 		default:
 			log.Error("unknown", "command", c)
 			return fmt.Errorf("unknown command %d", c)
@@ -756,6 +790,68 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 		}
 	}
 	return nil
+}
+
+func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+	var err error
+	var responseCode ResponseCode
+	in, out, closer, err := db.getConnection(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		if err != nil {
+			db.reconnect <- struct{}{}
+			closer.Close()
+			return
+		}
+		db.returnConn(ctx, in, out, closer)
+	}()
+
+	decoder := newDecoder(in)
+	defer returnDecoderToPool(decoder)
+	encoder := newEncoder(out)
+	defer returnEncoderToPool(encoder)
+
+	err = encoder.Encode(CmdGetAsOf)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
+	}
+	err = encoder.Encode(&bucket)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
+	}
+	err = encoder.Encode(&hBucket)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
+	}
+	err = encoder.Encode(&key)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
+	}
+	err = encoder.Encode(timestamp)
+	if err != nil {
+		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
+	}
+
+	err = decoder.Decode(&responseCode)
+	if err != nil {
+		return nil, err
+	}
+
+	if responseCode != ResponseOk {
+		err = decodeErr(decoder, responseCode)
+		return nil, err
+	}
+
+	var val []byte
+	err = decoder.Decode(&val)
+	if err != nil {
+		return nil, err
+	}
+
+	return val, nil
 }
 
 // View performs read-only transaction on the remote database

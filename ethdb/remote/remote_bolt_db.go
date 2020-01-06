@@ -73,6 +73,7 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 //
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
@@ -109,63 +110,7 @@ func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, err
 
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	var dat []byte
-	err := db.db.View(context.Background(), func(tx *Tx) error {
-		{
-			hB, err := tx.Bucket(hBucket)
-			if err != nil {
-				return err
-			}
-
-			if hB == nil {
-				return ethdb.ErrKeyNotFound
-			}
-			hC, err := hB.Cursor()
-			if err != nil {
-				return err
-			}
-
-			hK, hV, err := hC.Seek(composite)
-			if err != nil {
-				return err
-			}
-
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
-				return nil
-			}
-		}
-		{
-			b, err := tx.Bucket(bucket)
-			if err != nil {
-				return err
-			}
-
-			if b == nil {
-				return ethdb.ErrKeyNotFound
-			}
-			c, err := b.Cursor()
-			if err != nil {
-				return err
-			}
-
-			k, v, err := c.Seek(key)
-			if err != nil {
-				return err
-			}
-
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
-			}
-		}
-
-		return ethdb.ErrKeyNotFound
-	})
-	return dat, err
+	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
 }
 
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
