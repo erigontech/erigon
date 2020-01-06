@@ -434,8 +434,8 @@ beginTx:
 			}
 
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
-			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
+			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
