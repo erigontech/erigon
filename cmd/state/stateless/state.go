@@ -45,10 +45,10 @@ import (
 var emptyCodeHash = crypto.Keccak256(nil)
 
 const (
-	PrintMemStatsEvery = 10 * 1000 * 1000
-	PrintProgressEvery = 1 * 1000 * 1000
-	SaveSnapshotEvery  = 10 * 1000 * 1000
-	MaxIterationsPerTx = 1 * 1000 * 100
+	PrintMemStatsEvery = 1 * 1000 * 1000
+	PrintProgressEvery = 100 * 1000
+	SaveSnapshotEvery  = 1 * 1000 * 1000
+	MaxIterationsPerTx = 1 * 1000 * 1000
 	CursorBatchSize    = 10 * 1000
 )
 
@@ -287,10 +287,6 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
-		defer func() {
-			processingDone = true
-		}()
-
 		pre, err := tx.Bucket(dbutils.PreimagePrefix)
 		if err != nil {
 			return err
@@ -528,8 +524,8 @@ beginTx2:
 			}
 
 			copy(addrHash[:], k[:32])
-			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
+			addr := string(addrHash.Bytes())
 			l, ok := r.LastTimestamps.Get(addr)
 			if !ok {
 				l = make(map[common.Hash]uint64)
@@ -547,6 +543,10 @@ beginTx2:
 				r.StorageKey = k
 				r.save(ctx)
 			}
+			if count%MaxIterationsPerTx == 0 {
+				r.StorageKey = k
+				return nil
+			}
 		}
 		processingDone = true
 		return nil
@@ -563,7 +563,6 @@ beginTx2:
 			if lt < r.MaxTimestamp {
 				v, _ := r.CreationsByBlock.Get(address)
 				v[lt]--
-				r.CreationsByBlock.Set(address, v)
 			}
 		}
 		return false
@@ -669,7 +668,6 @@ beginTx:
 				continue
 			}
 
-			i++
 			// skip bucket keys not useful for analysis
 			if !dbutils.IsHeaderHashKey(k) {
 				continue
@@ -677,6 +675,7 @@ beginTx:
 
 			r.MainHashes.Set(string(v), 0)
 
+			i++
 			if i%PrintProgressEvery == 0 {
 				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(startTime))
 			}
@@ -730,7 +729,7 @@ beginTx:
 				r.HeaderPrefixKey2 = k
 				r.save(ctx)
 			}
-			if i%MaxIterationsPerTx == 0 {
+			if blockNum%MaxIterationsPerTx == 0 {
 				r.HeaderPrefixKey2 = k
 				return nil
 			}
