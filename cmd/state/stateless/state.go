@@ -369,7 +369,7 @@ beginTx2:
 		idx++
 	}
 	sort.Sort(tsi)
-	fmt.Printf("Writing dataset...")
+	fmt.Printf("Writing dataset...\n")
 	f, err := os.Create("accounts_growth.csv")
 	check(err)
 	defer f.Close()
