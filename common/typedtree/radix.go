@@ -25,10 +25,10 @@ func (t *RadixMapHash2Uint64) Len() int {
 
 func (t *RadixMapHash2Uint64) Get(k string) (map[common.Hash]uint64, bool) {
 	v, ok := t.tree.Get(k)
-	if !ok {
-		return nil, false
+	if ok {
+		return v.(map[common.Hash]uint64), ok
 	}
-	return v.(map[common.Hash]uint64), true
+	return nil, ok
 }
 
 func (t *RadixMapHash2Uint64) Set(k string, v map[common.Hash]uint64) {
@@ -59,9 +59,9 @@ func (t *RadixMapHash2Uint64) CodecDecodeSelf(d *codec.Decoder) {
 	}
 	var amount int
 	d.MustDecode(&amount)
-	var k string
-	var v map[common.Hash]uint64
 	for i := 0; i < amount; i++ {
+		var k string
+		var v map[common.Hash]uint64
 		d.MustDecode(&k)
 		d.MustDecode(&v)
 		t.tree.Insert(k, v)
@@ -87,10 +87,10 @@ func (t *RadixMapUint642Int) Len() int {
 
 func (t *RadixMapUint642Int) Get(k string) (map[uint64]int, bool) {
 	v, ok := t.tree.Get(k)
-	if !ok {
-		return nil, false
+	if ok {
+		return v.(map[uint64]int), ok
 	}
-	return v.(map[uint64]int), true
+	return nil, ok
 }
 
 func (t *RadixMapUint642Int) Set(k string, v map[uint64]int) {
@@ -120,9 +120,9 @@ func (t *RadixMapUint642Int) CodecDecodeSelf(d *codec.Decoder) {
 	}
 	var amount int
 	d.MustDecode(&amount)
-	var k string
-	var v map[uint64]int
 	for i := 0; i < amount; i++ {
+		var k string
+		var v map[uint64]int
 		d.MustDecode(&k)
 		d.MustDecode(&v)
 		t.tree.Insert(k, v)
@@ -148,10 +148,10 @@ func (t *RadixUint64) Len() int {
 
 func (t *RadixUint64) Get(k string) (uint64, bool) {
 	v, ok := t.tree.Get(k)
-	if !ok {
-		return 0, false
+	if ok {
+		return v.(uint64), ok
 	}
-	return v.(uint64), true
+	return 0, ok
 }
 
 func (t *RadixUint64) Set(k string, v uint64) {
@@ -183,9 +183,9 @@ func (t *RadixUint64) CodecDecodeSelf(d *codec.Decoder) {
 
 	var amount int
 	d.MustDecode(&amount)
-	var k string
-	var v uint64
 	for i := 0; i < amount; i++ {
+		var k string
+		var v uint64
 		d.MustDecode(&k)
 		d.MustDecode(&v)
 		t.tree.Insert(k, v)
