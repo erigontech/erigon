@@ -131,6 +131,7 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	// For each timestamp, how many accounts were created in the state
 	creationsByBlock := make(map[uint64]int)
 	var addrHash common.Hash
+
 	// Go through the history of account first
 	if err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
@@ -146,7 +147,11 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		t := time.Now()
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			// First 32 bytes is the hash of the address, then timestamp encoding
 			copy(addrHash[:], k[:32])
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
@@ -161,11 +166,10 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			}
 			lastTimestamps[addrHash] = timestamp
 			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+			if count%1000000 == 0 {
+				fmt.Printf("Processed %d account records. %s\n", count, time.Since(t))
 			}
 		}
-		check(c.Err())
 		return nil
 	}); err != nil {
 		check(err)
@@ -194,16 +198,19 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 			return err
 		}
 
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		t := time.Now()
+		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			// First 32 bytes is the hash of the address
 			copy(addrHash[:], k[:32])
 			lastTimestamps[addrHash] = maxTimestamp
 			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+			if count%1000000 == 0 {
+				fmt.Printf("Processed %d account records. %s\n", count, time.Since(t))
 			}
 		}
-		check(c.Err())
 		return nil
 	}); err != nil {
 		check(err)
@@ -265,7 +272,10 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			return err
 		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			// First 20 bytes is the address
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
@@ -300,7 +310,6 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 				fmt.Printf("Processed %d storage records\n", count)
 			}
 		}
-		check(c.Err())
 		return nil
 	}); err != nil {
 		panic(err)
@@ -321,7 +330,10 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 			return err
 		}
 
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
 			l, ok := lastTimestamps[addrHash]
@@ -335,7 +347,6 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 				fmt.Printf("Processed %d storage records\n", count)
 			}
 		}
-		check(c.Err())
 		return nil
 	}); err != nil {
 		panic(err)
@@ -392,6 +403,7 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	var blockNum uint64 = 0
 
 	mainHashes := make(map[string]struct{}, 10*000*000)
+	t := time.Now()
 
 	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
@@ -409,19 +421,31 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 
 		fmt.Println("Preloading block numbers...")
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		i := 0
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
+
+			i++
 			// skip bucket keys not useful for analysis
 			if !dbutils.IsHeaderHashKey(k) {
 				continue
 			}
 
 			mainHashes[string(v)] = struct{}{}
+
+			if i%1000000 == 0 {
+				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(t))
+			}
 		}
-		check(c.Err())
 
 		fmt.Println("Preloaded: ", len(mainHashes))
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return err
+			}
 			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
@@ -443,7 +467,6 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 
 			blockNum++
 		}
-		check(c.Err())
 		return nil
 	})
 	check(err)
