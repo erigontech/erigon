@@ -507,24 +507,6 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal("Account from GetAsOf(1) is incorrect")
 	}
 
-	b, err = db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc2.Equals(resAcc) {
-		t.Fatal("Account from GetS(1) is incorrect")
-	}
-
-	_, err = db.GetS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
-	if err != ErrKeyNotFound {
-		t.Fatal(err)
-	}
-
 	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 	if err != nil {
 		t.Fatal(err)
