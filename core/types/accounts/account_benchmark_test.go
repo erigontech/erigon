@@ -499,7 +499,7 @@ func BenchmarkRLPDecodingAccount(b *testing.B) {
 		test := test
 		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
-				bufBytes := make([]byte, 0, test.acc.encodingLength(false))
+				bufBytes := make([]byte, 0, test.acc.EncodingLengthForHashing())
 				buf := bytes.NewBuffer(bufBytes)
 				if err := test.acc.EncodeRLP(buf); err != nil {
 					b.Fatal("cant encode the account", err, test)

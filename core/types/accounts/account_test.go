@@ -161,7 +161,7 @@ func TestAccountEncodeWithCodeEIP2027(t *testing.T) {
 func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 	const HugeNumber = uint64(1 << 63)
 
-	storageSizes := []uint64{0, 1, 2, 3, 10, 100,
+	storageSizes := []uint64{0, 1, 2, 3, 10, 23, 24, 100,
 		HugeNumber, HugeNumber + 1, HugeNumber + 2, HugeNumber + 10, HugeNumber + 100, HugeNumber + 10000000}
 
 	for _, storageSize := range storageSizes {
@@ -174,7 +174,6 @@ func TestAccountEncodeWithCodeWithStorageSizeEIP2027(t *testing.T) {
 			HasStorageSize: true,
 			StorageSize:    storageSize,
 		}
-
 		encodedLen := a.EncodingLengthForStorage()
 		encodedAccount := make([]byte, encodedLen)
 		a.EncodeForStorage(encodedAccount)
