@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/typedtree"
+	"github.com/ledgerwatch/turbo-geth/common/radix"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -744,7 +744,7 @@ type GasLimitReporter struct {
 	save             func(ctx context.Context)
 	HeaderPrefixKey1 []byte
 	HeaderPrefixKey2 []byte
-	MainHashes       *typedtree.RadixUint64
+	MainHashes       *radix.RadixUint64
 }
 
 func NewGasLimitReporter(ctx context.Context, db *remote.DB) *GasLimitReporter {
@@ -752,7 +752,7 @@ func NewGasLimitReporter(ctx context.Context, db *remote.DB) *GasLimitReporter {
 		db:               db,
 		HeaderPrefixKey1: []byte{},
 		HeaderPrefixKey2: []byte{},
-		MainHashes:       typedtree.NewRadixUint64(),
+		MainHashes:       radix.NewRadixUint64(),
 	}
 	var dumpFile = file("GasLimit", 1)
 	rep.save = func(ctx context.Context) {
