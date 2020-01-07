@@ -37,6 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth/tracers"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -438,7 +439,7 @@ func (api *PrivateDebugAPI) traceBlock(ctx context.Context, block *types.Block, 
 	if parent == nil {
 		return nil, fmt.Errorf("parent %#x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeIntraBlockState(parent)
+	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainDb(), parent)
 	// Execute all the transaction contained within the block concurrently
 	var (
 		signer = types.MakeSigner(api.eth.blockchain.Config(), block.Number())
@@ -525,7 +526,7 @@ func (api *PrivateDebugAPI) standardTraceBlockToFile(ctx context.Context, block 
 			reexec = *config.Reexec
 		}
 	*/
-	statedb, dbstate := api.computeIntraBlockState(parent)
+	statedb, dbstate := ComputeIntraBlockState(api.eth.ChainDb(), parent)
 	// Retrieve the tracing configurations, or use default values
 	var (
 		logConfig vm.LogConfig
@@ -613,9 +614,9 @@ func containsTx(block *types.Block, hash common.Hash) bool {
 // computeIntraBlockState retrieves the state database associated with a certain block.
 // If no state is locally available for the given block, a number of blocks are
 // attempted to be reexecuted to generate the desired state.
-func (api *PrivateDebugAPI) computeIntraBlockState(block *types.Block) (*state.IntraBlockState, *state.DbState) {
+func ComputeIntraBlockState(chainDb ethdb.Getter, block *types.Block) (*state.IntraBlockState, *state.DbState) {
 	// If we have the state fully available, use that
-	dbstate := state.NewDbState(api.eth.ChainDb(), block.NumberU64())
+	dbstate := state.NewDbState(chainDb, block.NumberU64())
 	statedb := state.New(dbstate)
 	return statedb, dbstate
 }
@@ -628,7 +629,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, err := api.computeTxEnv(ctx, blockHash, int(index))
+	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.ChainDb(), blockHash, int(index))
 	if err != nil {
 		return nil, err
 	}
@@ -699,19 +700,19 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 }
 
 // computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
+func ComputeTxEnv(ctx context.Context, blockchain *core.BlockChain, chainDb ethdb.Getter, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
-	block := api.eth.blockchain.GetBlockByHash(blockHash)
+	block := blockchain.GetBlockByHash(blockHash)
 	if block == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}
-	parent := api.eth.blockchain.GetBlock(block.ParentHash(), block.NumberU64()-1)
+	parent := blockchain.GetBlock(block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
-	statedb, dbstate := api.computeIntraBlockState(parent)
+	statedb, dbstate := ComputeIntraBlockState(chainDb, parent)
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(api.eth.blockchain.Config(), block.Number())
+	signer := types.MakeSigner(blockchain.Config(), block.Number())
 
 	for idx, tx := range block.Transactions() {
 		select {
@@ -722,12 +723,12 @@ func (api *PrivateDebugAPI) computeTxEnv(ctx context.Context, blockHash common.H
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
-		EVMcontext := core.NewEVMContext(msg, block.Header(), api.eth.blockchain, nil)
+		EVMcontext := core.NewEVMContext(msg, block.Header(), blockchain, nil)
 		if idx == txIndex {
 			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, api.eth.blockchain.Config(), vm.Config{})
+		vmenv := vm.NewEVM(EVMcontext, statedb, blockchain.Config(), vm.Config{})
 		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
