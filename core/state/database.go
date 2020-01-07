@@ -43,9 +43,11 @@ import (
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
 const (
-	IncarnationLength        = 8
+	IncarnationLength = 8
+	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
-	AccountIncarnation       = 0
+	//NonContractIncarnation incarnation for non contracts
+	NonContractIncarnation = 0
 )
 
 type StateReader interface {
@@ -787,8 +789,9 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				}
 				// Fetch the code hash
 				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
-					codeHash, _ := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
-					copy(acc.CodeHash[:], codeHash)
+					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err != nil {
+						copy(acc.CodeHash[:], codeHash)
+					}
 				}
 				b.accountUpdates[addrHash] = &acc
 				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {

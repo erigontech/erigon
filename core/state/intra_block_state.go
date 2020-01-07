@@ -730,7 +730,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &accounts.Account{}
 	} else {
 		account.Copy(&previous.data)
-		account.Incarnation = AccountIncarnation
+		account.Incarnation = NonContractIncarnation
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
@@ -754,7 +754,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
-func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
+func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -770,7 +770,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	}
 
 	var previous *stateObject
-	if checkPrev {
+	if contractCreation {
 		previous = sdb.getStateObject(addr)
 	}
 
@@ -779,7 +779,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 		newObj.setBalance(&prev.data.Balance)
 	}
 
-	if checkPrev {
+	if contractCreation {
 		newObj.created = true
 	}
 }
