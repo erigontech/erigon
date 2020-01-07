@@ -938,7 +938,6 @@ func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, times
 
 	defer func() {
 		if err != nil {
-			db.reconnect <- struct{}{}
 			closer.Close()
 			return
 		}
