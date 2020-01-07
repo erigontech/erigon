@@ -1032,6 +1032,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		genesis = gspec.MustCommit(db)
 		signer  = types.HomesteadSigner{}
 	)
+
 	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
 
 	engine := ethash.NewFaker()
