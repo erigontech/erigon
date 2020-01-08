@@ -15,6 +15,8 @@ var (
 	witnessInterval  uint64
 	noverify         bool
 	bintries         bool
+	starkBlocksFile  string
+	starkStatsBase   string
 )
 
 func init() {
@@ -30,6 +32,8 @@ func init() {
 	statelessCmd.Flags().Uint64Var(&witnessInterval, "witnessInterval", 1, "after which block to extract witness (put a large number like 10000000 to disable)")
 	statelessCmd.Flags().BoolVar(&noverify, "noVerify", false, "skip snapshot verification on loading")
 	statelessCmd.Flags().BoolVar(&bintries, "bintries", false, "use binary tries instead of hexary to generate/load block witnesses")
+	statelessCmd.Flags().StringVar(&starkBlocksFile, "starkBlocksFile", "", "file with the list of blocks for which to produce stark data")
+	statelessCmd.Flags().StringVar(&starkStatsBase, "starkStatsBase", "stark_stats", "template for names of the files to write stark stats in")
 
 	rootCmd.AddCommand(statelessCmd)
 
@@ -57,6 +61,8 @@ var statelessCmd = &cobra.Command{
 			!noverify,
 			bintries,
 			createDb,
+			starkBlocksFile,
+			starkStatsBase,
 		)
 
 		return nil

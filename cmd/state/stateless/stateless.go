@@ -7,6 +7,9 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+	"io/ioutil"
+	"strconv"
+	"strings"
 
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
@@ -20,6 +23,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 var chartColors = []drawing.Color{
@@ -70,6 +74,35 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	return nil
 }
 
+func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
+	dat, err := ioutil.ReadFile(starkBlocksFile)
+	if err != nil {
+		return nil, err
+	}
+	blockStrs := strings.Split(string(dat), "\n")
+	m := make(map[uint64]struct{})
+	for _, blockStr := range blockStrs {
+		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 != nil {
+			return nil, err1
+		} else {
+			m[b] = struct{}{}
+		}
+	}
+	return m, nil
+}
+
+func starkData(witness []byte, starkStatsBase string, blockNum uint64) error {
+	filename := fmt.Sprintf("%x_%d.txt", starkStatsBase, blockNum)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	if err = trie.StarkStats(witness, f, true); err != nil {
+		return err
+	}
+	return nil
+}
+
 type CreateDbFunc func(string) (ethdb.Database, error)
 
 func Stateless(
@@ -84,7 +117,9 @@ func Stateless(
 	statsfile string,
 	verifySnapshot bool,
 	binary bool,
-	createDb CreateDbFunc) {
+	createDb CreateDbFunc,
+	starkBlocksFile string,
+	starkStatsBase string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -113,6 +148,11 @@ func Stateless(
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
+	var starkBlocks map[uint64]struct{}
+	if starkBlocksFile != "" {
+		starkBlocks, err = parseStarkBlockFile(starkBlocksFile)
+		check(err)
+	}
 	var preRoot common.Hash
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
@@ -205,6 +245,10 @@ func Stateless(
 				return
 			}
 			err = stats.AddRow(tapeStats)
+			check(err)
+		}
+		if _, ok := starkBlocks[blockNum]; ok && witness != nil {
+			err = starkData(witness, starkStatsBase, blockNum)
 			check(err)
 		}
 		finalRootFail := false
