@@ -458,18 +458,26 @@ type StateGrowth2Reporter struct {
 	StorageKey   []byte
 
 	// map[common.Hash]map[common.Hash]uint64 - key is addrHash + hash
-	lastTimestamps   *typedbucket.Uint64 // For each address hash, when was it last accounted
-	CreationsByBlock map[uint64]int      // For each timestamp, how many storage items were created
+	lastTimestamps *typedbucket.Uint64 // For each address hash, when was it last accounted
+	// map[common.Hash]map[uint64]int - key is addrHash + hash
+	creationsByBlock *typedbucket.Int // For each address hash, when was it last accounted
 }
 
 func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
 	var LastTimestampsBucket = []byte("sg2_accounts_last_timestamps")
+	var CreationsByBlockBucket = []byte("sg2_creations_by_block")
+	var ProgressKey = []byte("state_growth_2")
 
 	localTx, err := localDb.Begin(true)
 	if err != nil {
 		panic(err)
 	}
 	lastTimestamps, err := localTx.CreateBucketIfNotExists(LastTimestampsBucket, false)
+	if err != nil {
+		panic(err)
+	}
+
+	creationsByBlock, err := localTx.CreateBucketIfNotExists(CreationsByBlockBucket, false)
 	if err != nil {
 		panic(err)
 	}
@@ -481,7 +489,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
 		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
-		CreationsByBlock: make(map[uint64]int),
+		creationsByBlock: typedbucket.NewInt(creationsByBlock),
 	}
 	rep.commit = func(ctx context.Context) {
 		save2([]byte("state_growth_1"), localTx, rep)
@@ -494,6 +502,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		}
 
 		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
+		rep.creationsByBlock = typedbucket.NewInt(creationsByBlock)
 	}
 	rep.rollback = func(ctx context.Context) {
 		if err := localTx.Rollback(); err != nil {
@@ -512,8 +521,6 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	var addrHash common.Hash
 	var hash common.Hash
 	var processingDone bool
-
-	creationsByBlock := make(map[common.Hash]map[uint64]int)
 
 beginTx:
 	// Go through the history of account first
@@ -543,21 +550,23 @@ beginTx:
 
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
-			localKey := append(addrHash.Bytes(), hash.Bytes()...)
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
+
+			addr2HashKey := append(addrHash.Bytes(), hash.Bytes()...)
+
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
 			if vIsEmpty {
-				c, ok := creationsByBlock[addrHash]
-				if !ok {
-					c = make(map[uint64]int)
-					creationsByBlock[addrHash] = c
+				addr2TsKey := append(addrHash.Bytes(), dbutils.EncodeTimestamp(timestamp)...)
+				if err := r.creationsByBlock.Increment(addr2TsKey); err != nil {
+					return err
 				}
-				c[timestamp]++
-				l, ok := r.lastTimestamps.Get(localKey)
-				if ok {
-					c[l]--
+
+				if l, ok := r.lastTimestamps.Get(addr2HashKey); ok {
+					if err := r.lastTimestamps.Put(addr2HashKey, l-1); err != nil {
+						return err
+					}
 				}
 				lBytes, err := json.Marshal(l)
 				if err != nil {
@@ -576,7 +585,7 @@ beginTx:
 					return err
 				}
 			}
-			if err := r.lastTimestamps.Put(localKey, timestamp); err != nil {
+			if err := r.lastTimestamps.Put(addr2HashKey, timestamp); err != nil {
 				return err
 			}
 
@@ -670,7 +679,13 @@ beginTx2:
 	if err := r.lastTimestamps.ForEach(func(k []byte, lt uint64) error {
 		address := common.BytesToHash(k[:32])
 		if lt < r.MaxTimestamp {
-			creationsByBlock[address][lt]--
+			addr2BlockKey := append(address.Bytes(), dbutils.EncodeTimestamp(lt)...)
+			if h, ok := r.creationsByBlock.Get(addr2BlockKey); ok {
+				h--
+				if err := r.creationsByBlock.Put(addr2BlockKey, h); err != nil {
+					return err
+				}
+			}
 		}
 		return nil
 	})
@@ -679,19 +694,20 @@ beginTx2:
 	fmt.Printf("Storage history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
-	for _, c := range creationsByBlock {
-		cumulative := 0
-		for timestamp, count := range c {
-			totalCreationsByBlock[timestamp] += count
-			cumulative += count
-		}
+	if err := r.creationsByBlock.ForEach(func(k []byte, count int) error {
+		timestamp, _ := dbutils.DecodeTimestamp(k[32:])
+		totalCreationsByBlock[timestamp] += count
+		return nil
+	}); err != nil {
+		panic(err)
 	}
+
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
 	idx := 0
 	for timestamp, count := range totalCreationsByBlock {
 		tsi.timestamps[idx] = timestamp
-		tsi.values[idx] = count
+		tsi.values[idx] = int(count)
 		idx++
 	}
 	sort.Sort(tsi)
