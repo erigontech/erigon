@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -304,17 +305,19 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			t.Log("incorrect storage", i)
 		}
 
-		resAccStorage = make(map[common.Hash]common.Hash)
+		resAccHistoryStorage := make(map[common.Hash]common.Hash)
+
 		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
-			resAccStorage[common.BytesToHash(k[common.HashLength+8:common.HashLength+8+common.HashLength])] = common.BytesToHash(v)
+			fmt.Println("StorageHistoryBucket", string(k), string(v))
+			//resAccHistoryStorage[common.BytesToHash(k[common.HashLength+8:common.HashLength+8+common.HashLength])] = common.BytesToHash(v)
 			return true, nil
 		})
 		if err != nil {
 			t.Fatal("error on get account storage", i, err)
 		}
 
-		if !reflect.DeepEqual(resAccStorage, accHistoryStateStorage[i]) {
-			spew.Dump("res", resAccStorage)
+		if !reflect.DeepEqual(resAccHistoryStorage, accHistoryStateStorage[i]) {
+			spew.Dump("res", resAccHistoryStorage)
 			spew.Dump("expected", accHistoryStateStorage[i])
 			t.Fatal("incorrect history storage", i)
 		}

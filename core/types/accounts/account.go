@@ -534,6 +534,7 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 func (a *Account) DecodeForStorage(enc []byte) error {
 	a.Initialised = true
 	a.Nonce = 0
+	a.Incarnation = 0
 	a.Balance.SetInt64(0)
 	a.Root = emptyRoot
 	a.CodeHash = emptyCodeHash

@@ -40,6 +40,8 @@ const (
 	AddressLength = 20
 	// BlockNumberLength length of uint64 big endian
 	BlockNumberLength = 8
+	//
+	IncarnationLength = 8
 )
 
 var (
