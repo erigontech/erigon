@@ -149,7 +149,7 @@ func TestCmdBucket(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBegin")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -206,19 +206,19 @@ func TestCmdGet(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	// Issue CmdGet with existing key
 	var bucketHandle uint64 = 1
 	var key = []byte("key1")
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
 	// Issue CmdGet with non-existing key
 	key = []byte("key3")
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -285,7 +285,7 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
@@ -295,7 +295,7 @@ func TestCmdSeek(t *testing.T) {
 	var seekKey = []byte("key15") // Should find key2
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
-	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -362,7 +362,7 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
@@ -374,7 +374,7 @@ func TestCursorOperations(t *testing.T) {
 	var seekKey = []byte("key1") // Should find key1
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
-	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 
 	var numberOfKeys uint64 = 2 // Trying to get 2 keys, but will get 1 + nil
 	// .Next()
@@ -448,50 +448,10 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, value, "Unexpected value")
 
-	// Results of CmdCursorFirst
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirst")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	// first result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, key1, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, value1, string(value), "Unexpected value")
-	// second result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, key2, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, value2, string(value), "Unexpected value")
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
-	// Results of CmdCursorNext must be nil
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNext")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
-	assert.Nil(t, key, "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
-	assert.Nil(t, value, "Unexpected value")
-
-	var vIsEmpty bool
-	// Results of CmdCursorFirstKey
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirstKey")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	// first result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, key1, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
-	// second result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, key2, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
-
-	// Results of CmdCursorNextKey must be nil
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNextKey")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNextKey")
-	assert.Nil(t, key, "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorNextKey")
-	assert.True(t, vIsEmpty, "Unexpected vIsEmpty")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 }
 
 func TestTxYield(t *testing.T) {
