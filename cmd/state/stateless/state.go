@@ -457,9 +457,9 @@ type StateGrowth2Reporter struct {
 	HistoryKey   []byte
 	StorageKey   []byte
 
-	// map[addrHash]uint64
-	lastTimestamps   *bolt.Bucket   // For each address hash, when was it last accounted
-	CreationsByBlock map[uint64]int // For each timestamp, how many storage items were created
+	// map[common.Hash]map[common.Hash]uint64 - key is addrHash + hash
+	lastTimestamps   *typedbucket.Uint64 // For each address hash, when was it last accounted
+	CreationsByBlock map[uint64]int      // For each timestamp, how many storage items were created
 }
 
 func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
@@ -480,7 +480,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		HistoryKey:       []byte{},
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
-		lastTimestamps:   lastTimestamps,
+		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
 		CreationsByBlock: make(map[uint64]int),
 	}
 	rep.commit = func(ctx context.Context) {
@@ -493,7 +493,12 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 			panic(err)
 		}
 
-		rep.lastTimestamps = localTx.Bucket(LastTimestampsBucket)
+		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
+	}
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
 	}
 
 	restore2([]byte("state_growth_1"), localTx, rep)
@@ -538,6 +543,7 @@ beginTx:
 
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
+			localKey := append(addrHash.Bytes(), hash.Bytes()...)
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
@@ -549,18 +555,9 @@ beginTx:
 					creationsByBlock[addrHash] = c
 				}
 				c[timestamp]++
-
-				v, _ := r.lastTimestamps.Get(addrHash.Bytes())
-				var l map[common.Hash]uint64
-				if v == nil {
-					l = make(map[common.Hash]uint64)
-				} else {
-					if err := json.Unmarshal(v, &l); err != nil {
-						return err
-					}
-				}
-				if lt, ok := l[hash]; ok {
-					c[lt]--
+				l, ok := r.lastTimestamps.Get(localKey)
+				if ok {
+					c[l]--
 				}
 				lBytes, err := json.Marshal(l)
 				if err != nil {
@@ -579,12 +576,7 @@ beginTx:
 					return err
 				}
 			}
-			l[hash] = timestamp
-			lBytes, err := json.Marshal(l)
-			if err != nil {
-				return err
-			}
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
+			if err := r.lastTimestamps.Put(localKey, timestamp); err != nil {
 				return err
 			}
 
@@ -644,21 +636,8 @@ beginTx2:
 
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
-			v, _ := r.lastTimestamps.Get(addrHash.Bytes())
-			var l map[common.Hash]uint64
-			if v == nil {
-				l = make(map[common.Hash]uint64)
-			} else {
-				if err := json.Unmarshal(v, &l); err != nil {
-					return err
-				}
-			}
-			l[hash] = r.MaxTimestamp
-			lBytes, err := json.Marshal(l)
-			if err != nil {
-				return err
-			}
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
+			localKey := append(addrHash.Bytes(), hash.Bytes()...)
+			if err := r.lastTimestamps.Put(localKey, r.MaxTimestamp); err != nil {
 				return err
 			}
 
@@ -688,18 +667,10 @@ beginTx2:
 		goto beginTx2
 	}
 
-	r.lastTimestamps.ForEach(func(k, v []byte) error {
-		address := common.BytesToHash(k)
-		var l map[common.Hash]uint64
-		if err := json.Unmarshal(v, &l); err != nil {
-			return err
-		}
-
-		for _, lt := range l {
-			if lt < r.MaxTimestamp {
-				creationsByBlock[address][lt]--
-				v[lt]--
-			}
+	if err := r.lastTimestamps.ForEach(func(k []byte, lt uint64) error {
+		address := common.BytesToHash(k[:32])
+		if lt < r.MaxTimestamp {
+			creationsByBlock[address][lt]--
 		}
 		return nil
 	})
