@@ -502,7 +502,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		}
 
 		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
-		rep.creationsByBlock = typedbucket.NewInt(creationsByBlock)
+		rep.creationsByBlock = typedbucket.NewInt(localTx.Bucket(CreationsByBlockBucket))
 	}
 	rep.rollback = func(ctx context.Context) {
 		if err := localTx.Rollback(); err != nil {
@@ -563,10 +563,8 @@ beginTx:
 					return err
 				}
 
-				if l, ok := r.lastTimestamps.Get(addr2HashKey); ok {
-					if err := r.lastTimestamps.Put(addr2HashKey, l-1); err != nil {
-						return err
-					}
+				if err := r.lastTimestamps.DecrementIfExist(addr2HashKey); err != nil {
+					return err
 				}
 				lBytes, err := json.Marshal(l)
 				if err != nil {
