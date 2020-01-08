@@ -82,6 +82,9 @@ func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
 	blockStrs := strings.Split(string(dat), "\n")
 	m := make(map[uint64]struct{})
 	for _, blockStr := range blockStrs {
+		if len(blockStr) == 0 {
+			continue
+		}
 		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 != nil {
 			return nil, err1
 		} else {
