@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -47,7 +48,7 @@ var emptyCodeHash = crypto.Keccak256(nil)
 const (
 	PrintMemStatsEvery = 1 * 1000 * 1000
 	PrintProgressEvery = 100 * 1000
-	SaveSnapshotEvery  = 1 * 1000 * 1000
+	CommitEvery        = 1 * 1000 * 1000
 	MaxIterationsPerTx = 10 * 1000 * 1000
 	CursorBatchSize    = 10 * 1000
 )
@@ -129,6 +130,39 @@ func dir() string {
 	return dir
 }
 
+func save2(k []byte, tx *bolt.Tx, data interface{}) {
+	defer func(t time.Time) { fmt.Println("Save:", time.Since(t)) }(time.Now())
+	var buf bytes.Buffer
+
+	var handle codec.CborHandle
+	handle.WriterBufferSize = 1024 * 1024
+	codec.NewEncoder(&buf, &handle).MustEncode(data)
+
+	if err := tx.Bucket(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
+		panic(err)
+	}
+}
+
+func restore2(k []byte, tx *bolt.Tx, data interface{}) {
+	defer func(t time.Time) { fmt.Println("Restore:", time.Since(t)) }(time.Now())
+	reportsProgress, err := tx.CreateBucketIfNotExists(ReportsProgressBucket, false)
+	if err != nil {
+		panic(err)
+	}
+	v, _ := reportsProgress.Get(k)
+	if v == nil {
+		return
+	}
+
+	var handle codec.CborHandle
+	handle.ReaderBufferSize = 1024 * 1024
+	if err := codec.NewDecoder(bytes.NewReader(v), &handle).Decode(data); err != nil {
+		if err != io.EOF {
+			panic(err)
+		}
+	}
+}
+
 func restore(file string, snapshot interface{}) {
 	t := time.Now()
 	defer func() {
@@ -178,31 +212,58 @@ func bToMb(b uint64) uint64 {
 }
 
 type StateGrowth1Reporter struct {
-	db               *remote.DB `codec:"-"`
-	save             func(ctx context.Context)
-	MaxTimestamp     uint64
-	HistoryKey       []byte
-	AccountKey       []byte
-	LastTimestamps   *typedtree.RadixUint64 // For each address hash, when was it last accounted
-	CreationsByBlock map[uint64]int         // For each timestamp, how many accounts were created in the state
+	remoteDb     *remote.DB `codec:"-"`
+	commit       func(ctx context.Context)
+	MaxTimestamp uint64
+	HistoryKey   []byte
+	AccountKey   []byte
+
+	lastTimestamps   *bolt.Bucket   // map[addrHash]uint64
+	CreationsByBlock map[uint64]int // For each timestamp, how many accounts were created in the state
 }
 
-func NewStateGrowth1Reporter(ctx context.Context, db *remote.DB) *StateGrowth1Reporter {
+func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth1Reporter {
+	var LastTimestampsBucket = []byte("sg1_accounts_last_timestamps")
+
+	var err error
+
+	localTx, err := localDb.Begin(true)
+	if err != nil {
+		panic(err)
+	}
+	lastTimestamps, err := localTx.CreateBucketIfNotExists(LastTimestampsBucket, false)
+	if err != nil {
+		panic(err)
+	}
+
 	rep := &StateGrowth1Reporter{
-		db:               db,
+		remoteDb:         remoteDb,
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
 		MaxTimestamp:     0,
-		LastTimestamps:   typedtree.NewRadixUint64(), // For each address hash, when was it last accounted
-		CreationsByBlock: make(map[uint64]int),       // For each timestamp, how many accounts were created in the state}
+		lastTimestamps:   lastTimestamps,
+		CreationsByBlock: make(map[uint64]int),
 	}
-	var dumpFile = file("StateGrowth1", 1)
-	rep.save = func(ctx context.Context) {
-		save(dumpFile, rep)
+	rep.commit = func(ctx context.Context) {
+		save2([]byte("state_growth_1"), localTx, rep)
+		if err := localTx.Commit(); err != nil {
+			panic(err)
+		}
+		localTx, err = localDb.Begin(true)
+		if err != nil {
+			panic(err)
+		}
+
+		rep.lastTimestamps = localTx.Bucket(LastTimestampsBucket)
 	}
-	restore(dumpFile, rep)
+
+	restore2([]byte("state_growth_1"), localTx, rep)
 	return rep
 }
+
+var (
+	ReportsProgressBucket = []byte("reports_progress")
+)
 
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
@@ -213,7 +274,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 
 beginTx:
 	// Go through the history of account first
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if err != nil {
 			return err
@@ -237,19 +298,26 @@ beginTx:
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
-			addr := string(addrHash.Bytes())
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
 			if vIsEmpty {
 				r.CreationsByBlock[timestamp]++
-				if lt, ok := r.LastTimestamps.Get(addr); ok {
+				v, _ := r.lastTimestamps.Get(addrHash.Bytes())
+				if v != nil {
+					lt, err := strconv.ParseUint(string(v), 10, 0)
+					if err != nil {
+						return err
+					}
 					r.CreationsByBlock[lt]--
 				}
 			}
 
-			r.LastTimestamps.Set(addr, timestamp)
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), []byte(strconv.FormatUint(timestamp, 10))); err != nil {
+				return err
+			}
+
 			count++
 			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %dK account records, %s\n", count/1000, time.Since(startTime))
@@ -257,10 +325,11 @@ beginTx:
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if count%SaveSnapshotEvery == 0 {
+			if count%CommitEvery == 0 {
 				r.HistoryKey = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
+
 			if count%MaxIterationsPerTx == 0 {
 				r.HistoryKey = k
 				return nil
@@ -280,7 +349,7 @@ beginTx:
 
 beginTx2:
 	// Go through the current state
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		pre, err := tx.Bucket(dbutils.PreimagePrefix)
 		if err != nil {
 			return err
@@ -313,7 +382,10 @@ beginTx2:
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
-			r.LastTimestamps.Set(string(addrHash.Bytes()), r.MaxTimestamp)
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), []byte(strconv.FormatUint(r.MaxTimestamp, 10))); err != nil {
+				return err
+			}
+
 			count++
 			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %dK account records. %s\n", count/1000, time.Since(startTime))
@@ -321,9 +393,9 @@ beginTx2:
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if count%SaveSnapshotEvery == 0 {
+			if count%CommitEvery == 0 {
 				r.AccountKey = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
 			if count%MaxIterationsPerTx == 0 {
 				r.AccountKey = k
@@ -340,11 +412,16 @@ beginTx2:
 		goto beginTx2
 	}
 
-	r.LastTimestamps.Walk(func(_ string, lt uint64) bool {
+	r.lastTimestamps.ForEach(func(_, v []byte) error {
+		lt, err := strconv.ParseUint(string(v), 10, 0)
+		if err != nil {
+			return err
+		}
+
 		if lt < r.MaxTimestamp {
 			r.CreationsByBlock[lt]--
 		}
-		return false
+		return nil
 	})
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
@@ -373,29 +450,53 @@ beginTx2:
 }
 
 type StateGrowth2Reporter struct {
-	db               *remote.DB `codec:"-"`
-	save             func(ctx context.Context)
-	MaxTimestamp     uint64
-	HistoryKey       []byte
-	StorageKey       []byte
-	LastTimestamps   *typedtree.RadixMapHash2Uint64 // For each address hash, when was it last accounted
-	CreationsByBlock *typedtree.RadixMapUint642Int  // For each timestamp, how many storage items were created
+	remoteDb     *remote.DB `codec:"-"`
+	localDb      *bolt.DB   `codec:"-"`
+	commit       func(ctx context.Context)
+	MaxTimestamp uint64
+	HistoryKey   []byte
+	StorageKey   []byte
+
+	// map[addrHash]uint64
+	lastTimestamps   *bolt.Bucket   // For each address hash, when was it last accounted
+	CreationsByBlock map[uint64]int // For each timestamp, how many storage items were created
 }
 
-func NewStateGrowth2Reporter(ctx context.Context, db *remote.DB) *StateGrowth2Reporter {
+func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
+	var LastTimestampsBucket = []byte("sg2_accounts_last_timestamps")
+
+	localTx, err := localDb.Begin(true)
+	if err != nil {
+		panic(err)
+	}
+	lastTimestamps, err := localTx.CreateBucketIfNotExists(LastTimestampsBucket, false)
+	if err != nil {
+		panic(err)
+	}
+
 	rep := &StateGrowth2Reporter{
-		db:               db,
+		remoteDb:         remoteDb,
+		localDb:          localDb,
 		HistoryKey:       []byte{},
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
-		LastTimestamps:   typedtree.NewRadixMapHash2Uint64(),
-		CreationsByBlock: typedtree.NewRadixMapUint642Int(),
+		lastTimestamps:   lastTimestamps,
+		CreationsByBlock: make(map[uint64]int),
 	}
-	var dumpFile = file("StateGrowth2", 1)
-	rep.save = func(ctx context.Context) {
-		save(dumpFile, rep)
+	rep.commit = func(ctx context.Context) {
+		save2([]byte("state_growth_1"), localTx, rep)
+		if err := localTx.Commit(); err != nil {
+			panic(err)
+		}
+		localTx, err = localDb.Begin(true)
+		if err != nil {
+			panic(err)
+		}
+
+		rep.lastTimestamps = localTx.Bucket(LastTimestampsBucket)
 	}
-	restore(dumpFile, rep)
+
+	restore2([]byte("state_growth_1"), localTx, rep)
 	return rep
 }
 
@@ -407,9 +508,11 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	var hash common.Hash
 	var processingDone bool
 
+	creationsByBlock := make(map[common.Hash]map[uint64]int)
+
 beginTx:
 	// Go through the history of account first
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
 		if err != nil {
 			return err
@@ -434,34 +537,56 @@ beginTx:
 			}
 
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
-			addr := string(addrHash.Bytes())
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
 			if vIsEmpty {
-				c, ok := r.CreationsByBlock.Get(addr)
+				c, ok := creationsByBlock[addrHash]
 				if !ok {
 					c = make(map[uint64]int)
-					r.CreationsByBlock.Set(addr, c)
+					creationsByBlock[addrHash] = c
 				}
 				c[timestamp]++
-				l, ok := r.LastTimestamps.Get(addr)
-				if !ok {
+
+				v, _ := r.lastTimestamps.Get(addrHash.Bytes())
+				var l map[common.Hash]uint64
+				if v == nil {
 					l = make(map[common.Hash]uint64)
-					r.LastTimestamps.Set(addr, l)
+				} else {
+					if err := json.Unmarshal(v, &l); err != nil {
+						return err
+					}
 				}
 				if lt, ok := l[hash]; ok {
 					c[lt]--
 				}
+				lBytes, err := json.Marshal(l)
+				if err != nil {
+					return err
+				}
+				if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
+					return err
+				}
 			}
-			l, ok := r.LastTimestamps.Get(addr)
-			if !ok {
+			v, _ := r.lastTimestamps.Get(addrHash.Bytes())
+			var l map[common.Hash]uint64
+			if v == nil {
 				l = make(map[common.Hash]uint64)
-				r.LastTimestamps.Set(addr, l)
+			} else {
+				if err := json.Unmarshal(v, &l); err != nil {
+					return err
+				}
 			}
 			l[hash] = timestamp
+			lBytes, err := json.Marshal(l)
+			if err != nil {
+				return err
+			}
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
+				return err
+			}
 
 			count++
 			if count%PrintProgressEvery == 0 {
@@ -470,9 +595,9 @@ beginTx:
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if count%SaveSnapshotEvery == 0 {
+			if count%CommitEvery == 0 {
 				r.HistoryKey = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
 			if count%MaxIterationsPerTx == 0 {
 				r.HistoryKey = k
@@ -493,7 +618,7 @@ beginTx:
 
 beginTx2:
 	// Go through the current state
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageBucket)
 		if err != nil {
 			return err
@@ -519,13 +644,24 @@ beginTx2:
 
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
-			addr := string(addrHash.Bytes())
-			l, ok := r.LastTimestamps.Get(addr)
-			if !ok {
+			v, _ := r.lastTimestamps.Get(addrHash.Bytes())
+			var l map[common.Hash]uint64
+			if v == nil {
 				l = make(map[common.Hash]uint64)
-				r.LastTimestamps.Set(addr, l)
+			} else {
+				if err := json.Unmarshal(v, &l); err != nil {
+					return err
+				}
 			}
 			l[hash] = r.MaxTimestamp
+			lBytes, err := json.Marshal(l)
+			if err != nil {
+				return err
+			}
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
+				return err
+			}
+
 			count++
 			if count%PrintProgressEvery == 0 {
 				fmt.Printf("Processed %dK storage records, %s\n", count/1000, time.Since(startTime))
@@ -533,9 +669,9 @@ beginTx2:
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if count%SaveSnapshotEvery == 0 {
+			if count%CommitEvery == 0 {
 				r.StorageKey = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
 			if count%MaxIterationsPerTx == 0 {
 				r.StorageKey = k
@@ -552,29 +688,33 @@ beginTx2:
 		goto beginTx2
 	}
 
-	r.LastTimestamps.Walk(func(address string, l map[common.Hash]uint64) bool {
+	r.lastTimestamps.ForEach(func(k, v []byte) error {
+		address := common.BytesToHash(k)
+		var l map[common.Hash]uint64
+		if err := json.Unmarshal(v, &l); err != nil {
+			return err
+		}
+
 		for _, lt := range l {
 			if lt < r.MaxTimestamp {
-				v, _ := r.CreationsByBlock.Get(address)
+				creationsByBlock[address][lt]--
 				v[lt]--
 			}
 		}
-		return false
+		return nil
 	})
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Storage history records: %d\n", count)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
-	r.CreationsByBlock.Walk(func(_ string, c map[uint64]int) bool {
+	for _, c := range creationsByBlock {
 		cumulative := 0
 		for timestamp, count := range c {
 			totalCreationsByBlock[timestamp] += count
 			cumulative += count
 		}
-		return false
-	})
-
+	}
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
 	idx := 0
@@ -676,7 +816,7 @@ beginTx:
 			if i%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if i%SaveSnapshotEvery == 0 {
+			if i%CommitEvery == 0 {
 				r.HeaderPrefixKey1 = k
 				r.save(ctx)
 			}
@@ -719,7 +859,7 @@ beginTx:
 			if blockNum%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
 			}
-			if blockNum%SaveSnapshotEvery == 0 {
+			if blockNum%CommitEvery == 0 {
 				r.HeaderPrefixKey2 = k
 				r.save(ctx)
 			}
