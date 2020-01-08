@@ -95,12 +95,12 @@ func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
 }
 
 func starkData(witness []byte, starkStatsBase string, blockNum uint64) error {
-	filename := fmt.Sprintf("%x_%d.txt", starkStatsBase, blockNum)
+	filename := fmt.Sprintf("%s_%d.txt", starkStatsBase, blockNum)
 	f, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
-	if err = trie.StarkStats(witness, f, true); err != nil {
+	if err = trie.StarkStats(witness, f, false); err != nil {
 		return err
 	}
 	return nil

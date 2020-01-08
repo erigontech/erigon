@@ -391,10 +391,14 @@ func StarkStats(bw []byte, w io.Writer, trace bool) error {
 
 	inputSizes := make([]int, len(hb.perInputSize))
 	i := 0
-	for inputSize, _ := range hb.perInputSize {
+	for inputSize := range hb.perInputSize {
 		inputSizes[i] = inputSize
 		i++
 	}
 	sort.Ints(inputSizes)
+	fmt.Fprintf(w, "%d\n", hb.keccakCounter)
+	for _, inputSize := range inputSizes {
+		fmt.Fprintf(w, "%d %d\n", inputSize, hb.perInputSize[inputSize])
+	}
 	return nil
 }
