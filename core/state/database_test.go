@@ -1150,7 +1150,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal(err)
 	}
 	if acc.Incarnation != state.NonContractIncarnation {
-		t.Fatal("wrong incarnation")
+		t.Fatal("wrong incarnation", acc.Incarnation)
 	}
 
 }
