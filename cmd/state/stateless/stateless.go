@@ -250,8 +250,8 @@ func Stateless(
 			err = stats.AddRow(tapeStats)
 			check(err)
 		}
-		if _, ok := starkBlocks[blockNum]; ok && witness != nil {
-			err = starkData(witness, starkStatsBase, blockNum)
+		if _, ok := starkBlocks[blockNum-1]; ok && witness != nil {
+			err = starkData(witness, starkStatsBase, blockNum-1)
 			check(err)
 		}
 		finalRootFail := false
