@@ -42,7 +42,13 @@ import (
 // Trie cache generation limit after which to evict trie nodes from memory.
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
-const IncarnationLength = 8
+const (
+	IncarnationLength = 8
+	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
+	FirstContractIncarnation = 1
+	//NonContractIncarnation incarnation for non contracts
+	NonContractIncarnation = 0
+)
 
 type StateReader interface {
 	ReadAccountData(address common.Address) (*accounts.Account, error)
@@ -781,6 +787,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				if err := acc.DecodeForStorage(value); err != nil {
 					return err
 				}
+				// Fetch the code hash
+				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
+					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err != nil {
+						copy(acc.CodeHash[:], codeHash)
+					}
+				}
 				b.accountUpdates[addrHash] = &acc
 				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
 					return err
@@ -1080,7 +1092,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	if found {
 		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
-	return 1, nil
+	return FirstContractIncarnation, nil
 }
 
 var prevMemStats runtime.MemStats

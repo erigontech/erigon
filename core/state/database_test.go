@@ -889,6 +889,7 @@ func TestEip2200Gas(t *testing.T) {
 	}
 }
 
+//Create contract, drop trie, reload trie from disk and add block with contract call
 func TestWrongIncarnation(t *testing.T) {
 	// Configure and generate a sample block chain
 	var (
@@ -961,6 +962,17 @@ func TestWrongIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	addrHash := crypto.Keccak256(contractAddress[:])
+	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
+	var acc accounts.Account
+	err = acc.DecodeForStorage(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc.Incarnation != state.FirstContractIncarnation {
+		t.Fatal("Incorrect incarnation", acc.Incarnation)
+	}
+
 	st, _, _ = blockchain.State()
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
@@ -976,15 +988,16 @@ func TestWrongIncarnation(t *testing.T) {
 	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
-	addrHash := crypto.Keccak256(contractAddress[:])
-	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
-	fmt.Printf("%x:%x\n", addrHash, v)
-	var acc accounts.Account
+	addrHash = crypto.Keccak256(contractAddress[:])
+	v, _ = db.Get(dbutils.AccountsBucket, addrHash)
 	err = acc.DecodeForStorage(v)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fmt.Printf("%x:%d\n", addrHash, acc.Incarnation)
+	if acc.Incarnation != state.FirstContractIncarnation {
+		t.Fatal("Incorrect incarnation", acc.Incarnation)
+	}
+
 	var startKey [common.HashLength + 8 + common.HashLength]byte
 	copy(startKey[:], addrHash)
 	err = db.Walk(dbutils.StorageBucket, startKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
@@ -994,4 +1007,150 @@ func TestWrongIncarnation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+//create acc, deploy to it contract, reorg to state without contract
+func TestWrongIncarnation2(t *testing.T) {
+	// Configure and generate a sample block chain
+	var (
+		db      = ethdb.NewMemDatabase()
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = crypto.PubkeyToAddress(key.PublicKey)
+		funds   = big.NewInt(1000000000)
+		gspec   = &core.Genesis{
+			Config: &params.ChainConfig{
+				ChainID:        big.NewInt(1),
+				HomesteadBlock: new(big.Int),
+				EIP150Block:    new(big.Int),
+				EIP155Block:    new(big.Int),
+				EIP158Block:    big.NewInt(1),
+			},
+			Alloc: core.GenesisAlloc{
+				address: {Balance: funds},
+			},
+		}
+		genesis = gspec.MustCommit(db)
+		signer  = types.HomesteadSigner{}
+	)
+
+	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
+
+	engine := ethash.NewFaker()
+	blockchain, err := core.NewBlockChain(db, nil, gspec.Config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	blockchain.EnableReceipts(true)
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts := bind.NewKeyedTransactor(key)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	//var changer *contracts.Changer
+
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+
+	blocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 2, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, big.NewInt(1000), 1000000, new(big.Int), nil), signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(ctx, tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		case 1:
+			contractAddress, tx, _, err = contracts.DeployChanger(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackend.Commit()
+	})
+
+	if knownContractAddress != contractAddress {
+		t.Errorf("Expexted contractAddress: %x, got %x", knownContractAddress, contractAddress)
+	}
+
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger := bind.NewKeyedTransactor(key)
+	transactOptsLonger.GasLimit = 1000000
+	longerBlocks, _ := core.GenerateChain(ctx, gspec.Config, genesis, engine, db.MemCopy(), 3, func(i int, block *core.BlockGen) {
+		var tx *types.Transaction
+
+		switch i {
+		case 0:
+			tx, err = types.SignTx(types.NewTransaction(block.TxNonce(address), knownContractAddress, big.NewInt(1000), 1000000, new(big.Int), nil), signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackendLonger.SendTransaction(ctx, tx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(tx)
+		}
+		contractBackendLonger.Commit()
+	})
+
+	st, _, _ := blockchain.State()
+	if !st.Exist(address) {
+		t.Error("expected account to exist")
+	}
+
+	// BLOCK 1
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+		t.Fatal(err)
+	}
+
+	// BLOCKS 2
+	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+		t.Fatal(err)
+	}
+
+	st, _, _ = blockchain.State()
+	if !st.Exist(contractAddress) {
+		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+	}
+
+	addrHash := crypto.Keccak256(contractAddress[:])
+	v, err := db.Get(dbutils.AccountsBucket, addrHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var acc accounts.Account
+	err = acc.DecodeForStorage(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc.Incarnation != state.FirstContractIncarnation {
+		t.Fatal("wrong incarnation")
+	}
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
+	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+		t.Fatal(err)
+	}
+
+	v, err = db.Get(dbutils.AccountsBucket, addrHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = acc.DecodeForStorage(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acc.Incarnation != state.NonContractIncarnation {
+		t.Fatal("wrong incarnation")
+	}
+
 }
