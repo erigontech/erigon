@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"io"
@@ -171,15 +172,18 @@ func bToMb(b uint64) uint64 {
 }
 
 type StateGrowth1Reporter struct {
-	remoteDb     *remote.DB `codec:"-"`
-	commit       func(ctx context.Context)
-	rollback     func(ctx context.Context)
-	MaxTimestamp uint64
-	HistoryKey   []byte
-	AccountKey   []byte
+	StartedWhenBlockNumber uint64
+	MaxTimestamp           uint64
+	HistoryKey             []byte
+	AccountKey             []byte
+	// For each timestamp, how many accounts were created in the state
+	CreationsByBlock map[uint64]int
 
-	lastTimestamps   *typedbucket.Uint64 // map[addrHash]uint64
-	CreationsByBlock map[uint64]int      // For each timestamp, how many accounts were created in the state
+	// map[addrHash]uint64
+	lastTimestamps *typedbucket.Uint64 `codec:"-"`
+	commit         func(ctx context.Context)
+	rollback       func(ctx context.Context)
+	remoteDb       *remote.DB `codec:"-"`
 }
 
 func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth1Reporter {
@@ -236,6 +240,19 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	var addrHash common.Hash
 	var processingDone bool
 
+	if r.StartedWhenBlockNumber == 0 {
+		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+			var err error
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
 beginTx:
 	// Go through the history of account first
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
@@ -263,6 +280,11 @@ beginTx:
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
+
+			if timestamp > r.StartedWhenBlockNumber { // only count what happened before analysis started
+				continue
+			}
+
 			if timestamp+1 > r.MaxTimestamp {
 				r.MaxTimestamp = timestamp + 1
 			}
@@ -407,18 +429,21 @@ beginTx2:
 }
 
 type StateGrowth2Reporter struct {
-	remoteDb     *remote.DB `codec:"-"`
-	localDb      *bolt.DB   `codec:"-"`
-	commit       func(ctx context.Context)
-	rollback     func(ctx context.Context)
-	MaxTimestamp uint64
-	HistoryKey   []byte
-	StorageKey   []byte
+	StartedWhenBlockNumber uint64
+	MaxTimestamp           uint64
+	HistoryKey             []byte
+	StorageKey             []byte
 
 	// map[common.Hash]map[common.Hash]uint64 - key is addrHash + hash
-	lastTimestamps *typedbucket.Uint64 // For each address hash, when was it last accounted
+	// For each address hash, when was it last accounted
+	lastTimestamps *typedbucket.Uint64 `codec:"-"`
 	// map[common.Hash]map[uint64]int - key is addrHash + hash
-	creationsByBlock *typedbucket.Int // For each address hash, when was it last accounted
+	// For each address hash, when was it last accounted
+	creationsByBlock *typedbucket.Int `codec:"-"`
+
+	remoteDb *remote.DB `codec:"-"`
+	commit   func(ctx context.Context)
+	rollback func(ctx context.Context)
 }
 
 func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
@@ -445,7 +470,6 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 
 	rep := &StateGrowth2Reporter{
 		remoteDb:         remoteDb,
-		localDb:          localDb,
 		HistoryKey:       []byte{},
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
@@ -483,6 +507,19 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	var hash common.Hash
 	var processingDone bool
 
+	if r.StartedWhenBlockNumber == 0 {
+		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+			var err error
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
 beginTx:
 	// Go through the history of account first
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
@@ -512,6 +549,10 @@ beginTx:
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
+
+			if timestamp > r.StartedWhenBlockNumber { // only count what happened before analysis started
+				continue
+			}
 
 			addr2HashKey := append(addrHash.Bytes(), hash.Bytes()...)
 
@@ -672,14 +713,16 @@ beginTx2:
 }
 
 type GasLimitReporter struct {
-	remoteDb         *remote.DB `codec:"-"`
-	commit           func(ctx context.Context)
-	rollback         func(ctx context.Context)
-	HeaderPrefixKey1 []byte
-	HeaderPrefixKey2 []byte
+	remoteDb               *remote.DB `codec:"-"`
+	StartedWhenBlockNumber uint64
+	HeaderPrefixKey1       []byte
+	HeaderPrefixKey2       []byte
 
 	// map[common.Hash]uint64 - key is addrHash + hash
 	mainHashes *typedbucket.Uint64 // For each address hash, when was it last accounted
+
+	commit   func(ctx context.Context)
+	rollback func(ctx context.Context)
 }
 
 func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *GasLimitReporter {
@@ -739,6 +782,19 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	i := 0
 	var processingDone bool
 
+	if r.StartedWhenBlockNumber == 0 {
+		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+			var err error
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
 beginTx:
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
@@ -763,6 +819,11 @@ beginTx:
 			}
 			if skipFirst {
 				skipFirst = false
+				continue
+			}
+
+			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
+			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
 				continue
 			}
 
@@ -803,6 +864,12 @@ beginTx:
 				skipFirst = false
 				continue
 			}
+
+			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
+			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
+				continue
+			}
+
 			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
