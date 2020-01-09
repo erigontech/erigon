@@ -240,22 +240,17 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	var addrHash common.Hash
 	var processingDone bool
 
-	if r.StartedWhenBlockNumber == 0 {
-		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-			var err error
+beginTx:
+	// Go through the history of account first
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			panic(err)
 		}
-	}
 
-beginTx:
-	// Go through the history of account first
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if err != nil {
 			return err
@@ -507,22 +502,17 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	var hash common.Hash
 	var processingDone bool
 
-	if r.StartedWhenBlockNumber == 0 {
-		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-			var err error
+beginTx:
+	// Go through the history of account first
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			panic(err)
 		}
-	}
 
-beginTx:
-	// Go through the history of account first
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
 		if err != nil {
 			return err
@@ -782,21 +772,16 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	i := 0
 	var processingDone bool
 
-	if r.StartedWhenBlockNumber == 0 {
-		if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-			var err error
+beginTx:
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}
-			return nil
-		}); err != nil {
-			panic(err)
 		}
-	}
 
-beginTx:
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
 		if err != nil {
 			return err
@@ -824,7 +809,7 @@ beginTx:
 
 			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
 			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
-				continue
+				break
 			}
 
 			// skip bucket keys not useful for analysis
