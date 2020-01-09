@@ -16,7 +16,7 @@ func init() {
 		Use:   "stateGrowth",
 		Short: "stateGrowth",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			localDb, err := bolt.Open(file(), 0600, &bolt.Options{})
+			localDb, err := bolt.Open(file()+"_sg", 0600, &bolt.Options{})
 			if err != nil {
 				panic(err)
 			}

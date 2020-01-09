@@ -18,7 +18,7 @@ var gasLimitsCmd = &cobra.Command{
 	Use:   "gasLimits",
 	Short: "gasLimits",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		localDb, err := bolt.Open(file(), 0600, &bolt.Options{})
+		localDb, err := bolt.Open(file()+"_gl", 0600, &bolt.Options{})
 		if err != nil {
 			panic(err)
 		}

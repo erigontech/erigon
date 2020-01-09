@@ -25,7 +25,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ugorji/go/codec"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -46,11 +45,11 @@ import (
 var emptyCodeHash = crypto.Keccak256(nil)
 
 const (
-	PrintMemStatsEvery = 1 * 1000 * 1000
-	PrintProgressEvery = 100 * 1000
-	CommitEvery        = 1 * 1000 * 1000
-	MaxIterationsPerTx = 10 * 1000 * 1000
-	CursorBatchSize    = 10 * 1000
+	PrintMemStatsEvery = 1_000_000
+	PrintProgressEvery = 100_000
+	CommitEvery        = 1_000_000
+	MaxIterationsPerTx = 10_000_000
+	CursorBatchSize    = 10_000
 )
 
 func check(e error) {
@@ -156,13 +155,8 @@ func restore2(k []byte, tx *bolt.Tx, data interface{}) {
 		return
 	}
 
-	var handle codec.CborHandle
-	handle.ReaderBufferSize = 1024 * 1024
-	if err := codec.NewDecoder(bytes.NewReader(v), &handle).Decode(data); err != nil {
-		if err != io.EOF {
-			panic(err)
-		}
-	}
+	decoder := codecpool.Decoder(bytes.NewReader(v))
+	decoder.MustDecode(data)
 }
 
 func PrintMemUsage() {
@@ -783,7 +777,7 @@ beginTx:
 
 			i++
 			if i%PrintProgressEvery == 0 {
-				fmt.Printf("Scanned %d keys, %s\n", i, time.Since(startTime))
+				fmt.Printf("Scanned %dK keys, %s\n", i/1000, time.Since(startTime))
 			}
 			if i%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
@@ -812,8 +806,6 @@ beginTx:
 			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
-
-			fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
 
 			if _, ok := r.mainHashes.Get(k[common.BlockNumberLength:]); !ok {
 				continue
