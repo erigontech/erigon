@@ -102,11 +102,11 @@ const ClientMaxConnections uint64 = 128
 
 var logger = log.New("database", "remote")
 
-func encodeKeyValue(encoder *codec.Encoder, key *[]byte, value *[]byte) error {
-	if err := encoder.Encode(key); err != nil {
+func encodeKeyValue(encoder *codec.Encoder, key []byte, value []byte) error {
+	if err := encoder.Encode(&key); err != nil {
 		return err
 	}
-	if err := encoder.Encode(value); err != nil {
+	if err := encoder.Encode(&value); err != nil {
 		return err
 	}
 	return nil
@@ -122,8 +122,8 @@ func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) (err err
 	return nil
 }
 
-func encodeKey(encoder *codec.Encoder, key *[]byte, valueIsEmpty bool) error {
-	if err := encoder.Encode(key); err != nil {
+func encodeKey(encoder *codec.Encoder, key []byte, valueIsEmpty bool) error {
+	if err := encoder.Encode(&key); err != nil {
 		return err
 	}
 	if err := encoder.Encode(valueIsEmpty); err != nil {
@@ -366,7 +366,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			if err := encoder.Encode(ResponseOk); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
-			if err := encodeKeyValue(encoder, &k, &v); err != nil {
+			if err := encodeKeyValue(encoder, k, v); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
 		case CmdCursorSeekTo:
@@ -388,7 +388,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdCursorSeek: %w", err)
 			}
 
-			if err := encodeKeyValue(encoder, &k, &v); err != nil {
+			if err := encodeKeyValue(encoder, k, v); err != nil {
 				return fmt.Errorf("could not encode (key,value) in response to CmdCursorSeekTo: %w", err)
 			}
 		case CmdCursorNext:
@@ -422,7 +422,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return ctx.Err()
 				}
 
-				if err := encodeKeyValue(encoder, &k, &v); err != nil {
+				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) in response to CmdCursorNext: %w", err)
 				}
 
@@ -457,7 +457,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 					return ctx.Err()
 				}
 
-				if err := encodeKeyValue(encoder, &k, &v); err != nil {
+				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) for CmdCursorFirst: %w", err)
 				}
 
@@ -467,9 +467,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				}
 			}
 		case CmdCursorNextKey:
-			var k = &[]byte{}
-			var v = &[]byte{}
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorNextKey: %w", err)
 			}
@@ -493,26 +490,23 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdCursorNextKey: %w", err)
 			}
 
-			for *k, *v = cursor.Next(); numberOfKeys > 0; *k, *v = cursor.Next() {
+			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
 					return fmt.Errorf("could not encode (key,valueIsEmpty) in response to CmdCursorNextKey: %w", err)
 				}
 
 				numberOfKeys--
-				if *k == nil {
+				if k == nil {
 					break
 				}
 			}
 		case CmdCursorFirstKey:
-			var k = &[]byte{}
-			var v = &[]byte{}
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirstKey: %w", err)
 			}
@@ -530,14 +524,14 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response code for CmdCursorFirstKey: %w", err)
 			}
 
-			for *k, *v = cursor.First(); numberOfKeys > 0; *k, *v = cursor.Next() {
+			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
 					return fmt.Errorf("could not encode (key,valueIsEmpty) for CmdCursorFirstKey: %w", err)
 				}
 
@@ -612,7 +606,7 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 		for {
 			select {
 			case <-ticker.C:
-				logger.Trace("connections", "amount", len(ch))
+				logger.Debug("connections", "amount", len(ch))
 			case <-ctx.Done():
 				return
 			}
