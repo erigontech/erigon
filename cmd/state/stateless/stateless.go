@@ -24,6 +24,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 var chartColors = []drawing.Color{
@@ -70,6 +71,33 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 			fmt.Printf("block hash = %x\n", block.Hash())
 			return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
 		}
+	}
+	return nil
+}
+
+func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number uint64) error {
+	filename := fmt.Sprintf("state_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	indexColors := visual.HexIndexColors
+	fontColors := visual.HexFontColors
+	visual.StartGraph(f, false)
+	trie.Visual(t, f, &trie.VisualOpts{
+		Highlights:     nil,
+		IndexColors:    indexColors,
+		FontColors:     fontColors,
+		Values:         true,
+		CutTerminals:   0,
+		CodeMap:        codeMap,
+		CodeCompressed: false,
+		ValCompressed:  false,
+		ValHex:         true,
+	})
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -267,6 +295,10 @@ func Stateless(
 					tds.PrintTrie(f)
 				}
 				return
+			}
+			if _, ok := starkBlocks[blockNum-1]; ok && witness != nil {
+				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
+				check(err)
 			}
 			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
