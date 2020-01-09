@@ -68,7 +68,7 @@ type {{.TreeType}} struct {
 
 func New{{.TreeType}}() *{{.TreeType}} {
 	return &{{.TreeType}}{
-		Tree: New(),
+		New(),
 		version: "1",
 	}
 }
@@ -105,7 +105,7 @@ func (t *{{.TreeType}}) Walk(f func(string, {{.Type}}) bool) {
 
 func (t *{{.TreeType}}) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
-	e.MustEncode(t.Tree.Len())
+	e.MustEncode(t.tree.Len())
 	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)

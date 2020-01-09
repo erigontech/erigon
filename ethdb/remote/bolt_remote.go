@@ -22,8 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
@@ -102,16 +100,7 @@ const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ServerMaxConnections uint64 = 2048
 const ClientMaxConnections uint64 = 128
 
-// tracing enable by evn GODEBUG=remotedb.debug=1
-var tracing bool
-
-func init() {
-	for _, f := range strings.Split(os.Getenv("GODEBUG"), ",") {
-		if f == "remotedb.debug=1" {
-			tracing = true
-		}
-	}
-}
+var logger = log.New("database", "remote")
 
 func encodeKeyValue(encoder *codec.Encoder, key *[]byte, value *[]byte) error {
 	if err := encoder.Encode(key); err != nil {
@@ -155,11 +144,11 @@ func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
 
 func encodeErr(encoder *codec.Encoder, mainError error) {
 	if err := encoder.Encode(ResponseErr); err != nil {
-		log.Error("could not encode ResponseErr", "err", err)
+		logger.Error("could not encode ResponseErr", "err", err)
 		return
 	}
 	if err := encoder.Encode(mainError.Error()); err != nil {
-		log.Error("could not encode errCode", "err", err)
+		logger.Error("could not encode errCode", "err", err)
 		return
 	}
 }
@@ -184,7 +173,7 @@ func decodeErr(decoder *codec.Decoder, responseCode ResponseCode) error {
 func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
-			log.Error("Could not close connection", "err", err1)
+			logger.Error("Could not close connection", "err", err1)
 		}
 	}()
 
@@ -202,7 +191,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 	defer func() {
 		if tx != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Warn("remote db: could not roll back", "err", rollbackErr)
+				logger.Error("could not roll back", "err", rollbackErr)
 			}
 			tx = nil
 		}
@@ -599,7 +588,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
 			}
 		default:
-			log.Error("unknown", "command", c)
+			logger.Error("unknown", "command", c)
 			return fmt.Errorf("unknown command %d", c)
 		}
 	}
@@ -613,39 +602,37 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Error("Could not create listener", "address", address, "err", err)
+		logger.Error("Could not create listener", "address", address, "err", err)
 		return
 	}
 	defer func() {
 		if err = ln.Close(); err != nil {
-			log.Error("Could not close listener", "err", err)
+			logger.Error("Could not close listener", "err", err)
 		}
 	}()
-	log.Info("Remote DB interface listening on", "address", address)
+	logger.Info("Listening on", "address", address)
 
 	ch := make(chan bool, ServerMaxConnections)
 	defer close(ch)
 
-	if tracing {
-		go func() {
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
 
-			for {
-				select {
-				case <-ticker.C:
-					log.Info("remote db: connections", "amount", len(ch))
-				case <-ctx.Done():
-					return
-				}
+		for {
+			select {
+			case <-ticker.C:
+				logger.Trace("connections", "amount", len(ch))
+			case <-ctx.Done():
+				return
 			}
-		}()
-	}
+		}
+	}()
 
 	for {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
-			log.Error("Could not accept connection", "err", err1)
+			logger.Error("Could not accept connection", "err", err1)
 			continue
 		}
 
@@ -655,10 +642,9 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 				<-ch
 			}()
 
-			//nolint:errcheck
 			err := Server(ctx, db, conn, conn, conn)
 			if err != nil {
-				log.Warn("remote db server error", "err", err)
+				logger.Warn("server error", "err", err)
 			}
 		}()
 	}
@@ -710,7 +696,7 @@ func (db *DB) ping(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			if closeErr := closer.Close(); closeErr != nil {
-				log.Error("remote db: can't close connection", "err", closeErr)
+				logger.Error("can't close connection", "err", closeErr)
 			}
 			return
 		}
@@ -808,7 +794,7 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		defer cancel()
 		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
 		if err != nil {
-			log.Warn("remote db: dial failed", "err", err)
+			logger.Warn("dial failed", "err", err)
 			db.doDial <- struct{}{}
 			time.Sleep(db.retryDialAfter)
 			return
@@ -817,16 +803,14 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
 		db.returnConn(ctx, newIn, newOut, notifyCloser)
 	case <-db.doPing:
-		if tracing {
-			log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
-		}
+		logger.Trace("connections in pool", "amount", len(db.connectionPool))
 
 		// periodically ping to close broken connections
 		pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
 		defer cancel()
 		if err := db.ping(pingCtx); err != nil {
 			if !errors.Is(err, io.EOF) { // io.EOF means server gone
-				log.Warn("remote db: ping failed", "err", err)
+				logger.Warn("ping failed", "err", err)
 				return
 			}
 
@@ -949,7 +933,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	defer func() {
 		if err != nil || endTxErr != nil || opErr != nil {
 			if closeErr := closer.Close(); closeErr != nil {
-				log.Error("can't close connection", "err", closeErr)
+				logger.Error("can't close connection", "err", closeErr)
 			}
 			return
 		}
@@ -978,7 +962,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 
 	endTxErr = db.endTx(ctx, encoder, decoder)
 	if endTxErr != nil {
-		log.Warn("remote db: could not finish tx", "err", err)
+		logger.Warn("could not finish tx", "err", err)
 	}
 
 	return opErr

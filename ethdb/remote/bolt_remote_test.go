@@ -682,12 +682,12 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 func TestReconnect(t *testing.T) {
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 
 	dialCallCounter := 0
 	ctx, cancel := context.WithCancel(context.Background())

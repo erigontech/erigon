@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -21,7 +20,9 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ugorji/go/codec"
@@ -129,14 +130,16 @@ func dir() string {
 	return dir
 }
 
+var ReportsProgressBucket = []byte("reports_progress")
+
 func save2(k []byte, tx *bolt.Tx, data interface{}) {
 	defer func(t time.Time) { fmt.Println("Save:", time.Since(t)) }(time.Now())
 	var buf bytes.Buffer
 
-	var handle codec.CborHandle
-	handle.WriterBufferSize = 1024 * 1024
-	codec.NewEncoder(&buf, &handle).MustEncode(data)
+	encoder := codecpool.Encoder(&buf)
+	defer codecpool.Return(encoder)
 
+	encoder.MustEncode(data)
 	if err := tx.Bucket(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
 		panic(err)
 	}
@@ -162,43 +165,6 @@ func restore2(k []byte, tx *bolt.Tx, data interface{}) {
 	}
 }
 
-func restore(file string, snapshot interface{}) {
-	t := time.Now()
-	defer func() {
-		fmt.Println("Restore: " + time.Since(t).String())
-	}()
-	f, err := os.OpenFile(file, os.O_RDONLY|os.O_CREATE, 0644)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	var handle codec.CborHandle
-	handle.ReaderBufferSize = 1024 * 1024
-	if err := codec.NewDecoder(f, &handle).Decode(snapshot); err != nil {
-		if err != io.EOF {
-			panic(err)
-		}
-	}
-}
-
-func save(file string, snapshot interface{}) {
-	t := time.Now()
-	defer func() {
-		fmt.Println("Save: " + time.Since(t).String())
-	}()
-
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	var handle codec.CborHandle
-	handle.WriterBufferSize = 1024 * 1024
-	codec.NewEncoder(f, &handle).MustEncode(snapshot)
-}
-
 func PrintMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -213,25 +179,28 @@ func bToMb(b uint64) uint64 {
 type StateGrowth1Reporter struct {
 	remoteDb     *remote.DB `codec:"-"`
 	commit       func(ctx context.Context)
+	rollback     func(ctx context.Context)
 	MaxTimestamp uint64
 	HistoryKey   []byte
 	AccountKey   []byte
 
-	lastTimestamps   *bolt.Bucket   // map[addrHash]uint64
-	CreationsByBlock map[uint64]int // For each timestamp, how many accounts were created in the state
+	lastTimestamps   *typedbucket.Uint64 // map[addrHash]uint64
+	CreationsByBlock map[uint64]int      // For each timestamp, how many accounts were created in the state
 }
 
 func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth1Reporter {
 	var LastTimestampsBucket = []byte("sg1_accounts_last_timestamps")
+	var ProgressKey = []byte("state_growth_1")
 
 	var err error
+	var localTx *bolt.Tx
+	var lastTimestamps *bolt.Bucket
 
-	localTx, err := localDb.Begin(true)
-	if err != nil {
+	if localTx, err = localDb.Begin(true); err != nil {
 		panic(err)
 	}
-	lastTimestamps, err := localTx.CreateBucketIfNotExists(LastTimestampsBucket, false)
-	if err != nil {
+
+	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
 		panic(err)
 	}
 
@@ -240,12 +209,12 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
 		MaxTimestamp:     0,
-		lastTimestamps:   lastTimestamps,
+		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
 		CreationsByBlock: make(map[uint64]int),
 	}
 	rep.commit = func(ctx context.Context) {
-		save2([]byte("state_growth_1"), localTx, rep)
-		if err := localTx.Commit(); err != nil {
+		save2(ProgressKey, localTx, rep)
+		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
 		localTx, err = localDb.Begin(true)
@@ -253,18 +222,20 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 			panic(err)
 		}
 
-		rep.lastTimestamps = localTx.Bucket(LastTimestampsBucket)
+		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
+	}
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
 	}
 
-	restore2([]byte("state_growth_1"), localTx, rep)
+	restore2(ProgressKey, localTx, rep)
 	return rep
 }
 
-var (
-	ReportsProgressBucket = []byte("reports_progress")
-)
-
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
+	defer r.rollback(ctx)
 	startTime := time.Now()
 
 	var count int
@@ -303,17 +274,12 @@ beginTx:
 			}
 			if vIsEmpty {
 				r.CreationsByBlock[timestamp]++
-				v, _ := r.lastTimestamps.Get(addrHash.Bytes())
-				if v != nil {
-					lt, err := strconv.ParseUint(string(v), 10, 0)
-					if err != nil {
-						return err
-					}
+				if lt, ok := r.lastTimestamps.Get(addrHash.Bytes()); ok {
 					r.CreationsByBlock[lt]--
 				}
 			}
 
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), []byte(strconv.FormatUint(timestamp, 10))); err != nil {
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), timestamp); err != nil {
 				return err
 			}
 
@@ -381,7 +347,7 @@ beginTx2:
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
-			if err := r.lastTimestamps.Put(addrHash.Bytes(), []byte(strconv.FormatUint(r.MaxTimestamp, 10))); err != nil {
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), r.MaxTimestamp); err != nil {
 				return err
 			}
 
@@ -411,17 +377,14 @@ beginTx2:
 		goto beginTx2
 	}
 
-	r.lastTimestamps.ForEach(func(_, v []byte) error {
-		lt, err := strconv.ParseUint(string(v), 10, 0)
-		if err != nil {
-			return err
-		}
-
+	if err := r.lastTimestamps.ForEach(func(_ []byte, lt uint64) error {
 		if lt < r.MaxTimestamp {
 			r.CreationsByBlock[lt]--
 		}
 		return nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Account history records: %d\n", count)
@@ -439,6 +402,7 @@ beginTx2:
 	f, err := os.Create("accounts_growth.csv")
 	check(err)
 	defer f.Close()
+
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
@@ -452,6 +416,7 @@ type StateGrowth2Reporter struct {
 	remoteDb     *remote.DB `codec:"-"`
 	localDb      *bolt.DB   `codec:"-"`
 	commit       func(ctx context.Context)
+	rollback     func(ctx context.Context)
 	MaxTimestamp uint64
 	HistoryKey   []byte
 	StorageKey   []byte
@@ -467,17 +432,20 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	var CreationsByBlockBucket = []byte("sg2_creations_by_block")
 	var ProgressKey = []byte("state_growth_2")
 
-	localTx, err := localDb.Begin(true)
-	if err != nil {
-		panic(err)
-	}
-	lastTimestamps, err := localTx.CreateBucketIfNotExists(LastTimestampsBucket, false)
-	if err != nil {
+	var err error
+	var localTx *bolt.Tx
+	var lastTimestamps *bolt.Bucket
+	var creationsByBlock *bolt.Bucket
+
+	if localTx, err = localDb.Begin(true); err != nil {
 		panic(err)
 	}
 
-	creationsByBlock, err := localTx.CreateBucketIfNotExists(CreationsByBlockBucket, false)
-	if err != nil {
+	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
+		panic(err)
+	}
+
+	if creationsByBlock, err = localTx.CreateBucketIfNotExists(CreationsByBlockBucket, false); err != nil {
 		panic(err)
 	}
 
@@ -491,12 +459,11 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		creationsByBlock: typedbucket.NewInt(creationsByBlock),
 	}
 	rep.commit = func(ctx context.Context) {
-		save2([]byte("state_growth_1"), localTx, rep)
-		if err := localTx.Commit(); err != nil {
+		save2(ProgressKey, localTx, rep)
+		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
-		localTx, err = localDb.Begin(true)
-		if err != nil {
+		if localTx, err = localDb.Begin(true); err != nil {
 			panic(err)
 		}
 
@@ -509,11 +476,12 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		}
 	}
 
-	restore2([]byte("state_growth_1"), localTx, rep)
+	restore2(ProgressKey, localTx, rep)
 	return rep
 }
 
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
+	defer r.rollback(ctx)
 	startTime := time.Now()
 	var count int
 
@@ -563,22 +531,6 @@ beginTx:
 				}
 
 				if err := r.lastTimestamps.DecrementIfExist(addr2HashKey); err != nil {
-					return err
-				}
-				lBytes, err := json.Marshal(l)
-				if err != nil {
-					return err
-				}
-				if err := r.lastTimestamps.Put(addrHash.Bytes(), lBytes); err != nil {
-					return err
-				}
-			}
-			v, _ := r.lastTimestamps.Get(addrHash.Bytes())
-			var l map[common.Hash]uint64
-			if v == nil {
-				l = make(map[common.Hash]uint64)
-			} else {
-				if err := json.Unmarshal(v, &l); err != nil {
 					return err
 				}
 			}
@@ -685,7 +637,9 @@ beginTx2:
 			}
 		}
 		return nil
-	})
+	}); err != nil {
+		panic(err)
+	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 	fmt.Printf("Storage history records: %d\n", count)
@@ -704,7 +658,7 @@ beginTx2:
 	idx := 0
 	for timestamp, count := range totalCreationsByBlock {
 		tsi.timestamps[idx] = timestamp
-		tsi.values[idx] = int(count)
+		tsi.values[idx] = count
 		idx++
 	}
 	sort.Sort(tsi)
@@ -738,13 +692,14 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 	var MainHashesBucket = []byte("gl_main_hashes")
 	var ProgressKey = []byte("gas_limit")
 
-	localTx, err := localDb.Begin(true)
-	if err != nil {
+	var err error
+	var localTx *bolt.Tx
+	var mainHashes *bolt.Bucket
+
+	if localTx, err = localDb.Begin(true); err != nil {
 		panic(err)
 	}
-
-	mainHashes, err := localTx.CreateBucketIfNotExists(MainHashesBucket, false)
-	if err != nil {
+	if mainHashes, err = localTx.CreateBucketIfNotExists(MainHashesBucket, false); err != nil {
 		panic(err)
 	}
 
@@ -756,11 +711,10 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 	}
 	rep.commit = func(ctx context.Context) {
 		save2(ProgressKey, localTx, rep)
-		if err := localTx.Commit(); err != nil {
+		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
-		localTx, err = localDb.Begin(true)
-		if err != nil {
+		if localTx, err = localDb.Begin(true); err != nil {
 			panic(err)
 		}
 

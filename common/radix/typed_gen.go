@@ -14,7 +14,7 @@ type RadixMapHash2Uint64 struct {
 
 func NewRadixMapHash2Uint64() *RadixMapHash2Uint64 {
 	return &RadixMapHash2Uint64{
-		New(),
+		Tree:    New(),
 		version: "1",
 	}
 }
@@ -51,7 +51,7 @@ func (t *RadixMapHash2Uint64) Walk(f func(string, map[common.Hash]uint64) bool) 
 
 func (t *RadixMapHash2Uint64) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
-	e.MustEncode(t.tree.Len())
+	e.MustEncode(t.Tree.Len())
 	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
@@ -84,7 +84,7 @@ type RadixMapUint642Int struct {
 
 func NewRadixMapUint642Int() *RadixMapUint642Int {
 	return &RadixMapUint642Int{
-		New(),
+		Tree:    New(),
 		version: "1",
 	}
 }
@@ -121,7 +121,7 @@ func (t *RadixMapUint642Int) Walk(f func(string, map[uint64]int) bool) {
 
 func (t *RadixMapUint642Int) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
-	e.MustEncode(t.tree.Len())
+	e.MustEncode(t.Tree.Len())
 	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
@@ -154,7 +154,7 @@ type RadixUint64 struct {
 
 func NewRadixUint64() *RadixUint64 {
 	return &RadixUint64{
-		New(),
+		Tree:    New(),
 		version: "1",
 	}
 }
@@ -191,7 +191,7 @@ func (t *RadixUint64) Walk(f func(string, uint64) bool) {
 
 func (t *RadixUint64) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
-	e.MustEncode(t.tree.Len())
+	e.MustEncode(t.Tree.Len())
 	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
