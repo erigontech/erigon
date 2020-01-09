@@ -8,7 +8,7 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-var logger = log.New("codecpool")
+var logger = log.New("package", "codecpool")
 
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)

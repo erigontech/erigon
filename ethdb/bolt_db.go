@@ -210,7 +210,6 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
 	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
