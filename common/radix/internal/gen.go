@@ -62,35 +62,31 @@ import (
 var typedTreeTemplate = template.Must(template.New("").Parse(`
 // string -> {{.Type}}
 type {{.TreeType}} struct {
+	*Tree
 	version string
-	tree    *Tree
 }
 
 func New{{.TreeType}}() *{{.TreeType}} {
 	return &{{.TreeType}}{
+		New(),
 		version: "1",
-		tree:    New(),
 	}
 }
 
-func (t *{{.TreeType}}) Len() int {
-	return t.tree.Len()
-}
-
 func (t *{{.TreeType}}) Get(k string) ({{.Type}}, bool) {
-	v, ok := t.tree.Get(k)
+	v, ok := t.Tree.Get(k)
 	if ok {
 		return v.({{.Type}}), ok
 	}
 	return {{.NilValue}}, ok
 }
 
-func (t *{{.TreeType}}) Set(k string, v {{.Type}}) {
-	t.tree.Insert(k, v)
+func (t *{{.TreeType}}) Insert(k string, v {{.Type}}) {
+	t.Tree.Insert(k, v)
 }
 
 func (t *{{.TreeType}}) Delete(k string) ({{.Type}}, bool) {
-	v, ok := t.tree.Delete(k)
+	v, ok := t.Tree.Delete(k)
 	if ok {
 		return v.({{.Type}}), ok
 	}
@@ -98,11 +94,11 @@ func (t *{{.TreeType}}) Delete(k string) ({{.Type}}, bool) {
 }
 
 func (t *{{.TreeType}}) DeletePrefix(k string) int {
-	return t.tree.DeletePrefix(k)
+	return t.Tree.DeletePrefix(k)
 }
 
 func (t *{{.TreeType}}) Walk(f func(string, {{.Type}}) bool) {
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		return f(k, v.({{.Type}}))
 	})
 }
@@ -110,7 +106,7 @@ func (t *{{.TreeType}}) Walk(f func(string, {{.Type}}) bool) {
 func (t *{{.TreeType}}) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
 	e.MustEncode(t.tree.Len())
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
 		return false
@@ -130,7 +126,7 @@ func (t *{{.TreeType}}) CodecDecodeSelf(d *codec.Decoder) {
 		var v {{.Type}}
 		d.MustDecode(&k)
 		d.MustDecode(&v)
-		t.tree.Insert(k, v)
+		t.Insert(k, v)
 	}
 }
 `))

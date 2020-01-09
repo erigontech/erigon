@@ -8,35 +8,31 @@ import (
 
 // string -> map[common.Hash]uint64
 type RadixMapHash2Uint64 struct {
+	*Tree
 	version string
-	tree    *Tree
 }
 
 func NewRadixMapHash2Uint64() *RadixMapHash2Uint64 {
 	return &RadixMapHash2Uint64{
+		New(),
 		version: "1",
-		tree:    New(),
 	}
 }
 
-func (t *RadixMapHash2Uint64) Len() int {
-	return t.tree.Len()
-}
-
 func (t *RadixMapHash2Uint64) Get(k string) (map[common.Hash]uint64, bool) {
-	v, ok := t.tree.Get(k)
+	v, ok := t.Tree.Get(k)
 	if ok {
 		return v.(map[common.Hash]uint64), ok
 	}
 	return nil, ok
 }
 
-func (t *RadixMapHash2Uint64) Set(k string, v map[common.Hash]uint64) {
-	t.tree.Insert(k, v)
+func (t *RadixMapHash2Uint64) Insert(k string, v map[common.Hash]uint64) {
+	t.Tree.Insert(k, v)
 }
 
 func (t *RadixMapHash2Uint64) Delete(k string) (map[common.Hash]uint64, bool) {
-	v, ok := t.tree.Delete(k)
+	v, ok := t.Tree.Delete(k)
 	if ok {
 		return v.(map[common.Hash]uint64), ok
 	}
@@ -44,11 +40,11 @@ func (t *RadixMapHash2Uint64) Delete(k string) (map[common.Hash]uint64, bool) {
 }
 
 func (t *RadixMapHash2Uint64) DeletePrefix(k string) int {
-	return t.tree.DeletePrefix(k)
+	return t.Tree.DeletePrefix(k)
 }
 
 func (t *RadixMapHash2Uint64) Walk(f func(string, map[common.Hash]uint64) bool) {
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		return f(k, v.(map[common.Hash]uint64))
 	})
 }
@@ -56,7 +52,7 @@ func (t *RadixMapHash2Uint64) Walk(f func(string, map[common.Hash]uint64) bool) 
 func (t *RadixMapHash2Uint64) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
 	e.MustEncode(t.tree.Len())
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
 		return false
@@ -76,41 +72,37 @@ func (t *RadixMapHash2Uint64) CodecDecodeSelf(d *codec.Decoder) {
 		var v map[common.Hash]uint64
 		d.MustDecode(&k)
 		d.MustDecode(&v)
-		t.tree.Insert(k, v)
+		t.Insert(k, v)
 	}
 }
 
 // string -> map[uint64]int
 type RadixMapUint642Int struct {
+	*Tree
 	version string
-	tree    *Tree
 }
 
 func NewRadixMapUint642Int() *RadixMapUint642Int {
 	return &RadixMapUint642Int{
+		New(),
 		version: "1",
-		tree:    New(),
 	}
 }
 
-func (t *RadixMapUint642Int) Len() int {
-	return t.tree.Len()
-}
-
 func (t *RadixMapUint642Int) Get(k string) (map[uint64]int, bool) {
-	v, ok := t.tree.Get(k)
+	v, ok := t.Tree.Get(k)
 	if ok {
 		return v.(map[uint64]int), ok
 	}
 	return nil, ok
 }
 
-func (t *RadixMapUint642Int) Set(k string, v map[uint64]int) {
-	t.tree.Insert(k, v)
+func (t *RadixMapUint642Int) Insert(k string, v map[uint64]int) {
+	t.Tree.Insert(k, v)
 }
 
 func (t *RadixMapUint642Int) Delete(k string) (map[uint64]int, bool) {
-	v, ok := t.tree.Delete(k)
+	v, ok := t.Tree.Delete(k)
 	if ok {
 		return v.(map[uint64]int), ok
 	}
@@ -118,11 +110,11 @@ func (t *RadixMapUint642Int) Delete(k string) (map[uint64]int, bool) {
 }
 
 func (t *RadixMapUint642Int) DeletePrefix(k string) int {
-	return t.tree.DeletePrefix(k)
+	return t.Tree.DeletePrefix(k)
 }
 
 func (t *RadixMapUint642Int) Walk(f func(string, map[uint64]int) bool) {
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		return f(k, v.(map[uint64]int))
 	})
 }
@@ -130,7 +122,7 @@ func (t *RadixMapUint642Int) Walk(f func(string, map[uint64]int) bool) {
 func (t *RadixMapUint642Int) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
 	e.MustEncode(t.tree.Len())
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
 		return false
@@ -150,41 +142,37 @@ func (t *RadixMapUint642Int) CodecDecodeSelf(d *codec.Decoder) {
 		var v map[uint64]int
 		d.MustDecode(&k)
 		d.MustDecode(&v)
-		t.tree.Insert(k, v)
+		t.Insert(k, v)
 	}
 }
 
 // string -> uint64
 type RadixUint64 struct {
+	*Tree
 	version string
-	tree    *Tree
 }
 
 func NewRadixUint64() *RadixUint64 {
 	return &RadixUint64{
+		New(),
 		version: "1",
-		tree:    New(),
 	}
 }
 
-func (t *RadixUint64) Len() int {
-	return t.tree.Len()
-}
-
 func (t *RadixUint64) Get(k string) (uint64, bool) {
-	v, ok := t.tree.Get(k)
+	v, ok := t.Tree.Get(k)
 	if ok {
 		return v.(uint64), ok
 	}
 	return 0, ok
 }
 
-func (t *RadixUint64) Set(k string, v uint64) {
-	t.tree.Insert(k, v)
+func (t *RadixUint64) Insert(k string, v uint64) {
+	t.Tree.Insert(k, v)
 }
 
 func (t *RadixUint64) Delete(k string) (uint64, bool) {
-	v, ok := t.tree.Delete(k)
+	v, ok := t.Tree.Delete(k)
 	if ok {
 		return v.(uint64), ok
 	}
@@ -192,11 +180,11 @@ func (t *RadixUint64) Delete(k string) (uint64, bool) {
 }
 
 func (t *RadixUint64) DeletePrefix(k string) int {
-	return t.tree.DeletePrefix(k)
+	return t.Tree.DeletePrefix(k)
 }
 
 func (t *RadixUint64) Walk(f func(string, uint64) bool) {
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		return f(k, v.(uint64))
 	})
 }
@@ -204,7 +192,7 @@ func (t *RadixUint64) Walk(f func(string, uint64) bool) {
 func (t *RadixUint64) CodecEncodeSelf(e *codec.Encoder) {
 	e.MustEncode(t.version)
 	e.MustEncode(t.tree.Len())
-	t.tree.Walk(func(k string, v interface{}) bool {
+	t.Tree.Walk(func(k string, v interface{}) bool {
 		e.MustEncode(&k)
 		e.MustEncode(&v)
 		return false
@@ -224,6 +212,6 @@ func (t *RadixUint64) CodecDecodeSelf(d *codec.Decoder) {
 		var v uint64
 		d.MustDecode(&k)
 		d.MustDecode(&v)
-		t.tree.Insert(k, v)
+		t.Insert(k, v)
 	}
 }

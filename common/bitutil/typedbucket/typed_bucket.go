@@ -9,15 +9,15 @@ import (
 )
 
 type Uint64 struct {
-	b *bolt.Bucket
+	*bolt.Bucket
 }
 
 func NewUint64(b *bolt.Bucket) *Uint64 {
-	return &Uint64{b: b}
+	return &Uint64{b}
 }
 
 func (b *Uint64) Get(key []byte) (uint64, bool) {
-	value, _ := b.b.Get(key)
+	value, _ := b.Bucket.Get(key)
 	if value == nil {
 		return 0, false
 	}
@@ -65,11 +65,11 @@ func (b *Uint64) Put(key []byte, value uint64) error {
 	defer codecpool.Return(encoder)
 
 	encoder.MustEncode(&value)
-	return b.b.Put(key, buf.Bytes())
+	return b.Bucket.Put(key, buf.Bytes())
 }
 
 func (b *Uint64) ForEach(fn func([]byte, uint64) error) error {
-	return b.b.ForEach(func(k, v []byte) error {
+	return b.Bucket.ForEach(func(k, v []byte) error {
 		var value uint64
 		decoder := codecpool.Decoder(bytes.NewReader(v))
 		defer codecpool.Return(decoder)
@@ -80,15 +80,15 @@ func (b *Uint64) ForEach(fn func([]byte, uint64) error) error {
 }
 
 type Int struct {
-	b *bolt.Bucket
+	*bolt.Bucket
 }
 
 func NewInt(b *bolt.Bucket) *Int {
-	return &Int{b: b}
+	return &Int{b}
 }
 
 func (b *Int) Get(key []byte) (int, bool) {
-	value, _ := b.b.Get(key)
+	value, _ := b.Bucket.Get(key)
 	if value == nil {
 		return 0, false
 	}
@@ -107,7 +107,7 @@ func (b *Int) Put(key []byte, value int) error {
 	defer codecpool.Return(encoder)
 
 	encoder.MustEncode(&value)
-	return b.b.Put(key, buf.Bytes())
+	return b.Bucket.Put(key, buf.Bytes())
 }
 
 func (b *Int) Increment(key []byte) error {
@@ -133,7 +133,7 @@ func (b *Int) DecrementIfExist(key []byte) error {
 }
 
 func (b *Int) ForEach(fn func([]byte, int) error) error {
-	return b.b.ForEach(func(k, v []byte) error {
+	return b.Bucket.ForEach(func(k, v []byte) error {
 		var value int
 		decoder := codecpool.Decoder(bytes.NewReader(v))
 		defer codecpool.Return(decoder)

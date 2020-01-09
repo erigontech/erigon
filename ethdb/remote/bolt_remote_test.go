@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -57,12 +58,12 @@ func TestCmdVersion(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	assert.Nil(t, encoder.Encode(CmdVersion), "Could not encode CmdVersion")
 
@@ -87,12 +88,12 @@ func TestCmdBeginEndError(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Send CmdBeginTx, followed by double CmdEndTx
 	// followed by the CmdLastError
@@ -134,12 +135,12 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket
 	var name = []byte("testbucket")
@@ -182,12 +183,12 @@ func TestCmdGet(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -261,12 +262,12 @@ func TestCmdSeek(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -338,12 +339,12 @@ func TestCursorOperations(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -535,12 +536,12 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")

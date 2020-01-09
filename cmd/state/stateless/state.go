@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/radix"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -725,29 +724,61 @@ beginTx2:
 }
 
 type GasLimitReporter struct {
-	db               *remote.DB `codec:"-"`
-	save             func(ctx context.Context)
+	remoteDb         *remote.DB `codec:"-"`
+	commit           func(ctx context.Context)
+	rollback         func(ctx context.Context)
 	HeaderPrefixKey1 []byte
 	HeaderPrefixKey2 []byte
-	MainHashes       *radix.RadixUint64
+
+	// map[common.Hash]uint64 - key is addrHash + hash
+	mainHashes *typedbucket.Uint64 // For each address hash, when was it last accounted
 }
 
-func NewGasLimitReporter(ctx context.Context, db *remote.DB) *GasLimitReporter {
+func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *GasLimitReporter {
+	var MainHashesBucket = []byte("gl_main_hashes")
+	var ProgressKey = []byte("gas_limit")
+
+	localTx, err := localDb.Begin(true)
+	if err != nil {
+		panic(err)
+	}
+
+	mainHashes, err := localTx.CreateBucketIfNotExists(MainHashesBucket, false)
+	if err != nil {
+		panic(err)
+	}
+
 	rep := &GasLimitReporter{
-		db:               db,
+		remoteDb:         remoteDb,
 		HeaderPrefixKey1: []byte{},
 		HeaderPrefixKey2: []byte{},
-		MainHashes:       radix.NewRadixUint64(),
+		mainHashes:       typedbucket.NewUint64(mainHashes),
 	}
-	var dumpFile = file("GasLimit", 1)
-	rep.save = func(ctx context.Context) {
-		save(dumpFile, rep)
+	rep.commit = func(ctx context.Context) {
+		save2(ProgressKey, localTx, rep)
+		if err := localTx.Commit(); err != nil {
+			panic(err)
+		}
+		localTx, err = localDb.Begin(true)
+		if err != nil {
+			panic(err)
+		}
+
+		rep.mainHashes = typedbucket.NewUint64(localTx.Bucket(MainHashesBucket))
 	}
-	restore(dumpFile, rep)
+
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
+	}
+
+	restore2(ProgressKey, localTx, rep)
 	return rep
 }
 
 func (r *GasLimitReporter) GasLimits(ctx context.Context) {
+	defer r.rollback(ctx)
 	startTime := time.Now()
 
 	f, ferr := os.Create("gas_limits.csv")
@@ -761,7 +792,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	var processingDone bool
 
 beginTx:
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
 		if err != nil {
 			return err
@@ -792,7 +823,9 @@ beginTx:
 				continue
 			}
 
-			r.MainHashes.Set(string(v), 0)
+			if err := r.mainHashes.Put(v, 0); err != nil {
+				return err
+			}
 
 			i++
 			if i%PrintProgressEvery == 0 {
@@ -803,7 +836,7 @@ beginTx:
 			}
 			if i%CommitEvery == 0 {
 				r.HeaderPrefixKey1 = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
 			if i%MaxIterationsPerTx == 0 {
 				r.HeaderPrefixKey1 = k
@@ -811,7 +844,7 @@ beginTx:
 			}
 		}
 
-		fmt.Println("Preloaded: ", r.MainHashes.Len())
+		fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
 
 		skipFirst = len(r.HeaderPrefixKey2) > 0 // snapshot stores last analyzed key
 		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
@@ -826,7 +859,9 @@ beginTx:
 				continue
 			}
 
-			if _, ok := r.MainHashes.Get(string(k[common.BlockNumberLength:])); !ok {
+			fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
+
+			if _, ok := r.mainHashes.Get(k[common.BlockNumberLength:]); !ok {
 				continue
 			}
 
@@ -846,7 +881,7 @@ beginTx:
 			}
 			if blockNum%CommitEvery == 0 {
 				r.HeaderPrefixKey2 = k
-				r.save(ctx)
+				r.commit(ctx)
 			}
 			if blockNum%MaxIterationsPerTx == 0 {
 				r.HeaderPrefixKey2 = k
@@ -1625,9 +1660,9 @@ func storageUsage() {
 
 func tokenUsage() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDb, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDb, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	tokensFile, err := os.Open("tokens.csv")

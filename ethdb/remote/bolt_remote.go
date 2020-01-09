@@ -28,6 +28,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
@@ -112,62 +113,6 @@ func init() {
 	}
 }
 
-// Pool of decoders
-var decoderPool = make(chan *codec.Decoder, 128)
-
-func newDecoder(r io.Reader) *codec.Decoder {
-	var d *codec.Decoder
-	select {
-	case d = <-decoderPool:
-		d.Reset(r)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.ReaderBufferSize = 64 * 1024
-			d = codec.NewDecoder(r, &handle)
-		}
-	}
-	return d
-}
-
-func returnDecoderToPool(d *codec.Decoder) {
-	select {
-	case decoderPool <- d:
-	default:
-		if tracing {
-			log.Info("RemoteDb: Allowing decoder to be garbage collected, pool is full")
-		}
-	}
-}
-
-// Pool of encoders
-var encoderPool = make(chan *codec.Encoder, 128)
-
-func newEncoder(w io.Writer) *codec.Encoder {
-	var e *codec.Encoder
-	select {
-	case e = <-encoderPool:
-		e.Reset(w)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.WriterBufferSize = 64 * 1024
-			e = codec.NewEncoder(w, &handle)
-		}
-	}
-	return e
-}
-
-func returnEncoderToPool(e *codec.Encoder) {
-	select {
-	case encoderPool <- e:
-	default:
-		if tracing {
-			log.Info("RemoteDb: Allowing encoder to be garbage collected, pool is full")
-		}
-	}
-}
-
 func encodeKeyValue(encoder *codec.Encoder, key *[]byte, value *[]byte) error {
 	if err := encoder.Encode(key); err != nil {
 		return err
@@ -243,10 +188,10 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 		}
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 	// Server is passive - it runs a loop what reads commands (and their arguments) and attempts to respond
 	var lastHandle uint64
 	// Read-only transactions opened by the client
@@ -773,11 +718,10 @@ func (db *DB) ping(ctx context.Context) (err error) {
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
-
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 	// Check version
 	if err := encoder.Encode(CmdVersion); err != nil {
 		return fmt.Errorf("could not encode CmdVersion: %w", err)
@@ -944,10 +888,10 @@ func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, times
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 
 	err = encoder.Encode(CmdGetAsOf)
 	if err != nil {
@@ -1012,10 +956,10 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 
 	if err = encoder.Encode(CmdBeginTx); err != nil {
 		return fmt.Errorf("could not encode CmdBeginTx: %w", err)
@@ -1070,10 +1014,10 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 		return nil, tx.ctx.Err()
 	}
 
-	decoder := newDecoder(tx.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(tx.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(tx.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(tx.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdBucket); err != nil {
 		return nil, fmt.Errorf("could not encode CmdBucket: %w", err)
@@ -1114,10 +1058,10 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 		return nil, b.ctx.Err()
 	}
 
-	decoder := newDecoder(b.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(b.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(b.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(b.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdGet); err != nil {
 		return nil, fmt.Errorf("could not encode CmdGet: %w", err)
@@ -1164,10 +1108,10 @@ func (b *Bucket) Cursor() (*Cursor, error) {
 		return nil, b.ctx.Err()
 	}
 
-	decoder := newDecoder(b.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(b.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(b.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(b.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursor); err != nil {
 		return nil, fmt.Errorf("could not encode CmdCursor: %w", err)
@@ -1253,10 +1197,10 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 		return nil, nil, c.ctx.Err()
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursorSeek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode CmdCursorSeek: %w", err)
@@ -1299,10 +1243,10 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
 		return nil, nil, c.ctx.Err()
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
 		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
@@ -1375,10 +1319,10 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		c.cacheValueIsEmpty = make([]bool, c.batchSize)
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(cmd); err != nil {
 		return fmt.Errorf("could not encode command %d. %w", cmd, err)
