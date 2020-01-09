@@ -249,11 +249,12 @@ First prefix, `c6` means that the following 6 bytes is a sequence of RLP-encoded
 prefix `c5` means that the following 5 bytes is a sequence of RLP-encoded sub-structures. There are 3 of them: `01`, `825208`, and `c0`. The first encodes
 number 1, which means the "Success" status of the transaction (0 would mean failure). Next, we have a byte array of length 2 (prefix `82`), `5208`, which is
 21000 in hexadecimal, the cumulative gas used by all transactions so far. And the last structure, `c0` is RLP encoding of an empty list. Usually, the log (events) emitted by the transaction, would be here. But since our transaction did not emit anything, the list is empty.
+
 Next bucket is "History Of Accounts":
 
 ![block1_db_history_of_accounts](changes_1_hAT_8.dot.gd.png)
 
-First of all, a new entry has been added and is the concatenation of the preimage of the account that sent the transaction with the block suffix. the first thing to notice is that the new entry has a block suffix of `0x21` instead of `0x20` since the change didn't occur in block Additionally, now the key has a value associated since before the changes the account changed existed actually existed. 
+First of all, a new entry has been added and is the concatenation of the preimage of the account that sent the transaction with the block suffix. The first thing to notice is that the new entry has a block suffix of `0x21` instead of `0x20` since the change didn't occur in block Additionally, now the key has a value associated since before the changes the account changed existed actually existed.
 
 The value is the value associated with the changed account **Before** the changes.
 

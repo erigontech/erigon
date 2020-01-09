@@ -166,7 +166,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 				firstB := firstTx.Bucket(bucketName)
 				return b.ForEach(func(k, v []byte) error {
 					if firstB != nil {
-						if firstV, _ := firstB.Get(k); bytes.Equal(v, firstV) {
+						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
 							// Skip the record that is the same as in the first Db
 							return nil
 						}
