@@ -254,9 +254,9 @@ Next bucket is "History Of Accounts":
 
 ![block1_db_history_of_accounts](changes_1_hAT_8.dot.gd.png)
 
-First of all, a new entry has been added and is the concatenation of the preimage of the account that sent the transaction with the block suffix. The first thing to notice is that the new entry has a block suffix of `0x21` instead of `0x20` since the change didn't occur in block Additionally, now the key has a value associated since before the changes the account changed existed actually existed.
-
-The value is the value associated with the changed account **Before** the changes.
+The first entry has a non-empty value. This is the sender of 0.001ETH. As history bucket records the value of this account BEFORE the change, we should
+expect the same value here as this account had at the geneis. The other two records contain empty values, which means these account were non-existent previously. These are the account of the recepient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), and the miner account `0x0000000000000000000000000000000000000000`.
+The keys of all three records have the common suffix of `0x21` instead of `0x20`, which is simply encoding of the block number 1 instead of block number 0.
 
 Next bucket is "Headers"
 
