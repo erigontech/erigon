@@ -258,6 +258,9 @@ The first entry has a non-empty value. This is the sender of 0.001ETH. As histor
 expect the same value here as this account had at the geneis. The other two records contain empty values, which means these account were non-existent previously. These are the account of the recepient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), and the miner account `0x0000000000000000000000000000000000000000`.
 The keys of all three records have the common suffix of `0x21` instead of `0x20`, which is simply encoding of the block number 1 instead of block number 0.
 
+**WARNING** We are planning a change, called `THIN_HISTORY`, after which the bucket "History of Accounts" will not store the values of the accounts,
+but only the block numbers when those accounts changed.
+
 Next bucket is "Headers"
 
 ![block1_db_headers](changes_1_h_7.dot.gd.png)
@@ -273,17 +276,18 @@ Next bucket is "Block Bodies":
 The keys in this bucket are concatenations of 8-byte encoding of the block number and 32-byte block hash.
 The new record is the repressentation of block 1.
 
-![genesis_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
+![block1_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
 
 Bucket "Change Sets" recorded the change in account that occurred BEFORE the 0.001 ETH transaction. you can notice that unlike the genesis block, this time the key has a prefix of `0x21` since now the blockchain is 1 block apart from the Genesis block.
+Like in the ChangeSet in the genesis block, there are 3 new records. But unlike the ChangeSet in the genesis block, one of the records (the last one) has
+a non-empty value. This is the same value that we see in the corresponding record in the "History of Accounts" bucket.
 
-**Note**
-it records what value the accounts (or storage slots)
-had BEFORE the change. In fact, it just store the existence of the address generated AFTER the genesis block.
+**WARNING** We are planning a change, called `THIN_HISTORY`, after which the bucket "History of Accounts" will not store the values of the accounts,
+but only the block numbers when those accounts changed.
 
 The next bucket is "Accounts":
 
-![genesis_db_accounts](changes_1_AT_0.dot.gd.png)
+![block1_db_accounts](changes_1_AT_0.dot.gd.png)
 
 The values are the current state of each account. 
 * The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. the nonce legth is `0x01`. therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
@@ -315,15 +319,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x038d7ea4c68000
 1000000000000000
 ````
-Which is 0.01 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
-
-In the third bit is contained Incarnation. The Incarnation is a turbo-geth specific attribute, which is
-used to make removal and revival of contract accounts (now possible with `CREATE2` since Constantinopole) efficient
-with turbo-geth's database layout. For now it will suffice to say that all non-contract accounts will have
-incarnation 0 (not set), and all contract accounts will start their existence with incarnation 1.
-
-Contract accounts may also contract code hash and storage root, and these two pieces of information would make the record
-in the "Accounts" bucket contain 5 instead of 3 fields.
+Which is 0.001 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
 
 Block 1 in go-ethereum
 ------------------------------
