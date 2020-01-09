@@ -8,6 +8,8 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
+var logger = log.New("codecpool")
+
 // Pool of decoders
 var decoderPool = make(chan *codec.Decoder, 128)
 
@@ -30,7 +32,7 @@ func returnDecoderToPool(d *codec.Decoder) {
 	select {
 	case decoderPool <- d:
 	default:
-		log.Warn("RemoteDb: Allowing decoder to be garbage collected, pool is full")
+		logger.Trace("Allowing decoder to be garbage collected, pool is full")
 	}
 }
 
@@ -56,7 +58,7 @@ func returnEncoderToPool(e *codec.Encoder) {
 	select {
 	case encoderPool <- e:
 	default:
-		log.Warn("RemoteDb: Allowing encoder to be garbage collected, pool is full")
+		logger.Trace("Allowing encoder to be garbage collected, pool is full")
 	}
 }
 

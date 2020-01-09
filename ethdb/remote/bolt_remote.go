@@ -769,15 +769,20 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 		cancelConnections()
 	}()
 
+	traceTicker := time.NewTicker(3 * time.Second)
 	pingTicker := time.NewTicker(db.pingEvery)
 	db.doPing = pingTicker.C
 	go func() {
 		defer pingTicker.Stop()
+		defer traceTicker.Stop()
+
 		for {
 			select {
 			default:
 			case <-ctx.Done():
 				return
+			case <-traceTicker.C:
+				logger.Trace("connections in pool", "amount", len(db.connectionPool))
 			}
 
 			db.autoReconnect(ctx)
@@ -803,8 +808,6 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
 		db.returnConn(ctx, newIn, newOut, notifyCloser)
 	case <-db.doPing:
-		logger.Trace("connections in pool", "amount", len(db.connectionPool))
-
 		// periodically ping to close broken connections
 		pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
 		defer cancel()
