@@ -12,8 +12,6 @@ import (
 	"math/big"
 	"os"
 	"os/signal"
-	"path"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +19,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
@@ -114,22 +113,6 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-// Generate name off the file for snapshot
-// Each day has it's own partition
-// It means that you can only continue execution of report from last snapshot.Save() checkpoint - read buckets forward from last key
-// But not re-read bucket
-func file(prefix string, version int) string {
-	return path.Join(dir(), fmt.Sprintf("%s_%s_v%d.cbor", prefix, time.Now().Format("2006-01-02"), version))
-}
-
-func dir() string {
-	dir := path.Join(os.TempDir(), "turbo_geth_reports")
-	if err := os.MkdirAll(dir, 0770); err != nil {
-		panic(err)
-	}
-	return dir
-}
-
 var ReportsProgressBucket = []byte("reports_progress")
 
 func commit(k []byte, tx *bolt.Tx, data interface{}) {
@@ -158,17 +141,6 @@ func restore(k []byte, tx *bolt.Tx, data interface{}) {
 
 	decoder := codecpool.Decoder(bytes.NewReader(v))
 	decoder.MustDecode(data)
-}
-
-func PrintMemUsage() {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	// For info on each, see: https://golang.org/pkg/runtime/#MemStats
-	fmt.Printf("HeapInuse: %vMb, Alloc: %vMb, TotalAlloc: %vMb, Sys: %vMb, NumGC: %v, PauseNs: %d\n", bToMb(m.HeapInuse), bToMb(m.Alloc), bToMb(m.TotalAlloc), bToMb(m.Sys), m.NumGC, m.PauseNs[(m.NumGC+255)%256])
-}
-
-func bToMb(b uint64) uint64 {
-	return b / 1024 / 1024
 }
 
 type StateGrowth1Reporter struct {
@@ -237,7 +209,7 @@ func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime t
 		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
 	}
 	if i%PrintMemStatsEvery == 0 {
-		PrintMemUsage()
+		debug.PrintMemStats(true)
 	}
 	if i%CommitEvery == 0 {
 		r.commit(ctx)
@@ -482,7 +454,7 @@ func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime t
 		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
 	}
 	if i%PrintMemStatsEvery == 0 {
-		PrintMemUsage()
+		debug.PrintMemStats(true)
 	}
 	if i%CommitEvery == 0 {
 		r.commit(ctx)
@@ -667,7 +639,7 @@ beginTx2:
 		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
 
-	PrintMemUsage()
+	debug.PrintMemStats(true)
 }
 
 type GasLimitReporter struct {
@@ -731,7 +703,7 @@ func (r *GasLimitReporter) interrupt(ctx context.Context, i int, startTime time.
 		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
 	}
 	if i%PrintMemStatsEvery == 0 {
-		PrintMemUsage()
+		debug.PrintMemStats(true)
 	}
 	if i%CommitEvery == 0 {
 		r.commit(ctx)
@@ -850,7 +822,7 @@ beginTx:
 	}
 
 	fmt.Printf("Finish processing %d blocks\n", blockNum)
-	PrintMemUsage()
+	debug.PrintMemStats(true)
 }
 
 func parseFloat64(str string) float64 {
