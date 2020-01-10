@@ -112,23 +112,29 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 					codeHex := keybytesToHex(code)
 					codeHex = codeHex[:len(codeHex)-1]
 					visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)
-					fmt.Fprintf(w,
-						`e_%x -> c_%x;
-					`, accountHex, accountHex)
+				} else {
+					visual.Box(w, fmt.Sprintf("c_%x", accountHex), "codeHash")
 				}
+				fmt.Fprintf(w,
+					`e_%x -> c_%x;
+				`, accountHex, accountHex)
 			}
 			if !a.IsEmptyRoot() {
-				nKey := n.Key
-				if nKey[len(nKey)-1] == 16 {
-					nKey = nKey[:len(nKey)-1]
-				}
-				var newHighlights [][]byte
-				for _, h := range highlights {
-					if h != nil && bytes.HasPrefix(h, nKey) {
-						newHighlights = append(newHighlights, h[len(nKey):])
+				if a.storage != nil {
+					nKey := n.Key
+					if nKey[len(nKey)-1] == 16 {
+						nKey = nKey[:len(nKey)-1]
 					}
+					var newHighlights [][]byte
+					for _, h := range highlights {
+						if h != nil && bytes.HasPrefix(h, nKey) {
+							newHighlights = append(newHighlights, h[len(nKey):])
+						}
+					}
+					visualNode(a.storage, accountHex[:len(accountHex)-1], w, newHighlights, opts, leaves, hashes)
+				} else {
+					visual.Box(w, fmt.Sprintf("n_%x", accountHex[:len(accountHex)-1]), "storHash")
 				}
-				visualNode(a.storage, accountHex[:len(accountHex)-1], w, newHighlights, opts, leaves, hashes)
 				fmt.Fprintf(w,
 					`e_%x -> n_%x;
 	`, accountHex, accountHex[:len(accountHex)-1])
