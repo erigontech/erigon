@@ -181,6 +181,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 	defer codecpool.Return(decoder)
 	encoder := codecpool.Encoder(out)
 	defer codecpool.Return(encoder)
+
 	// Server is passive - it runs a loop what reads commands (and their arguments) and attempts to respond
 	var lastHandle uint64
 	// Read-only transactions opened by the client
