@@ -232,11 +232,27 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	return rep
 }
 
+func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		PrintMemUsage()
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
+
 func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	defer r.rollback(ctx)
 	startTime := time.Now()
 
-	var count int
+	var i int
 	var addrHash common.Hash
 	var processingDone bool
 
@@ -263,20 +279,20 @@ beginTx:
 			return err
 		}
 
-		skipFirst := len(r.HistoryKey) > 0 // snapshot stores last analyzed key
 		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			i++
+			r.HistoryKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
 
-			if timestamp > r.StartedWhenBlockNumber { // only count what happened before analysis started
+			if timestamp > r.StartedWhenBlockNumber { // skip what happened after analysis started
 				continue
 			}
 
@@ -293,23 +309,6 @@ beginTx:
 			if err := r.lastTimestamps.Put(addrHash.Bytes(), timestamp); err != nil {
 				return err
 			}
-
-			count++
-			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK account records, %s\n", count/1000, time.Since(startTime))
-			}
-			if count%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if count%CommitEvery == 0 {
-				r.HistoryKey = k
-				r.commit(ctx)
-			}
-
-			if count%MaxIterationsPerTx == 0 {
-				r.HistoryKey = k
-				return nil
-			}
 		}
 		processingDone = true
 		return nil
@@ -322,6 +321,7 @@ beginTx:
 	}
 
 	processingDone = false
+	i = 0
 
 beginTx2:
 	// Go through the current state
@@ -347,35 +347,19 @@ beginTx2:
 			return err
 		}
 
-		skipFirst := len(r.AccountKey) > 0 // snapshot stores last analyzed key
 		for k, _, err := c.SeekKey(r.AccountKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			i++
+			r.AccountKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
 			if err := r.lastTimestamps.Put(addrHash.Bytes(), r.MaxTimestamp); err != nil {
 				return err
-			}
-
-			count++
-			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK account records. %s\n", count/1000, time.Since(startTime))
-			}
-			if count%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if count%CommitEvery == 0 {
-				r.AccountKey = k
-				r.commit(ctx)
-			}
-			if count%MaxIterationsPerTx == 0 {
-				r.AccountKey = k
-				return nil
 			}
 		}
 		processingDone = true
@@ -398,7 +382,7 @@ beginTx2:
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
-	fmt.Printf("Account history records: %d\n", count)
+	fmt.Printf("Account history records: %d\n", i)
 	fmt.Printf("Creating dataset...\n")
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(r.CreationsByBlock))
@@ -493,10 +477,26 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	return rep
 }
 
+func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		PrintMemUsage()
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
+
 func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	defer r.rollback(ctx)
 	startTime := time.Now()
-	var count int
+	var i int
 
 	var addrHash common.Hash
 	var hash common.Hash
@@ -526,16 +526,15 @@ beginTx:
 			return err
 		}
 
-		skipFirst := len(r.HistoryKey) > 0 // snapshot stores last analyzed key
 		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			r.HistoryKey = k
+			i++
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
-
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
@@ -562,22 +561,6 @@ beginTx:
 			if err := r.lastTimestamps.Put(addr2HashKey, timestamp); err != nil {
 				return err
 			}
-
-			count++
-			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK storage records, %s\n", count/1000, time.Since(startTime))
-			}
-			if count%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if count%CommitEvery == 0 {
-				r.HistoryKey = k
-				r.commit(ctx)
-			}
-			if count%MaxIterationsPerTx == 0 {
-				r.HistoryKey = k
-				return nil
-			}
 		}
 		processingDone = true
 		return nil
@@ -590,6 +573,7 @@ beginTx:
 	}
 
 	processingDone = false
+	i = 0
 
 beginTx2:
 	// Go through the current state
@@ -607,14 +591,14 @@ beginTx2:
 			return err
 		}
 
-		skipFirst := len(r.StorageKey) > 0 // snapshot stores last analyzed key
 		for k, _, err := c.SeekKey(r.StorageKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			i++
+			r.StorageKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
 
 			copy(addrHash[:], k[:32])
@@ -622,22 +606,6 @@ beginTx2:
 			localKey := append(addrHash.Bytes(), hash.Bytes()...)
 			if err := r.lastTimestamps.Put(localKey, r.MaxTimestamp); err != nil {
 				return err
-			}
-
-			count++
-			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK storage records, %s\n", count/1000, time.Since(startTime))
-			}
-			if count%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if count%CommitEvery == 0 {
-				r.StorageKey = k
-				r.commit(ctx)
-			}
-			if count%MaxIterationsPerTx == 0 {
-				r.StorageKey = k
-				return nil
 			}
 		}
 		processingDone = true
@@ -667,7 +635,7 @@ beginTx2:
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
-	fmt.Printf("Storage history records: %d\n", count)
+	fmt.Printf("Storage history records: %d\n", i)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
 	if err := r.creationsByBlock.ForEach(func(k []byte, count int) error {
@@ -758,6 +726,21 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 	return rep
 }
 
+func (r *GasLimitReporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		PrintMemUsage()
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
 func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	defer r.rollback(ctx)
 	startTime := time.Now()
@@ -797,14 +780,14 @@ beginTx:
 
 		fmt.Println("Preloading block numbers...")
 
-		skipFirst := len(r.HeaderPrefixKey1) > 0 // snapshot stores last analyzed key
 		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			i++
+			r.HeaderPrefixKey1 = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
 
 			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
@@ -820,34 +803,18 @@ beginTx:
 			if err := r.mainHashes.Put(v, 0); err != nil {
 				return err
 			}
-
-			i++
-			if i%PrintProgressEvery == 0 {
-				fmt.Printf("Scanned %dK keys, %s\n", i/1000, time.Since(startTime))
-			}
-			if i%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if i%CommitEvery == 0 {
-				r.HeaderPrefixKey1 = k
-				r.commit(ctx)
-			}
-			if i%MaxIterationsPerTx == 0 {
-				r.HeaderPrefixKey1 = k
-				return nil
-			}
 		}
 
 		fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
-
-		skipFirst = len(r.HeaderPrefixKey2) > 0 // snapshot stores last analyzed key
+		i = 0
 		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if skipFirst {
-				skipFirst = false
-				continue
+			i++
+			r.HeaderPrefixKey2 = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
 			}
 
 			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
@@ -871,20 +838,6 @@ beginTx:
 
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
 			blockNum++
-			if blockNum%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK blocks, %s\n", blockNum/1000, time.Since(startTime))
-			}
-			if blockNum%PrintMemStatsEvery == 0 {
-				PrintMemUsage()
-			}
-			if blockNum%CommitEvery == 0 {
-				r.HeaderPrefixKey2 = k
-				r.commit(ctx)
-			}
-			if blockNum%MaxIterationsPerTx == 0 {
-				r.HeaderPrefixKey2 = k
-				return nil
-			}
 		}
 		processingDone = true
 		return nil
