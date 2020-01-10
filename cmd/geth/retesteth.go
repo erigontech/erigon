@@ -889,9 +889,8 @@ func hash2CompactHex(h common.Hash) string {
 	d := h.Big()
 	if d.Uint64() < math.MaxInt32 {
 		return fmt.Sprintf("0x%02x", d.Uint64())
-	} else {
-		return hexutil.EncodeBig(d)
 	}
+	return hexutil.EncodeBig(d)
 }
 
 func (api *RetestethAPI) ClientVersion(_ context.Context) (string, error) {
