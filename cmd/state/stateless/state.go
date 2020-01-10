@@ -48,7 +48,7 @@ var emptyCodeHash = crypto.Keccak256(nil)
 const (
 	PrintMemStatsEvery = 1_000_000
 	PrintProgressEvery = 100_000
-	CommitEvery        = 1_000_000
+	CommitEvery        = 100_000
 	MaxIterationsPerTx = 10_000_000
 	CursorBatchSize    = 10_000
 )
@@ -132,8 +132,8 @@ func dir() string {
 
 var ReportsProgressBucket = []byte("reports_progress")
 
-func save2(k []byte, tx *bolt.Tx, data interface{}) {
-	defer func(t time.Time) { fmt.Println("Save:", time.Since(t)) }(time.Now())
+func commit(k []byte, tx *bolt.Tx, data interface{}) {
+	//defer func(t time.Time) { fmt.Println("Commit:", time.Since(t)) }(time.Now())
 	var buf bytes.Buffer
 
 	encoder := codecpool.Encoder(&buf)
@@ -145,8 +145,8 @@ func save2(k []byte, tx *bolt.Tx, data interface{}) {
 	}
 }
 
-func restore2(k []byte, tx *bolt.Tx, data interface{}) {
-	defer func(t time.Time) { fmt.Println("Restore:", time.Since(t)) }(time.Now())
+func restore(k []byte, tx *bolt.Tx, data interface{}) {
+	//defer func(t time.Time) { fmt.Println("Restore:", time.Since(t)) }(time.Now())
 	reportsProgress, err := tx.CreateBucketIfNotExists(ReportsProgressBucket, false)
 	if err != nil {
 		panic(err)
@@ -211,7 +211,7 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		CreationsByBlock: make(map[uint64]int),
 	}
 	rep.commit = func(ctx context.Context) {
-		save2(ProgressKey, localTx, rep)
+		commit(ProgressKey, localTx, rep)
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
@@ -228,7 +228,7 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		}
 	}
 
-	restore2(ProgressKey, localTx, rep)
+	restore(ProgressKey, localTx, rep)
 	return rep
 }
 
@@ -456,7 +456,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		creationsByBlock: typedbucket.NewInt(creationsByBlock),
 	}
 	rep.commit = func(ctx context.Context) {
-		save2(ProgressKey, localTx, rep)
+		commit(ProgressKey, localTx, rep)
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
@@ -473,7 +473,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		}
 	}
 
-	restore2(ProgressKey, localTx, rep)
+	restore(ProgressKey, localTx, rep)
 	return rep
 }
 
@@ -705,7 +705,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 		mainHashes:       typedbucket.NewUint64(mainHashes),
 	}
 	rep.commit = func(ctx context.Context) {
-		save2(ProgressKey, localTx, rep)
+		commit(ProgressKey, localTx, rep)
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
@@ -722,7 +722,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 		}
 	}
 
-	restore2(ProgressKey, localTx, rep)
+	restore(ProgressKey, localTx, rep)
 	return rep
 }
 
