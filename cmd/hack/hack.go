@@ -1179,6 +1179,26 @@ func testMemBolt() {
 	check(err)
 }
 
+func printBucket(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	f, err := os.Create("bucket.txt")
+	check(err)
+	defer f.Close()
+	fb := bufio.NewWriter(f)
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			fmt.Fprintf(fb, "%x %x\n", k, v)
+		}
+		return nil
+	})
+	check(err)
+	fb.Flush()
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -1250,5 +1270,8 @@ func main() {
 	}
 	if *action == "current" {
 		printCurrentBlockNumber(*chaindata)
+	}
+	if *action == "bucket" {
+		printBucket(*chaindata)
 	}
 }
