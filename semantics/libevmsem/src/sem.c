@@ -1,6 +1,9 @@
 #include "sem.h"
 #include <stdlib.h>
 #include <string.h>
+#include <z3.h>
+
+Z3_context ctx;
 
 // Maximum number of terms in the sequence - constant for now to avoid dynamic memory allocation
 #define MAX_TERMS 1024*1024
@@ -37,6 +40,10 @@ char input_bytes[MAX_TERMS];
 // Initialises the sequence with given state root and transaction data
 // Returns 0 if the initialisation is successful, otherwise error code
 int initialise(void* state_root, void *from_address, void *to_address, __uint128_t value, int tx_data_len, void* tx_data, __uint64_t gas_price, __uint64_t gas) {
+    Z3_config cfg;
+    cfg = Z3_mk_config();
+    ctx = Z3_mk_context(cfg);
+    Z3_del_config(cfg);
     if (2 + tx_data_len > MAX_TERMS) {
         // First term is to state root
         // Second term is for gas counter
@@ -85,4 +92,5 @@ void cleanup() {
                 break;
         }
     }
+    Z3_del_context(ctx);
 }

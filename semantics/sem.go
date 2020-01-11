@@ -2,10 +2,13 @@ package semantics
 
 /*
 #include <stdlib.h>
-#cgo CFLAGS: -I./libevmsem/src/
-#cgo CFLAGS: -I./libevmsem/
-#include "./libevmsem/src/sem.h"
-#include "./libevmsem/src/sem.c"
+#cgo CFLAGS: -I${SRCDIR}/libevmsem/src/
+#cgo CFLAGS: -I${SRCDIR}/libevmsem/
+#cgo CFLAGS: -I${SRCDIR}/z3/src/api
+#cgo LDFLAGS: ${SRCDIR}/z3/build/libz3.a -lstdc++
+#include "libevmsem/src/sem.h"
+#include "libevmsem/src/sem.c"
+#include "z3/src/api/z3.h"
 */
 import "C"
 import (
