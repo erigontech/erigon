@@ -24,7 +24,7 @@ func Initialise(stateRoot [32]byte, from [20]byte, to [20]byte, toPresent bool, 
 	if toPresent {
 		toPtr = C.CBytes(to[:])
 	}
-	result := int(C.initialise(stateRootPtr, fromPtr, toPtr, value, C.int(len(txData)), txDataPtr, C.ulonglong(gasPrice), C.ulonglong(gas)))
+	result := int(C.initialise(stateRootPtr, fromPtr, toPtr, value, C.int(len(txData)), txDataPtr, C.__uint64_t(gasPrice), C.__uint64_t(gas)))
 	if toPresent {
 		C.free(toPtr)
 	}
