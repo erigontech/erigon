@@ -52,6 +52,16 @@ rpcdaemon:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
+semantics: semantics/z3/build/libz3.a
+	build/env.sh go run build/ci.go install ./cmd/semantics
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/semantics\" to launch semantics."
+
+semantics/z3/build/libz3.a:
+	cd semantics/z3 && python scripts/mk_make.py --staticlib
+	cd semantics/z3/build && ${MAKE}
+	cp semantics/z3/build/libz3.a .	
+
 all:
 	build/env.sh go run build/ci.go install -procs=1
 
