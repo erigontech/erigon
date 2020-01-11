@@ -59,7 +59,7 @@ semantics: semantics/z3/build/libz3.a
 
 semantics/z3/build/libz3.a:
 	cd semantics/z3 && python scripts/mk_make.py --staticlib
-	cd semantics/z3/build && ${MAKE}
+	cd semantics/z3/build && ${MAKE} -j8
 	cp semantics/z3/build/libz3.a .	
 
 all:
@@ -75,7 +75,7 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: all
+test: semantics/z3/build/libz3.a all
 	build/env.sh go run build/ci.go test
 
 lint: lintci
