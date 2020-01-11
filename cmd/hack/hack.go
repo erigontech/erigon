@@ -882,6 +882,15 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	}
 }
 
+func printCurrentBlockNumber(chaindata string) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	hash := rawdb.ReadHeadBlockHash(ethDb)
+	number := rawdb.ReadHeaderNumber(ethDb, hash)
+	fmt.Printf("Block number: %d\n", *number)	
+}
+
 func printTxHashes() {
 	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
@@ -1238,5 +1247,8 @@ func main() {
 	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()
+	}
+	if *action == "current" {
+		printCurrentBlockNumber(*chaindata)
 	}
 }
