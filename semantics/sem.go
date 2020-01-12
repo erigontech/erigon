@@ -38,3 +38,13 @@ func Initialise(stateRoot [32]byte, from [20]byte, to [20]byte, toPresent bool, 
 func Cleanup() {
 	C.cleanup()
 }
+
+// Init creates z3 context, sorts and datatypes
+func Init() {
+	C.init()
+}
+
+// Destroy deletes z3 contrxt, sorts and datatypes
+func Destroy() {
+	C.destroy()
+}

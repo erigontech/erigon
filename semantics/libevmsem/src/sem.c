@@ -4,6 +4,16 @@
 #include <z3.h>
 
 Z3_context ctx;
+// Integer sort to act as account addresses, balances, nonces, indices in arrays, and storage keys and values
+Z3_sort int_sort;
+// Array sort that is used for contract storage, mapping keys (int) to values (int)
+Z3_sort contract_storage_sort;
+// Array sort that is used for contract code, mapping indices (program counter, int) to opcodes (int)
+Z3_sort contract_code_sort;
+// Account type constructor
+Z3_constructor account_constructor;
+// Account type
+Z3_sort account_sort;
 
 // Maximum number of terms in the sequence - constant for now to avoid dynamic memory allocation
 #define MAX_TERMS 1024*1024
@@ -37,13 +47,46 @@ __uint64_t gas_counters[MAX_TERMS];
 // Actual bytes for the InputByte terms
 char input_bytes[MAX_TERMS];
 
-// Initialises the sequence with given state root and transaction data
-// Returns 0 if the initialisation is successful, otherwise error code
-int initialise(void* state_root, void *from_address, void *to_address, __uint128_t value, int tx_data_len, void* tx_data, __uint64_t gas_price, __uint64_t gas) {
+// Create z3 context and necessary sorts and datatypes
+void init() {
     Z3_config cfg;
     cfg = Z3_mk_config();
     ctx = Z3_mk_context(cfg);
     Z3_del_config(cfg);
+    int_sort = Z3_mk_int_sort(ctx);
+    contract_storage_sort = Z3_mk_array_sort(ctx, int_sort, int_sort);
+    contract_code_sort = Z3_mk_array_sort(ctx, int_sort, int_sort);
+    Z3_symbol account_fields[5] = {
+        Z3_mk_string_symbol(ctx, "balance"),
+        Z3_mk_string_symbol(ctx, "nonce"),
+        Z3_mk_string_symbol(ctx, "codelen"),
+        Z3_mk_string_symbol(ctx, "code"),
+        Z3_mk_string_symbol(ctx, "storage"),
+    };
+    Z3_sort account_field_sorts[5] = {
+        int_sort,              // balance
+        int_sort,              // nonce
+        int_sort,              // codelen
+        contract_code_sort,    // code
+        contract_storage_sort, // storage
+    };
+    unsigned int account_sort_refs[5] = { 0, 0, 0, 0, 0 }; // There are no recursive datatypes, therefore all zeroes
+    account_constructor = Z3_mk_constructor(ctx,
+        Z3_mk_string_symbol(ctx, "account_const"), // name of the constructor
+        Z3_mk_string_symbol(ctx, "is_account"),    // name of the recognizer function
+        5,                                         // number of fields
+        account_fields,                            // field symbols
+        account_field_sorts,                       // field sorts
+        account_sort_refs                          // sort references
+    );
+    Z3_constructor account_constructors[1];
+    account_constructors[0] = account_constructor;
+    account_sort = Z3_mk_datatype(ctx, Z3_mk_string_symbol(ctx, "account"), 1, account_constructors);
+}
+
+// Initialises the sequence with given state root and transaction data
+// Returns 0 if the initialisation is successful, otherwise error code
+int initialise(void* state_root, void *from_address, void *to_address, __uint128_t value, int tx_data_len, void* tx_data, __uint64_t gas_price, __uint64_t gas) {
     if (2 + tx_data_len > MAX_TERMS) {
         // First term is to state root
         // Second term is for gas counter
@@ -92,5 +135,8 @@ void cleanup() {
                 break;
         }
     }
+}
+
+void destroy() {
     Z3_del_context(ctx);
 }

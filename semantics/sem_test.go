@@ -15,4 +15,5 @@ func TestSemantics(t *testing.T) {
 		t.Errorf("Could not initialise: %d", result)
 	}
 	fmt.Printf("Got it1!\n")
+	Cleanup()
 }

@@ -9,6 +9,11 @@ extern "C" {
 
 #define ERR_TX_DATA_TOO_LONG 1
 
+// Create z3 context and necessary sorts and datatypes
+void init();
+// Deletes z3 context and all sorts and datatypes
+void destroy();
+
 // Initialise sequence with given state root and transaction data,
 // all other terms being empty
 // Returns 0 if the initialisation is successful, otherwise error code (ERR_*)
