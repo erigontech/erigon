@@ -124,7 +124,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
-
+		// s.Sort(dat) not sorting it here. seems that this Puts is only for testing.
 		return sb.Put(changeSetKey, dat)
 	})
 	return err
