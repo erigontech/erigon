@@ -758,7 +758,7 @@ beginTx:
 
 		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
-				return err
+				return fmt.Errorf("loop break: %w", err)
 			}
 			i++
 			r.HeaderPrefixKey1 = k
@@ -776,7 +776,7 @@ beginTx:
 				continue
 			}
 
-			var mainHash []byte
+			mainHash := make([]byte, len(v))
 			copy(mainHash[:], v[:])
 			if err := r.mainHashes.Put(mainHash, 0); err != nil {
 				return err
@@ -787,7 +787,7 @@ beginTx:
 		i = 0
 		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
-				return err
+				return fmt.Errorf("loop break: %w", err)
 			}
 			i++
 			r.HeaderPrefixKey2 = k
