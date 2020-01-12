@@ -5,8 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func NewChangeSet() *ChangeSet {
@@ -179,7 +177,7 @@ func Walk(b []byte, f func(k, v []byte) error) error {
 		idx1 := binary.BigEndian.Uint32(b[8+n*m+4*i : 8+n*m+4*(i+1)])
 		val := b[valOffset+idx0 : valOffset+idx1]
 
-		err := f(common.CopyBytes(key), common.CopyBytes(val))
+		err := f(key, val)
 		if err != nil {
 			return err
 		}

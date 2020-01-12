@@ -47,9 +47,9 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				m[bucketStr] = t
 			}
 
-			err := dbutils.Walk(v, func(k, v []byte) error {
+			err := dbutils.Walk(v, func(k, vv []byte) error {
 				if _, ok = t[string(k)]; !ok {
-					t[string(k)] = v
+					t[string(k)] = vv
 				}
 
 				return nil
@@ -85,7 +85,7 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
-		err := dbutils.Walk(v, func(k, v []byte) error {
+		err := dbutils.Walk(v, func(k, _ []byte) error {
 			keys = append(keys, k)
 			return nil
 		})
