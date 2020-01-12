@@ -225,7 +225,6 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 	startTime := time.Now()
 
 	var i int
-	var addrHash common.Hash
 	var processingDone bool
 
 beginTx:
@@ -260,6 +259,8 @@ beginTx:
 			if r.interrupt(ctx, i, startTime) {
 				return nil
 			}
+
+			var addrHash common.Hash
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
 			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
@@ -328,6 +329,8 @@ beginTx2:
 			if r.interrupt(ctx, i, startTime) {
 				return nil
 			}
+
+			var addrHash common.Hash
 
 			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
 			if err := r.lastTimestamps.Put(addrHash.Bytes(), r.MaxTimestamp); err != nil {
@@ -470,8 +473,6 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 	startTime := time.Now()
 	var i int
 
-	var addrHash common.Hash
-	var hash common.Hash
 	var processingDone bool
 
 beginTx:
@@ -507,6 +508,8 @@ beginTx:
 			if r.interrupt(ctx, i, startTime) {
 				return nil
 			}
+
+			var addrHash, hash common.Hash
 			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
@@ -573,6 +576,7 @@ beginTx2:
 				return nil
 			}
 
+			var addrHash, hash common.Hash
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
 			localKey := append(addrHash.Bytes(), hash.Bytes()...)
@@ -772,7 +776,9 @@ beginTx:
 				continue
 			}
 
-			if err := r.mainHashes.Put(v, 0); err != nil {
+			var mainHash []byte
+			copy(mainHash[:], v[:])
+			if err := r.mainHashes.Put(mainHash, 0); err != nil {
 				return err
 			}
 		}
