@@ -1,17 +1,20 @@
 package ethdb
 
 import (
+	"bytes"
+	"math/big"
+	"math/rand"
+	"reflect"
+	"sort"
+	"testing"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"math/big"
-	"math/rand"
-	"reflect"
-	"sort"
-	"testing"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
@@ -39,15 +42,12 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err := dbutils.DecodeChangeSet(csData)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	if cs.Len() != 10 {
+	if dbutils.Len(csData) != 10 {
 		t.FailNow()
 	}
-
 	if debug.IsThinHistory() {
 		csData, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
 		if err != nil {
@@ -184,7 +184,6 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err := dbutils.DecodeChangeSet(csData)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,9 +199,11 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	sort.Sort(expectedChangeSet)
-	if !reflect.DeepEqual(cs, expectedChangeSet) {
-		spew.Dump("res", cs)
-		spew.Dump("expected", expectedChangeSet)
+	expectedData, err := expectedChangeSet.Encode()
+	assert.NoError(t, err)
+	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect account changeset")
 	}
 
@@ -211,12 +212,11 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err = dbutils.DecodeChangeSet(csData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cs.Len() != numOfAccounts*numOfStateKeys {
+	if dbutils.Len(csData) != numOfAccounts*numOfStateKeys {
 		t.FailNow()
 	}
 
@@ -233,9 +233,11 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	sort.Sort(expectedChangeSet)
-	if !reflect.DeepEqual(cs, expectedChangeSet) {
-		spew.Dump("res", cs)
-		spew.Dump("expected", expectedChangeSet)
+	expectedData, err = expectedChangeSet.Encode()
+	assert.NoError(t, err)
+	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect storage changeset")
 	}
 }
@@ -325,11 +327,6 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err := dbutils.DecodeChangeSet(csData)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	expectedChangeSet := dbutils.NewChangeSet()
 	for i := range addrHashes {
 		b := make([]byte, accHistory[i].EncodingLengthForStorage())
@@ -341,9 +338,11 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 	}
 
-	if !reflect.DeepEqual(cs, expectedChangeSet) {
-		spew.Dump("res", cs)
-		spew.Dump("expected", expectedChangeSet)
+	expectedData, err := expectedChangeSet.Encode()
+	assert.NoError(t, err)
+	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect changeset")
 	}
 
@@ -352,12 +351,11 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cs, err = dbutils.DecodeChangeSet(csData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if cs.Len() != numOfAccounts*numOfStateKeys {
+	if dbutils.Len(csData) != numOfAccounts*numOfStateKeys {
 		t.FailNow()
 	}
 
@@ -373,9 +371,11 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	if !reflect.DeepEqual(cs, expectedChangeSet) {
-		spew.Dump("res", cs)
-		spew.Dump("expected", expectedChangeSet)
+	expectedData, err = expectedChangeSet.Encode()
+	assert.NoError(t, err)
+	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect changeset")
 	}
 }

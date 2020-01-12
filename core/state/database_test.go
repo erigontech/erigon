@@ -20,12 +20,13 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
+	"testing"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"math/big"
-	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
@@ -628,11 +629,6 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		if bytes.HasSuffix(k, dbutils.StorageHistoryBucket) {
 			stats.ChangeSetHST += uint64(len(v))
 		}
-		cs, innerErr := dbutils.DecodeChangeSet(v)
-		if innerErr != nil {
-			fmt.Println(innerErr)
-		}
-		_ = cs
 		return true, nil
 	})
 	if err != nil {
