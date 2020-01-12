@@ -256,7 +256,7 @@ HASH 1
 BRANCH 0123
 ```
 
-These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`) in [trie/structural_2.go](../../trie/hashbuilder.go)
+These opcodes are implemented by the type `HashBuilder` (implements the interface `structInfoReceiver`) in [trie/hashbuilder.go](../../trie/hashbuilder.go)
 
 ### Multiproofs
 
@@ -386,7 +386,7 @@ In the deeper recursive step, max common prefix is empty. Since the common prefi
 the common prefix with the succeeding key (they are both empty). The optional part of the step happens, opcode `BRANCH 0123`
 is emitted, and `groups` is trimmed to become empty. No recursive invocation follows.
 
-The step of this algorithm is implemented by the function `GenStructStep` in [trie/gen_struct_step.go](../../trie/structural_2.go).
+The step of this algorithm is implemented by the function `GenStructStep` in [trie/gen_struct_step.go](../../trie/gen_struct_step.go).
 
 ### Converting sequence of keys and value into a multiproof
 
@@ -408,7 +408,7 @@ However, in order to make these choices efficiently, the set of keys being resol
 list. Then, at each point when the algorithm processes a key, it maintains references to two consecutive keys from
 that sorted list - one "LTE" (Less Than or Equal to the currently processed key), and another "GT" (Greater Than the
 currently processed key). If max common prefix is also prefix of either LTE or GT, then `BRANCH` opcode is emitted,
-otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `ResolveSet` in [trie/structural.go](../../trie/structural.go)
+otherwise, `BRANCHHASH` opcode is emitted. This is implemented by the type `ResolveSet` in [trie/resolve_set.go](../../trie/resolve_set.go)
 
 ### Extension of the structure to support contracts with contract storage
 When it is required to construct tries containing accounts as well as contract storage, and contract code, the
