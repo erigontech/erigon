@@ -45,6 +45,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	if dbutils.Len(csData) != 10 {
 		t.FailNow()
 	}
