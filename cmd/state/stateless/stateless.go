@@ -3,13 +3,13 @@ package stateless
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
-	"syscall"
-	"time"
-	"io/ioutil"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
@@ -113,11 +113,12 @@ func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
 		if len(blockStr) == 0 {
 			continue
 		}
-		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 != nil {
-			return nil, err1
-		} else {
+		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 == nil {
 			m[b] = struct{}{}
+		} else {
+			return nil, err1
 		}
+		
 	}
 	return m, nil
 }

@@ -888,7 +888,7 @@ func printCurrentBlockNumber(chaindata string) {
 	defer ethDb.Close()
 	hash := rawdb.ReadHeadBlockHash(ethDb)
 	number := rawdb.ReadHeaderNumber(ethDb, hash)
-	fmt.Printf("Block number: %d\n", *number)	
+	fmt.Printf("Block number: %d\n", *number)
 }
 
 func printTxHashes() {
