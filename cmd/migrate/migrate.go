@@ -63,7 +63,7 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Transactin completed with %d records\n", i)
+		fmt.Printf("Transaction completed with %d records\n", i)
 		i = 0
 	}
 	return nil
