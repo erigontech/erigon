@@ -108,14 +108,13 @@ func (hb *StarkStatsBuilder) branch(set uint16) error {
 	return hb.branchHash(set)
 }
 
-func (hb *StarkStatsBuilder) hash(_ common.Hash) error {
+func (hb *StarkStatsBuilder) hash(_ common.Hash) {
 	hb.sizeStack = append(hb.sizeStack, 32)
-	return nil
 }
 
-func (hb *StarkStatsBuilder) code(_ []byte) (common.Hash, error) {
+func (hb *StarkStatsBuilder) code(_ []byte) common.Hash {
 	hb.sizeStack = append(hb.sizeStack, 32)
-	return common.Hash{}, nil
+	return common.Hash{}
 }
 
 func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
@@ -312,9 +311,7 @@ func StarkStats(bw []byte, w io.Writer, trace bool) error {
 				if err != nil {
 					return err
 				}
-				if err := hb.hash(hash); err != nil {
-					return err
-				}
+				hb.hash(hash)
 			}
 		case OpCode:
 			if trace {
@@ -324,9 +321,7 @@ func StarkStats(bw []byte, w io.Writer, trace bool) error {
 			if err != nil {
 				return err
 			}
-			if _, err := hb.code(code); err != nil {
-				return err
-			}
+			hb.code(code)
 
 		case OpAccountLeafHash:
 			hashOnly = true
