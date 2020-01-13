@@ -139,7 +139,9 @@ func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		flags |= flagBalance
 	}
 
-	_, err := output.WithColumn(ColumnLeafValues).Write([]byte{flags})
+	if _, err := output.WithColumn(ColumnLeafValues).Write([]byte{flags}); err != nil {
+		return nil
+	}
 
 	if o.Nonce > 0 {
 		encoder := codec.NewEncoder(output.WithColumn(ColumnLeafValues), &cbor)
@@ -154,7 +156,7 @@ func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		}
 	}
 
-	return err
+	return nil
 }
 
 func (o *OperandLeafAccount) LoadFrom(input io.Reader) error {
