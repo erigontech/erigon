@@ -219,10 +219,10 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 		available []bool        // Availability of explicitly requested blocks
 		expected  int           // Total number of existing blocks to expect
 	}{
-		{1, nil, nil, 1},                                                         // A single random block should be retrievable
-		{10, nil, nil, 10},                                                       // Multiple random blocks should be retrievable
-		{limit, nil, nil, limit},                                                 // The maximum possible blocks should be retrievable
-		{limit + 1, nil, nil, limit},                                             // No more than the possible block count should be returned
+		{1, nil, nil, 1},             // A single random block should be retrievable
+		{10, nil, nil, 10},           // Multiple random blocks should be retrievable
+		{limit, nil, nil, limit},     // The maximum possible blocks should be retrievable
+		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
 		{0, []common.Hash{pm.blockchain.Genesis().Hash()}, []bool{true}, 1},      // The genesis block should be retrievable
 		{0, []common.Hash{pm.blockchain.CurrentBlock().Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
 		{0, []common.Hash{{}}, []bool{false}, 0},                                 // A non existent block should not be returned
@@ -1315,5 +1315,68 @@ func TestFirehoseBytecode(t *testing.T) {
 	assert.NoError(t, p2p.Send(peer.app, GetBytecodeCode, request))
 	if err := p2p.ExpectMsg(peer.app, BytecodeCode, codes); err != nil {
 		t.Errorf("unexpected Bytecode response: %v", err)
+	}
+}
+
+// Tests that a propagated malformed block (uncles or transactions don't match
+// with the hashes in the header) gets discarded and not broadcast forward.
+func TestBroadcastMalformedBlock(t *testing.T) {
+	// Create a live node to test propagation with
+	var (
+		engine  = ethash.NewFaker()
+		db      = ethdb.NewMemDatabase()
+		config  = &params.ChainConfig{}
+		gspec   = &core.Genesis{Config: config}
+		genesis = gspec.MustCommit(db)
+	)
+	blockchain, err := core.NewBlockChain(db, nil, config, engine, vm.Config{}, nil)
+	if err != nil {
+		t.Fatalf("failed to create new blockchain: %v", err)
+	}
+	pm, err := NewProtocolManager(config, nil, downloader.FullSync, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), engine, blockchain, db, nil)
+	if err != nil {
+		t.Fatalf("failed to start test protocol manager: %v", err)
+	}
+	pm.Start(2)
+	defer pm.Stop()
+
+	// Create two peers, one to send the malformed block with and one to check
+	// propagation
+	source, _ := newTestPeer("source", eth63, pm, true)
+	defer source.close()
+
+	sink, _ := newTestPeer("sink", eth63, pm, true)
+	defer sink.close()
+
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	// Create various combinations of malformed blocks
+	chain, _ := core.GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), db, 1, func(i int, gen *core.BlockGen) {})
+
+	malformedUncles := chain[0].Header()
+	malformedUncles.UncleHash[0]++
+	malformedTransactions := chain[0].Header()
+	malformedTransactions.TxHash[0]++
+	malformedEverything := chain[0].Header()
+	malformedEverything.UncleHash[0]++
+	malformedEverything.TxHash[0]++
+
+	// Keep listening to broadcasts and notify if any arrives
+	notify := make(chan struct{})
+	go func() {
+		if _, err := sink.app.ReadMsg(); err == nil {
+			notify <- struct{}{}
+		}
+	}()
+	// Try to broadcast all malformations and ensure they all get discarded
+	for _, header := range []*types.Header{malformedUncles, malformedTransactions, malformedEverything} {
+		block := types.NewBlockWithHeader(header).WithBody(chain[0].Transactions(), chain[0].Uncles())
+		if err := p2p.Send(source.app, NewBlockMsg, []interface{}{block, big.NewInt(131136)}); err != nil {
+			t.Fatalf("failed to broadcast block: %v", err)
+		}
+		select {
+		case <-notify:
+			t.Fatalf("malformed block forwarded")
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
