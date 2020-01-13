@@ -14,6 +14,8 @@ var cbor codec.CborHandle
 const (
 	flagCode = 1 << iota
 	flagStorage
+	flagNonce
+	flagBalance
 )
 
 // Instruction is "enum" type for defining the opcodes of the stack machine that reconstructs the structure of tries from Structure tape
@@ -122,15 +124,6 @@ func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		return err
 	}
 
-	encoder := codec.NewEncoder(output.WithColumn(ColumnLeafValues), &cbor)
-	if err := encoder.Encode(o.Nonce); err != nil {
-		return err
-	}
-
-	if err := encodeByteArray(o.Balance.Bytes(), output.WithColumn(ColumnLeafValues)); err != nil {
-		return err
-	}
-
 	flags := byte(0)
 	if o.HasCode {
 		flags |= flagCode
@@ -138,8 +131,29 @@ func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 	if o.HasStorage {
 		flags |= flagStorage
 	}
+	if o.Nonce > 0 {
+		flags |= flagNonce
+	}
+
+	if o.Balance.Uint64() > 0 {
+		flags |= flagBalance
+	}
 
 	_, err := output.WithColumn(ColumnLeafValues).Write([]byte{flags})
+
+	if o.Nonce > 0 {
+		encoder := codec.NewEncoder(output.WithColumn(ColumnLeafValues), &cbor)
+		if err := encoder.Encode(o.Nonce); err != nil {
+			return err
+		}
+	}
+
+	if o.Balance.Uint64() > 0 {
+		if err := encodeByteArray(o.Balance.Bytes(), output.WithColumn(ColumnLeafValues)); err != nil {
+			return err
+		}
+	}
+
 	return err
 }
 
@@ -150,24 +164,6 @@ func (o *OperandLeafAccount) LoadFrom(input io.Reader) error {
 	}
 	o.Key = key
 
-	var nonce uint64
-	decoder := codec.NewDecoder(input, &cbor)
-	err = decoder.Decode(&nonce)
-	if err != nil {
-		return err
-	}
-
-	o.Nonce = nonce
-
-	var balanceBytes []byte
-	balanceBytes, err = decodeByteArray(input)
-	if err != nil {
-		return err
-	}
-	balance := big.NewInt(0)
-	balance.SetBytes(balanceBytes)
-	o.Balance = *balance
-
 	flags := make([]byte, 1)
 	_, err = input.Read(flags)
 	if err != nil {
@@ -175,6 +171,30 @@ func (o *OperandLeafAccount) LoadFrom(input io.Reader) error {
 	}
 	o.HasCode = flags[0]&flagCode != 0
 	o.HasStorage = flags[0]&flagStorage != 0
+
+	if flags[0]&flagNonce != 0 {
+		var nonce uint64
+		decoder := codec.NewDecoder(input, &cbor)
+		err = decoder.Decode(&nonce)
+		if err != nil {
+			return err
+		}
+
+		o.Nonce = nonce
+	}
+
+	balance := big.NewInt(0)
+
+	if flags[0]&flagBalance != 0 {
+		var balanceBytes []byte
+		balanceBytes, err = decodeByteArray(input)
+		if err != nil {
+			return err
+		}
+		balance.SetBytes(balanceBytes)
+	}
+
+	o.Balance = *balance
 
 	return nil
 }

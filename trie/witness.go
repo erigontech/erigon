@@ -49,7 +49,7 @@ func NewWitness(operands []WitnessOperand) *Witness {
 }
 
 func (w *Witness) WriteTo(out io.Writer) (*BlockWitnessStats, error) {
-	statsCollector := NewWitnessStatsWriter(out)
+	statsCollector := NewWitnessStatsCollector(out)
 
 	if err := w.Header.WriteTo(statsCollector); err != nil {
 		return nil, err

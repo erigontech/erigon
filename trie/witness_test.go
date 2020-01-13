@@ -38,6 +38,13 @@ func generateOperands() []WitnessOperand {
 			false,
 			false,
 		},
+		&OperandLeafAccount{
+			[]byte("lead-account-key-2"),
+			0,
+			*big.NewInt(0),
+			false,
+			false,
+		},
 	}
 }
 

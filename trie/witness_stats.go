@@ -20,7 +20,7 @@ type WitnessStatsCollector struct {
 	total         uint64
 }
 
-func NewWitnessStatsWriter(w io.Writer) *WitnessStatsCollector {
+func NewWitnessStatsCollector(w io.Writer) *WitnessStatsCollector {
 	return &WitnessStatsCollector{w: w, stats: make(map[StatsColumn]uint64)}
 }
 
