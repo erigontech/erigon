@@ -1212,14 +1212,19 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
+			fmt.Printf("Unload duoNode, add to cache: hex: %x => child.hash(): %x\n", hex, p.child1.hash())
 			p.child1 = hnode
 		case i2:
+			fmt.Printf("Unload duoNode, add to cache: hex: %x => child.hash(): %x\n", hex, p.child2.hash())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
+		fmt.Printf("Unload fullNode, add to cache: hex: %x => child.hash(): %x\n", hex, p.Children[idx].hash())
 		p.Children[idx] = hnode
 	case *accountNode:
+		// Don't save it?
+		fmt.Printf("Unload accountNode, add to cache: hex: %x, incarnation: %d, account.root: %x => p.storage.hash(): %x\n", hex, p.Incarnation, p.Account.Root, p.storage.hash())
 		p.storage = hnode
 	}
 }
