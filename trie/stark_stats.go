@@ -1,27 +1,27 @@
 package trie
 
 import (
+	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 	"github.com/ugorji/go/codec"
 	"io"
-	"fmt"
 	"math/big"
 	"math/bits"
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 	"sort"
 )
 
 type StarkStatsBuilder struct {
-	keccakCounter int // Number of Keccak invocations
-	perInputSize map[int]int // Number of invocation for certain size of input
-	sizeStack []int // Stack of input sizes
+	keccakCounter int         // Number of Keccak invocations
+	perInputSize  map[int]int // Number of invocation for certain size of input
+	sizeStack     []int       // Stack of input sizes
 }
 
 func NewStarkStatsBuilder() *StarkStatsBuilder {
 	return &StarkStatsBuilder{
 		keccakCounter: 0,
-		perInputSize: make(map[int]int),
+		perInputSize:  make(map[int]int),
 	}
 }
 
@@ -43,7 +43,7 @@ func (hb *StarkStatsBuilder) leafHash(length int, keyHex []byte, val RlpSerializ
 	totalLen := kp + kl + val.DoubleRLPLen()
 	var lenPrefix [4]byte
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
-	inputSize := totalLen+pt
+	inputSize := totalLen + pt
 	if inputSize > common.HashLength {
 		inputSize = 32
 	}

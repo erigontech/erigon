@@ -118,7 +118,7 @@ func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
 		} else {
 			return nil, err1
 		}
-		
+
 	}
 	return m, nil
 }
