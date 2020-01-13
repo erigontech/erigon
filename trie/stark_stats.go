@@ -108,17 +108,17 @@ func (hb *StarkStatsBuilder) branch(set uint16) error {
 	return hb.branchHash(set)
 }
 
-func (hb *StarkStatsBuilder) hash(hash common.Hash) error {
+func (hb *StarkStatsBuilder) hash(_ common.Hash) error {
 	hb.sizeStack = append(hb.sizeStack, 32)
 	return nil
 }
 
-func (hb *StarkStatsBuilder) code(code []byte) (common.Hash, error) {
+func (hb *StarkStatsBuilder) code(_ []byte) (common.Hash, error) {
 	hb.sizeStack = append(hb.sizeStack, 32)
 	return common.Hash{}, nil
 }
 
-func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
+func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
 	key := keyHex[len(keyHex)-length:]
 	var acc accounts.Account
 	acc.Root = EmptyRoot
