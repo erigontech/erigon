@@ -23,8 +23,8 @@ Then it might contain some data.
 * `OpCode` -- data is account code as a list of bytes encoded using CBOR; encoded as `[ 0x04 CBOR(code)... ]`
 * `OpExtension` -- data is key encoded as a list of bytes, encoded using CBOR; encoded as `[ 0x01 CBOR(key)... ]`
 * `OpLeaf` -- data is key and value, lists of bytes, encoded usng CBOR; the whole operand is `[ 0x00 CBOR(key)... CBOR(value)... ]`
-* `OpAccountLeaf` -- data is account fields encoded as CBOR, the last fields is a mask determining if the account has a storage or any code associated with it; the whole operand is `[ 0x05 CBOR(key|[]byte)... CBOR(nonce|uint64)... CBOR(balance|[]byte)... flags ]`
+* `OpAccountLeaf` -- data is account fields encoded as CBOR, the last fields is a mask determining if the account has a storage or any code associated with it; the whole operand is `[ 0x05 CBOR(key|[]byte)... flags /CBOR(nonce|uint64).../ /CBOR(balance|[]byte).../ ]`
   
-    * *flags* - the lowest byte represents code, the 2nd lowest is storage. bits: `0b000000<storage><code>`.
+    * *flags* - the lowest byte represents code, the 2nd lowest is storage, then nonce, balance. bits: `0b0000<balance><nonce><storage><code>`. If a flag for `balance` or `nonce` aren't set, the corresponding field is not encoded!
 
 
