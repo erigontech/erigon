@@ -2,6 +2,7 @@ package trie
 
 import (
 	"fmt"
+	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -65,6 +66,7 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode) 
 	copy(op.Key[:], key)
 
 	op.Nonce = accountNode.Nonce
+	op.Balance = big.NewInt(0)
 	op.Balance.SetBytes(accountNode.Balance.Bytes())
 	if !accountNode.IsEmptyRoot() || !accountNode.IsEmptyCodeHash() {
 		op.HasCode = true
