@@ -371,7 +371,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
-	var req = t.NewResolveRequest(nil, key, pos, expected)
+	req := t.NewResolveRequest(nil, key, pos, expected)
 	r := NewResolver(5, accounts, blockNr)
 	r.AddRequest(req)
 	return r.ResolveWithDb(db, blockNr)
