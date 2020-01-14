@@ -7,7 +7,7 @@ There is no length of witness specified anywhere, the code expects to just reach
 Witness: `[HEADER, OP1, OP2, ..., OPn-1, OPn, EOF]`
 
 
-## Header:
+## Header
 
 format: `version:byte`
 
