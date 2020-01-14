@@ -337,8 +337,9 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 		}
 	}
 	if hasTerminator {
-		return append(result, 0x10)
+		result[0] |= 1 << 1
 	}
+
 	return result
 }
 
@@ -350,13 +351,9 @@ func keyBytesToNibbles(b []byte) []byte {
 		return b
 	}
 
-	hasTerminator := false
-	if b[len(b)-1] == 0x10 {
-		b = b[:len(b)-1]
-		hasTerminator = true
-	}
+	hasTerminator := b[0]&(1<<1) != 0
 
-	targetLen := (len(b)-1)*2 - int(b[0])
+	targetLen := (len(b)-1)*2 - int(b[0]&1)
 
 	nibbles := make([]byte, targetLen)
 

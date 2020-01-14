@@ -10,9 +10,11 @@ Witness: `[HEADER, OP1, OP2, ..., OPn-1, OPn, EOF]`
 
 ### Keys
 
-key nibbles are encoded in a following way `[PARITY NIBBLE1+NIBBLE2 NIBBLE3+NIBBLE4 NIBBLE5... ]`
+key nibbles are encoded in a following way `[FLAGS NIBBLE1+NIBBLE2 NIBBLE3+NIBBLE4 NIBBLE5... ]`
 
-if the number of nibbles is odd, the PARITY byte is 1, otherwise it is 0
+*FLAGS*
+* bit 0 -- 1 if the number of nibbles were odd
+* bit 1 -- 1 if the nibbles end with 0x10
 
 ## Header
 
