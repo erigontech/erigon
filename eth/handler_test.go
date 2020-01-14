@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -219,10 +218,10 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 		available []bool        // Availability of explicitly requested blocks
 		expected  int           // Total number of existing blocks to expect
 	}{
-		{1, nil, nil, 1},                                                         // A single random block should be retrievable
-		{10, nil, nil, 10},                                                       // Multiple random blocks should be retrievable
-		{limit, nil, nil, limit},                                                 // The maximum possible blocks should be retrievable
-		{limit + 1, nil, nil, limit},                                             // No more than the possible block count should be returned
+		{1, nil, nil, 1},             // A single random block should be retrievable
+		{10, nil, nil, 10},           // Multiple random blocks should be retrievable
+		{limit, nil, nil, limit},     // The maximum possible blocks should be retrievable
+		{limit + 1, nil, nil, limit}, // No more than the possible block count should be returned
 		{0, []common.Hash{pm.blockchain.Genesis().Hash()}, []bool{true}, 1},      // The genesis block should be retrievable
 		{0, []common.Hash{pm.blockchain.CurrentBlock().Hash()}, []bool{true}, 1}, // The chains head block should be retrievable
 		{0, []common.Hash{{}}, []bool{false}, 0},                                 // A non existent block should not be returned
@@ -281,9 +280,6 @@ func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
 func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 
 func testGetNodeData(t *testing.T, protocol int) {
-	// see eth/protocol.go:61
-	// FIXME: implement getNodeData
-	t.Skip("not implemented in Turbo-Geth")
 	// Define three accounts to simulate transactions with
 	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	acc2Key, _ := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
@@ -320,59 +316,31 @@ func testGetNodeData(t *testing.T, protocol int) {
 		}
 	}
 	// Assemble the test environment
-	pm, db := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
+	pm, _ := newTestProtocolManagerMust(t, downloader.FullSync, 4, generator, nil)
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
 
-	// Fetch for now the entire chain db
-	hashes := []common.Hash{}
+	// Fetch for now the root node
+	hashes := []common.Hash{pm.blockchain.CurrentBlock().Root()}
 
-	db.Walk(nil, []byte{}, 0, func(key, value []byte) (bool, error) {
-		if len(key) == common.HashLength {
-			hashes = append(hashes, common.BytesToHash(key))
-		}
-		return false, nil
-	})
-
-	p2p.Send(peer.app, 0x0d, hashes)
+	p2p.Send(peer.app, GetNodeDataMsg, hashes)
 	msg, err := peer.app.ReadMsg()
 	if err != nil {
 		t.Fatalf("failed to read node data response: %v", err)
 	}
-	if msg.Code != 0x0e {
+	if msg.Code != NodeDataMsg {
 		t.Fatalf("response packet code mismatch: have %x, want %x", msg.Code, 0x0c)
 	}
 	var data [][]byte
 	if err := msg.Decode(&data); err != nil {
 		t.Fatalf("failed to decode response node data: %v", err)
 	}
-	// Verify that all hashes correspond to the requested data, and reconstruct a state tree
-	for i, want := range hashes {
-		if hash := crypto.Keccak256Hash(data[i]); hash != want {
-			t.Errorf("data hash mismatch: have %x, want %x", hash, want)
-		}
-	}
-	statedb := ethdb.NewMemDatabase()
-	for i := 0; i < len(data); i++ {
-		statedb.Put(nil, hashes[i].Bytes(), data[i])
-	}
-	accounts := []common.Address{testBank, acc1Addr, acc2Addr}
-	for i := uint64(0); i <= pm.blockchain.CurrentBlock().NumberU64(); i++ {
-		trie := state.New(state.NewDbState(statedb, i))
 
-		for j, acc := range accounts {
-			state, _, _ := pm.blockchain.State()
-			bw := state.GetBalance(acc)
-			bh := trie.GetBalance(acc)
-
-			if (bw != nil && bh == nil) || (bw == nil && bh != nil) {
-				t.Errorf("test %d, account %d: balance mismatch: have %v, want %v", i, j, bh, bw)
-			}
-			if bw != nil && bh != nil && bw.Cmp(bw) != 0 {
-				t.Errorf("test %d, account %d: balance mismatch: have %v, want %v", i, j, bh, bw)
-			}
-		}
-	}
+	// Verify that we get the root node back
+	tds, err := pm.blockchain.GetTrieDbState()
+	assert.NoError(t, err)
+	root := tds.Trie().Root()
+	assert.Equal(t, [][]byte{root}, data)
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.

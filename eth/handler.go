@@ -621,6 +621,45 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 
+	case p.version >= eth63 && msg.Code == GetNodeDataMsg:
+		// Decode the retrieval message
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		// Obtain the TrieDbState
+		tds, err := pm.blockchain.GetTrieDbState()
+		if err != nil {
+			return err
+		}
+
+		// Gather state data until the fetch or network limits is reached
+		var (
+			hash  common.Hash
+			bytes int
+			data  [][]byte
+		)
+		for bytes < softResponseLimit && len(data) < downloader.MaxStateFetch {
+			// Retrieve the hash of the next node
+			if err := msgStream.Decode(&hash); err == rlp.EOL {
+				break
+			} else if err != nil {
+				return errResp(ErrDecode, "msg %v: %v", msg, err)
+			}
+			// TODO [Andrew] proper implementation
+			if hash == tds.LastRoot() {
+				node := tds.Trie().Root()
+				data = append(data, node)
+				bytes += len(node)
+			} else {
+				data = append(data, nil)
+			}
+			// TODO [Andrew] serve byte codes
+			// TODO [Andrew] storage nodes
+		}
+		return p.SendNodeData(data)
+
 	case p.version >= eth63 && msg.Code == GetReceiptsMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
