@@ -317,7 +317,14 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 	if len(nibbles) < 2 {
 		return nibbles
 	}
+	hasTerminator := false
+	if nibbles[len(nibbles)-1] == 0x10 {
+		nibbles = nibbles[:len(nibbles)-1]
+		hasTerminator = true
+	}
+
 	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
+
 	result := make([]byte, targetLen)
 	nibbleIndex := 0
 	result[0] = byte(len(nibbles) % 2) // parity bit
@@ -329,6 +336,9 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 			nibbleIndex++
 		}
 	}
+	if hasTerminator {
+		return append(result, 0x10)
+	}
 	return result
 }
 
@@ -339,6 +349,13 @@ func keyBytesToNibbles(b []byte) []byte {
 	if len(b) < 2 {
 		return b
 	}
+
+	hasTerminator := false
+	if b[len(b)-1] == 0x10 {
+		b = b[:len(b)-1]
+		hasTerminator = true
+	}
+
 	targetLen := (len(b)-1)*2 - int(b[0])
 
 	nibbles := make([]byte, targetLen)
@@ -352,6 +369,8 @@ func keyBytesToNibbles(b []byte) []byte {
 			nibbleIndex++
 		}
 	}
-
+	if hasTerminator {
+		return append(nibbles, 0x10)
+	}
 	return nibbles
 }

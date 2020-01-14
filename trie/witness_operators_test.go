@@ -234,11 +234,13 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 
 func TestKeySerialization(t *testing.T) {
 	for _, key := range [][]byte{
+		{1, 16},
 		{1, 2, 3, 4, 5},
 		{1, 2, 3, 4, 5, 6},
 		{},
 		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 15, 15, 15, 15},
 		{1},
+		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 15, 15, 15, 16},
 	} {
 		b := keyNibblesToBytes(key)
 
