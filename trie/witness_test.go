@@ -9,36 +9,36 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-func generateOperands() []WitnessOperand {
-	return []WitnessOperand{
-		&OperandBranch{Mask: 0xFF},
-		&OperandEmptyRoot{},
-		&OperandCode{[]byte("code-operand-1")},
-		&OperandExtension{[]byte("extension-key-1")},
-		&OperandLeafValue{[]byte("leaf-value-key-1"), []byte("leaf-value-value-1")},
-		&OperandHash{common.HexToHash("0xabcabcabcabc")},
-		&OperandLeafAccount{
+func generateOperands() []WitnessOperator {
+	return []WitnessOperator{
+		&OperatorBranch{Mask: 0xFF},
+		&OperatorEmptyRoot{},
+		&OperatorCode{[]byte("code-operand-1")},
+		&OperatorExtension{[]byte("extension-key-1")},
+		&OperatorLeafValue{[]byte("leaf-value-key-1"), []byte("leaf-value-value-1")},
+		&OperatorHash{common.HexToHash("0xabcabcabcabc")},
+		&OperatorLeafAccount{
 			[]byte("lead-account-key-1"),
 			999,
 			*big.NewInt(552),
 			true,
 			false,
 		},
-		&OperandLeafAccount{
+		&OperatorLeafAccount{
 			[]byte("lead-account-key-2"),
 			757,
 			*big.NewInt(334),
 			true,
 			true,
 		},
-		&OperandLeafAccount{
+		&OperatorLeafAccount{
 			[]byte("lead-account-key-2"),
 			333,
 			*big.NewInt(11112),
 			false,
 			false,
 		},
-		&OperandLeafAccount{
+		&OperatorLeafAccount{
 			[]byte("lead-account-key-2"),
 			0,
 			*big.NewInt(0),

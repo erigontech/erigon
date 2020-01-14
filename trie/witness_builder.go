@@ -16,7 +16,7 @@ type WitnessBuilder struct {
 	trace    bool
 	rs       *ResolveSet
 	codeMap  CodeMap
-	operands []WitnessOperand
+	operands []WitnessOperator
 }
 
 func NewWitnessBuilder(t *Trie, blockNr uint64, trace bool, rs *ResolveSet, codeMap CodeMap) *WitnessBuilder {
@@ -26,7 +26,7 @@ func NewWitnessBuilder(t *Trie, blockNr uint64, trace bool, rs *ResolveSet, code
 		trace:    trace,
 		rs:       rs,
 		codeMap:  codeMap,
-		operands: make([]WitnessOperand, 0),
+		operands: make([]WitnessOperator, 0),
 	}
 }
 
@@ -42,7 +42,7 @@ func (b *WitnessBuilder) addLeafOp(key []byte, value []byte) error {
 		fmt.Printf("LEAF_VALUE: k %x v:%x\n", key, value)
 	}
 
-	var op OperandLeafValue
+	var op OperatorLeafValue
 
 	op.Key = make([]byte, len(key))
 	copy(op.Key[:], key)
@@ -60,7 +60,7 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode) 
 		fmt.Printf("LEAF_ACCOUNT: k %x acc:%v\n", key, accountNode)
 	}
 
-	var op OperandLeafAccount
+	var op OperatorLeafAccount
 	op.Key = make([]byte, len(key))
 	copy(op.Key[:], key)
 
@@ -81,7 +81,7 @@ func (b *WitnessBuilder) addExtensionOp(key []byte) error {
 		fmt.Printf("EXTENSION: k %x\n", key)
 	}
 
-	var op OperandExtension
+	var op OperatorExtension
 	op.Key = make([]byte, len(key))
 	copy(op.Key[:], key)
 
@@ -104,7 +104,7 @@ func (b *WitnessBuilder) addHashOp(n node, force bool, hashNodeFunc HashNodeFunc
 		fmt.Printf("HASH: type: %T v %x\n", n, hash)
 	}
 
-	var op OperandHash
+	var op OperatorHash
 	op.Hash = hash
 
 	b.operands = append(b.operands, &op)
@@ -116,7 +116,7 @@ func (b *WitnessBuilder) addBranchOp(mask uint32) error {
 		fmt.Printf("BRANCH: mask=%b\n", mask)
 	}
 
-	var op OperandBranch
+	var op OperatorBranch
 	op.Mask = mask
 
 	b.operands = append(b.operands, &op)
@@ -128,7 +128,7 @@ func (b *WitnessBuilder) addCodeOp(code []byte) error {
 		fmt.Printf("CODE: len=%d\n", len(code))
 	}
 
-	var op OperandCode
+	var op OperatorCode
 	op.Code = make([]byte, len(code))
 	copy(op.Code, code)
 
@@ -141,7 +141,7 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 		fmt.Printf("EMPTY ROOT\n")
 	}
 
-	b.operands = append(b.operands, &OperandEmptyRoot{})
+	b.operands = append(b.operands, &OperatorEmptyRoot{})
 	return nil
 }
 

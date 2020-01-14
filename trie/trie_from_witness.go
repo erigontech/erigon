@@ -13,7 +13,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 	hb := NewHashBuilder(false)
 	for _, operand := range witness.Operands {
 		switch op := operand.(type) {
-		case *OperandLeafValue:
+		case *OperatorLeafValue:
 			if trace {
 				fmt.Printf("LEAF ")
 			}
@@ -22,28 +22,28 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			if err := hb.leaf(len(op.Key), keyHex, rlphacks.RlpSerializableBytes(val)); err != nil {
 				return nil, nil, err
 			}
-		case *OperandExtension:
+		case *OperatorExtension:
 			if trace {
 				fmt.Printf("EXTENSION ")
 			}
 			if err := hb.extension(op.Key); err != nil {
 				return nil, nil, err
 			}
-		case *OperandBranch:
+		case *OperatorBranch:
 			if trace {
 				fmt.Printf("BRANCH ")
 			}
 			if err := hb.branch(uint16(op.Mask)); err != nil {
 				return nil, nil, err
 			}
-		case *OperandHash:
+		case *OperatorHash:
 			if trace {
 				fmt.Printf("HASH ")
 			}
 			if err := hb.hash(op.Hash); err != nil {
 				return nil, nil, err
 			}
-		case *OperandCode:
+		case *OperatorCode:
 			if trace {
 				fmt.Printf("CODE ")
 			}
@@ -54,7 +54,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 				return nil, nil, err
 			}
 
-		case *OperandLeafAccount:
+		case *OperatorLeafAccount:
 			if trace {
 				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
@@ -71,7 +71,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, fieldSet); err != nil {
 				return nil, nil, err
 			}
-		case *OperandEmptyRoot:
+		case *OperatorEmptyRoot:
 			if trace {
 				fmt.Printf("EMPTYROOT ")
 			}

@@ -38,10 +38,10 @@ func defaultWitnessHeader() WitnessHeader {
 
 type Witness struct {
 	Header   WitnessHeader
-	Operands []WitnessOperand
+	Operands []WitnessOperator
 }
 
-func NewWitness(operands []WitnessOperand) *Witness {
+func NewWitness(operands []WitnessOperator) *Witness {
 	return &Witness{
 		Header:   defaultWitnessHeader(),
 		Operands: operands,
@@ -75,7 +75,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 
 	opcode := make([]byte, 1)
 	var err error
-	operands := make([]WitnessOperand, 0)
+	operands := make([]WitnessOperator, 0)
 	for _, err = input.Read(opcode); ; _, err = input.Read(opcode) {
 		if err == io.EOF {
 			break
@@ -83,22 +83,22 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 		if err != nil {
 			return nil, err
 		}
-		var op WitnessOperand
-		switch Instruction(opcode[0]) {
+		var op WitnessOperator
+		switch OperatorKindCode(opcode[0]) {
 		case OpHash:
-			op = &OperandHash{}
+			op = &OperatorHash{}
 		case OpLeaf:
-			op = &OperandLeafValue{}
+			op = &OperatorLeafValue{}
 		case OpAccountLeaf:
-			op = &OperandLeafAccount{}
+			op = &OperatorLeafAccount{}
 		case OpCode:
-			op = &OperandCode{}
+			op = &OperatorCode{}
 		case OpBranch:
-			op = &OperandBranch{}
+			op = &OperatorBranch{}
 		case OpEmptyRoot:
-			op = &OperandEmptyRoot{}
+			op = &OperatorEmptyRoot{}
 		case OpExtension:
-			op = &OperandExtension{}
+			op = &OperatorExtension{}
 		default:
 			return nil, fmt.Errorf("unexpected opcode while reading witness: %x", opcode[0])
 		}
@@ -135,45 +135,45 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 
 	for i := 0; i < len(w.Operands); i++ {
 		switch o1 := w.Operands[i].(type) {
-		case *OperandBranch:
-			o2, ok := w2.Operands[i].(*OperandBranch)
+		case *OperatorBranch:
+			o2, ok := w2.Operands[i].(*OperatorBranch)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
 			if o1.Mask != o2.Mask {
 				fmt.Fprintf(output, "o1[%d].Mask = %v; o2[%d].Mask = %v", i, o1.Mask, i, o2.Mask)
 			}
-		case *OperandHash:
-			o2, ok := w2.Operands[i].(*OperandHash)
+		case *OperatorHash:
+			o2, ok := w2.Operands[i].(*OperatorHash)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
 			if !bytes.Equal(o1.Hash.Bytes(), o2.Hash.Bytes()) {
 				fmt.Fprintf(output, "o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
 			}
-		case *OperandCode:
-			o2, ok := w2.Operands[i].(*OperandCode)
+		case *OperatorCode:
+			o2, ok := w2.Operands[i].(*OperatorCode)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
 			if !bytes.Equal(o1.Code, o2.Code) {
 				fmt.Fprintf(output, "o1[%d].Code = %x; o2[%d].Code = %x\n", i, o1.Code, i, o2.Code)
 			}
-		case *OperandEmptyRoot:
-			o2, ok := w2.Operands[i].(*OperandEmptyRoot)
+		case *OperatorEmptyRoot:
+			o2, ok := w2.Operands[i].(*OperatorEmptyRoot)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
-		case *OperandExtension:
-			o2, ok := w2.Operands[i].(*OperandExtension)
+		case *OperatorExtension:
+			o2, ok := w2.Operands[i].(*OperatorExtension)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
 			if !bytes.Equal(o1.Key, o2.Key) {
 				fmt.Fprintf(output, "extension o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
 			}
-		case *OperandLeafAccount:
-			o2, ok := w2.Operands[i].(*OperandLeafAccount)
+		case *OperatorLeafAccount:
+			o2, ok := w2.Operands[i].(*OperatorLeafAccount)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -192,8 +192,8 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 			if o1.HasStorage != o2.HasStorage {
 				fmt.Fprintf(output, "leafAcc o1[%d].HasStorage = %v; o2[%d].HasStorage = %v\n", i, o1.HasStorage, i, o2.HasStorage)
 			}
-		case *OperandLeafValue:
-			o2, ok := w2.Operands[i].(*OperandLeafValue)
+		case *OperatorLeafValue:
+			o2, ok := w2.Operands[i].(*OperatorLeafValue)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}

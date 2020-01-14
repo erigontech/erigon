@@ -18,12 +18,12 @@ const (
 	flagBalance
 )
 
-// Instruction is "enum" type for defining the opcodes of the stack machine that reconstructs the structure of tries from Structure tape
-type Instruction uint8
+// OperatorKindCode is "enum" type for defining the opcodes of the stack machine that reconstructs the structure of tries from Structure tape
+type OperatorKindCode uint8
 
 const (
 	// OpLeaf creates leaf node and pushes it onto the node stack, its hash onto the hash stack
-	OpLeaf Instruction = iota
+	OpLeaf OperatorKindCode = iota
 	// OpExtension pops a node from the node stack, constructs extension node from it and its operand's key, and pushes this extension node onto
 	// the node stack, its hash onto the hash stack
 	OpExtension
@@ -40,19 +40,19 @@ const (
 	OpEmptyRoot
 )
 
-// WitnessOperand is a single operand in the block witness. It knows how to serialize/deserialize itself.
-type WitnessOperand interface {
+// WitnessOperator is a single operand in the block witness. It knows how to serialize/deserialize itself.
+type WitnessOperator interface {
 	WriteTo(*WitnessStatsCollector) error
 
 	// LoadFrom always assumes that the opcode value was already read
 	LoadFrom(io.Reader) error
 }
 
-type OperandHash struct {
+type OperatorHash struct {
 	Hash common.Hash
 }
 
-func (o *OperandHash) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorHash) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpHash, output.WithColumn(ColumnStructure)); err != nil {
 		return nil
 	}
@@ -60,7 +60,7 @@ func (o *OperandHash) WriteTo(output *WitnessStatsCollector) error {
 	return err
 }
 
-func (o *OperandHash) LoadFrom(input io.Reader) error {
+func (o *OperatorHash) LoadFrom(input io.Reader) error {
 	var hash common.Hash
 	bytesRead, err := input.Read(hash[:])
 	if err != nil {
@@ -73,12 +73,12 @@ func (o *OperandHash) LoadFrom(input io.Reader) error {
 	return nil
 }
 
-type OperandLeafValue struct {
+type OperatorLeafValue struct {
 	Key   []byte
 	Value []byte
 }
 
-func (o *OperandLeafValue) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorLeafValue) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpLeaf, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
@@ -90,7 +90,7 @@ func (o *OperandLeafValue) WriteTo(output *WitnessStatsCollector) error {
 	return encodeByteArray(o.Value, output.WithColumn(ColumnLeafValues))
 }
 
-func (o *OperandLeafValue) LoadFrom(input io.Reader) error {
+func (o *OperatorLeafValue) LoadFrom(input io.Reader) error {
 	key, err := decodeByteArray(input)
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (o *OperandLeafValue) LoadFrom(input io.Reader) error {
 	return nil
 }
 
-type OperandLeafAccount struct {
+type OperatorLeafAccount struct {
 	Key        []byte
 	Nonce      uint64
 	Balance    big.Int
@@ -115,7 +115,7 @@ type OperandLeafAccount struct {
 	HasStorage bool
 }
 
-func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpAccountLeaf, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func (o *OperandLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 	return nil
 }
 
-func (o *OperandLeafAccount) LoadFrom(input io.Reader) error {
+func (o *OperatorLeafAccount) LoadFrom(input io.Reader) error {
 	key, err := decodeByteArray(input)
 	if err != nil {
 		return err
@@ -201,11 +201,11 @@ func (o *OperandLeafAccount) LoadFrom(input io.Reader) error {
 	return nil
 }
 
-type OperandCode struct {
+type OperatorCode struct {
 	Code []byte
 }
 
-func (o *OperandCode) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorCode) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpCode, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
@@ -213,7 +213,7 @@ func (o *OperandCode) WriteTo(output *WitnessStatsCollector) error {
 	return encodeByteArray(o.Code, output.WithColumn(ColumnCodes))
 }
 
-func (o *OperandCode) LoadFrom(input io.Reader) error {
+func (o *OperatorCode) LoadFrom(input io.Reader) error {
 	code, err := decodeByteArray(input)
 	if err != nil {
 		return err
@@ -222,11 +222,11 @@ func (o *OperandCode) LoadFrom(input io.Reader) error {
 	return nil
 }
 
-type OperandBranch struct {
+type OperatorBranch struct {
 	Mask uint32
 }
 
-func (o *OperandBranch) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorBranch) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpBranch, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
@@ -234,7 +234,7 @@ func (o *OperandBranch) WriteTo(output *WitnessStatsCollector) error {
 	return encoder.Encode(o.Mask)
 }
 
-func (o *OperandBranch) LoadFrom(input io.Reader) error {
+func (o *OperatorBranch) LoadFrom(input io.Reader) error {
 	var mask uint32
 	decoder := codec.NewDecoder(input, &cbor)
 	if err := decoder.Decode(&mask); err != nil {
@@ -246,29 +246,29 @@ func (o *OperandBranch) LoadFrom(input io.Reader) error {
 	return nil
 }
 
-type OperandEmptyRoot struct{}
+type OperatorEmptyRoot struct{}
 
-func (o *OperandEmptyRoot) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorEmptyRoot) WriteTo(output *WitnessStatsCollector) error {
 	return writeOpCode(OpEmptyRoot, output.WithColumn(ColumnStructure))
 }
 
-func (o *OperandEmptyRoot) LoadFrom(input io.Reader) error {
+func (o *OperatorEmptyRoot) LoadFrom(input io.Reader) error {
 	// no-op
 	return nil
 }
 
-type OperandExtension struct {
+type OperatorExtension struct {
 	Key []byte
 }
 
-func (o *OperandExtension) WriteTo(output *WitnessStatsCollector) error {
+func (o *OperatorExtension) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpExtension, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
 	return encodeByteArray(o.Key, output.WithColumn(ColumnLeafKeys))
 }
 
-func (o *OperandExtension) LoadFrom(input io.Reader) error {
+func (o *OperatorExtension) LoadFrom(input io.Reader) error {
 	key, err := decodeByteArray(input)
 	if err != nil {
 		return err
@@ -301,7 +301,7 @@ func encodeByteArray(data []byte, output io.Writer) error {
 	return encoder.Encode(data)
 }
 
-func writeOpCode(opcode Instruction, output io.Writer) error {
+func writeOpCode(opcode OperatorKindCode, output io.Writer) error {
 	_, err := output.Write([]byte{byte(opcode)})
 	return err
 }

@@ -46,7 +46,7 @@ func TestDecodeBytes(t *testing.T) {
 
 func TestAccountCompactWriteTo(t *testing.T) {
 	key := []byte("l")
-	acc := &OperandLeafAccount{
+	acc := &OperatorLeafAccount{
 		key,
 		0,
 		*big.NewInt(0),
@@ -74,7 +74,7 @@ func TestAccountCompactWriteTo(t *testing.T) {
 
 func TestAccountFullWriteTo(t *testing.T) {
 	key := []byte("l")
-	acc := &OperandLeafAccount{
+	acc := &OperatorLeafAccount{
 		key,
 		20,
 		*big.NewInt(10),
@@ -114,7 +114,7 @@ func TestAccountFullWriteTo(t *testing.T) {
 
 func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 	key := []byte("l")
-	acc := &OperandLeafAccount{
+	acc := &OperatorLeafAccount{
 		key,
 		0,
 		*big.NewInt(10),
@@ -153,7 +153,7 @@ func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 
 func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 	key := []byte("l")
-	acc := &OperandLeafAccount{
+	acc := &OperatorLeafAccount{
 		key,
 		22,
 		*big.NewInt(0),

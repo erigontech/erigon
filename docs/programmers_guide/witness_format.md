@@ -1,6 +1,6 @@
 # Block Witness Format
 
-Each block witness consists of a header followed by a list of operands.
+Each block witness consists of a header followed by a list of operators.
 
 There is no length of witness specified anywhere, the code expects to just reach `EOF`.
 
@@ -15,9 +15,9 @@ encoded as `[ version ]`
 
 the current version is 1.
 
-## Operands
+## Operators
 
-Each operand starts with an opcode (see [`witness_operands.go`](../../trie/witness_operands.go) for exact values).
+Each operator starts with an opcode (see [`witness_operators.go`](../../trie/witness_operators.go) for exact values).
 
 Then it might contain some data.
 
@@ -65,8 +65,8 @@ format: `OpAccountLeaf key:[]byte flags <nonce:uint64> <balance:[]byte>`
 
 encoded as `[ 0x05 CBOR(key|[]byte)... flags /CBOR(nonce|uint64).../ /CBOR(balance|[]byte).../ ]`
   
-*flags* is a bitset encoded in a single bit (see [`witness_operands_test.go`](../../trie/witness_operands_test.go) to see flags in action).
-* bit 0 defines if **code** is present; if set to 1, the next operand should be `OpCode` containing the code value;
-* bit 1 defines if **storage** is present; if set to 1, the  operands following `OpAccountLeaf` will reconstruct a storage trie;
+*flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../trie/witness_operators_test.go) to see flags in action).
+* bit 0 defines if **code** is present; if set to 1 it assumes that either `OpCode` or `OpHash` already put something on the stack;
+* bit 1 defines if **storage** is present; if set to 1, the operators preceeding `OpAccountLeaf` will reconstruct a storage trie;
 * bit 2 defines if **nonce** is not 0; if set to 0, *nonce* field is not encoded;
 * bit 3 defines if **balance** is not 0; if set to 0, *balance* field is not encoded;
