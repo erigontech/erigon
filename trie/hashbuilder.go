@@ -444,7 +444,7 @@ func (hb *HashBuilder) afterBranch() {
 		return
 	}
 	if hb.lastPrefix == nil || len(hb.lastPrefix) == 0 {
-		log.Warn("IntermediateTrieCash: lastPrefix was not set for Delete")
+		//log.Warn("IntermediateTrieCash: lastPrefix was not set for Delete")
 		return
 	}
 	//defer func(t time.Time) { fmt.Println("IntermediateTrieHashesBucket.Delete", time.Since(t)) }(time.Now())
