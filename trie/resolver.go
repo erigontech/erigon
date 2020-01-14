@@ -183,7 +183,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
-	tr.hb.lastPrefix.Reset()
+	tr.hb.skippedPrefix.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -267,17 +267,20 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 
-		tr.hb.lastPrefix.Reset()
-		tr.hb.lastPrefix.Write(k[:skip])
+		tr.hb.skippedPrefix.Reset()
 
 		i := 0
 		for _, b := range k {
 			if i >= skip {
 				tr.succ.WriteByte(b / 16)
+			} else {
+				tr.hb.skippedPrefix.WriteByte(b / 16)
 			}
 			i++
 			if i >= skip {
 				tr.succ.WriteByte(b % 16)
+			} else {
+				tr.hb.skippedPrefix.WriteByte(b % 16)
 			}
 			i++
 		}
@@ -332,7 +335,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 }
 
 func (tr *Resolver) hackWrapperForHashOnly(prefix []byte) bool {
-	tr.hb.lastPrefix.Write(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
+	tr.hb.skippedPrefix.Write(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
 	return tr.currentRs.HashOnly(prefix)
 }
 
