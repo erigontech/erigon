@@ -443,7 +443,7 @@ func (hb *HashBuilder) afterBranch() {
 	if hb.intermediateTrieHashesDb == nil {
 		return
 	}
-	if hb.lastPrefix == nil {
+	if hb.lastPrefix == nil || len(hb.lastPrefix) == 0 {
 		log.Warn("IntermediateTrieCash: lastPrefix was not set for Delete")
 		return
 	}
