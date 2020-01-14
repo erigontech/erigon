@@ -110,7 +110,7 @@ func (o *OperatorLeafValue) LoadFrom(input io.Reader) error {
 type OperatorLeafAccount struct {
 	Key        []byte
 	Nonce      uint64
-	Balance    big.Int
+	Balance    *big.Int
 	HasCode    bool
 	HasStorage bool
 }
@@ -135,7 +135,9 @@ func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		flags |= flagNonce
 	}
 
-	if o.Balance.Uint64() > 0 {
+	emptyBalance := big.NewInt(0)
+
+	if o.Balance.Cmp(emptyBalance) != 0 {
 		flags |= flagBalance
 	}
 
@@ -150,8 +152,9 @@ func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		}
 	}
 
-	if o.Balance.Uint64() > 0 {
-		if err := encodeByteArray(o.Balance.Bytes(), output.WithColumn(ColumnLeafValues)); err != nil {
+	if o.Balance.Cmp(emptyBalance) != 0 {
+		bb := o.Balance.Bytes()
+		if err := encodeByteArray(bb, output.WithColumn(ColumnLeafValues)); err != nil {
 			return err
 		}
 	}
@@ -193,10 +196,11 @@ func (o *OperatorLeafAccount) LoadFrom(input io.Reader) error {
 		if err != nil {
 			return err
 		}
+
 		balance.SetBytes(balanceBytes)
 	}
 
-	o.Balance = *balance
+	o.Balance = balance
 
 	return nil
 }

@@ -44,12 +44,54 @@ func TestDecodeBytes(t *testing.T) {
 	}
 }
 
+func TestAccountBigBalance(t *testing.T) {
+	key := []byte("l")
+	balance := big.NewInt(0)
+	var ok bool
+	balance, ok = balance.SetString("92233720368547758080", 10)
+	if !ok {
+		t.Error("fail to set balance to a large number")
+	}
+	acc := &OperatorLeafAccount{
+		key,
+		0,
+		balance,
+		false,
+		false,
+	}
+
+	var buff bytes.Buffer
+
+	collector := NewWitnessStatsCollector(&buff)
+
+	err := acc.WriteTo(collector)
+	if err != nil {
+		t.Error(err)
+	}
+
+	// discard the opcode
+	_, err = buff.ReadByte()
+	if err != nil {
+		t.Error(err)
+	}
+
+	acc2 := &OperatorLeafAccount{}
+	if err := acc2.LoadFrom(&buff); err != nil {
+		t.Error(err)
+	}
+
+	if acc2.Balance.Cmp(acc.Balance) != 0 {
+		t.Errorf("wrong deserialization of balance (expected: %s got %s)", acc.Balance.String(), acc2.Balance.String())
+	}
+
+}
+
 func TestAccountCompactWriteTo(t *testing.T) {
 	key := []byte("l")
 	acc := &OperatorLeafAccount{
 		key,
 		0,
-		*big.NewInt(0),
+		big.NewInt(0),
 		false,
 		false,
 	}
@@ -77,7 +119,7 @@ func TestAccountFullWriteTo(t *testing.T) {
 	acc := &OperatorLeafAccount{
 		key,
 		20,
-		*big.NewInt(10),
+		big.NewInt(10),
 		true,
 		true,
 	}
@@ -117,7 +159,7 @@ func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 	acc := &OperatorLeafAccount{
 		key,
 		0,
-		*big.NewInt(10),
+		big.NewInt(10),
 		true,
 		true,
 	}
@@ -156,7 +198,7 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 	acc := &OperatorLeafAccount{
 		key,
 		22,
-		*big.NewInt(0),
+		big.NewInt(0),
 		true,
 		true,
 	}
