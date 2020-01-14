@@ -6,6 +6,13 @@ There is no length of witness specified anywhere, the code expects to just reach
 
 Witness: `[HEADER, OP1, OP2, ..., OPn-1, OPn, EOF]`
 
+## Encoding
+
+### Keys
+
+key nibbles are encoded in a following way `[PARITY NIBBLE1+NIBBLE2 NIBBLE3+NIBBLE4 NIBBLE5... ]`
+
+if the number of nibbles is odd, the PARITY byte is 1, otherwise it is 0
 
 ## Header
 
