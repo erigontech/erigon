@@ -9,7 +9,11 @@ Witness: `[HEADER, OP1, OP2, ..., OPn-1, OPn, EOF]`
 
 ## Header:
 
-Header contains only 1 byte with the current version `VERSION`, should be 1.
+format: `version:byte`
+
+encoded as `[ version ]`
+
+the current version is 1.
 
 ## Operands
 
@@ -61,7 +65,7 @@ format: `OpAccountLeaf key:[]byte flags <nonce:uint64> <balance:[]byte>`
 
 encoded as `[ 0x05 CBOR(key|[]byte)... flags /CBOR(nonce|uint64).../ /CBOR(balance|[]byte).../ ]`
   
-*flags* is a bitset encoded in a single bit.
+*flags* is a bitset encoded in a single bit (see [`witness_operands_test.go`](../../trie/witness_operands_test.go) to see flags in action).
 * bit 0 defines if **code** is present; if set to 1, the next operand should be `OpCode` containing the code value;
 * bit 1 defines if **storage** is present; if set to 1, the  operands following `OpAccountLeaf` will reconstruct a storage trie;
 * bit 2 defines if **nonce** is not 0; if set to 0, *nonce* field is not encoded;
