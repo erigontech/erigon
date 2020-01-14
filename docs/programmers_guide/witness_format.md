@@ -23,17 +23,23 @@ Then it might contain some data.
 
 ### `OpEmptyRoot` 
 
+puts empty trie root to on the stack
+
 format: `OpEmptyRoot` 
 
 encoded as `[ 0x06 ]`
 
 ### `OpHash` 
 
+puts a single hash on the stack
+
 format: `OpHash hash:[32]byte`
 
 encoded as `[ 0x03 hash_byte_1 ... hash_byte_32 ]`
 
 ### `OpBranch`
+
+pops N values from the stack and adds them as the children; pushes the result to the stack; N is the number of 1's in the *mask* field.
 
 format: `OpBranch mask:uint32`
 
@@ -44,22 +50,31 @@ encoded as `[ 0x02 CBOR(mask)...]`
 
 ### `OpCode`
 
+pushes a code to the stack
+
 format: `OpCode code:[]byte`
 
 encoded as `[ 0x04 CBOR(code)... ]`
 
 ### `OpExtension`
+
+pushes an extension node with a specified key on the stack
+
 format: `OpExtension key:[]byte` 
 
 encoded as `[ 0x01 CBOR(key)... ]`
 
 ### `OpLeaf`
 
+pushes a leaf with specified key and value to the stack
+
 format: `OpLeaf key:[]byte value:[]byte` 
 
 encoded as `[ 0x00 CBOR(key)... CBOR(value)... ]`
 
 ### `OpAccountLeaf`
+
+pushes a leaf with specified parameters to the stack; if flags show, before that pops 1 or 2 values from the stack;
 
 format: `OpAccountLeaf key:[]byte flags <nonce:uint64> <balance:[]byte>` 
 
