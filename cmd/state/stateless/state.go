@@ -252,7 +252,7 @@ beginTx:
 			r.LastTimestamps.Set(addr, timestamp)
 			count++
 			if count%PrintProgressEvery == 0 {
-				fmt.Printf("Processed %dK account records. %s\n", count/1000, time.Since(startTime))
+				fmt.Printf("Processed %dK account records, %s\n", count/1000, time.Since(startTime))
 			}
 			if count%PrintMemStatsEvery == 0 {
 				PrintMemUsage()
