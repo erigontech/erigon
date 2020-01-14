@@ -68,6 +68,7 @@ func (b *WitnessBuilder) addAccountLeafOp(key []byte, accountNode *accountNode) 
 	op.Nonce = accountNode.Nonce
 	op.Balance = big.NewInt(0)
 	op.Balance.SetBytes(accountNode.Balance.Bytes())
+
 	if !accountNode.IsEmptyRoot() || !accountNode.IsEmptyCodeHash() {
 		op.HasCode = true
 		op.HasStorage = true

@@ -202,6 +202,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				StorageSize: a.StorageSize,
 				Balance:     &a.Balance,
 				Nonce:       a.Nonce,
+				Incarnation: a.Incarnation,
 			}
 		}
 	}
