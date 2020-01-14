@@ -83,7 +83,7 @@ func (o *OperatorLeafValue) WriteTo(output *WitnessStatsCollector) error {
 		return err
 	}
 
-	if err := encodeByteArray(o.Key, output.WithColumn(ColumnLeafKeys)); err != nil {
+	if err := encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys)); err != nil {
 		return err
 	}
 
@@ -96,7 +96,7 @@ func (o *OperatorLeafValue) LoadFrom(input io.Reader) error {
 		return err
 	}
 
-	o.Key = key
+	o.Key = keyBytesToNibbles(key)
 
 	value, err := decodeByteArray(input)
 	if err != nil {
@@ -120,7 +120,7 @@ func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		return err
 	}
 
-	if err := encodeByteArray(o.Key, output.WithColumn(ColumnLeafKeys)); err != nil {
+	if err := encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys)); err != nil {
 		return err
 	}
 
@@ -167,7 +167,7 @@ func (o *OperatorLeafAccount) LoadFrom(input io.Reader) error {
 	if err != nil {
 		return err
 	}
-	o.Key = key
+	o.Key = keyBytesToNibbles(key)
 
 	flags := make([]byte, 1)
 	_, err = input.Read(flags)
@@ -269,7 +269,7 @@ func (o *OperatorExtension) WriteTo(output *WitnessStatsCollector) error {
 	if err := writeOpCode(OpExtension, output.WithColumn(ColumnStructure)); err != nil {
 		return err
 	}
-	return encodeByteArray(o.Key, output.WithColumn(ColumnLeafKeys))
+	return encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys))
 }
 
 func (o *OperatorExtension) LoadFrom(input io.Reader) error {
@@ -278,7 +278,7 @@ func (o *OperatorExtension) LoadFrom(input io.Reader) error {
 		return err
 	}
 
-	o.Key = key
+	o.Key = keyBytesToNibbles(key)
 
 	return nil
 }
@@ -308,4 +308,50 @@ func encodeByteArray(data []byte, output io.Writer) error {
 func writeOpCode(opcode OperatorKindCode, output io.Writer) error {
 	_, err := output.Write([]byte{byte(opcode)})
 	return err
+}
+
+func keyNibblesToBytes(nibbles []byte) []byte {
+	if len(nibbles) < 1 {
+		return []byte{}
+	}
+	if len(nibbles) < 2 {
+		return nibbles
+	}
+	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
+	result := make([]byte, targetLen)
+	nibbleIndex := 0
+	result[0] = byte(len(nibbles) % 2) // parity bit
+	for i := 1; i < len(result); i++ {
+		result[i] = nibbles[nibbleIndex] * 16
+		nibbleIndex++
+		if nibbleIndex < len(nibbles) {
+			result[i] += nibbles[nibbleIndex]
+			nibbleIndex++
+		}
+	}
+	return result
+}
+
+func keyBytesToNibbles(b []byte) []byte {
+	if len(b) < 1 {
+		return []byte{}
+	}
+	if len(b) < 2 {
+		return b
+	}
+	targetLen := (len(b)-1)*2 - int(b[0])
+
+	nibbles := make([]byte, targetLen)
+
+	nibbleIndex := 0
+	for i := 1; i < len(b); i++ {
+		nibbles[nibbleIndex] = b[i] / 16
+		nibbleIndex++
+		if nibbleIndex < len(nibbles) {
+			nibbles[nibbleIndex] = b[i] % 16
+			nibbleIndex++
+		}
+	}
+
+	return nibbles
 }

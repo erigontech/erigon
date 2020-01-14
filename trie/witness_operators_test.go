@@ -231,3 +231,22 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 		t.Errorf("unexpected flags value (expected %b, got %b)", expectedFlags, flags)
 	}
 }
+
+func TestKeySerialization(t *testing.T) {
+	for _, key := range [][]byte{
+		{1, 2, 3, 4, 5},
+		{1, 2, 3, 4, 5, 6},
+		{},
+		{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 15, 15, 15, 15, 15},
+		{1},
+	} {
+		b := keyNibblesToBytes(key)
+
+		key2 := keyBytesToNibbles(b)
+
+		if !bytes.Equal(key, key2) {
+			t.Errorf("wrong deserialization, expected %x got %x", key, key2)
+		}
+
+	}
+}
