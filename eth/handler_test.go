@@ -323,7 +323,9 @@ func testGetNodeData(t *testing.T, protocol int) {
 	// Fetch for now the root node
 	hashes := []common.Hash{pm.blockchain.CurrentBlock().Root()}
 
-	p2p.Send(peer.app, GetNodeDataMsg, hashes)
+	err := p2p.Send(peer.app, GetNodeDataMsg, hashes)
+	assert.NoError(t, err)
+
 	msg, err := peer.app.ReadMsg()
 	if err != nil {
 		t.Fatalf("failed to read node data response: %v", err)
