@@ -35,26 +35,25 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts      bool // Is this a resolver for accounts or for storage
-	topLevels     int  // How many top levels of the trie to keep (not roll into hashes)
-	requests      []*ResolveRequest
-	reqIndices    []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	keyIdx        int
-	currentReq    *ResolveRequest // Request currently being handled
-	currentRs     *ResolveSet     // ResolveSet currently being used
-	historical    bool
-	blockNr       uint64
-	hb            *HashBuilder
-	fieldSet      uint32 // fieldSet for the next invocation of genStructStep
-	rss           []*ResolveSet
-	curr          bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ          bytes.Buffer
-	value         bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups        []uint16
-	a             accounts.Account
-	leafData      GenStructStepLeafData
-	accData       GenStructStepAccountData
-	skippedPrefix bytes.Buffer
+	accounts   bool // Is this a resolver for accounts or for storage
+	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
+	requests   []*ResolveRequest
+	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	keyIdx     int
+	currentReq *ResolveRequest // Request currently being handled
+	currentRs  *ResolveSet     // ResolveSet currently being used
+	historical bool
+	blockNr    uint64
+	hb         *HashBuilder
+	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
+	rss        []*ResolveSet
+	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ       bytes.Buffer
+	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
+	groups     []uint16
+	a          accounts.Account
+	leafData   GenStructStepLeafData
+	accData    GenStructStepAccountData
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -184,6 +183,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
+	tr.hb.lastPrefix.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -198,7 +198,7 @@ func (tr *Resolver) finaliseRoot() error {
 			tr.accData.Incarnation = tr.a.Incarnation
 			data = &tr.accData
 		}
-		tr.groups, err = GenStructStep(tr.hackWrapperForHashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 		if err != nil {
 			return err
 		}
@@ -267,8 +267,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 
-		tr.skippedPrefix.Reset()
-		tr.skippedPrefix.Write(k[:skip])
+		tr.hb.lastPrefix.Reset()
+		tr.hb.lastPrefix.Write(k[:skip])
 
 		i := 0
 		for _, b := range k {
@@ -332,9 +332,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 }
 
 func (tr *Resolver) hackWrapperForHashOnly(prefix []byte) bool {
-	tr.skippedPrefix.Write(prefix)
-	tr.hb.lastPrefix = tr.skippedPrefix.Bytes() // hack, will use this field in HashBuilder.afterBranch method for caching
-	tr.skippedPrefix.Reset()
+	tr.hb.lastPrefix.Write(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
 	return tr.currentRs.HashOnly(prefix)
 }
 
