@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"fmt"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -301,24 +300,29 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 		if !reflect.DeepEqual(resAccStorage, accStateStorage[i]) {
 			spew.Dump("res", resAccStorage)
-			spew.Dump("expected", accHistoryStateStorage[i])
+			spew.Dump("expected", accStateStorage[i])
 			t.Log("incorrect storage", i)
 		}
 
-		resAccHistoryStorage := make(map[common.Hash]common.Hash)
-
-		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
-			fmt.Println("StorageHistoryBucket", string(k), string(v))
-			//resAccHistoryStorage[common.BytesToHash(k[common.HashLength+8:common.HashLength+8+common.HashLength])] = common.BytesToHash(v)
-			return true, nil
-		})
+		v, err := db.Get(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation))
 		if err != nil {
-			t.Fatal("error on get account storage", i, err)
+			t.Fatal(err)
 		}
 
-		if !reflect.DeepEqual(resAccHistoryStorage, accHistoryStateStorage[i]) {
-			spew.Dump("res", resAccHistoryStorage)
-			spew.Dump("expected", accHistoryStateStorage[i])
+		storageIndex := NewStorageIndex()
+		err = storageIndex.Decode(v)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		expectedIndex := NewStorageIndex()
+		for j := range accHistoryStateStorage[i] {
+			expectedIndex.Append(j, 1)
+		}
+		if !reflect.DeepEqual(expectedIndex, storageIndex) {
+			spew.Dump("res", storageIndex)
+			spew.Dump("expected", expectedIndex)
+			spew.Dump("orig", accHistoryStateStorage[i])
 			t.Fatal("incorrect history storage", i)
 		}
 	}
@@ -344,6 +348,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 	}
 
+	sort.Sort(expectedChangeSet)
 	if !reflect.DeepEqual(cs, expectedChangeSet) {
 		spew.Dump("res", cs)
 		spew.Dump("expected", expectedChangeSet)
@@ -376,6 +381,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
+	sort.Sort(expectedChangeSet)
 	if !reflect.DeepEqual(cs, expectedChangeSet) {
 		spew.Dump("res", cs)
 		spew.Dump("expected", expectedChangeSet)
