@@ -10,7 +10,7 @@ import (
 )
 
 // FirehoseName is the official short name of the protocol used during capability negotiation.
-var FirehoseName = "firehose"
+var FirehoseName = "frh" // Parity only supports 3 letter capabilities
 
 // FirehoseVersions are the supported versions of the Firehose protocol.
 var FirehoseVersions = []uint{1}

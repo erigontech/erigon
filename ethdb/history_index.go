@@ -181,6 +181,20 @@ func BoltDBFindStorageByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timesta
 	if err != nil {
 		return nil, ErrKeyNotFound
 	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(data); err != nil {
+		return nil, err
+	}
+
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+		codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+		if len(codeHash) > 0 {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		}
+		data = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(data)
+	}
 	return data, nil
 
 }

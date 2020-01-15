@@ -21,13 +21,14 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"unsafe"
+
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	lru "github.com/hashicorp/golang-lru"
 
@@ -159,21 +160,21 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t               *trie.Trie
-	tMu             *sync.Mutex
-	db              ethdb.Database
-	blockNr         uint64
-	buffers         []*Buffer
-	aggregateBuffer *Buffer // Merge of all buffers
-	currentBuffer   *Buffer
-	codeCache       *lru.Cache
-	codeSizeCache   *lru.Cache
-	historical      bool
-	noHistory       bool
-	resolveReads    bool
-	savePreimages   bool
-	pg              *trie.ProofGenerator
-	tp              *trie.TriePruning
+	t                 *trie.Trie
+	tMu               *sync.Mutex
+	db                ethdb.Database
+	blockNr           uint64
+	buffers           []*Buffer
+	aggregateBuffer   *Buffer // Merge of all buffers
+	currentBuffer     *Buffer
+	codeCache         *lru.Cache
+	codeSizeCache     *lru.Cache
+	historical        bool
+	noHistory         bool
+	resolveReads      bool
+	savePreimages     bool
+	resolveSetBuilder *trie.ResolveSetBuilder
+	tp                *trie.TriePruning
 }
 
 var (
@@ -232,15 +233,15 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	tp := trie.NewTriePruning(blockNr)
 
 	tds := &TrieDbState{
-		t:             t,
-		tMu:           new(sync.Mutex),
-		db:            db,
-		blockNr:       blockNr,
-		codeCache:     cc,
-		codeSizeCache: csc,
-		pg:            trie.NewProofGenerator(),
-		tp:            tp,
-		savePreimages: true,
+		t:                 t,
+		tMu:               new(sync.Mutex),
+		db:                db,
+		blockNr:           blockNr,
+		codeCache:         cc,
+		codeSizeCache:     csc,
+		resolveSetBuilder: trie.NewResolveSetBuilder(),
+		tp:                tp,
+		savePreimages:     true,
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -326,20 +327,20 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 
 	tds.tMu.Lock()
 	t := &TrieDbState{
-		t:               tds.t,
-		tMu:             tds.tMu,
-		db:              tds.db,
-		blockNr:         tds.getBlockNr(),
-		buffers:         buffers,
-		aggregateBuffer: aggregateBuffer,
-		currentBuffer:   currentBuffer,
-		codeCache:       tds.codeCache,
-		codeSizeCache:   tds.codeSizeCache,
-		historical:      tds.historical,
-		noHistory:       tds.noHistory,
-		resolveReads:    tds.resolveReads,
-		pg:              tds.pg,
-		tp:              tds.tp,
+		t:                 tds.t,
+		tMu:               tds.tMu,
+		db:                tds.db,
+		blockNr:           tds.getBlockNr(),
+		buffers:           buffers,
+		aggregateBuffer:   aggregateBuffer,
+		currentBuffer:     currentBuffer,
+		codeCache:         tds.codeCache,
+		codeSizeCache:     tds.codeSizeCache,
+		historical:        tds.historical,
+		noHistory:         tds.noHistory,
+		resolveReads:      tds.resolveReads,
+		resolveSetBuilder: tds.resolveSetBuilder,
+		tp:                tds.tp,
 	}
 	tds.tMu.Unlock()
 
@@ -453,7 +454,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys)
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
-		tds.pg.AddStorageTouch(storageKey[:])
+		tds.resolveSetBuilder.AddStorageTouch(storageKey[:])
 	}
 	return nil
 }
@@ -527,7 +528,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) erro
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
 	for _, addrHash := range accountTouches {
 		a := addrHash
-		tds.pg.AddTouch(a[:])
+		tds.resolveSetBuilder.AddTouch(a[:])
 	}
 }
 
@@ -535,7 +536,7 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) 
 // Each list is the collection of keys that have been "touched" (inserted, updated, or simply accessed)
 // since the last invocation of `ExtractTouches`.
 func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouches [][]byte) {
-	return tds.pg.ExtractTouches()
+	return tds.resolveSetBuilder.ExtractTouches()
 }
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
@@ -1022,7 +1023,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
-		tds.pg.ReadCode(codeHash, code)
+		tds.resolveSetBuilder.ReadCode(codeHash, code)
 	}
 	return code, err
 }
@@ -1056,7 +1057,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
-		tds.pg.ReadCode(codeHash, code)
+		tds.resolveSetBuilder.ReadCode(codeHash, code)
 	}
 	return codeSize, nil
 }
@@ -1184,7 +1185,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 
 func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
-		tsw.tds.pg.CreateCode(codeHash, code)
+		tsw.tds.resolveSetBuilder.CreateCode(codeHash, code)
 	}
 	return nil
 }
@@ -1215,55 +1216,22 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
-func (tds *TrieDbState) ExtractWitness(trace bool, bin bool) ([]byte, *BlockWitnessStats, error) {
-	bwb := trie.NewBlockWitnessBuilder(trace)
+func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness, error) {
+	rs, codeMap := tds.resolveSetBuilder.Build(isBinary)
 
-	var rs *trie.ResolveSet
-	if bin {
-		rs = trie.NewBinaryResolveSet(0)
-	} else {
-		rs = trie.NewResolveSet(0)
-	}
-
-	touches, storageTouches := tds.pg.ExtractTouches()
-	for _, touch := range touches {
-		rs.AddKey(touch)
-	}
-	for _, touch := range storageTouches {
-		rs.AddKey(touch)
-	}
-	codeMap := tds.pg.ExtractCodeMap()
-
-	err := tds.makeBlockWitness(bwb, rs, codeMap, bin)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	var b bytes.Buffer
-
-	stats, err := bwb.WriteTo(&b)
-
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return b.Bytes(), NewBlockWitnessStats(tds.blockNr, uint64(b.Len()), stats), nil
+	return tds.makeBlockWitness(trace, rs, codeMap, isBinary)
 }
 
-func (tds *TrieDbState) makeBlockWitness(bwb *trie.BlockWitnessBuilder, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, bin bool) error {
+func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
-	if bin {
-		if err := bwb.MakeBlockWitnessBin(trie.HexToBin(tds.t), rs, codeMap); err != nil {
-			return err
-		}
-	} else {
-		if err := bwb.MakeBlockWitness(tds.t, rs, codeMap); err != nil {
-			return err
-		}
+	t := tds.t
+	if isBinary {
+		t = trie.HexToBin(tds.t).Trie()
 	}
-	return nil
+
+	return t.ExtractWitness(tds.blockNr, trace, rs, codeMap)
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

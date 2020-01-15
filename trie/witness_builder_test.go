@@ -15,18 +15,21 @@ func TestBlockWitnessBinary(t *testing.T) {
 
 	trBin := HexToBin(tr)
 
-	bwb := NewBlockWitnessBuilder(false)
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
-	if err := bwb.MakeBlockWitnessBin(trBin, rs, nil); err != nil {
-		t.Errorf("Could not make block witness: %v", err)
-	}
-	var b bytes.Buffer
-	if _, err := bwb.WriteTo(&b); err != nil {
+
+	bwb := NewWitnessBuilder(trBin.Trie(), 1, false, rs, nil)
+
+	hr := newHasher(false)
+	defer returnHasherToPool(hr)
+
+	var w *Witness
+	var err error
+	if w, err = bwb.Build(hr.hash); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, _, err := BlockWitnessToTrieBin(b.Bytes() /*trace*/, false /*is-binary*/, true)
+	trBin1, _, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
@@ -51,18 +54,21 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 
 	trBin := HexToBin(tr)
 
-	bwb := NewBlockWitnessBuilder(false)
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
-	if err := bwb.MakeBlockWitnessBin(trBin, rs, nil); err != nil {
-		t.Errorf("Could not make block witness: %v", err)
-	}
-	var b bytes.Buffer
-	if _, err := bwb.WriteTo(&b); err != nil {
+
+	bwb := NewWitnessBuilder(trBin.Trie(), 1, false, rs, nil)
+
+	hr := newHasher(false)
+	defer returnHasherToPool(hr)
+
+	var w *Witness
+	var err error
+	if w, err = bwb.Build(hr.hash); err != nil {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, _, err := BlockWitnessToTrieBin(b.Bytes() /*trace*/, false /*is-binary*/, true)
+	trBin1, _, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
