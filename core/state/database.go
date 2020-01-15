@@ -790,11 +790,13 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 				}
 				// Fetch the code hash
 				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
-					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err != nil {
+					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err == nil {
 						copy(acc.CodeHash[:], codeHash)
 					}
 				}
 				b.accountUpdates[addrHash] = &acc
+				value = make([]byte, acc.EncodingLengthForStorage())
+				acc.EncodeForStorage(value)
 				if err := tds.db.Put(dbutils.AccountsBucket, addrHash[:], value); err != nil {
 					return err
 				}
@@ -877,7 +879,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 
-	if tds.historical && debug.IsThinHistory() {
+	if tds.historical && debug.IsThinHistory() && a.Incarnation > 0 {
 		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)

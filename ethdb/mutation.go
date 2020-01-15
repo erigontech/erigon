@@ -363,7 +363,7 @@ func (m *mutation) Commit() (uint64, error) {
 				if err != nil {
 					log.Error("EncodeChangeSet changeSet error on commit", "err", err)
 				}
-				if debug.IsThinHistory() {
+				if debug.IsThinHistory() && !bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 					changedKeys := changeSet.ChangedKeys()
 					for k := range changedKeys {
 						value, err := m.getNoLock(hBucket, []byte(k))

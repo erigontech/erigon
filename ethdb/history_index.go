@@ -2,7 +2,9 @@ package ethdb
 
 import (
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"sort"
 )
@@ -123,6 +125,20 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	data, err = cs.FindLast(key)
 	if err != nil {
 		return nil, ErrKeyNotFound
+	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(data); err != nil {
+		return nil, err
+	}
+
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+		codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+		if len(codeHash) > 0 {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		}
+		data = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(data)
 	}
 	return data, nil
 
