@@ -172,6 +172,7 @@ func (tr *Resolver) finaliseRoot() error {
 				StorageSize: tr.a.StorageSize,
 				Balance:     &tr.a.Balance,
 				Nonce:       tr.a.Nonce,
+				Incarnation: tr.a.Incarnation,
 			}
 		}
 		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
@@ -265,6 +266,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					StorageSize: tr.a.StorageSize,
 					Balance:     &tr.a.Balance,
 					Nonce:       tr.a.Nonce,
+					Incarnation: tr.a.Incarnation,
 				}
 			}
 			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
