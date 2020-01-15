@@ -882,6 +882,15 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	}
 }
 
+func printCurrentBlockNumber(chaindata string) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	hash := rawdb.ReadHeadBlockHash(ethDb)
+	number := rawdb.ReadHeaderNumber(ethDb, hash)
+	fmt.Printf("Block number: %d\n", *number)
+}
+
 func printTxHashes() {
 	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
@@ -1170,6 +1179,26 @@ func testMemBolt() {
 	check(err)
 }
 
+func printBucket(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	f, err := os.Create("bucket.txt")
+	check(err)
+	defer f.Close()
+	fb := bufio.NewWriter(f)
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			fmt.Fprintf(fb, "%x %x\n", k, v)
+		}
+		return nil
+	})
+	check(err)
+	fb.Flush()
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -1238,5 +1267,11 @@ func main() {
 	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()
+	}
+	if *action == "current" {
+		printCurrentBlockNumber(*chaindata)
+	}
+	if *action == "bucket" {
+		printBucket(*chaindata)
 	}
 }

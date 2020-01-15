@@ -301,3 +301,11 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 	s.created = make(map[common.Hash]struct{})
 	return nil
 }
+
+func (s *Stateless) GetTrie() *trie.Trie {
+	return s.t
+}
+
+func (s *Stateless) GetCodeMap() map[common.Hash][]byte {
+	return s.codeMap
+}

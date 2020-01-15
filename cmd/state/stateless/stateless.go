@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +25,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 var chartColors = []drawing.Color{
@@ -72,6 +76,66 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	return nil
 }
 
+func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number uint64) error {
+	filename := fmt.Sprintf("state_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	indexColors := visual.HexIndexColors
+	fontColors := visual.HexFontColors
+	visual.StartGraph(f, false)
+	trie.Visual(t, f, &trie.VisualOpts{
+		Highlights:     nil,
+		IndexColors:    indexColors,
+		FontColors:     fontColors,
+		Values:         true,
+		CutTerminals:   0,
+		CodeMap:        codeMap,
+		CodeCompressed: false,
+		ValCompressed:  false,
+		ValHex:         true,
+	})
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
+	dat, err := ioutil.ReadFile(starkBlocksFile)
+	if err != nil {
+		return nil, err
+	}
+	blockStrs := strings.Split(string(dat), "\n")
+	m := make(map[uint64]struct{})
+	for _, blockStr := range blockStrs {
+		if len(blockStr) == 0 {
+			continue
+		}
+		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 == nil {
+			m[b] = struct{}{}
+		} else {
+			return nil, err1
+		}
+
+	}
+	return m, nil
+}
+
+func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) error {
+	filename := fmt.Sprintf("%s_%d.txt", starkStatsBase, blockNum)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	if err = trie.StarkStats(witness, f, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 type CreateDbFunc func(string) (ethdb.Database, error)
 
 func Stateless(
@@ -86,7 +150,9 @@ func Stateless(
 	statsfile string,
 	verifySnapshot bool,
 	binary bool,
-	createDb CreateDbFunc) {
+	createDb CreateDbFunc,
+	starkBlocksFile string,
+	starkStatsBase string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -117,6 +183,11 @@ func Stateless(
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
+	var starkBlocks map[uint64]struct{}
+	if starkBlocksFile != "" {
+		starkBlocks, err = parseStarkBlockFile(starkBlocksFile)
+		check(err)
+	}
 	var preRoot common.Hash
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
@@ -223,7 +294,7 @@ func Stateless(
 			check(err)
 		}
 		finalRootFail := false
-		if blockNum >= witnessThreshold && blockWitness != nil { // witness == nil means the extraction fails
+		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
 			var w *trie.Witness
 			w, err = trie.NewWitnessFromReader(bytes.NewReader(blockWitness), false)
@@ -231,6 +302,10 @@ func Stateless(
 			if err != nil {
 				fmt.Printf("error deserializing witness for block %d: %v\n", blockNum, err)
 				return
+			}
+			if _, ok := starkBlocks[blockNum-1]; ok {
+				err = starkData(w, starkStatsBase, blockNum-1)
+				check(err)
 			}
 			s, err = state.NewStateless(preRoot, w, blockNum-1, trace, binary /* is binary */)
 			if err != nil {
@@ -242,6 +317,10 @@ func Stateless(
 					tds.PrintTrie(f)
 				}
 				return
+			}
+			if _, ok := starkBlocks[blockNum-1]; ok {
+				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
+				check(err)
 			}
 			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
