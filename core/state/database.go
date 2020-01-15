@@ -237,8 +237,8 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 
 	var intermediateCache ethdb.MinDatabase = db
 	t.SetUnloadFunc(func(prefix []byte, subtrieHash []byte) {
-		if prefix == nil || len(prefix) == 0 {
-			log.Warn("IntermediateTrieCache: empty prefix for Put")
+		if len(prefix) == 0 {
+			//log.Warn("IntermediateTrieCache: empty prefix for Put")
 			return
 		}
 		//defer func(t time.Time) { fmt.Println("IntermediateTrieHashesBucket.Put", time.Since(t)) }(time.Now())
