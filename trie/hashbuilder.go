@@ -39,7 +39,9 @@ type HashBuilder struct {
 	prefixBuf [8]byte
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
-	skippedPrefix bytes.Buffer
+	streamingKey     bytes.Buffer
+	streamingSkipped int
+	nodePrefixLen    int
 
 	intermediateTrieHashesDb ethdb.MinDatabase
 }
@@ -444,12 +446,11 @@ func (hb *HashBuilder) afterBranch() {
 	if hb.intermediateTrieHashesDb == nil {
 		return
 	}
-	if hb.skippedPrefix.Len() == 0 {
-		//log.Warn("IntermediateTrieCash: skippedPrefix was not set for Delete")
+	if hb.streamingSkipped == 0 || hb.nodePrefixLen == 0 || hb.streamingKey.Len() == 0 {
 		return
 	}
-	//defer func(t time.Time) { fmt.Println("IntermediateTrieHashesBucket.Delete", time.Since(t)) }(time.Now())
-	k := hb.skippedPrefix.Bytes()
+	//fmt.Printf("AfterBranch: %d, %d\n", hb.streamingSkipped, hb.nodePrefixLen)
+	k := hb.streamingKey.Bytes()[:hb.streamingSkipped+hb.nodePrefixLen]
 	if err := hb.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, k); err != nil {
 		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
 	}

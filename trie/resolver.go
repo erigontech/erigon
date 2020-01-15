@@ -183,7 +183,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
-	tr.hb.skippedPrefix.Reset()
+	tr.hb.streamingKey.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -249,7 +249,7 @@ const (
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
+	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t, tr.currentReq.extResolvePos: %d\n", keyIdx, k, v, tr.accounts, tr.currentReq.extResolvePos)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -267,20 +267,21 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 
-		tr.hb.skippedPrefix.Reset()
-
+		tr.hb.streamingKey.Reset()
+		tr.hb.streamingKey.Write(k)
+		tr.hb.streamingSkipped = skip
 		i := 0
 		for _, b := range k {
+			high := b / 16
+			low := b % 16
+			tr.hb.streamingKey.WriteByte(high)
 			if i >= skip {
-				tr.succ.WriteByte(b / 16)
-			} else {
-				tr.hb.skippedPrefix.WriteByte(b / 16)
+				tr.succ.WriteByte(high)
 			}
 			i++
+			tr.hb.streamingKey.WriteByte(low)
 			if i >= skip {
-				tr.succ.WriteByte(b % 16)
-			} else {
-				tr.hb.skippedPrefix.WriteByte(b % 16)
+				tr.succ.WriteByte(low)
 			}
 			i++
 		}
@@ -335,7 +336,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 }
 
 func (tr *Resolver) hackWrapperForHashOnly(prefix []byte) bool {
-	tr.hb.skippedPrefix.Write(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
+	//fmt.Printf("Yuou called hackWrapperForHashOnly with: %d\n", len(prefix))
+	tr.hb.nodePrefixLen = len(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
 	return tr.currentRs.HashOnly(prefix)
 }
 
