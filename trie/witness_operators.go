@@ -127,9 +127,7 @@ func (o *OperatorLeafAccount) WriteTo(output *OperatorMarshaller) error {
 		flags |= flagNonce
 	}
 
-	emptyBalance := big.NewInt(0)
-
-	if o.Balance.Cmp(emptyBalance) != 0 {
+	if o.Balance.Sign() != 0 {
 		flags |= flagBalance
 	}
 
@@ -143,7 +141,7 @@ func (o *OperatorLeafAccount) WriteTo(output *OperatorMarshaller) error {
 		}
 	}
 
-	if o.Balance.Cmp(emptyBalance) != 0 {
+	if o.Balance.Sign() != 0 {
 		return output.WriteByteArrayValue(o.Balance.Bytes())
 	}
 

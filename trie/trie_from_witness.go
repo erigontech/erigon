@@ -11,8 +11,8 @@ import (
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, CodeMap, error) {
 	codeMap := make(map[common.Hash][]byte)
 	hb := NewHashBuilder(false)
-	for _, operand := range witness.Operands {
-		switch op := operand.(type) {
+	for _, operator := range witness.Operators {
+		switch op := operator.(type) {
 		case *OperatorLeafValue:
 			if trace {
 				fmt.Printf("LEAF ")
@@ -77,7 +77,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			}
 			hb.emptyRoot()
 		default:
-			return nil, nil, fmt.Errorf("unknown operand type: %T", operand)
+			return nil, nil, fmt.Errorf("unknown operand type: %T", operator)
 		}
 	}
 	if trace {

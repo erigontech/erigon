@@ -37,14 +37,14 @@ func defaultWitnessHeader() WitnessHeader {
 }
 
 type Witness struct {
-	Header   WitnessHeader
-	Operands []WitnessOperator
+	Header    WitnessHeader
+	Operators []WitnessOperator
 }
 
 func NewWitness(operands []WitnessOperator) *Witness {
 	return &Witness{
-		Header:   defaultWitnessHeader(),
-		Operands: operands,
+		Header:    defaultWitnessHeader(),
+		Operators: operands,
 	}
 }
 
@@ -55,7 +55,7 @@ func (w *Witness) WriteTo(out io.Writer) (*BlockWitnessStats, error) {
 		return nil, err
 	}
 
-	for _, op := range w.Operands {
+	for _, op := range w.Operators {
 		if err := op.WriteTo(statsCollector); err != nil {
 			return nil, err
 		}
@@ -123,7 +123,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 		return nil, err
 	}
 
-	return &Witness{Header: header, Operands: operands}, nil
+	return &Witness{Header: header, Operators: operands}, nil
 }
 
 func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
@@ -131,14 +131,14 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 		fmt.Fprintf(output, "w1 header %d; w2 header %d\n", w.Header.Version, w2.Header.Version)
 	}
 
-	if len(w.Operands) != len(w2.Operands) {
-		fmt.Fprintf(output, "w1 operands: %d; w2 operands: %d\n", len(w.Operands), len(w2.Operands))
+	if len(w.Operators) != len(w2.Operators) {
+		fmt.Fprintf(output, "w1 operands: %d; w2 operands: %d\n", len(w.Operators), len(w2.Operators))
 	}
 
-	for i := 0; i < len(w.Operands); i++ {
-		switch o1 := w.Operands[i].(type) {
+	for i := 0; i < len(w.Operators); i++ {
+		switch o1 := w.Operators[i].(type) {
 		case *OperatorBranch:
-			o2, ok := w2.Operands[i].(*OperatorBranch)
+			o2, ok := w2.Operators[i].(*OperatorBranch)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -146,7 +146,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "o1[%d].Mask = %v; o2[%d].Mask = %v", i, o1.Mask, i, o2.Mask)
 			}
 		case *OperatorHash:
-			o2, ok := w2.Operands[i].(*OperatorHash)
+			o2, ok := w2.Operators[i].(*OperatorHash)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -154,7 +154,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
 			}
 		case *OperatorCode:
-			o2, ok := w2.Operands[i].(*OperatorCode)
+			o2, ok := w2.Operators[i].(*OperatorCode)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -162,12 +162,12 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "o1[%d].Code = %x; o2[%d].Code = %x\n", i, o1.Code, i, o2.Code)
 			}
 		case *OperatorEmptyRoot:
-			o2, ok := w2.Operands[i].(*OperatorEmptyRoot)
+			o2, ok := w2.Operators[i].(*OperatorEmptyRoot)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
 		case *OperatorExtension:
-			o2, ok := w2.Operands[i].(*OperatorExtension)
+			o2, ok := w2.Operators[i].(*OperatorExtension)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -175,7 +175,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "extension o1[%d].Key = %x; o2[%d].Key = %x\n", i, o1.Key, i, o2.Key)
 			}
 		case *OperatorLeafAccount:
-			o2, ok := w2.Operands[i].(*OperatorLeafAccount)
+			o2, ok := w2.Operators[i].(*OperatorLeafAccount)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -195,7 +195,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "leafAcc o1[%d].HasStorage = %v; o2[%d].HasStorage = %v\n", i, o1.HasStorage, i, o2.HasStorage)
 			}
 		case *OperatorLeafValue:
-			o2, ok := w2.Operands[i].(*OperatorLeafValue)
+			o2, ok := w2.Operators[i].(*OperatorLeafValue)
 			if !ok {
 				fmt.Fprintf(output, "o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 			}
@@ -206,7 +206,7 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 				fmt.Fprintf(output, "leafVal o1[%d].Value = %x; o2[%d].Value = %x\n", i, o1.Value, i, o2.Value)
 			}
 		default:
-			o2 := w2.Operands[i]
+			o2 := w2.Operators[i]
 			fmt.Fprintf(output, "unexpected o1[%d] = %T; o2[%d] = %T\n", i, o1, i, o2)
 		}
 	}
