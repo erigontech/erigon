@@ -1,5 +1,6 @@
 package dbutils
 
+// EncodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
 func EncodeTimestamp(timestamp uint64) []byte {
 	var suffix []byte
 	var limit uint64 = 32

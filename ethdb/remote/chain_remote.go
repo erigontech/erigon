@@ -2,6 +2,7 @@ package remote
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math/big"
 
@@ -148,4 +149,40 @@ func ReadBody(tx *Tx, hash common.Hash, number uint64) (*types.Body, error) {
 	// Post-processing
 	body.SendersToTxs()
 	return body, nil
+}
+
+func ReadLastBlockNumber(tx *Tx) (uint64, error) {
+	b, err := tx.Bucket(dbutils.HeadHeaderKey)
+	if err != nil {
+		return 0, err
+	}
+
+	if b == nil {
+		return 0, fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
+	}
+	blockHashData, err := b.Get(dbutils.HeadHeaderKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(blockHashData) != common.HashLength {
+		return 0, fmt.Errorf("head header hash not found or wrong size: %x", blockHashData)
+	}
+	b1, err := tx.Bucket(dbutils.HeaderNumberPrefix)
+	if err != nil {
+		return 0, err
+	}
+
+	if b1 == nil {
+		return 0, fmt.Errorf("bucket %s not found", dbutils.HeaderNumberPrefix)
+	}
+	blockNumberData, err := b1.Get(blockHashData)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(blockNumberData) != 8 {
+		return 0, fmt.Errorf("head block number not found or wrong size: %x", blockNumberData)
+	}
+
+	return binary.BigEndian.Uint64(blockNumberData), nil
 }

@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -13,7 +12,6 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -86,42 +84,14 @@ func NewPrivateDebugAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	var blockNumber uint64
 
-	err := api.db.View(ctx, func(tx *remote.Tx) error {
-		b, err := tx.Bucket(dbutils.HeadHeaderKey)
+	if err := api.db.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		blockNumber, err = remote.ReadLastBlockNumber(tx)
 		if err != nil {
 			return err
 		}
-
-		if b == nil {
-			return fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
-		}
-		blockHashData, err := b.Get(dbutils.HeadHeaderKey)
-		if err != nil {
-			return err
-		}
-		if len(blockHashData) != common.HashLength {
-			return fmt.Errorf("head header hash not found or wrong size: %x", blockHashData)
-		}
-		b1, err := tx.Bucket(dbutils.HeaderNumberPrefix)
-		if err != nil {
-			return err
-		}
-
-		if b1 == nil {
-			return fmt.Errorf("bucket %s not found", dbutils.HeaderNumberPrefix)
-		}
-		blockNumberData, err := b1.Get(blockHashData)
-		if err != nil {
-			return err
-		}
-
-		if len(blockNumberData) != 8 {
-			return fmt.Errorf("head block number not found or wrong size: %x", blockNumberData)
-		}
-		blockNumber = binary.BigEndian.Uint64(blockNumberData)
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return 0, err
 	}
 
