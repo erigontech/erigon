@@ -19,6 +19,7 @@ package ethdb
 
 import (
 	"bytes"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"os"
 	"path"
 
@@ -96,7 +97,8 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+			switch {
+			case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
 				b, _ := hb.Get(key)
 				b, err = AppendToIndex(b, timestamp)
 				if err != nil {
@@ -106,7 +108,17 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 				if err = hb.Put(key, b); err != nil {
 					return err
 				}
-			} else {
+			case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+				b, _ := hb.Get(key[:common.HashLength+common.IncarnationLength])
+				b, err = AppendToStorageIndex(b, key[common.HashLength+common.IncarnationLength:common.HashLength+common.IncarnationLength+common.HashLength], timestamp)
+				if err != nil {
+					log.Error("PutS AppendChangedOnIndex err", "err", err)
+					return err
+				}
+				if err = hb.Put(key, b); err != nil {
+					return err
+				}
+			default:
 				if err = hb.Put(composite, value); err != nil {
 					return err
 				}
@@ -210,7 +222,6 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
 	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
@@ -238,7 +249,8 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+		switch {
+		case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
 			v, err := BoltDBFindByHistory(tx, hBucket, key, timestamp)
 			if err != nil {
 				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
@@ -247,7 +259,16 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				copy(dat, v)
 				return nil
 			}
-		} else {
+		case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+			v, err := BoltDBFindStorageByHistory(tx, hBucket, key, timestamp)
+			if err != nil {
+				log.Debug("BoltDB BoltDBFindStorageByHistory err", "err", err)
+			} else {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		default:
 			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 			hB := tx.Bucket(hBucket)
 			if hB == nil {

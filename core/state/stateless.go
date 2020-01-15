@@ -46,8 +46,8 @@ type Stateless struct {
 // NewStateless creates a new instance of Stateless
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
-func NewStateless(stateRoot common.Hash, witness []byte, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
-	t, codeMap, err := trie.BlockWitnessToTrieBin(witness, trace, isBinary)
+func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
+	t, codeMap, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
 	if err != nil {
 		return nil, err
 	}

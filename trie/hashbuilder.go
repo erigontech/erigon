@@ -47,7 +47,7 @@ func (hb *HashBuilder) Reset() {
 	hb.nodeStack = hb.nodeStack[:0]
 }
 
-func (hb *HashBuilder) leaf(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAF %d\n", length)
 	}
@@ -67,7 +67,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val RlpSerializable) erro
 }
 
 // To be called internally
-func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializable) error {
 	var hash [hashStackStride]byte // RLP representation of hash (or of un-hashed value if short)
 	// Compute the total length of binary representation
 	var keyPrefix [1]byte
@@ -112,7 +112,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val RlpSerializable) error
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val rlphacks.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
 
@@ -162,7 +162,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 	return nil
 }
 
-func (hb *HashBuilder) leafHash(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	if hb.trace {
 		fmt.Printf("LEAFHASH %d\n", length)
 	}
@@ -173,7 +173,7 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte, val RlpSerializable) 
 	return hb.leafHashWithKeyVal(key, val)
 }
 
-func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
@@ -185,6 +185,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
+	hb.acc.Incarnation = incarnation
 
 	popped := 0
 	var root node
@@ -206,10 +207,6 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	//fixme[https://github.com/ledgerwatch/turbo-geth/issues/221] we start usisng incarnation for contracts started from 1
-	if !accCopy.IsEmptyRoot() || !accCopy.IsEmptyCodeHash() {
-		accCopy.Incarnation = 1
-	}
 	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
@@ -224,7 +221,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	return nil
 }
 
-func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
+func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
@@ -236,6 +233,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	hb.acc.Initialised = true
 	hb.acc.StorageSize = storageSize
 	hb.acc.HasStorageSize = storageSize > 0
+	hb.acc.Incarnation = incarnation
 
 	popped := 0
 	if fieldSet&uint32(4) != 0 {

@@ -38,7 +38,7 @@ func BenchmarkSerialize(b *testing.B) {
 
 		for i := 0; i < b.N; i++ {
 			_ = encoder.Encode(ResponseOk)
-			_ = encodeKeyValue(encoder, &k, &v)
+			_ = encodeKeyValue(encoder, k, v)
 		}
 	})
 	b.Run("encoder.Encode(&k)", func(b *testing.B) {

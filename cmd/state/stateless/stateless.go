@@ -1,6 +1,7 @@
 package stateless
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/ioutil"
@@ -164,6 +165,8 @@ func Stateless(
 		interruptCh <- true
 	}()
 
+	witnessThreshold = 0
+
 	ethDb, err := createDb(chaindata)
 	check(err)
 	defer ethDb.Close()
@@ -218,13 +221,16 @@ func Stateless(
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
 	interrupt := false
-	var witness []byte
+	var blockWitness []byte
+	var bw *trie.Witness
 
 	processed := 0
 	blockProcessingStartTime := time.Now()
 
+	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
+
 	for !interrupt {
-		trace := false // blockNum == 545080
+		trace := blockNum == 50111 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -267,16 +273,24 @@ func Stateless(
 			fmt.Printf("Failed to resolve state trie: %v\n", err)
 			return
 		}
-		witness = nil
+		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
-			var tapeStats *state.BlockWitnessStats
-			witness, tapeStats, err = tds.ExtractWitness(trace, binary /* is binary */)
+			var blockWitnessStats *trie.BlockWitnessStats
+			bw, err = tds.ExtractWitness(trace, binary /* is binary */)
 			if err != nil {
 				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
 				return
 			}
-			err = stats.AddRow(tapeStats)
+
+			var buf bytes.Buffer
+			blockWitnessStats, err = bw.WriteTo(&buf)
+			if err != nil {
+				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
+				return
+			}
+			blockWitness = buf.Bytes()
+			err = stats.AddRow(blockNum, blockWitnessStats)
 			check(err)
 		}
 		if _, ok := starkBlocks[blockNum-1]; ok && witness != nil {
@@ -284,9 +298,16 @@ func Stateless(
 			check(err)
 		}
 		finalRootFail := false
-		if blockNum >= witnessThreshold && witness != nil { // witness == nil means the extraction fails
+		if blockNum >= witnessThreshold && blockWitness != nil { // witness == nil means the extraction fails
 			var s *state.Stateless
-			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace, binary /* is binary */)
+			var w *trie.Witness
+			w, err = trie.NewWitnessFromReader(bytes.NewReader(blockWitness), false)
+			bw.WriteDiff(w, os.Stdout)
+			if err != nil {
+				fmt.Printf("error deserializing witness for block %d: %v\n", blockNum, err)
+				return
+			}
+			s, err = state.NewStateless(preRoot, w, blockNum-1, trace, binary /* is binary */)
 			if err != nil {
 				fmt.Printf("Error making stateless2 for block %d: %v\n", blockNum, err)
 				filename := fmt.Sprintf("right_%d.txt", blockNum-1)

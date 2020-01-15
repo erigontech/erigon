@@ -144,8 +144,8 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 			return false, err
 		}
 
-		err = tds.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
-			key := tds.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
+		err = tds.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := tds.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {
 				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
