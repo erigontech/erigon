@@ -3,10 +3,11 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -287,16 +288,12 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, v []byte) (bool, error) {
+	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, changedAccounts []byte) (bool, error) {
 		// k = encodedTS + hBucket
 		hBucket := k[len(encodedTS):]
 		hBucketStr := string(hBucket)
-		changedAccounts, err := dbutils.DecodeChangeSet(v)
-		if err != nil {
-			return false, err
-		}
 		if debug.IsThinHistory() {
-			innerErr := changedAccounts.Walk(func(kk, _ []byte) error {
+			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
 				indexBytes, err := m.getNoLock(hBucket, kk)
 				if err != nil {
 					return nil
@@ -329,7 +326,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			}
 			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
 		} else {
-			innerErr := changedAccounts.Walk(func(kk, _ []byte) error {
+			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(hBucketStr, composite)
 				return nil
@@ -358,25 +355,8 @@ func (m *mutation) Commit() (uint64, error) {
 			for hBucketStr, changes := range changesByBucket {
 				hBucket := []byte(hBucketStr)
 				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
-				dat, err := m.getNoLock(dbutils.ChangeSetBucket, changeSetKey)
-				if err != nil && err != ErrKeyNotFound {
-					return 0, err
-				}
-
-				changeSet, err := dbutils.DecodeChangeSet(dat)
-				if err != nil {
-					log.Error("DecodeChangeSet changeSet error on commit", "err", err)
-				}
-
-				if err = changeSet.MultiAdd(changes.Changes); err != nil {
-					return 0, err
-				}
-				changedRLP, err := changeSet.Encode()
-				if err != nil {
-					log.Error("EncodeChangeSet changeSet error on commit", "err", err)
-				}
 				if debug.IsThinHistory() && !bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-					changedKeys := changeSet.ChangedKeys()
+					changedKeys := changes.ChangedKeys()
 					for k := range changedKeys {
 						var (
 							v   []byte
@@ -424,7 +404,12 @@ func (m *mutation) Commit() (uint64, error) {
 
 					}
 				}
-				m.puts.SetStr(changeSetStr, changeSetKey, changedRLP)
+				sort.Sort(changes)
+				dat, err := changes.Encode()
+				if err != nil {
+					return 0, err
+				}
+				m.puts.SetStr(changeSetStr, changeSetKey, dat)
 			}
 		}
 	}

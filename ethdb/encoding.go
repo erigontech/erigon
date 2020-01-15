@@ -1,5 +1,11 @@
 package ethdb
 
+import (
+	"bytes"
+	"encoding/binary"
+	"fmt"
+)
+
 // Maximum length (in bytes of encoded timestamp)
 const MaxTimestampLength = 8
 
@@ -74,4 +80,63 @@ func decode7to8(b []byte) []byte {
 		}
 	}
 	return out
+}
+
+// addToChangeSet is not part the ChangeSet API, and it is only used in the test settings.
+// In the production settings, ChangeSets encodings are never modified.
+// In production settings (mutation.PutS) we always first populate ChangeSet object,
+// then encode it once, and then only work with the encoding
+func addToChangeSet(b []byte, key []byte, value []byte) ([]byte, error) {
+	var m int
+	var n int
+
+	if len(b) == 0 {
+		m = len(key)
+		n = 0
+	} else {
+		n = int(binary.BigEndian.Uint32(b[0:4]))
+		m = int(binary.BigEndian.Uint32(b[4:8]))
+		if len(key) != m {
+			return nil, fmt.Errorf("wrong key size in ChangeSet: expected %d, actual %d", m, len(key))
+		}
+	}
+	pos := 4
+	var buffer bytes.Buffer
+	// Encode n
+	intArr := make([]byte, 4)
+	binary.BigEndian.PutUint32(intArr, uint32(n+1))
+	buffer.Write(intArr)
+	// KeySize should be the same
+	if n == 0 {
+		binary.BigEndian.PutUint32(intArr, uint32(len(key)))
+		buffer.Write(intArr)
+	} else {
+		buffer.Write(b[pos : pos+4])
+	}
+
+	pos += 4
+	// append key
+	if n == 0 {
+		buffer.Write(key)
+		pos += len(key)
+	} else {
+		buffer.Write(b[pos : pos+n*m])
+		buffer.Write(key)
+		pos += n * m
+	}
+	// Append Index
+	if n == 0 {
+		binary.BigEndian.PutUint32(intArr, uint32(len(value)))
+		buffer.Write(intArr)
+	} else {
+		buffer.Write(b[pos : pos+4*n])
+		pos += 4 * n
+		prev := int(binary.BigEndian.Uint32(b[pos-4 : pos]))
+		binary.BigEndian.PutUint32(intArr, uint32(prev+len(value)))
+		buffer.Write(intArr)
+		buffer.Write(b[pos:])
+	}
+	// Append Value
+	buffer.Write(value)
+	return buffer.Bytes(), nil
 }

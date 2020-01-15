@@ -5,9 +5,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"sort"
-
-	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 func NewChangeSet() *ChangeSet {
@@ -60,8 +57,6 @@ uint32 integers are serialized as big-endian.
 
 // Encode sorts a ChangeSet by key and then serializes it.
 func (s *ChangeSet) Encode() ([]byte, error) {
-	sort.Sort(s)
-
 	buf := new(bytes.Buffer)
 	intArr := make([]byte, 4)
 	n := s.Len()
@@ -105,53 +100,6 @@ func (s *ChangeSet) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func DecodeChangeSet(b []byte) (*ChangeSet, error) {
-	h := new(ChangeSet)
-	h.Changes = make([]Change, 0)
-	if len(b) == 0 {
-		return h, nil
-	}
-
-	if len(b) < 8 {
-		return h, fmt.Errorf("decode: input too short (%d bytes)", len(b))
-	}
-
-	n := binary.BigEndian.Uint32(b[0:4])
-	m := binary.BigEndian.Uint32(b[4:8])
-
-	if n == 0 {
-		return h, nil
-	}
-
-	h.Changes = make([]Change, n)
-
-	valOffset := 8 + n*m + 4*n
-	if uint32(len(b)) < valOffset {
-		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
-	}
-
-	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
-	if uint32(len(b)) < valOffset+totalValLength {
-		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
-	}
-
-	for i := uint32(0); i < n; i++ {
-		key := b[8+i*m : 8+(i+1)*m]
-		idx0 := uint32(0)
-		if i > 0 {
-			idx0 = binary.BigEndian.Uint32(b[8+n*m+4*(i-1) : 8+n*m+4*i])
-		}
-		idx1 := binary.BigEndian.Uint32(b[8+n*m+4*i : 8+n*m+4*(i+1)])
-		val := b[valOffset+idx0 : valOffset+idx1]
-
-		h.Changes[i].Key = common.CopyBytes(key)
-		h.Changes[i].Value = common.CopyBytes(val)
-	}
-
-	sort.Sort(h)
-	return h, nil
-}
-
 func (s *ChangeSet) KeySize() int {
 	for _, c := range s.Changes {
 		return len(c.Key)
@@ -182,27 +130,54 @@ func (s *ChangeSet) Add(key []byte, value []byte) error {
 	return nil
 }
 
-func (s *ChangeSet) KeyCount() uint32 {
-	return uint32(len(s.Changes))
+func (s *ChangeSet) ChangedKeys() map[string]struct{} {
+	m := make(map[string]struct{}, len(s.Changes))
+	for i := range s.Changes {
+		m[string(s.Changes[i].Key)] = struct{}{}
+	}
+	return m
 }
 
-// MultiAdd adds multiple new entries to the ChangeSet.
-// One must not add existing keys
-// and may add keys only of the same size.
-func (s *ChangeSet) MultiAdd(changes []Change) error {
-	for i := range changes {
-		if err := s.checkKeySize(changes[i].Key); err != nil {
-			return err
-		}
-		s.Changes = append(s.Changes, changes[i])
+// Encoded Method
+
+func Len(b []byte) int {
+	return int(binary.BigEndian.Uint32(b[0:4]))
+}
+
+func Walk(b []byte, f func(k, v []byte) error) error {
+	if len(b) == 0 {
+		return nil
+	}
+	if len(b) < 8 {
+		return fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
-	return nil
-}
+	n := binary.BigEndian.Uint32(b[0:4])
+	m := binary.BigEndian.Uint32(b[4:8])
 
-func (s *ChangeSet) Walk(f func(k, v []byte) error) error {
-	for i := range s.Changes {
-		err := f(s.Changes[i].Key, s.Changes[i].Value)
+	if n == 0 {
+		return nil
+	}
+	valOffset := 8 + n*m + 4*n
+	if uint32(len(b)) < valOffset {
+		return fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
+	}
+
+	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
+	if uint32(len(b)) < valOffset+totalValLength {
+		return fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
+	}
+
+	for i := uint32(0); i < n; i++ {
+		key := b[8+i*m : 8+(i+1)*m]
+		idx0 := uint32(0)
+		if i > 0 {
+			idx0 = binary.BigEndian.Uint32(b[8+n*m+4*(i-1) : 8+n*m+4*i])
+		}
+		idx1 := binary.BigEndian.Uint32(b[8+n*m+4*i : 8+n*m+4*(i+1)])
+		val := b[valOffset+idx0 : valOffset+idx1]
+
+		err := f(key, val)
 		if err != nil {
 			return err
 		}
@@ -210,28 +185,44 @@ func (s *ChangeSet) Walk(f func(k, v []byte) error) error {
 	return nil
 }
 
-func (s *ChangeSet) FindFirst(k []byte) ([]byte, error) {
-	for i := range s.Changes {
-		if bytes.Equal(k, s.Changes[i].Key) {
-			return s.Changes[i].Value, nil
+func FindLast(b []byte, k []byte) ([]byte, error) {
+	if len(b) == 0 {
+		return nil, nil
+	}
+
+	if len(b) < 8 {
+		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
+	}
+
+	n := binary.BigEndian.Uint32(b[0:4])
+	m := binary.BigEndian.Uint32(b[4:8])
+
+	if n == 0 {
+		return nil, nil
+	}
+
+	valOffset := 8 + n*m + 4*n
+	if uint32(len(b)) < valOffset {
+		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
+	}
+
+	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
+	if uint32(len(b)) < valOffset+totalValLength {
+		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
+	}
+
+	for i := n - 1; int(i) >= 0; i-- {
+		key := b[8+i*m : 8+(i+1)*m]
+		idx0 := uint32(0)
+		if i > 0 {
+			idx0 = binary.BigEndian.Uint32(b[8+n*m+4*(i-1) : 8+n*m+4*i])
+		}
+		idx1 := binary.BigEndian.Uint32(b[8+n*m+4*i : 8+n*m+4*(i+1)])
+		val := b[valOffset+idx0 : valOffset+idx1]
+
+		if bytes.Equal(key, k) {
+			return val, nil
 		}
 	}
 	return nil, errors.New("not found")
-}
-
-func (s *ChangeSet) FindLast(k []byte) ([]byte, error) {
-	for i := len(s.Changes) - 1; i >= 0; i-- {
-		if bytes.Equal(k, s.Changes[i].Key) {
-			return s.Changes[i].Value, nil
-		}
-	}
-	return nil, errors.New("not found")
-}
-
-func (s *ChangeSet) ChangedKeys() map[string]struct{} {
-	m := make(map[string]struct{}, len(s.Changes))
-	for i := range s.Changes {
-		m[string(s.Changes[i].Key)] = struct{}{}
-	}
-	return m
 }
