@@ -230,7 +230,7 @@ func Stateless(
 	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
 
 	for !interrupt {
-		trace := blockNum == 50111 // false // blockNum == 545080
+		trace := blockNum == 1 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
