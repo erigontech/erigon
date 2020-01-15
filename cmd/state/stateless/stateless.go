@@ -124,7 +124,7 @@ func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
 	return m, nil
 }
 
-func starkData(witness []byte, starkStatsBase string, blockNum uint64) error {
+func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) error {
 	filename := fmt.Sprintf("%s_%d.txt", starkStatsBase, blockNum)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -293,12 +293,8 @@ func Stateless(
 			err = stats.AddRow(blockNum, blockWitnessStats)
 			check(err)
 		}
-		if _, ok := starkBlocks[blockNum-1]; ok && witness != nil {
-			err = starkData(witness, starkStatsBase, blockNum-1)
-			check(err)
-		}
 		finalRootFail := false
-		if blockNum >= witnessThreshold && blockWitness != nil { // witness == nil means the extraction fails
+		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
 			var w *trie.Witness
 			w, err = trie.NewWitnessFromReader(bytes.NewReader(blockWitness), false)
@@ -306,6 +302,10 @@ func Stateless(
 			if err != nil {
 				fmt.Printf("error deserializing witness for block %d: %v\n", blockNum, err)
 				return
+			}
+			if _, ok := starkBlocks[blockNum-1]; ok {
+				err = starkData(w, starkStatsBase, blockNum-1)
+				check(err)
 			}
 			s, err = state.NewStateless(preRoot, w, blockNum-1, trace, binary /* is binary */)
 			if err != nil {
@@ -318,7 +318,7 @@ func Stateless(
 				}
 				return
 			}
-			if _, ok := starkBlocks[blockNum-1]; ok && witness != nil {
+			if _, ok := starkBlocks[blockNum-1]; ok {
 				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
 				check(err)
 			}

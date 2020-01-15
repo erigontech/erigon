@@ -2,14 +2,14 @@ package trie
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
-	"github.com/ugorji/go/codec"
 	"io"
 	"math/big"
 	"math/bits"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 type StarkStatsBuilder struct {
@@ -25,7 +25,7 @@ func NewStarkStatsBuilder() *StarkStatsBuilder {
 	}
 }
 
-func (hb *StarkStatsBuilder) leafHash(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *StarkStatsBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	key := keyHex[len(keyHex)-length:]
 	var compactLen int
 	var kp, kl int
@@ -51,7 +51,7 @@ func (hb *StarkStatsBuilder) leafHash(length int, keyHex []byte, val RlpSerializ
 	return nil
 }
 
-func (hb *StarkStatsBuilder) leaf(length int, keyHex []byte, val RlpSerializable) error {
+func (hb *StarkStatsBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
 	return hb.leafHash(length, keyHex, val)
 }
 
@@ -163,7 +163,7 @@ func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64
 	return nil
 }
 
-func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldSet uint32) (err error) {
+func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnaton uint64, fieldSet uint32) (err error) {
 	return hb.accountLeafHash(length, keyHex, storageSize, balance, nonce, fieldSet)
 }
 
@@ -171,213 +171,76 @@ func (hb *StarkStatsBuilder) emptyRoot() {
 	hb.sizeStack = append(hb.sizeStack, 32)
 }
 
-func StarkStats(bw []byte, w io.Writer, trace bool) error {
-	var lens map[string]int
-	var handle codec.CborHandle
-	decoder := codec.NewDecoderBytes(bw, &handle)
-	if err := decoder.Decode(&lens); err != nil {
-		return err
-	}
+// StarkStats collects Keccak256 stats from the witness and write them into the file
+func StarkStats(witness *Witness, w io.Writer, trace bool) error {
 	hb := NewStarkStatsBuilder()
-	// It is important to read the tapes in the same order as they were written
-	startOffset := decoder.NumBytesRead()
-	endOffset := startOffset + lens[KeyTape]
 
-	keyTape := NewCborBytesTape(bw[startOffset:endOffset])
-
-	startOffset = endOffset
-	endOffset = startOffset + lens[ValueTape]
-	valueTape := NewRlpSerializableBytesTape(NewCborBytesTape(bw[startOffset:endOffset]))
-
-	startOffset = endOffset
-	endOffset = startOffset + lens[NonceTape]
-	nonceTape := NewCborUint64Tape(bw[startOffset:endOffset])
-	startOffset = endOffset
-	endOffset = startOffset + lens[BalanceTape]
-	balanceTape := NewCborBigIntTape(bw[startOffset:endOffset])
-	startOffset = endOffset
-	endOffset = startOffset + lens[HashesTape]
-
-	hashTape := NewCborHashTape(bw[startOffset:endOffset])
-	startOffset = endOffset
-	endOffset = startOffset + lens[CodesTape]
-
-	codeTape := NewCborBytesTape(bw[startOffset:endOffset])
-	startOffset = endOffset
-	endOffset = startOffset + lens[StructureTape]
-	structureB := bw[startOffset:endOffset]
-	decoder.ResetBytes(structureB)
-	for decoder.NumBytesRead() < len(structureB) {
-		var opcode Instruction
-		if err := decoder.Decode(&opcode); err != nil {
-			return err
-		}
-		hashOnly := false
-		switch opcode {
-		case OpLeafHash:
-			hashOnly = true
-			opcode = OpLeaf
-			fallthrough
-		case OpLeaf:
+	for _, operator := range witness.Operators {
+		switch op := operator.(type) {
+		case *OperatorLeafValue:
 			if trace {
-				if hashOnly {
-					fmt.Printf("LEAFHASH ")
-				} else {
-					fmt.Printf("LEAF ")
-				}
+				fmt.Printf("LEAF ")
 			}
-			var length int
-			if err := decoder.Decode(&length); err != nil {
+			keyHex := op.Key
+			val := op.Value
+			if err := hb.leaf(len(op.Key), keyHex, rlphacks.RlpSerializableBytes(val)); err != nil {
 				return err
 			}
-			keyHex, err := keyTape.Next()
-			if err != nil {
-				return err
-			}
-			val, err := valueTape.Next()
-			if err != nil {
-				return err
-			}
-			if hashOnly {
-				if err := hb.leafHash(length, keyHex, val); err != nil {
-					return err
-				}
-			} else {
-				if err := hb.leaf(length, keyHex, val); err != nil {
-					return err
-				}
-			}
-		case OpExtensionHash:
-			hashOnly = true
-			opcode = OpExtension
-			fallthrough
-		case OpExtension:
+		case *OperatorExtension:
 			if trace {
-				if hashOnly {
-					fmt.Printf("EXTENSIONHASH ")
-				} else {
-					fmt.Printf("EXTENSION ")
-				}
+				fmt.Printf("EXTENSION ")
 			}
-			var key []byte
-			if err := decoder.Decode(&key); err != nil {
+			if err := hb.extension(op.Key); err != nil {
 				return err
 			}
-			if hashOnly {
-				if err := hb.extensionHash(key); err != nil {
-					return err
-				}
-			} else {
-				if err := hb.extension(key); err != nil {
-					return err
-				}
-			}
-
-		case OpBranchHash:
-			hashOnly = true
-			opcode = OpBranch
-			fallthrough
-		case OpBranch:
+		case *OperatorBranch:
 			if trace {
-				if hashOnly {
-					fmt.Printf("BRANCHHASH ")
-				} else {
-					fmt.Printf("BRANCH ")
-				}
+				fmt.Printf("BRANCH ")
 			}
-			var set uint16
-			if err := decoder.Decode(&set); err != nil {
+			if err := hb.branch(uint16(op.Mask)); err != nil {
 				return err
 			}
-			if hashOnly {
-				if err := hb.branchHash(set); err != nil {
-					return err
-				}
-			} else {
-				if err := hb.branch(set); err != nil {
-					return err
-				}
-			}
-		case OpHash:
+		case *OperatorHash:
 			if trace {
 				fmt.Printf("HASH ")
 			}
-			var number int
-			if err := decoder.Decode(&number); err != nil {
-				return err
-			}
-			for i := 0; i < number; i++ {
-				hash, err := hashTape.Next()
-				if err != nil {
-					return err
-				}
-				hb.hash(hash)
-			}
-		case OpCode:
+			hb.hash(op.Hash)
+		case *OperatorCode:
 			if trace {
 				fmt.Printf("CODE ")
 			}
-			code, err := codeTape.Next()
-			if err != nil {
-				return err
-			}
-			hb.code(code)
 
-		case OpAccountLeafHash:
-			hashOnly = true
-			opcode = OpAccountLeaf
-			fallthrough
-		case OpAccountLeaf:
-			var length int
-			var fieldSet uint32
-			if err := decoder.Decode(&length); err != nil {
-				return err
-			}
-			if err := decoder.Decode(&fieldSet); err != nil {
-				return err
-			}
+			hb.code(op.Code)
+
+		case *OperatorLeafAccount:
 			if trace {
-				if hashOnly {
-					fmt.Printf("ACCOUNTLEAFHASH (%b)", fieldSet)
-				} else {
-					fmt.Printf("ACCOUNTLEAF(%b) ", fieldSet)
-				}
-			}
-			keyHex, err := keyTape.Next()
-			if err != nil {
-				return err
+				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
 			}
 			balance := big.NewInt(0)
-			if fieldSet&uint32(2) != 0 {
-				balance, err = balanceTape.Next()
-				if err != nil {
-					return err
-				}
-			}
-			nonce := uint64(0)
-			if fieldSet&uint32(1) != 0 {
-				nonce, err = nonceTape.Next()
-				if err != nil {
-					return err
-				}
-			}
-			if hashOnly {
+			balance.SetBytes(op.Balance.Bytes())
+			nonce := op.Nonce
 
-				if err := hb.accountLeafHash(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
-					return err
-				}
-			} else {
-				if err := hb.accountLeaf(length, keyHex, 0, balance, nonce, fieldSet); err != nil {
-					return err
-				}
+			// FIXME: probably not needed, fix hb.accountLeaf
+			fieldSet := uint32(3)
+			if op.HasCode && op.HasStorage {
+				fieldSet = 15
 			}
-		case OpEmptyRoot:
+
+			// Incarnation is always needed for a hashbuilder.
+			// but it is just our implementation detail needed for contract self-descruction suport with our
+			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
+			incarnaton := uint64(0)
+
+			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnaton, fieldSet); err != nil {
+				return err
+			}
+		case *OperatorEmptyRoot:
 			if trace {
 				fmt.Printf("EMPTYROOT ")
 			}
 			hb.emptyRoot()
 		default:
-			return fmt.Errorf("unknown opcode: %d", opcode)
+			return fmt.Errorf("unknown operand type: %T", operator)
 		}
 	}
 	if trace {
