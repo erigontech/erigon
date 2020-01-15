@@ -10,7 +10,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -342,7 +341,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		} else {
 			for _, prefLen := range tr.hb.invalidatePrefixes {
 				tr.invalidationKey.Reset()
-				tr.invalidationKey.Write(k[:common.HashLength+state.IncarnationLength])
+				tr.invalidationKey.Write(k[:common.HashLength+8])
 				tr.invalidationKey.Write(tr.skipped.Bytes())
 				tr.invalidationKey.Write(tr.succ.Bytes()[:prefLen])
 				tr.invalidateIntermediateCache(tr.invalidationKey.Bytes())
