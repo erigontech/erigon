@@ -27,7 +27,7 @@ func TestOperatoLoaderByteArray(t *testing.T) {
 		t.Error(err)
 	}
 
-	loader1 := NewOperatorLoader(&buffer)
+	loader1 := NewOperatorUnmarshaller(&buffer)
 
 	decoded1, err := loader1.ReadByteArray()
 	if err != nil {
@@ -64,7 +64,7 @@ func TestAccountBigBalance(t *testing.T) {
 
 	var buff bytes.Buffer
 
-	collector := NewWitnessStatsCollector(&buff)
+	collector := NewOperatorMarshaller(&buff)
 
 	err := acc.WriteTo(collector)
 	if err != nil {
@@ -78,7 +78,7 @@ func TestAccountBigBalance(t *testing.T) {
 	}
 
 	acc2 := &OperatorLeafAccount{}
-	loader := NewOperatorLoader(&buff)
+	loader := NewOperatorUnmarshaller(&buff)
 	if err := acc2.LoadFrom(loader); err != nil {
 		t.Error(err)
 	}
@@ -101,7 +101,7 @@ func TestAccountCompactWriteTo(t *testing.T) {
 
 	var buff bytes.Buffer
 
-	collector := NewWitnessStatsCollector(&buff)
+	collector := NewOperatorMarshaller(&buff)
 
 	err := acc.WriteTo(collector)
 	if err != nil {
@@ -129,7 +129,7 @@ func TestAccountFullWriteTo(t *testing.T) {
 
 	var buff bytes.Buffer
 
-	collector := NewWitnessStatsCollector(&buff)
+	collector := NewOperatorMarshaller(&buff)
 
 	err := acc.WriteTo(collector)
 	if err != nil {
@@ -169,7 +169,7 @@ func TestAccountPartialNoNonceWriteTo(t *testing.T) {
 
 	var buff bytes.Buffer
 
-	collector := NewWitnessStatsCollector(&buff)
+	collector := NewOperatorMarshaller(&buff)
 
 	err := acc.WriteTo(collector)
 	if err != nil {
@@ -208,7 +208,7 @@ func TestAccountPartialNoBalanceWriteTo(t *testing.T) {
 
 	var buff bytes.Buffer
 
-	collector := NewWitnessStatsCollector(&buff)
+	collector := NewOperatorMarshaller(&buff)
 
 	err := acc.WriteTo(collector)
 	if err != nil {

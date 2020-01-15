@@ -1,15 +1,11 @@
 package trie
 
 import (
-	"fmt"
-	"io"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ugorji/go/codec"
 )
-
-var cbor codec.CborHandle
 
 const (
 	flagCode = 1 << iota
@@ -42,25 +38,24 @@ const (
 
 // WitnessOperator is a single operand in the block witness. It knows how to serialize/deserialize itself.
 type WitnessOperator interface {
-	WriteTo(*WitnessStatsCollector) error
+	WriteTo(*OperatorMarshaller) error
 
 	// LoadFrom always assumes that the opcode value was already read
-	LoadFrom(*OperatorLoader) error
+	LoadFrom(*OperatorUnmarshaller) error
 }
 
 type OperatorHash struct {
 	Hash common.Hash
 }
 
-func (o *OperatorHash) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpHash, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorHash) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpHash); err != nil {
 		return nil
 	}
-	_, err := output.WithColumn(ColumnHashes).Write(o.Hash.Bytes())
-	return err
+	return output.WriteHash(o.Hash)
 }
 
-func (o *OperatorHash) LoadFrom(loader *OperatorLoader) error {
+func (o *OperatorHash) LoadFrom(loader *OperatorUnmarshaller) error {
 	hash, err := loader.ReadHash()
 	if err != nil {
 		return err
@@ -75,25 +70,25 @@ type OperatorLeafValue struct {
 	Value []byte
 }
 
-func (o *OperatorLeafValue) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpLeaf, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorLeafValue) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpLeaf); err != nil {
 		return err
 	}
 
-	if err := encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys)); err != nil {
+	if err := output.WriteKey(o.Key); err != nil {
 		return err
 	}
 
-	return encodeByteArray(o.Value, output.WithColumn(ColumnLeafValues))
+	return output.WriteByteArrayValue(o.Value)
 }
 
-func (o *OperatorLeafValue) LoadFrom(loader *OperatorLoader) error {
-	key, err := loader.ReadByteArray()
+func (o *OperatorLeafValue) LoadFrom(loader *OperatorUnmarshaller) error {
+	key, err := loader.ReadKey()
 	if err != nil {
 		return err
 	}
 
-	o.Key = keyBytesToNibbles(key)
+	o.Key = key
 
 	value, err := loader.ReadByteArray()
 	if err != nil {
@@ -112,12 +107,12 @@ type OperatorLeafAccount struct {
 	HasStorage bool
 }
 
-func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpAccountLeaf, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorLeafAccount) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpAccountLeaf); err != nil {
 		return err
 	}
 
-	if err := encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys)); err != nil {
+	if err := output.WriteKey(o.Key); err != nil {
 		return err
 	}
 
@@ -138,33 +133,29 @@ func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 		flags |= flagBalance
 	}
 
-	if _, err := output.WithColumn(ColumnLeafValues).Write([]byte{flags}); err != nil {
-		return nil
+	if err := output.WriteByteValue(flags); err != nil {
+		return err
 	}
 
 	if o.Nonce > 0 {
-		encoder := codec.NewEncoder(output.WithColumn(ColumnLeafValues), &cbor)
-		if err := encoder.Encode(o.Nonce); err != nil {
+		if err := output.WriteUint64Value(o.Nonce); err != nil {
 			return err
 		}
 	}
 
 	if o.Balance.Cmp(emptyBalance) != 0 {
-		bb := o.Balance.Bytes()
-		if err := encodeByteArray(bb, output.WithColumn(ColumnLeafValues)); err != nil {
-			return err
-		}
+		return output.WriteByteArrayValue(o.Balance.Bytes())
 	}
 
 	return nil
 }
 
-func (o *OperatorLeafAccount) LoadFrom(loader *OperatorLoader) error {
-	key, err := loader.ReadByteArray()
+func (o *OperatorLeafAccount) LoadFrom(loader *OperatorUnmarshaller) error {
+	key, err := loader.ReadKey()
 	if err != nil {
 		return err
 	}
-	o.Key = keyBytesToNibbles(key)
+	o.Key = key
 
 	flags, err := loader.ReadByte()
 	if err != nil {
@@ -202,15 +193,15 @@ type OperatorCode struct {
 	Code []byte
 }
 
-func (o *OperatorCode) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpCode, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorCode) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpCode); err != nil {
 		return err
 	}
 
-	return encodeByteArray(o.Code, output.WithColumn(ColumnCodes))
+	return output.WriteCode(o.Code)
 }
 
-func (o *OperatorCode) LoadFrom(loader *OperatorLoader) error {
+func (o *OperatorCode) LoadFrom(loader *OperatorUnmarshaller) error {
 	code, err := loader.ReadByteArray()
 	if err != nil {
 		return err
@@ -223,15 +214,16 @@ type OperatorBranch struct {
 	Mask uint32
 }
 
-func (o *OperatorBranch) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpBranch, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorBranch) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpBranch); err != nil {
 		return err
 	}
+
 	encoder := codec.NewEncoder(output.WithColumn(ColumnStructure), &cbor)
 	return encoder.Encode(o.Mask)
 }
 
-func (o *OperatorBranch) LoadFrom(loader *OperatorLoader) error {
+func (o *OperatorBranch) LoadFrom(loader *OperatorUnmarshaller) error {
 	mask, err := loader.ReadUint32()
 	if err != nil {
 		return err
@@ -243,11 +235,11 @@ func (o *OperatorBranch) LoadFrom(loader *OperatorLoader) error {
 
 type OperatorEmptyRoot struct{}
 
-func (o *OperatorEmptyRoot) WriteTo(output *WitnessStatsCollector) error {
-	return writeOpCode(OpEmptyRoot, output.WithColumn(ColumnStructure))
+func (o *OperatorEmptyRoot) WriteTo(output *OperatorMarshaller) error {
+	return output.WriteOpCode(OpEmptyRoot)
 }
 
-func (o *OperatorEmptyRoot) LoadFrom(loader *OperatorLoader) error {
+func (o *OperatorEmptyRoot) LoadFrom(loader *OperatorUnmarshaller) error {
 	// no-op
 	return nil
 }
@@ -256,153 +248,19 @@ type OperatorExtension struct {
 	Key []byte
 }
 
-func (o *OperatorExtension) WriteTo(output *WitnessStatsCollector) error {
-	if err := writeOpCode(OpExtension, output.WithColumn(ColumnStructure)); err != nil {
+func (o *OperatorExtension) WriteTo(output *OperatorMarshaller) error {
+	if err := output.WriteOpCode(OpExtension); err != nil {
 		return err
 	}
-	return encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys))
+	return output.WriteKey(o.Key)
 }
 
-func (o *OperatorExtension) LoadFrom(loader *OperatorLoader) error {
-	key, err := loader.ReadByteArray()
+func (o *OperatorExtension) LoadFrom(loader *OperatorUnmarshaller) error {
+	key, err := loader.ReadKey()
 	if err != nil {
 		return err
 	}
-
-	o.Key = keyBytesToNibbles(key)
+	o.Key = key
 
 	return nil
-}
-
-func encodeByteArray(data []byte, output io.Writer) error {
-	encoder := codec.NewEncoder(output, &cbor)
-	return encoder.Encode(data)
-}
-
-func writeOpCode(opcode OperatorKindCode, output io.Writer) error {
-	_, err := output.Write([]byte{byte(opcode)})
-	return err
-}
-
-func keyNibblesToBytes(nibbles []byte) []byte {
-	if len(nibbles) < 1 {
-		return []byte{}
-	}
-	if len(nibbles) < 2 {
-		return nibbles
-	}
-	hasTerminator := false
-	if nibbles[len(nibbles)-1] == 0x10 {
-		nibbles = nibbles[:len(nibbles)-1]
-		hasTerminator = true
-	}
-
-	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
-
-	result := make([]byte, targetLen)
-	nibbleIndex := 0
-	result[0] = byte(len(nibbles) % 2) // parity bit
-	for i := 1; i < len(result); i++ {
-		result[i] = nibbles[nibbleIndex] * 16
-		nibbleIndex++
-		if nibbleIndex < len(nibbles) {
-			result[i] += nibbles[nibbleIndex]
-			nibbleIndex++
-		}
-	}
-	if hasTerminator {
-		result[0] |= 1 << 1
-	}
-
-	return result
-}
-
-func keyBytesToNibbles(b []byte) []byte {
-	if len(b) < 1 {
-		return []byte{}
-	}
-	if len(b) < 2 {
-		return b
-	}
-
-	hasTerminator := b[0]&(1<<1) != 0
-
-	targetLen := (len(b)-1)*2 - int(b[0]&1)
-
-	nibbles := make([]byte, targetLen)
-
-	nibbleIndex := 0
-	for i := 1; i < len(b); i++ {
-		nibbles[nibbleIndex] = b[i] / 16
-		nibbleIndex++
-		if nibbleIndex < len(nibbles) {
-			nibbles[nibbleIndex] = b[i] % 16
-			nibbleIndex++
-		}
-	}
-	if hasTerminator {
-		return append(nibbles, 0x10)
-	}
-	return nibbles
-}
-
-type OperatorLoader struct {
-	reader  io.Reader
-	decoder *codec.Decoder
-}
-
-func NewOperatorLoader(r io.Reader) *OperatorLoader {
-	return &OperatorLoader{r, codec.NewDecoder(r, &cbor)}
-}
-
-func (l *OperatorLoader) ReadByteArray() ([]byte, error) {
-	var buffer []byte
-	err := l.decoder.Decode(&buffer)
-	if err != nil {
-		return []byte{}, err
-	}
-
-	return buffer, nil
-}
-
-func (l *OperatorLoader) ReadHash() (common.Hash, error) {
-	var hash common.Hash
-	bytesRead, err := l.reader.Read(hash[:])
-	if err != nil {
-		return hash, err
-	}
-	if bytesRead != len(hash) {
-		return hash, fmt.Errorf("error while reading hash from input. expected to read %d bytes, read only %d", len(hash), bytesRead)
-	}
-	return hash, nil
-}
-
-func (l *OperatorLoader) ReadUint32() (uint32, error) {
-	var value uint32
-	if err := l.decoder.Decode(&value); err != nil {
-		return 0, err
-	}
-	return value, nil
-}
-
-func (l *OperatorLoader) ReadByte() (byte, error) {
-	values := make([]byte, 1)
-	bytesRead, err := l.reader.Read(values)
-	if err != nil {
-		return 0, err
-	}
-	if bytesRead < 1 {
-		return 0, fmt.Errorf("could not read a byte from a reader")
-	}
-	return values[0], nil
-}
-
-func (l *OperatorLoader) ReadUInt64() (uint64, error) {
-	var value uint64
-	err := l.decoder.Decode(&value)
-	if err != nil {
-		return 0, err
-	}
-	return value, nil
-
 }

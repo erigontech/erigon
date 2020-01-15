@@ -17,7 +17,7 @@ type WitnessHeader struct {
 	Version uint8
 }
 
-func (h *WitnessHeader) WriteTo(out *WitnessStatsCollector) error {
+func (h *WitnessHeader) WriteTo(out *OperatorMarshaller) error {
 	_, err := out.WithColumn(ColumnStructure).Write([]byte{h.Version})
 	return err
 }
@@ -49,7 +49,7 @@ func NewWitness(operands []WitnessOperator) *Witness {
 }
 
 func (w *Witness) WriteTo(out io.Writer) (*BlockWitnessStats, error) {
-	statsCollector := NewWitnessStatsCollector(out)
+	statsCollector := NewOperatorMarshaller(out)
 
 	if err := w.Header.WriteTo(statsCollector); err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 		return nil, fmt.Errorf("unexpected witness version: expected %d, got %d", WitnessVersion, header.Version)
 	}
 
-	operatorLoader := NewOperatorLoader(input)
+	operatorLoader := NewOperatorUnmarshaller(input)
 
 	opcode := make([]byte, 1)
 	var err error
