@@ -163,7 +163,7 @@ func (hb *StarkStatsBuilder) accountLeafHash(length int, keyHex []byte, _ uint64
 	return nil
 }
 
-func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnaton uint64, fieldSet uint32) (err error) {
+func (hb *StarkStatsBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, _ uint64, fieldSet uint32) (err error) {
 	return hb.accountLeafHash(length, keyHex, storageSize, balance, nonce, fieldSet)
 }
 
