@@ -356,6 +356,9 @@ func (tr *Resolver) invalidateAccountCache(prefix []byte) {
 	if tr.intermediateTrieHashesDb == nil {
 		return
 	}
+	if len(prefix) == 0 {
+		return
+	}
 	if err := tr.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
 		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
 	}
@@ -363,6 +366,9 @@ func (tr *Resolver) invalidateAccountCache(prefix []byte) {
 
 func (tr *Resolver) invalidateStorageCache(addressHash common.Hash, incarnation uint64, prefix []byte) {
 	if tr.intermediateTrieHashesDb == nil {
+		return
+	}
+	if len(prefix) == 0 {
 		return
 	}
 	toDel := append(dbutils.GenerateStoragePrefix(addressHash, incarnation), prefix...)
