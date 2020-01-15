@@ -22,12 +22,11 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
-	"strings"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
 )
@@ -101,80 +100,19 @@ const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ServerMaxConnections uint64 = 2048
 const ClientMaxConnections uint64 = 128
 
-// tracing enable by evn GODEBUG=remotedb.debug=1
-var tracing bool
-
-func init() {
-	for _, f := range strings.Split(os.Getenv("GODEBUG"), ",") {
-		if f == "remotedb.debug=1" {
-			tracing = true
-		}
-	}
-}
-
-// Pool of decoders
-var decoderPool = make(chan *codec.Decoder, 128)
-
-func newDecoder(r io.Reader) *codec.Decoder {
-	var d *codec.Decoder
-	select {
-	case d = <-decoderPool:
-		d.Reset(r)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.ReaderBufferSize = 64 * 1024
-			d = codec.NewDecoder(r, &handle)
-		}
-	}
-	return d
-}
-
-func returnDecoderToPool(d *codec.Decoder) {
-	select {
-	case decoderPool <- d:
-	default:
-		log.Warn("Allowing decoder to be garbage collected, pool is full")
-	}
-}
-
-// Pool of encoders
-var encoderPool = make(chan *codec.Encoder, 128)
-
-func newEncoder(w io.Writer) *codec.Encoder {
-	var e *codec.Encoder
-	select {
-	case e = <-encoderPool:
-		e.Reset(w)
-	default:
-		{
-			var handle codec.CborHandle
-			handle.WriterBufferSize = 64 * 1024
-			e = codec.NewEncoder(w, &handle)
-		}
-	}
-	return e
-}
-
-func returnEncoderToPool(e *codec.Encoder) {
-	select {
-	case encoderPool <- e:
-	default:
-		log.Warn("Allowing encoder to be garbage collected, pool is full")
-	}
-}
+var logger = log.New("database", "remote")
 
 func encodeKeyValue(encoder *codec.Encoder, key []byte, value []byte) error {
-	if err := encoder.Encode(key); err != nil {
+	if err := encoder.Encode(&key); err != nil {
 		return err
 	}
-	if err := encoder.Encode(value); err != nil {
+	if err := encoder.Encode(&value); err != nil {
 		return err
 	}
 	return nil
 }
 
-func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) error {
+func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) (err error) {
 	if err := decoder.Decode(key); err != nil {
 		return err
 	}
@@ -184,8 +122,8 @@ func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) error {
 	return nil
 }
 
-func encodeKey(encoder *codec.Encoder, key *[]byte, valueIsEmpty bool) error {
-	if err := encoder.Encode(key); err != nil {
+func encodeKey(encoder *codec.Encoder, key []byte, valueIsEmpty bool) error {
+	if err := encoder.Encode(&key); err != nil {
 		return err
 	}
 	if err := encoder.Encode(valueIsEmpty); err != nil {
@@ -206,11 +144,11 @@ func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
 
 func encodeErr(encoder *codec.Encoder, mainError error) {
 	if err := encoder.Encode(ResponseErr); err != nil {
-		log.Error("could not encode ResponseErr", "error", err)
+		logger.Error("could not encode ResponseErr", "err", err)
 		return
 	}
 	if err := encoder.Encode(mainError.Error()); err != nil {
-		log.Error("could not encode errCode", "error", err)
+		logger.Error("could not encode errCode", "err", err)
 		return
 	}
 }
@@ -235,16 +173,15 @@ func decodeErr(decoder *codec.Decoder, responseCode ResponseCode) error {
 func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
-			log.Error("Could not close connection", "error", err1)
+			logger.Error("Could not close connection", "err", err1)
 		}
 	}()
 
-	var err error
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
 	// Server is passive - it runs a loop what reads commands (and their arguments) and attempts to respond
 	var lastHandle uint64
 	// Read-only transactions opened by the client
@@ -254,8 +191,9 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 	// anything
 	defer func() {
 		if tx != nil {
-			// nolint:errcheck
-			tx.Rollback()
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				logger.Error("could not roll back", "err", rollbackErr)
+			}
 			tx = nil
 		}
 	}()
@@ -298,6 +236,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdVersion: %w", err)
 			}
 		case CmdBeginTx:
+			var err error
 			tx, err = db.Begin(false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for CmdBeginTx: %w", err)
@@ -361,7 +300,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 
 		case CmdGet:
-			var k, v []byte
+			var k []byte
 			if err := decoder.Decode(&bucketHandle); err != nil {
 				return fmt.Errorf("could not decode bucketHandle for CmdGet: %w", err)
 			}
@@ -373,14 +312,14 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				encodeErr(encoder, fmt.Errorf("bucket not found for CmdGet: %d", bucketHandle))
 				continue
 			}
-			v, _ = bucket.Get(k)
+			v, _ := bucket.Get(k)
 
 			if err := encoder.Encode(ResponseOk); err != nil {
 				err = fmt.Errorf("could not encode response code for CmdGet: %w", err)
 				return err
 			}
 
-			if err := encoder.Encode(v); err != nil {
+			if err := encoder.Encode(&v); err != nil {
 				return fmt.Errorf("could not encode value in response for CmdGet: %w", err)
 			}
 
@@ -413,8 +352,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not cursor handle in response to CmdCursor: %w", err)
 			}
 		case CmdCursorSeek:
-			var k, v []byte
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
@@ -426,7 +363,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
 				continue
 			}
-			k, v = cursor.Seek(seekKey)
+			k, v := cursor.Seek(seekKey)
 			if err := encoder.Encode(ResponseOk); err != nil {
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
@@ -434,8 +371,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
 			}
 		case CmdCursorSeekTo:
-			var k, v []byte
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode seekKey for CmdCursorSeekTo: %w", err)
 			}
@@ -448,7 +383,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				continue
 			}
 
-			k, v = cursor.SeekTo(seekKey)
+			k, v := cursor.SeekTo(seekKey)
 
 			if err := encoder.Encode(ResponseOk); err != nil {
 				return fmt.Errorf("could not encode response to CmdCursorSeek: %w", err)
@@ -458,8 +393,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode (key,value) in response to CmdCursorSeekTo: %w", err)
 			}
 		case CmdCursorNext:
-			var k, v []byte
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorNext: %w", err)
 			}
@@ -483,7 +416,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdCursorNext: %w", err)
 			}
 
-			for k, v = cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
+			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
@@ -501,8 +434,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 
 		case CmdCursorFirst:
-			var k, v []byte
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirst: %w", err)
 			}
@@ -520,7 +451,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response code for CmdCursorFirst: %w", err)
 			}
 
-			for k, v = cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
+			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
@@ -537,9 +468,6 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				}
 			}
 		case CmdCursorNextKey:
-			var k = &[]byte{}
-			var v = &[]byte{}
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorNextKey: %w", err)
 			}
@@ -563,26 +491,23 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdCursorNextKey: %w", err)
 			}
 
-			for *k, *v = cursor.Next(); numberOfKeys > 0; *k, *v = cursor.Next() {
+			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
 					return fmt.Errorf("could not encode (key,valueIsEmpty) in response to CmdCursorNextKey: %w", err)
 				}
 
 				numberOfKeys--
-				if *k == nil {
+				if k == nil {
 					break
 				}
 			}
 		case CmdCursorFirstKey:
-			var k = &[]byte{}
-			var v = &[]byte{}
-
 			if err := decoder.Decode(&cursorHandle); err != nil {
 				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirstKey: %w", err)
 			}
@@ -600,14 +525,14 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response code for CmdCursorFirstKey: %w", err)
 			}
 
-			for *k, *v = cursor.First(); numberOfKeys > 0; *k, *v = cursor.Next() {
+			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
 				select {
 				default:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 
-				if err := encodeKey(encoder, k, len(*v) == 0); err != nil {
+				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
 					return fmt.Errorf("could not encode (key,valueIsEmpty) for CmdCursorFirstKey: %w", err)
 				}
 
@@ -648,7 +573,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
 			}
 		default:
-			log.Error("unknown", "command", c)
+			logger.Error("unknown", "command", c)
 			return fmt.Errorf("unknown command %d", c)
 		}
 	}
@@ -662,39 +587,37 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 	var lc net.ListenConfig
 	ln, err := lc.Listen(ctx, "tcp", address)
 	if err != nil {
-		log.Error("Could not create listener", "address", address, "error", err)
+		logger.Error("Could not create listener", "address", address, "err", err)
 		return
 	}
 	defer func() {
 		if err = ln.Close(); err != nil {
-			log.Error("Could not close listener", "error", err)
+			logger.Error("Could not close listener", "err", err)
 		}
 	}()
-	log.Info("Remote DB interface listening on", "address", address)
+	logger.Info("Listening on", "address", address)
 
 	ch := make(chan bool, ServerMaxConnections)
 	defer close(ch)
 
-	if tracing {
-		go func() {
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
+	go func() {
+		ticker := time.NewTicker(3 * time.Second)
+		defer ticker.Stop()
 
-			for {
-				select {
-				case <-ticker.C:
-					log.Info("remote db: connections", "amount", len(ch))
-				case <-ctx.Done():
-					return
-				}
+		for {
+			select {
+			case <-ticker.C:
+				logger.Debug("connections", "amount", len(ch))
+			case <-ctx.Done():
+				return
 			}
-		}()
-	}
+		}
+	}()
 
 	for {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
-			log.Error("Could not accept connection", "err", err1)
+			logger.Error("Could not accept connection", "err", err1)
 			continue
 		}
 
@@ -704,10 +627,9 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 				<-ch
 			}()
 
-			//nolint:errcheck
 			err := Server(ctx, db, conn, conn, conn)
 			if err != nil {
-				log.Warn("remote db server error", "err", err)
+				logger.Warn("server error", "err", err)
 			}
 		}()
 	}
@@ -724,26 +646,24 @@ type conn struct {
 type DB struct {
 	dialFunc       DialFunc
 	connectionPool chan *conn
-	reconnect      chan struct{}
+	dialTimeout    time.Duration
+	pingTimeout    time.Duration
+	retryDialAfter time.Duration
+	pingEvery      time.Duration
+	doDial         chan struct{}
+	doPing         <-chan time.Time
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
 
 // Pool of connections to server
 func (db *DB) getConnection(ctx context.Context) (io.Reader, io.Writer, io.Closer, error) {
-	var in io.Reader
-	var out io.Writer
-	var closer io.Closer
-	var err error
-
 	select {
-	case conn := <-db.connectionPool:
-		in, out, closer = conn.in, conn.out, conn.closer
 	case <-ctx.Done():
 		return nil, nil, nil, ctx.Err()
+	case conn := <-db.connectionPool:
+		return conn.in, conn.out, conn.closer, nil
 	}
-
-	return in, out, closer, err
 }
 
 func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, closer io.Closer) {
@@ -753,33 +673,34 @@ func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, close
 	}
 }
 
-func (db *DB) ping(ctx context.Context) error {
-	var err error
+func (db *DB) ping(ctx context.Context) (err error) {
 	in, out, closer, err := db.getConnection(ctx)
 	if err != nil {
-		return fmt.Errorf("remote db: ping failed: %w", err)
+		return err
 	}
 	defer func() {
-		if err != nil { // reconnect on error
-			db.reconnect <- struct{}{}
-			closer.Close()
+		if err != nil {
+			if closeErr := closer.Close(); closeErr != nil {
+				logger.Error("can't close connection", "err", closeErr)
+			}
 			return
 		}
+
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 	// Check version
 	if err := encoder.Encode(CmdVersion); err != nil {
-		return err
+		return fmt.Errorf("could not encode CmdVersion: %w", err)
 	}
 
 	var responseCode ResponseCode
 	if err := decoder.Decode(&responseCode); err != nil {
-		return err
+		return fmt.Errorf("could not decode ResponseCode of CmdVersion: %w", err)
 	}
 
 	if responseCode != ResponseOk {
@@ -791,80 +712,104 @@ func (db *DB) ping(ctx context.Context) error {
 		return err
 	}
 	if v != Version {
-		return fmt.Errorf("returned version %d, expected %d", v, Version)
+		return fmt.Errorf("server protocol version %d, expected %d", v, Version)
 	}
 
 	return nil
 }
 
+type notifyOnClose struct {
+	internal io.Closer
+	notifyCh chan struct{}
+}
+
+func (closer notifyOnClose) Close() error {
+	closer.notifyCh <- struct{}{}
+	if closer.internal == nil {
+		return nil
+	}
+
+	return closer.internal.Close()
+}
+
 // NewDB creates a new instance of DB
-func NewDB(ctx context.Context, dialFunc DialFunc) (*DB, error) {
+func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 	db := &DB{
 		dialFunc:       dialFunc,
 		connectionPool: make(chan *conn, ClientMaxConnections),
-		reconnect:      make(chan struct{}, ClientMaxConnections),
+		doDial:         make(chan struct{}, ClientMaxConnections),
+		dialTimeout:    3 * time.Second,
+		pingTimeout:    500 * time.Millisecond,
+		retryDialAfter: 1 * time.Second,
+		pingEvery:      1 * time.Second,
 	}
 
-	connectionCtx, connectionCtxCancel := context.WithCancel(context.Background())
+	for i := uint64(0); i < ClientMaxConnections; i++ {
+		db.doDial <- struct{}{}
+	}
+
+	ctx, cancelConnections := context.WithCancel(context.Background())
 	go func() {
-		<-ctx.Done()
-		time.Sleep(50 * time.Millisecond)
-		connectionCtxCancel()
+		<-parentCtx.Done()
+		cancelConnections()
 	}()
 
-	for i := 0; i < cap(db.connectionPool); i++ {
-		in, out, closer, err := db.dialFunc(connectionCtx)
-		if err != nil {
-			return nil, err
-		}
-
-		db.connectionPool <- &conn{in, out, closer}
-	}
-
-	go func() { // reconnect, regular ping
-		pingTicker := time.NewTicker(10 * time.Second)
+	traceTicker := time.NewTicker(3 * time.Second)
+	pingTicker := time.NewTicker(db.pingEvery)
+	db.doPing = pingTicker.C
+	go func() {
 		defer pingTicker.Stop()
+		defer traceTicker.Stop()
+
 		for {
 			select {
+			default:
 			case <-ctx.Done():
 				return
-			case <-db.reconnect:
-				// TODO: what to do if can't reconnect?
-				newIn, newOut, newCloser, dialErr := db.dialFunc(ctx)
-				if dialErr != nil {
-					log.Error("could not create new connection", "error", dialErr)
-					return
-				}
-				db.returnConn(ctx, newIn, newOut, newCloser)
-			case <-pingTicker.C:
-				if err := db.ping(ctx); err != nil {
-					log.Error("remote db: ping failed", "err", err)
-				}
+			case <-traceTicker.C:
+				logger.Trace("connections in pool", "amount", len(db.connectionPool))
 			}
+
+			db.autoReconnect(ctx)
 		}
 	}()
 
-	if err := db.ping(ctx); err != nil {
-		return nil, err
-	}
-
-	if tracing {
-		go func() {
-			ticker := time.NewTicker(3 * time.Second)
-			defer ticker.Stop()
-
-			for {
-				select {
-				case <-ticker.C:
-					log.Info("remote db: connections in pool", "amount", len(db.connectionPool))
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
 	return db, nil
+}
+
+func (db *DB) autoReconnect(ctx context.Context) {
+	select {
+	case <-db.doDial:
+		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
+		defer cancel()
+		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
+		if err != nil {
+			logger.Warn("dial failed", "err", err)
+			db.doDial <- struct{}{}
+			time.Sleep(db.retryDialAfter)
+			return
+		}
+
+		notifyCloser := notifyOnClose{notifyCh: db.doDial, internal: newCloser}
+		db.returnConn(ctx, newIn, newOut, notifyCloser)
+	case <-db.doPing:
+		// periodically ping to close broken connections
+		pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+		defer cancel()
+		if err := db.ping(pingCtx); err != nil {
+			if !errors.Is(err, io.EOF) { // io.EOF means server gone
+				logger.Warn("ping failed", "err", err)
+				return
+			}
+
+			// if server gone, then need re-check all connections by ping. It will remove broken connections from pool.
+			for i := uint64(0); i < ClientMaxConnections-1; i++ {
+				pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+				_ = db.ping(pingCtx)
+				cancel()
+			}
+		}
+	}
 }
 
 // Close closes DB by using the closer field
@@ -884,19 +829,16 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 	var responseCode ResponseCode
 
 	if err := encoder.Encode(CmdEndTx); err != nil {
-		err = fmt.Errorf("could not encode CmdEndTx: %w", err)
-		return err
+		return fmt.Errorf("could not encode CmdEndTx: %w", err)
 	}
 
 	if err := decoder.Decode(&responseCode); err != nil {
-		err = fmt.Errorf("could not decode ResponseCode for CmdEndTx: %w", err)
-		return err
+		return fmt.Errorf("could not decode ResponseCode for CmdEndTx: %w", err)
 	}
 
 	if responseCode != ResponseOk {
 		if err := decodeErr(decoder, responseCode); err != nil {
-			err = fmt.Errorf("could not decode errorMessage for CmdEndTx: %w", err)
-			return err
+			return fmt.Errorf("could not decode errorMessage for CmdEndTx: %w", err)
 		}
 	}
 	return nil
@@ -912,17 +854,16 @@ func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, times
 
 	defer func() {
 		if err != nil {
-			db.reconnect <- struct{}{}
 			closer.Close()
 			return
 		}
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 
 	err = encoder.Encode(CmdGetAsOf)
 	if err != nil {
@@ -966,8 +907,7 @@ func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, times
 
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
-func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
-	var err error
+func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	var opErr error
 	var endTxErr error
 
@@ -980,30 +920,29 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 
 	defer func() {
 		if err != nil || endTxErr != nil || opErr != nil {
-			db.reconnect <- struct{}{}
-			closer.Close()
+			if closeErr := closer.Close(); closeErr != nil {
+				logger.Error("can't close connection", "err", closeErr)
+			}
 			return
 		}
 		db.returnConn(ctx, in, out, closer)
 	}()
 
-	decoder := newDecoder(in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(out)
+	defer codecpool.Return(encoder)
 
-	err = encoder.Encode(CmdBeginTx)
-	if err != nil {
-		return fmt.Errorf("can't encode CmdBeginTx: %w", err)
+	if err = encoder.Encode(CmdBeginTx); err != nil {
+		return fmt.Errorf("could not encode CmdBeginTx: %w", err)
 	}
-	err = decoder.Decode(&responseCode)
-	if err != nil {
-		return err
+
+	if err = decoder.Decode(&responseCode); err != nil {
+		return fmt.Errorf("could not decode response code of CmdBeginTx: %w", err)
 	}
 
 	if responseCode != ResponseOk {
-		err = decodeErr(decoder, responseCode)
-		return err
+		return decodeErr(decoder, responseCode)
 	}
 
 	tx := &Tx{ctx: ctx, in: in, out: out}
@@ -1011,7 +950,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) error {
 
 	endTxErr = db.endTx(ctx, encoder, decoder)
 	if endTxErr != nil {
-		log.Error("remote db: could not finish tx", "err", err)
+		logger.Warn("could not finish tx", "err", err)
 	}
 
 	return opErr
@@ -1047,15 +986,15 @@ func (tx *Tx) Bucket(name []byte) (*Bucket, error) {
 		return nil, tx.ctx.Err()
 	}
 
-	decoder := newDecoder(tx.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(tx.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(tx.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(tx.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdBucket); err != nil {
 		return nil, fmt.Errorf("could not encode CmdBucket: %w", err)
 	}
-	if err := encoder.Encode(name); err != nil {
+	if err := encoder.Encode(&name); err != nil {
 		return nil, fmt.Errorf("could not encode name for CmdBucket: %w", err)
 	}
 
@@ -1091,10 +1030,10 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 		return nil, b.ctx.Err()
 	}
 
-	decoder := newDecoder(b.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(b.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(b.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(b.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdGet); err != nil {
 		return nil, fmt.Errorf("could not encode CmdGet: %w", err)
@@ -1102,7 +1041,7 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 	if err := encoder.Encode(b.bucketHandle); err != nil {
 		return nil, fmt.Errorf("could not encode bucketHandle for CmdGet: %w", err)
 	}
-	if err := encoder.Encode(key); err != nil {
+	if err := encoder.Encode(&key); err != nil {
 		return nil, fmt.Errorf("could not encode key for CmdGet: %w", err)
 	}
 
@@ -1141,10 +1080,10 @@ func (b *Bucket) Cursor() (*Cursor, error) {
 		return nil, b.ctx.Err()
 	}
 
-	decoder := newDecoder(b.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(b.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(b.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(b.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursor); err != nil {
 		return nil, fmt.Errorf("could not encode CmdCursor: %w", err)
@@ -1230,10 +1169,10 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 		return nil, nil, c.ctx.Err()
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursorSeek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode CmdCursorSeek: %w", err)
@@ -1241,7 +1180,7 @@ func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
 	if err := encoder.Encode(c.cursorHandle); err != nil {
 		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeek: %w", err)
 	}
-	if err := encoder.Encode(seek); err != nil {
+	if err := encoder.Encode(&seek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeek: %w", err)
 	}
 
@@ -1276,10 +1215,10 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
 		return nil, nil, c.ctx.Err()
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(CmdCursorSeekTo); err != nil {
 		return nil, nil, fmt.Errorf("could not encode CmdCursorSeekTo: %w", err)
@@ -1287,7 +1226,7 @@ func (c *Cursor) SeekTo(seek []byte) (key []byte, value []byte, err error) {
 	if err := encoder.Encode(c.cursorHandle); err != nil {
 		return nil, nil, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekTo: %w", err)
 	}
-	if err := encoder.Encode(seek); err != nil {
+	if err := encoder.Encode(&seek); err != nil {
 		return nil, nil, fmt.Errorf("could not encode key for CmdCursorSeekTo: %w", err)
 	}
 
@@ -1352,10 +1291,10 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		c.cacheValueIsEmpty = make([]bool, c.batchSize)
 	}
 
-	decoder := newDecoder(c.in)
-	defer returnDecoderToPool(decoder)
-	encoder := newEncoder(c.out)
-	defer returnEncoderToPool(encoder)
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
 
 	if err := encoder.Encode(cmd); err != nil {
 		return fmt.Errorf("could not encode command %d. %w", cmd, err)

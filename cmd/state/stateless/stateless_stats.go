@@ -6,22 +6,21 @@ import (
 	"io"
 	"os"
 
-	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type statsColumn struct {
 	name   string
-	getter func(*state.BlockWitnessStats) uint64
+	getter func(*trie.BlockWitnessStats) uint64
 }
 
 var columns = []statsColumn{
-	{"BlockNumber", func(s *state.BlockWitnessStats) uint64 { return s.BlockNumber() }},
-	{"BlockWitnessSize", func(s *state.BlockWitnessStats) uint64 { return s.BlockWitnessSize() }},
-	{"CodesSize", func(s *state.BlockWitnessStats) uint64 { return s.CodesSize() }},
-	{"LeafKeysSize", func(s *state.BlockWitnessStats) uint64 { return s.LeafKeysSize() }},
-	{"LeafValuesSize", func(s *state.BlockWitnessStats) uint64 { return s.LeafValuesSize() }},
-	{"MasksSize", func(s *state.BlockWitnessStats) uint64 { return s.MasksSize() }},
-	{"HashesSize", func(s *state.BlockWitnessStats) uint64 { return s.HashesSize() }},
+	{"BlockWitnessSize", func(s *trie.BlockWitnessStats) uint64 { return s.BlockWitnessSize() }},
+	{"CodesSize", func(s *trie.BlockWitnessStats) uint64 { return s.CodesSize() }},
+	{"LeafKeysSize", func(s *trie.BlockWitnessStats) uint64 { return s.LeafKeysSize() }},
+	{"LeafValuesSize", func(s *trie.BlockWitnessStats) uint64 { return s.LeafValuesSize() }},
+	{"StructureSize", func(s *trie.BlockWitnessStats) uint64 { return s.StructureSize() }},
+	{"HashesSize", func(s *trie.BlockWitnessStats) uint64 { return s.HashesSize() }},
 }
 
 type StatsFile struct {
@@ -43,16 +42,17 @@ func NewStatsFile(path string) (*StatsFile, error) {
 }
 
 func (s *StatsFile) writeHeader() error {
-	header := make([]string, len(columns))
+	header := make([]string, len(columns)+1)
 
+	header[0] = "BlockNumber"
 	for i, col := range columns {
-		header[i] = col.name
+		header[i+1] = col.name
 	}
 
 	return s.buffer.Write(header)
 }
 
-func (s *StatsFile) AddRow(row *state.BlockWitnessStats) error {
+func (s *StatsFile) AddRow(blockNumber uint64, row *trie.BlockWitnessStats) error {
 	if !s.hasHeader {
 		fmt.Println("writing header")
 		if err := s.writeHeader(); err != nil {
@@ -61,10 +61,11 @@ func (s *StatsFile) AddRow(row *state.BlockWitnessStats) error {
 		s.hasHeader = true
 	}
 
-	fields := make([]string, len(columns))
+	fields := make([]string, len(columns)+1)
 
+	fields[0] = stringify(blockNumber)
 	for i, col := range columns {
-		fields[i] = stringify(col.getter(row))
+		fields[i+1] = stringify(col.getter(row))
 	}
 
 	return s.buffer.Write(fields)

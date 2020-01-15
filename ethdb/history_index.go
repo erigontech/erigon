@@ -4,7 +4,9 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
@@ -120,6 +122,74 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	data, err = dbutils.FindLast(changeSetData, key)
 	if err != nil {
 		return nil, ErrKeyNotFound
+	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(data); err != nil {
+		return nil, err
+	}
+
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+		codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+		if len(codeHash) > 0 {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		}
+		data = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(data)
+	}
+	return data, nil
+
+}
+
+func BoltDBFindStorageByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {
+	var k common.Hash
+	copy(k[:], key[common.HashLength+common.IncarnationLength:])
+
+	//check
+	hB := tx.Bucket(hBucket)
+	if hB == nil {
+		return nil, ErrKeyNotFound
+	}
+	v, _ := hB.Get(key)
+	index := NewStorageIndex()
+
+	err := index.Decode(v)
+	if err != nil {
+		return nil, err
+	}
+
+	changeSetBlock, ok := index.Search(k, timestamp)
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+
+	csB := tx.Bucket(dbutils.ChangeSetBucket)
+	if csB == nil {
+		return nil, ErrKeyNotFound
+	}
+	cs, _ := csB.Get(dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(changeSetBlock), hBucket))
+	if err != nil {
+		return nil, err
+	}
+
+	var data []byte
+	data, err = dbutils.FindLast(cs, key)
+	if err != nil {
+		return nil, ErrKeyNotFound
+	}
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(data); err != nil {
+		return nil, err
+	}
+
+	if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+		codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+		codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(key), acc.Incarnation))
+		if len(codeHash) > 0 {
+			acc.CodeHash = common.BytesToHash(codeHash)
+		}
+		data = make([]byte, acc.EncodingLengthForStorage())
+		acc.EncodeForStorage(data)
 	}
 	return data, nil
 

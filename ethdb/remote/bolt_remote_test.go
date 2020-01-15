@@ -20,9 +20,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"io"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -54,12 +58,12 @@ func TestCmdVersion(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	assert.Nil(t, encoder.Encode(CmdVersion), "Could not encode CmdVersion")
 
@@ -84,12 +88,12 @@ func TestCmdBeginEndError(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Send CmdBeginTx, followed by double CmdEndTx
 	// followed by the CmdLastError
@@ -131,12 +135,12 @@ func TestCmdBucket(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket
 	var name = []byte("testbucket")
@@ -149,7 +153,7 @@ func TestCmdBucket(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBegin")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -179,12 +183,12 @@ func TestCmdGet(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -206,19 +210,19 @@ func TestCmdGet(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	// Issue CmdGet with existing key
 	var bucketHandle uint64 = 1
 	var key = []byte("key1")
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
 	// Issue CmdGet with non-existing key
 	key = []byte("key3")
 	assert.Nil(t, encoder.Encode(CmdGet), "Could not encode CmdGet")
 	assert.Nil(t, encoder.Encode(bucketHandle), "Could not encode bucketHandle for CmdGet")
-	assert.Nil(t, encoder.Encode(key), "Could not encode key for CmdGet")
+	assert.Nil(t, encoder.Encode(&key), "Could not encode key for CmdGet")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -258,12 +262,12 @@ func TestCmdSeek(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -285,7 +289,7 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
@@ -295,7 +299,7 @@ func TestCmdSeek(t *testing.T) {
 	var seekKey = []byte("key15") // Should find key2
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
-	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
@@ -335,12 +339,12 @@ func TestCursorOperations(t *testing.T) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -362,7 +366,7 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(t, encoder.Encode(name), "Could not encode name for CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
 	assert.Nil(t, encoder.Encode(CmdCursor), "Could not encode CmdCursor")
@@ -374,7 +378,7 @@ func TestCursorOperations(t *testing.T) {
 	var seekKey = []byte("key1") // Should find key1
 	assert.Nil(t, encoder.Encode(CmdCursorSeek), "Could not encode CmdCursorSeek")
 	assert.Nil(t, encoder.Encode(cursorHandle), "Could not encode cursorHandle for CmdCursorSeek")
-	assert.Nil(t, encoder.Encode(seekKey), "Could not encode seekKey for CmdCursorSeek")
+	assert.Nil(t, encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 
 	var numberOfKeys uint64 = 2 // Trying to get 2 keys, but will get 1 + nil
 	// .Next()
@@ -448,98 +452,78 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(t, value, "Unexpected value")
 
-	// Results of CmdCursorFirst
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirst")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	// first result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, key1, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, value1, string(value), "Unexpected value")
-	// second result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, key2, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorFirst")
-	assert.Equal(t, value2, string(value), "Unexpected value")
+	assert.Nil(t, encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
-	// Results of CmdCursorNext must be nil
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNext")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNext")
-	assert.Nil(t, key, "Unexpected key")
-	assert.Nil(t, decoder.Decode(&value), "Could not decode response from CmdCursorNext")
-	assert.Nil(t, value, "Unexpected value")
-
-	var vIsEmpty bool
-	// Results of CmdCursorFirstKey
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorFirstKey")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	// first result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, key1, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
-	// second result
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, key2, string(key), "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorFirstKey")
-	assert.Equal(t, false, vIsEmpty, "Unexpected vIsEmpty")
-
-	// Results of CmdCursorNextKey must be nil
-	assert.Nil(t, decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdCursorNextKey")
-	assert.Equal(t, ResponseOk, responseCode, "unexpected response code")
-	assert.Nil(t, decoder.Decode(&key), "Could not decode response from CmdCursorNextKey")
-	assert.Nil(t, key, "Unexpected key")
-	assert.Nil(t, decoder.Decode(&vIsEmpty), "Could not decode response from CmdCursorNextKey")
-	assert.True(t, vIsEmpty, "Unexpected vIsEmpty")
+	assert.Nil(t, encoder.Encode(CmdBucket), "Could not encode CmdBucket")
+	assert.Nil(t, encoder.Encode(&name), "Could not encode name for CmdBucket")
 }
 
 func TestTxYield(t *testing.T) {
 	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
+	assert.Nil(t, err, "Could not create database")
+
 	// Create bucket
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket([]byte("bucket"), false)
 		return err1
-	}); err != nil {
-		t.Errorf("Could not create bucket: %v", err)
-	}
-	var readFinished bool
+	})
+	assert.Nil(t, err, "Could not create bucket")
+
+	errors := make(chan error, 10)
+	writeDoneNotify := make(chan struct{}, 1)
+	defer close(writeDoneNotify)
+	readDoneNotify := make(chan struct{}, 1)
 	go func() {
+		defer func() {
+			readDoneNotify <- struct{}{}
+			close(readDoneNotify)
+			close(errors)
+		}()
+
 		// Long read-only transaction
-		if err1 := db.View(func(tx *bolt.Tx) error {
+		if err = db.View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("bucket"))
 			var keyBuf [8]byte
-			for i := 0; i < 100000; i++ {
-				binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
+			var i uint64
+			for {
+				select { // do reads until write finish
+				case <-writeDoneNotify:
+					return nil
+				default:
+				}
+
+				i++
+				binary.BigEndian.PutUint64(keyBuf[:], i)
 				b.Get(keyBuf[:])
 				tx.Yield()
 			}
-			return nil
-		}); err1 != nil {
-			t.Fatal(err1)
+		}); err != nil {
+			errors <- err
 		}
-		readFinished = true
 	}()
+
 	// Expand the database
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("bucket"))
 		var keyBuf, valBuf [8]byte
-		for i := 0; i < 10000; i++ {
-			binary.BigEndian.PutUint64(keyBuf[:], uint64(i))
-			binary.BigEndian.PutUint64(valBuf[:], uint64(i))
+		for i := uint64(0); i < 10000; i++ {
+			binary.BigEndian.PutUint64(keyBuf[:], i)
+			binary.BigEndian.PutUint64(valBuf[:], i)
 			if err2 := b.Put(keyBuf[:], valBuf[:]); err2 != nil {
 				return err2
 			}
 		}
 		return nil
-	}); err != nil {
-		t.Errorf("Could not execute update: %v", err)
-	}
-	if readFinished {
-		t.Errorf("Read should not finished here, if it did, it means the writes were blocked by it")
+	})
+	assert.Nil(t, err, "Could not execute update")
+
+	// write must finish before read
+	assert.Equal(t, 0, len(readDoneNotify), "Read should not finished here, if it did, it means the writes were blocked by it")
+	writeDoneNotify <- struct{}{}
+	<-readDoneNotify
+
+	for err := range errors {
+		assert.Nil(t, err)
 	}
 }
 
@@ -552,12 +536,12 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
-	encoder := newEncoder(&inBuf)
-	defer returnEncoderToPool(encoder)
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
 	// output buffer to receive the result of the command
 	var outBuf bytes.Buffer
-	decoder := newDecoder(&outBuf)
-	defer returnDecoderToPool(decoder)
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
@@ -634,12 +618,9 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 		assert.Nil(b, decoder.Decode(&value))
 
 		// .End()
-		check(encoder.Encode(CmdEndTx))
-		check(decoder.Decode(&responseCode))
-		if responseCode != ResponseOk {
-			panic("not Ok")
-		}
-
+		assert.Nil(b, encoder.Encode(CmdEndTx))
+		assert.Nil(b, decoder.Decode(&responseCode))
+		assert.Equal(b, responseCode, ResponseOk)
 	}
 }
 
@@ -698,8 +679,69 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 
 }
 
-func check(e error) {
-	if e != nil {
-		panic(e)
+func TestReconnect(t *testing.T) {
+	// Prepare input buffer with one command CmdVersion
+	var inBuf bytes.Buffer
+	encoder := codecpool.Encoder(&inBuf)
+	defer codecpool.Return(encoder)
+	// output buffer to receive the result of the command
+	var outBuf bytes.Buffer
+	decoder := codecpool.Decoder(&outBuf)
+	defer codecpool.Return(decoder)
+
+	dialCallCounter := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pingCh := make(chan time.Time, ClientMaxConnections)
+	db := &DB{
+		dialFunc: func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+			dialCallCounter++
+			if dialCallCounter%2 == 0 {
+				return &inBuf, &outBuf, nil, net.UnknownNetworkError("Oops")
+			}
+			return &inBuf, &outBuf, nil, nil
+		},
+		connectionPool: make(chan *conn, ClientMaxConnections),
+		doDial:         make(chan struct{}, ClientMaxConnections),
+		doPing:         pingCh,
+		dialTimeout:    time.Second,
+		pingTimeout:    time.Minute,
+		retryDialAfter: 0 * time.Nanosecond,
+		pingEvery:      time.Second,
 	}
+
+	// no open connections by default
+	assert.Equal(t, 0, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open 1 connection and wait for it
+	db.doDial <- struct{}{}
+	db.autoReconnect(ctx)
+	<-db.connectionPool
+	assert.Equal(t, 1, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open 2nd connection - dialFunc will return err on 2nd call, but db must reconnect automatically
+	db.doDial <- struct{}{}
+	db.autoReconnect(ctx) // dial err
+	db.autoReconnect(ctx) // dial ok
+	<-db.connectionPool
+	assert.Equal(t, 3, dialCallCounter)
+	assert.Equal(t, 0, len(db.connectionPool))
+
+	// open conn and call ping on it
+	db.doDial <- struct{}{}
+	assert.Nil(t, encoder.Encode(ResponseOk))
+	assert.Nil(t, encoder.Encode(Version))
+	db.autoReconnect(ctx) // dial err
+	db.autoReconnect(ctx) // dial ok
+	assert.Equal(t, 5, dialCallCounter)
+	assert.Equal(t, 1, len(db.connectionPool))
+	pingCh <- time.Now()
+	db.autoReconnect(ctx)
+	var cmd Command
+	assert.Nil(t, decoder.Decode(&cmd))
+	assert.Equal(t, CmdVersion, cmd)
+
+	// TODO: cover case when ping receive io.EOF
 }

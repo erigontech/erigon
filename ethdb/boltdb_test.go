@@ -9,9 +9,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 )
 
 func TestBoltDB_WalkAsOf1(t *testing.T) {
+	if debug.IsThinHistory() {
+		t.Skip()
+	}
 	db := NewMemDatabase()
 
 	block2Expected := &dbutils.ChangeSet{
@@ -157,6 +161,10 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 }
 
 func TestBoltDB_MultiWalkAsOf(t *testing.T) {
+	if debug.IsThinHistory() {
+		t.Skip()
+	}
+
 	db := NewMemDatabase()
 
 	block2Expected := &dbutils.ChangeSet{

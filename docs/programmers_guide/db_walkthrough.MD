@@ -51,10 +51,6 @@ The first 8 bytes of the key (or 16 nobbles, equaling to 0s here) encode the blo
 The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there were
 no transactions in the Genesis block, therefore, we have RLP encoding of an empty list, `0xC0`.
 
-Next bucket is "Transacqtion index":
-
-![genesis_db_history_of_accounts](changes_0_hAT_9.dot.gd.png)
-
 Next bucket is "History Of Accounts":
 
 ![genesis_db_history_of_accounts](changes_0_hAT_9.dot.gd.png)
@@ -92,9 +88,11 @@ Next bucket is "Block Bodies":
 
 The keys in this bucket are concatenations of 8-byte encoding of the block number and 32-byte block hash.
 The values are RLP-encoded list of 3 structures:
+
 1. List of transactions
 2. List transaction sender addresses, one for each transaction in the first list
 3. List of ommers (a.k.a uncles)
+
 In the case of the genesis block, all of these lists are empty (RLP encodings `0xC0`), and the prefix `0xC3` means
 in RLP "some number of sub-structures with the total length of 3 bytes".
 
@@ -122,10 +120,10 @@ and "History of Storage" (this bucket will appear later), where keys are derived
 In the cases of our genesis block, the keys is composed from the encoding of the block number (`0x20`), and the
 ASCII-code of `hAT` (meaning **h**istory of **A**counts **T**rie).
 The "Change Set" bucket records changes that happen to accounts and contract storage slots at every block.
-It is important to node that the values recorded in the "Changes Set" bucket are not the values the accounts
+It is important to note that the values recorded in the "Changes Set" bucket are not the values the accounts
 (or storage slots) had AFTER the change, it records what value the accounts (or storage slots)
 had BEFORE the change. That explains the empty values here - it records the fact that these
-three accounts in questions did not exist prior to the block 0.
+three accounts in question did not exist prior to the block 0.
 The encoding of the values in the records is tailored for fast access and binary search. It has 5 parts:
 1. Number of keys-value pairs, encoded as a 4-byte (32-bit) number. In this example, it is `0x00000003`, which means
 there are 3 key-value pairs
@@ -149,10 +147,12 @@ They all start with a fieldset of `0x02`, for each bit set into the fieldSet a f
 the order in the fieldset is the following:
 * 1st bit: Nonce
 * 2nd bit: Balance
-* 3rd Bit: Incarnation
-* 4th Bit: Root
-* 5th Bit: Code Hash
-* 6th Bit: Storage Size
+* 3rd bit: Incarnation
+* 4th bit: Root
+* 5th bit: Code Hash
+* 6th bit: Storage Size
+
+**WARNING**: The Storage Size bit will be removed soon.
 
 Therefore, immediately after the fieldset we have the length in byte of the balance: `0x08` (`8` bytes). the following 8 bytes (aka. 16 nibbles) contains the hexadecimal value of the balance that in the first record would be: `0x7ce66c50e2840000`.
 ````
@@ -220,36 +220,46 @@ such traversal requires finding the corresponding record in the "Hashes" bucket.
 
 Block with 1 Ethereum transaction in Turbo-Geth
 ------------------------------
-When the first block is inserted, we sign a transaction using the private key of the account with 9 ETH to address 0x1 with 0.001 ETH and then execute it.
+The first block contains transaction that transfers 0.001 ETH from the account holding 9ETH to a new account with the address `0x0100000000000000000000000000000000000000` (this is what one gets specifying `common.Address{1}` in the code).
 This is how the state trie after Block 1 is inserted looks like:
 
 ![block1_state](state_2.dot.gd.png)
 
-First thing to note about the illustration of the state trie is that the nonce of the first account is now 1 since a transaction from that address has been executed and the amount of ETH of that account is now 8.999 since the transaction had a value of 0.001 ETH. Additionally, a new account has been generated in the state trie. it's the recipient of the transaction. In fact, it has only 0.001 ETH (the value of the transaction) and it's nonce is set to 0.
-how turbo-geth's database after such a block would be generated:
+First thing to note about the illustration of the state trie is that the nonce of the first account is now 1 since a transaction from that address has been executed and the amount of ETH of that account is now 8.999 since the transaction had a value of 0.001 ETH. Usually, the transaction fee would also
+be paid, but in our simplified example, we set gas price to 0, therefore no fees are deducted. A new account has been added to the state trie, the recipient of the transaction. In fact, it has 0.001 ETH (the value of the transaction) and its nonce is set to 0.
+What follows are excerpts from the turbo-geth's database after block 1 has been inserted. These excerpts only show the records that have changed, and
+omit the records that are the same as before the insertion of the block.
 
 ![block1_db](changes_1.dot.gd.png)
 
 We have got now two more preimages:
-* the preimage of the recipient of the transaction (account 0x01)
-* the preimage of the signer
+
+* the preimage of the recipient of the transaction (account `0x0100000000000000000000000000000000000000`)
+* the preimage of the miner (account `0x0000000000000000000000000000000000000000`)
 
 ![block1_db_preimages](changes_1_secure-key-_11.dot.gd.png)
 
-This happened because when the transaction was sent, a new entry for the account of the recipient (that didn't exist before) was generated and along with it his preimage.
+Bucket "Receipts" now has some non-empty information for the block 1, because we had 1 transaction:
 
 ![block1_db_receipts](changes_1_r_10.dot.gd.png)
 
-The first 8 bytes of the key (or 16 nobbles, equaling to 0s here) encode the block number, which value increased to 1 in this case (the first 15 nibbles are 0s and the 16th nibble is 1);
-The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, instead of having `0XC0` (that repressent an empty list) we have `0xcbc501825208c0` that his the receipt for the 0.001 ETH transaction.
+The first 8 bytes of the key (or 16 nibbles, 15 zeroes followed by `1`) encode the block number, which is 1.
+The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, instead of having `0xC0` (that repressent an empty list) we have `0xc6c501825208c0` that his the receipt for the 0.001 ETH transaction.
+First prefix, `c6` means that the following 6 bytes is a sequence of RLP-encoded sub-structures. In our case, there is only one sub-structure, and its
+prefix `c5` means that the following 5 bytes is a sequence of RLP-encoded sub-structures. There are 3 of them: `01`, `825208`, and `c0`. The first encodes
+number 1, which means the "Success" status of the transaction (0 would mean failure). Next, we have a byte array of length 2 (prefix `82`), `5208`, which is
+21000 in hexadecimal, the cumulative gas used by all transactions so far. And the last structure, `c0` is RLP encoding of an empty list. Usually, the log (events) emitted by the transaction, would be here. But since our transaction did not emit anything, the list is empty.
 
 Next bucket is "History Of Accounts":
 
 ![block1_db_history_of_accounts](changes_1_hAT_8.dot.gd.png)
 
-First of all, a new entry has been added and is the concatenation of the preimage of the account that sent the transaction with the block suffix. the first thing to notice is that the new entry has a block suffix of `0x21` instead of `0x20` since the change didn't occur in block Additionally, now the key has a value associated since before the changes the account changed existed actually existed. 
+The first entry has a non-empty value. This is the sender of 0.001ETH. As history bucket records the value of this account BEFORE the change, we should
+expect the same value here as this account had at the geneis. The other two records contain empty values, which means these account were non-existent previously. These are the account of the recepient of 0.001 ETH (`0x0100000000000000000000000000000000000000`), and the miner account `0x0000000000000000000000000000000000000000`.
+The keys of all three records have the common suffix of `0x21` instead of `0x20`, which is simply encoding of the block number 1 instead of block number 0.
 
-The value is the value associated with the changed account **Before** the changes.
+**WARNING** We are planning a change, called `THIN_HISTORY`, after which the bucket "History of Accounts" will not store the values of the accounts,
+but only the block numbers when those accounts changed.
 
 Next bucket is "Headers"
 
@@ -266,17 +276,18 @@ Next bucket is "Block Bodies":
 The keys in this bucket are concatenations of 8-byte encoding of the block number and 32-byte block hash.
 The new record is the repressentation of block 1.
 
-![genesis_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
+![block1_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
 
 Bucket "Change Sets" recorded the change in account that occurred BEFORE the 0.001 ETH transaction. you can notice that unlike the genesis block, this time the key has a prefix of `0x21` since now the blockchain is 1 block apart from the Genesis block.
+Like in the ChangeSet in the genesis block, there are 3 new records. But unlike the ChangeSet in the genesis block, one of the records (the last one) has
+a non-empty value. This is the same value that we see in the corresponding record in the "History of Accounts" bucket.
 
-**Note**
-it records what value the accounts (or storage slots)
-had BEFORE the change. In fact, it just store the existence of the address generated AFTER the genesis block.
+**WARNING** We are planning a change, called `THIN_HISTORY`, after which the bucket "History of Accounts" will not store the values of the accounts,
+but only the block numbers when those accounts changed.
 
 The next bucket is "Accounts":
 
-![genesis_db_accounts](changes_1_AT_0.dot.gd.png)
+![block1_db_accounts](changes_1_AT_0.dot.gd.png)
 
 The values are the current state of each account. 
 * The first record has a field set of `0x3` (`11`) meaning that this time the accound has a nonce as well. the nonce legth is `0x01`. therefore the nonce is stored in the byte immediately after the length of the field: `0x01`. the balance is now changed to `0x7ce2ded23dbd8000`.
@@ -308,7 +319,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x038d7ea4c68000
 1000000000000000
 ````
-Which is 0.01 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
+Which is 0.001 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
 
 Block 1 in go-ethereum
 ------------------------------
