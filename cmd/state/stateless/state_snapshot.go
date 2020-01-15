@@ -12,7 +12,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -348,7 +347,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			st := trie.New(account.Root)
 			sr := trie.NewResolver(32, false, blockNum)
 			key := []byte{}
-			contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation^^uint64(0))
 			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
