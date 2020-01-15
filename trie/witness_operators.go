@@ -45,7 +45,7 @@ type WitnessOperator interface {
 	WriteTo(*WitnessStatsCollector) error
 
 	// LoadFrom always assumes that the opcode value was already read
-	LoadFrom(io.Reader) error
+	LoadFrom(*OperatorLoader) error
 }
 
 type OperatorHash struct {
@@ -60,15 +60,12 @@ func (o *OperatorHash) WriteTo(output *WitnessStatsCollector) error {
 	return err
 }
 
-func (o *OperatorHash) LoadFrom(input io.Reader) error {
-	var hash common.Hash
-	bytesRead, err := input.Read(hash[:])
+func (o *OperatorHash) LoadFrom(loader *OperatorLoader) error {
+	hash, err := loader.ReadHash()
 	if err != nil {
 		return err
 	}
-	if bytesRead != len(hash) {
-		return fmt.Errorf("error while reading hash from input. expected to read %d bytes, read only %d", len(hash), bytesRead)
-	}
+
 	o.Hash = hash
 	return nil
 }
@@ -90,15 +87,15 @@ func (o *OperatorLeafValue) WriteTo(output *WitnessStatsCollector) error {
 	return encodeByteArray(o.Value, output.WithColumn(ColumnLeafValues))
 }
 
-func (o *OperatorLeafValue) LoadFrom(input io.Reader) error {
-	key, err := decodeByteArray(input)
+func (o *OperatorLeafValue) LoadFrom(loader *OperatorLoader) error {
+	key, err := loader.ReadByteArray()
 	if err != nil {
 		return err
 	}
 
 	o.Key = keyBytesToNibbles(key)
 
-	value, err := decodeByteArray(input)
+	value, err := loader.ReadByteArray()
 	if err != nil {
 		return err
 	}
@@ -162,41 +159,37 @@ func (o *OperatorLeafAccount) WriteTo(output *WitnessStatsCollector) error {
 	return nil
 }
 
-func (o *OperatorLeafAccount) LoadFrom(input io.Reader) error {
-	key, err := decodeByteArray(input)
+func (o *OperatorLeafAccount) LoadFrom(loader *OperatorLoader) error {
+	key, err := loader.ReadByteArray()
 	if err != nil {
 		return err
 	}
 	o.Key = keyBytesToNibbles(key)
 
-	flags := make([]byte, 1)
-	_, err = input.Read(flags)
+	flags, err := loader.ReadByte()
 	if err != nil {
 		return err
 	}
-	o.HasCode = flags[0]&flagCode != 0
-	o.HasStorage = flags[0]&flagStorage != 0
 
-	if flags[0]&flagNonce != 0 {
-		var nonce uint64
-		decoder := codec.NewDecoder(input, &cbor)
-		err = decoder.Decode(&nonce)
+	o.HasCode = flags&flagCode != 0
+	o.HasStorage = flags&flagStorage != 0
+
+	if flags&flagNonce != 0 {
+		nonce, err := loader.ReadUInt64()
 		if err != nil {
 			return err
 		}
-
 		o.Nonce = nonce
 	}
 
 	balance := big.NewInt(0)
 
-	if flags[0]&flagBalance != 0 {
+	if flags&flagBalance != 0 {
 		var balanceBytes []byte
-		balanceBytes, err = decodeByteArray(input)
+		balanceBytes, err = loader.ReadByteArray()
 		if err != nil {
 			return err
 		}
-
 		balance.SetBytes(balanceBytes)
 	}
 
@@ -217,8 +210,8 @@ func (o *OperatorCode) WriteTo(output *WitnessStatsCollector) error {
 	return encodeByteArray(o.Code, output.WithColumn(ColumnCodes))
 }
 
-func (o *OperatorCode) LoadFrom(input io.Reader) error {
-	code, err := decodeByteArray(input)
+func (o *OperatorCode) LoadFrom(loader *OperatorLoader) error {
+	code, err := loader.ReadByteArray()
 	if err != nil {
 		return err
 	}
@@ -238,15 +231,13 @@ func (o *OperatorBranch) WriteTo(output *WitnessStatsCollector) error {
 	return encoder.Encode(o.Mask)
 }
 
-func (o *OperatorBranch) LoadFrom(input io.Reader) error {
-	var mask uint32
-	decoder := codec.NewDecoder(input, &cbor)
-	if err := decoder.Decode(&mask); err != nil {
+func (o *OperatorBranch) LoadFrom(loader *OperatorLoader) error {
+	mask, err := loader.ReadUint32()
+	if err != nil {
 		return err
 	}
 
 	o.Mask = mask
-
 	return nil
 }
 
@@ -256,7 +247,7 @@ func (o *OperatorEmptyRoot) WriteTo(output *WitnessStatsCollector) error {
 	return writeOpCode(OpEmptyRoot, output.WithColumn(ColumnStructure))
 }
 
-func (o *OperatorEmptyRoot) LoadFrom(input io.Reader) error {
+func (o *OperatorEmptyRoot) LoadFrom(loader *OperatorLoader) error {
 	// no-op
 	return nil
 }
@@ -272,8 +263,8 @@ func (o *OperatorExtension) WriteTo(output *WitnessStatsCollector) error {
 	return encodeByteArray(keyNibblesToBytes(o.Key), output.WithColumn(ColumnLeafKeys))
 }
 
-func (o *OperatorExtension) LoadFrom(input io.Reader) error {
-	key, err := decodeByteArray(input)
+func (o *OperatorExtension) LoadFrom(loader *OperatorLoader) error {
+	key, err := loader.ReadByteArray()
 	if err != nil {
 		return err
 	}
@@ -281,23 +272,6 @@ func (o *OperatorExtension) LoadFrom(input io.Reader) error {
 	o.Key = keyBytesToNibbles(key)
 
 	return nil
-}
-
-func decodeByteArray(input io.Reader) ([]byte, error) {
-	codec := codec.NewDecoder(input, &cbor)
-
-	var buffer interface{}
-	err := codec.Decode(&buffer)
-	if err != nil {
-		return []byte{}, err
-	}
-
-	b, ok := buffer.([]byte)
-	if !ok {
-		return []byte{}, fmt.Errorf("unexpected decode result, expected []byte, got %T", buffer)
-	}
-
-	return b, nil
 }
 
 func encodeByteArray(data []byte, output io.Writer) error {
@@ -370,4 +344,65 @@ func keyBytesToNibbles(b []byte) []byte {
 		return append(nibbles, 0x10)
 	}
 	return nibbles
+}
+
+type OperatorLoader struct {
+	reader  io.Reader
+	decoder *codec.Decoder
+}
+
+func NewOperatorLoader(r io.Reader) *OperatorLoader {
+	return &OperatorLoader{r, codec.NewDecoder(r, &cbor)}
+}
+
+func (l *OperatorLoader) ReadByteArray() ([]byte, error) {
+	var buffer []byte
+	err := l.decoder.Decode(&buffer)
+	if err != nil {
+		return []byte{}, err
+	}
+
+	return buffer, nil
+}
+
+func (l *OperatorLoader) ReadHash() (common.Hash, error) {
+	var hash common.Hash
+	bytesRead, err := l.reader.Read(hash[:])
+	if err != nil {
+		return hash, err
+	}
+	if bytesRead != len(hash) {
+		return hash, fmt.Errorf("error while reading hash from input. expected to read %d bytes, read only %d", len(hash), bytesRead)
+	}
+	return hash, nil
+}
+
+func (l *OperatorLoader) ReadUint32() (uint32, error) {
+	var value uint32
+	if err := l.decoder.Decode(&value); err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+func (l *OperatorLoader) ReadByte() (byte, error) {
+	values := make([]byte, 1)
+	bytesRead, err := l.reader.Read(values)
+	if err != nil {
+		return 0, err
+	}
+	if bytesRead < 1 {
+		return 0, fmt.Errorf("could not read a byte from a reader")
+	}
+	return values[0], nil
+}
+
+func (l *OperatorLoader) ReadUInt64() (uint64, error) {
+	var value uint64
+	err := l.decoder.Decode(&value)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+
 }

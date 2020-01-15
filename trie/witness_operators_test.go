@@ -8,7 +8,7 @@ import (
 	"github.com/ugorji/go/codec"
 )
 
-func TestDecodeBytes(t *testing.T) {
+func TestOperatoLoaderByteArray(t *testing.T) {
 
 	var cbor codec.CborHandle
 
@@ -27,7 +27,9 @@ func TestDecodeBytes(t *testing.T) {
 		t.Error(err)
 	}
 
-	decoded1, err := decodeByteArray(&buffer)
+	loader1 := NewOperatorLoader(&buffer)
+
+	decoded1, err := loader1.ReadByteArray()
 	if err != nil {
 		t.Error(err)
 	}
@@ -35,7 +37,7 @@ func TestDecodeBytes(t *testing.T) {
 		t.Errorf("failed to decode bytes, expected %v got %v", bytes1, decoded1)
 	}
 
-	decoded2, err := decodeByteArray(&buffer)
+	decoded2, err := loader1.ReadByteArray()
 	if err != nil {
 		t.Error(err)
 	}
@@ -76,7 +78,8 @@ func TestAccountBigBalance(t *testing.T) {
 	}
 
 	acc2 := &OperatorLeafAccount{}
-	if err := acc2.LoadFrom(&buff); err != nil {
+	loader := NewOperatorLoader(&buff)
+	if err := acc2.LoadFrom(loader); err != nil {
 		t.Error(err)
 	}
 

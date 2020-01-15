@@ -73,6 +73,8 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 		return nil, fmt.Errorf("unexpected witness version: expected %d, got %d", WitnessVersion, header.Version)
 	}
 
+	operatorLoader := NewOperatorLoader(input)
+
 	opcode := make([]byte, 1)
 	var err error
 	operands := make([]WitnessOperator, 0)
@@ -103,7 +105,7 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 			return nil, fmt.Errorf("unexpected opcode while reading witness: %x", opcode[0])
 		}
 
-		err = op.LoadFrom(input)
+		err = op.LoadFrom(operatorLoader)
 		if err != nil {
 			return nil, err
 		}
