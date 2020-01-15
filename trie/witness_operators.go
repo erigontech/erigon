@@ -166,11 +166,10 @@ func (o *OperatorLeafAccount) LoadFrom(loader *OperatorUnmarshaller) error {
 	o.HasStorage = flags&flagStorage != 0
 
 	if flags&flagNonce != 0 {
-		nonce, err := loader.ReadUInt64()
+		o.Nonce, err = loader.ReadUInt64()
 		if err != nil {
 			return err
 		}
-		o.Nonce = nonce
 	}
 
 	balance := big.NewInt(0)
