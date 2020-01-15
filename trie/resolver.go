@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -332,9 +333,16 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				}
 			}
 			for _, prefLen := range tr.hb.invalidatePrefixes {
-				tr.invalidateAccountCache(append(tr.skipped.Bytes(), tr.succ.Bytes()[:prefLen]...))
+				prefix := append(tr.skipped.Bytes(), tr.succ.Bytes()[:prefLen]...)
+				tr.invalidateAccountCache(prefix)
 			}
 		} else {
+			for _, prefLen := range tr.hb.invalidatePrefixes {
+				prefix := append(tr.skipped.Bytes(), tr.succ.Bytes()[:prefLen]...)
+				addrHash := common.BytesToHash(k[:common.HashLength])
+				tr.invalidateStorageCache(addrHash, tr.a.Incarnation, prefix)
+				tr.invalidateAccountCache(prefix)
+			}
 			tr.value.Reset()
 			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
@@ -349,6 +357,16 @@ func (tr *Resolver) invalidateAccountCache(prefix []byte) {
 		return
 	}
 	if err := tr.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
+		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
+	}
+}
+
+func (tr *Resolver) invalidateStorageCache(addressHash common.Hash, incarnation uint64, prefix []byte) {
+	if tr.intermediateTrieHashesDb == nil {
+		return
+	}
+	toDel := append(dbutils.GenerateStoragePrefix(addressHash, incarnation), prefix...)
+	if err := tr.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, toDel); err != nil {
 		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
 	}
 }
