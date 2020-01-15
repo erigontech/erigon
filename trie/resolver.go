@@ -3,6 +3,7 @@ package trie
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -49,6 +50,7 @@ type Resolver struct {
 	rss        []*ResolveSet
 	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
+	skipped    bytes.Buffer
 	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groups     []uint16
 	a          accounts.Account
@@ -183,7 +185,7 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
-	tr.hb.streamingKey.Reset()
+	tr.skipped.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -266,23 +268,26 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
+		tr.skipped.Reset()
 
-		tr.hb.streamingKey.Reset()
-		tr.hb.streamingKey.Write(k)
-		tr.hb.streamingSkipped = skip
 		i := 0
+		var to io.ByteWriter
 		for _, b := range k {
-			high := b / 16
-			low := b % 16
-			tr.hb.streamingKey.WriteByte(high)
 			if i >= skip {
-				tr.succ.WriteByte(high)
+				to = &tr.succ
+			} else {
+				to = &tr.skipped
 			}
+			//nolint:errcheck
+			to.WriteByte(b / 16)
 			i++
-			tr.hb.streamingKey.WriteByte(low)
 			if i >= skip {
-				tr.succ.WriteByte(low)
+				to = &tr.succ
+			} else {
+				to = &tr.skipped
 			}
+			//nolint:errcheck
+			to.WriteByte(b % 16)
 			i++
 		}
 		tr.succ.WriteByte(16)
@@ -326,13 +331,26 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					return err
 				}
 			}
+			for _, prefLen := range tr.hb.invalidatePrefixes {
+				tr.invalidateAccountCache(append(tr.skipped.Bytes(), tr.succ.Bytes()[:prefLen]...))
+			}
 		} else {
 			tr.value.Reset()
 			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
+		tr.hb.invalidatePrefixes = []int{}
 	}
 	return nil
+}
+
+func (tr *Resolver) invalidateAccountCache(prefix []byte) {
+	if tr.intermediateTrieHashesDb == nil {
+		return
+	}
+	if err := tr.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
+		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
+	}
 }
 
 func (tr *Resolver) hackWrapperForHashOnly(prefix []byte) bool {
@@ -352,7 +370,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		}
 		return fmt.Errorf("Unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
-	tr.hb.SetIntermediateTrieHashesDb(db)
+	tr.intermediateTrieHashesDb = db
 	if tr.accounts {
 		if tr.historical {
 			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
