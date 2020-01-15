@@ -291,6 +291,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 			i++
 		}
 		tr.succ.WriteByte(16)
+		var succ = tr.succ.Bytes()
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
@@ -305,7 +306,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
 			}
-			tr.groups, err = GenStructStep(tr.hackWrapperForHashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
+			tr.groups, err = GenStructStep(tr.hackWrapperForHashOnly, tr.curr.Bytes(), succ, tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
@@ -332,11 +333,8 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				}
 			}
 			for _, l := range tr.hb.invalidatePrefixes {
-				tr.invalidationKey.Reset()
 				// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-				tr.invalidationKey.Write(tr.skipped.Bytes())
-				tr.invalidationKey.Write(tr.succ.Bytes()[:l])
-				tr.invalidateIntermediateCache(tr.invalidationKey.Bytes())
+				tr.invalidateIntermediateCache(append(tr.skipped.Bytes(), succ[:l]...))
 			}
 		} else {
 			/* Here we can invalidate storage, but I don't see how we can fill this cache in Trie.unload
