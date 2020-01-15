@@ -28,12 +28,10 @@ import (
 	"sync/atomic"
 	"unsafe"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
 	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
