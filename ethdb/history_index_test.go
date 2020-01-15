@@ -46,41 +46,41 @@ func TestHistoryIndex_Search2(t *testing.T) {
 
 func TestStorageIndex_Append(t *testing.T) {
 	index := NewStorageIndex()
-	key1,key2:=common.Hash{1}, common.Hash{2}
+	key1, key2 := common.Hash{1}, common.Hash{2}
 	index.Append(key1, 123)
 	index.Append(key2, 121)
 	index.Append(key2, 321)
 	index.Append(key2, 421)
 
 	if !reflect.DeepEqual(index, StorageIndex{
-		key1:&HistoryIndex{123},
-		key2:&HistoryIndex{121,321,421},
+		key1: &HistoryIndex{123},
+		key2: &HistoryIndex{121, 321, 421},
 	}) {
 		t.Fatal()
 	}
 
-	v,found:=index.Search(key2, 121)
-	if !found || v!=121 {
-		t.Fatal(v,found)
+	v, found := index.Search(key2, 121)
+	if !found || v != 121 {
+		t.Fatal(v, found)
 	}
 
 	index.Remove(key1, 123)
 	index.Remove(key2, 321)
 
 	if !reflect.DeepEqual(index, StorageIndex{
-		key2:&HistoryIndex{121,421},
+		key2: &HistoryIndex{121, 421},
 	}) {
 		t.Fatal()
 	}
 
-	b,err :=index.Encode()
-	if err!=nil {
+	b, err := index.Encode()
+	if err != nil {
 		t.Fatal(err)
 	}
 
-	index2:=NewStorageIndex()
-	err=index2.Decode(b)
-	if err!=nil {
+	index2 := NewStorageIndex()
+	err = index2.Decode(b)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if !reflect.DeepEqual(index, index2) {

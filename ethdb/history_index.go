@@ -146,7 +146,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 
 func BoltDBFindStorageByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint64) ([]byte, error) {
 	var k common.Hash
-	copy(k[:], key[common.HashLength + common.IncarnationLength:])
+	copy(k[:], key[common.HashLength+common.IncarnationLength:])
 
 	//check
 	hB := tx.Bucket(hBucket)

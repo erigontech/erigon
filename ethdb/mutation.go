@@ -302,8 +302,8 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 					return nil
 				}
 				var (
-					v []byte
-					isEmpty bool
+					v         []byte
+					isEmpty   bool
 					removeErr error
 				)
 
@@ -379,17 +379,17 @@ func (m *mutation) Commit() (uint64, error) {
 					changedKeys := changeSet.ChangedKeys()
 					for k := range changedKeys {
 						var (
-							v []byte
+							v   []byte
 							key []byte
 							err error
 						)
 						switch {
-						case debug.IsThinHistory()&&bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
-							key=[]byte(k)
-						case debug.IsThinHistory()&&bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
-							key=[]byte(k)[:common.HashLength+common.IncarnationLength]
+						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
+							key = []byte(k)
+						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+							key = []byte(k)[:common.HashLength+common.IncarnationLength]
 						default:
-							key=[]byte(k)
+							key = []byte(k)
 
 						}
 						value, err := m.getNoLock(hBucket, key)
@@ -421,7 +421,6 @@ func (m *mutation) Commit() (uint64, error) {
 							fmt.Println(hBucketStr, hBucket)
 							panic("incorrect")
 						}
-
 
 					}
 				}
