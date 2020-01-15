@@ -40,8 +40,8 @@ var (
 	// value - encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
 	ChangeSetBucket = []byte("ChangeSet")
 
-	// key - some_prefix_of(hash_of_address_of_account)
-	// value - hash_of_subtrie
+	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
+	// hash_of_address_of_account|incarnation|some_prefix_of(hash_of_storage_position) => hash_of_subtrie
 	IntermediateTrieHashesBucket = []byte("IntermediateTrieCache")
 
 	// databaseVerisionKey tracks the current database version.

@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -332,20 +331,24 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					return err
 				}
 			}
-			for _, prefLen := range tr.hb.invalidatePrefixes {
+			for _, l := range tr.hb.invalidatePrefixes {
 				tr.invalidationKey.Reset()
+				// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 				tr.invalidationKey.Write(tr.skipped.Bytes())
-				tr.invalidationKey.Write(tr.succ.Bytes()[:prefLen])
+				tr.invalidationKey.Write(tr.succ.Bytes()[:l])
 				tr.invalidateIntermediateCache(tr.invalidationKey.Bytes())
 			}
 		} else {
-			for _, prefLen := range tr.hb.invalidatePrefixes {
+			/* Here we can invalidate storage, but I don't see how we can fill this cache in Trie.unload
+			for _, l := range tr.hb.invalidatePrefixes {
 				tr.invalidationKey.Reset()
+				// hash_of_address_of_account|incarnation|some_prefix_of(hash_of_storage_position) => hash_of_subtrie
 				tr.invalidationKey.Write(k[:common.HashLength+8])
 				tr.invalidationKey.Write(tr.skipped.Bytes())
-				tr.invalidationKey.Write(tr.succ.Bytes()[:prefLen])
+				tr.invalidationKey.Write(tr.succ.Bytes()[:l])
 				tr.invalidateIntermediateCache(tr.invalidationKey.Bytes())
 			}
+			*/
 			tr.value.Reset()
 			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
