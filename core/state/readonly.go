@@ -67,11 +67,11 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	}
 
 	st := llrb.New()
-	var s [common.HashLength + IncarnationLength + common.HashLength]byte
+	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
 	// TODO: [Issue 99] support incarnations
 	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(FirstContractIncarnation))
-	copy(s[common.HashLength+IncarnationLength:], start)
+	copy(s[common.HashLength+common.IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
 	emptyHash := common.Hash{}
@@ -97,7 +97,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[common.HashLength+IncarnationLength:]
+		seckey := ks[common.HashLength+common.IncarnationLength:]
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
 		copy(si.seckey[:], seckey)
@@ -304,8 +304,8 @@ func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissin
 			return false, err
 		}
 
-		err = dbs.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+IncarnationLength), func(ks, vs []byte) (bool, error) {
-			key := dbs.GetKey(ks[common.HashLength+IncarnationLength:]) //remove account address and version from composite key
+		err = dbs.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
+			key := dbs.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {
 				account.Storage[common.BytesToHash(key).String()] = common.Bytes2Hex(vs)
@@ -341,13 +341,13 @@ func (dbs *DbState) DefaultRawDump() Dump {
 // for no more than maxItems.
 // Returns whether all matching storage items were traversed (provided there was no error).
 func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes, maxItems int, walker func(common.Hash, big.Int)) (bool, error) {
-	startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 	copy(startkey, addrHash[:])
 	// TODO: [Issue 99] Support incarnations
 	binary.BigEndian.PutUint64(startkey[common.HashLength:], ^uint64(1))
-	copy(startkey[common.HashLength+IncarnationLength:], prefix.Data)
+	copy(startkey[common.HashLength+common.IncarnationLength:], prefix.Data)
 
-	fixedbits := (common.HashLength + IncarnationLength + uint(len(prefix.Data))) * 8
+	fixedbits := (common.HashLength + common.IncarnationLength + uint(len(prefix.Data))) * 8
 	if prefix.Odd {
 		fixedbits -= 4
 	}

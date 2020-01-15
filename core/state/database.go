@@ -43,7 +43,6 @@ import (
 var MaxTrieCacheGen = uint32(1024 * 1024)
 
 const (
-	IncarnationLength = 8
 	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
 	//NonContractIncarnation incarnation for non contracts
@@ -809,7 +808,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var addrHash common.Hash
 			copy(addrHash[:], key[:common.HashLength])
 			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength+IncarnationLength:])
+			copy(keyHash[:], key[common.HashLength+common.IncarnationLength:])
 			m, ok := b.storageUpdates[addrHash]
 			if !ok {
 				m = make(map[common.Hash][]byte)
@@ -817,12 +816,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = value
-				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+IncarnationLength+common.HashLength], value); err != nil {
+				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 					return err
 				}
 			} else {
 				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+IncarnationLength+common.HashLength]); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
 					return err
 				}
 			}
@@ -860,7 +859,6 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	var err error
 	var enc []byte
 	if tds.historical {
-		panic("tds.historical")
 		enc, err = tds.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], tds.blockNr+1)
 		if err != nil {
 			enc = nil
@@ -880,7 +878,6 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 	}
 
 	if tds.historical && debug.IsThinHistory() && a.Incarnation > 0 {
-		panic("tds.historical")
 		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)
@@ -990,7 +987,6 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
-			panic("tds.historical")
 			enc, err = tds.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey), tds.blockNr)
 			if err != nil {
 				enc = nil
@@ -1068,12 +1064,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 // nextIncarnation determines what should be the next incarnation of an account (i.e. how many time it has existed before at this address)
 func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 	var found bool
-	var incarnationBytes [IncarnationLength]byte
+	var incarnationBytes [common.IncarnationLength]byte
 	if tds.historical {
-		panic("tds.historical")
 		// We reserve ethdb.MaxTimestampLength (8) at the end of the key to accomodate any possible timestamp
 		// (timestamp's encoding may have variable length)
-		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
+		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength+ethdb.MaxTimestampLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
 		if err := tds.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, tds.blockNr, func(k, _ []byte) (bool, error) {
@@ -1084,7 +1079,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 			return 0, err
 		}
 	} else {
-		startkey := make([]byte, common.HashLength+IncarnationLength+common.HashLength)
+		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
 		if err := tds.db.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
