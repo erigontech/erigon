@@ -14,8 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-// +build none
-
 // This file contains a miner stress test based on the Ethash consensus engine.
 package main
 
@@ -49,8 +47,9 @@ import (
 )
 
 func main() {
+	const n = 1
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	fdlimit.Raise(2048)
+	fdlimit.Raise(512*n)
 
 	// Generate a batch of accounts to seal and fund with
 	faucets := make([]*ecdsa.PrivateKey, 128)
@@ -67,7 +66,7 @@ func main() {
 		nodes  []*node.Node
 		enodes []*enode.Node
 	)
-	for i := 0; i < 4; i++ {
+	for i := 0; i < n; i++ {
 		// Start the node and wait until it's up
 		node, err := makeMiner(genesis)
 		if err != nil {
@@ -127,7 +126,7 @@ func main() {
 		nonces[index]++
 
 		// Wait if we're too saturated
-		if pend, _ := ethereum.TxPool().Stats(); pend > 2048 {
+		if pend, _ := ethereum.TxPool().Stats(); pend > n*512 {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}

@@ -20,7 +20,9 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +30,7 @@ import (
 	mapset "github.com/deckarep/golang-set"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/misc"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -180,6 +183,7 @@ type worker struct {
 	canonicalMiningMu sync.Mutex
 	sideMining        []consensus.Cancel
 	sideMiningMu      sync.Mutex
+	n int
 }
 
 type hooks struct {
@@ -213,10 +217,12 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
+		n: rand.Intn(100),
 	}
 
 	// Submit first work to initialize pending state.
 	if init {
+		fmt.Println("@@@@@@@@@@@ Start", worker.n)
 		worker.startCh <- struct{}{}
 	}
 	return worker
@@ -263,6 +269,7 @@ func (w *worker) pendingBlock() *types.Block {
 
 func (w *worker) init() {
 	w.initOnce.Do(func() {
+		time.Sleep(5*time.Second)
 		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
 		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
 		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
@@ -284,7 +291,7 @@ func (w *worker) init() {
 		commit, timestamp, timer := w.getCommit(recommit)
 
 		go w.mainLoop()
-		go w.newWorkLoop(timestamp, timer, recommit, commit)
+		go w.newWorkLoop(timer, recommit, commit)
 		go w.chainEvents(timestamp, commit)
 		go w.resultLoop()
 		go w.taskLoop()
@@ -293,6 +300,7 @@ func (w *worker) init() {
 
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
+	fmt.Println("@@@@@@@@@@@ Start", w.n)
 	atomic.StoreInt32(&w.running, 1)
 	w.init()
 	w.startCh <- struct{}{}
@@ -315,7 +323,7 @@ func (w *worker) close() {
 }
 
 // newWorkLoop is a standalone goroutine to submit new mining work upon received events.
-func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.Duration, commit func(ctx consensus.Cancel, noempty bool, s int32)) {
+func (w *worker) newWorkLoop(timer *time.Timer, recommit time.Duration, commit func(ctx consensus.Cancel, noempty bool, s int32)) {
 	minRecommit := recommit // minimal resubmit interval specified by user.
 
 	// recalcRecommit recalculates the resubmitting interval upon feedback.
@@ -342,11 +350,6 @@ func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.
 
 	for {
 		select {
-		case <-w.startCh:
-			w.clearPending(w.chain.CurrentBlock().NumberU64())
-			atomic.StoreInt64(timestamp, time.Now().Unix())
-			commit(consensus.StabCancel(), false, commitInterruptNewHead)
-
 		case <-timer.C:
 			// If mining is running resubmit a new work cycle periodically to pull in
 			// higher priced transactions. Disable this overhead for pending blocks.
@@ -357,7 +360,9 @@ func (w *worker) newWorkLoop(timestamp *int64, timer *time.Timer, recommit time.
 					continue
 				}
 				//fixme: not sure about it
+				fmt.Println("!!!!!!! 2")
 				commit(consensus.StabCancel(), true, commitInterruptResubmit)
+				fmt.Println("!!!!!!! 2.1", w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String(), w.chain.CurrentBlock().Root().String())
 			}
 
 		case interval := <-w.resubmitIntervalCh:
@@ -431,6 +436,8 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case req := <-w.newWorkCh:
+			fmt.Println("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+			//fixme data race
 			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
 
 		case ev := <-w.txsCh:
@@ -487,8 +494,20 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 
+	t := time.NewTicker(100*time.Millisecond)
+	defer t.Stop()
+
 	for {
 		select {
+		case <-t.C:
+			fmt.Println("===", w.n, w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String(), w.chain.CurrentBlock().Root().String())
+		case <-w.startCh:
+			w.clearPending(w.chain.CurrentBlock().NumberU64())
+			atomic.StoreInt64(timestamp, time.Now().Unix())
+			fmt.Println("!!!!!!! 1")
+			commit(consensus.StabCancel(), false, commitInterruptNewHead)
+			fmt.Println("!!!!!!! 1.1", w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String(), w.chain.CurrentBlock().Root().String())
+
 		//fixme do we need side chain events?
 		case head := <-w.chainHeadCh:
 			go func(ctx consensus.Cancel) {
@@ -497,7 +516,9 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 
 				atomic.StoreInt64(timestamp, time.Now().Unix())
 
+				fmt.Println("!!!!!!! 3", w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String())
 				commit(ctx, false, commitInterruptNewHead)
+				fmt.Println("!!!!!!! 3.1", w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String(), w.chain.CurrentBlock().Root().String())
 
 				ctx.CancelFunc()
 			}(w.getCanonicalChainContext())
@@ -546,6 +567,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 						return false
 					})
 
+					fmt.Println("!!!!!!! 5")
 					if err := w.commit(ctx, uncles, nil, true, start); err != nil {
 						ctx.CancelFunc()
 						log.Debug("cannot commit a block", "err", err)
@@ -574,6 +596,7 @@ func (w *worker) taskLoop() {
 
 	// interrupt aborts the in-flight sealing task.
 	interrupt := func() {
+		fmt.Println("+++++++++ 999")
 		if stopCh != nil {
 			close(stopCh)
 			stopCh = nil
@@ -583,28 +606,36 @@ func (w *worker) taskLoop() {
 		select {
 		case task := <-w.taskCh:
 			if w.newTaskHook != nil {
+				//fixme datarace in the tests
+				num := task.block.Number().Uint64()
+				StateLock(num)
 				w.newTaskHook(task)
+				StateUnlock(num)
 			}
 
 			// Reject duplicate sealing work due to resubmitting.
 			sealHash := w.engine.SealHash(task.block.Header())
 			if sealHash == prev {
+				fmt.Println("+++++++ 1")
 				continue
 			}
 			// Interrupt previous sealing operation
-			interrupt()
+			//interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
 
 			if w.skipSealHook != nil && w.skipSealHook(task) {
+				fmt.Println("+++++++ 21")
 				continue
 			}
 			w.pendingMu.Lock()
 			w.pendingTasks[w.engine.SealHash(task.block.Header())] = task
 			w.pendingMu.Unlock()
 
+			fmt.Println("+++++++ 2")
 			if err := w.engine.Seal(task.ctx, w.chain, task.block, w.resultCh, stopCh); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 			}
+			fmt.Println("+++++++ 3")
 		case <-w.exitCh:
 			interrupt()
 			return
@@ -615,9 +646,11 @@ func (w *worker) taskLoop() {
 // resultLoop is a standalone goroutine to handle sealing result submitting
 // and flush relative data to the database.
 func (w *worker) resultLoop() {
+	fmt.Println("+++++++++++ 0000")
 	for {
 		select {
 		case result := <-w.resultCh:
+			fmt.Println("+++++++ 4", result.Header())
 			// Short circuit when receiving empty result.
 			block := result.Block
 			if block == nil {
@@ -625,6 +658,7 @@ func (w *worker) resultLoop() {
 			}
 			// Short circuit when receiving duplicate result caused by resubmitting.
 			if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
+				fmt.Println("+++++++ 5")
 				continue
 			}
 			var (
@@ -635,6 +669,7 @@ func (w *worker) resultLoop() {
 			task, exist := w.pendingTasks[sealhash]
 			w.pendingMu.RUnlock()
 			if !exist {
+				fmt.Println("+++++++ 6")
 				log.Error("Block found but no relative pending task", "number", block.Number(), "sealhash", sealhash, "hash", hash)
 				continue
 			}
@@ -659,11 +694,18 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
+			//fixme data race
+			StateLock(block.Number().Uint64())
 			_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
+			//_, err := w.chain.InsertChain(types.Blocks{block})
 			if err != nil {
+				StateUnlock(block.Number().Uint64())
 				log.Error("Failed writing block to chain", "err", err)
+				fmt.Println("+++++++ 7")
 				continue
 			}
+			StateUnlock(block.Number().Uint64())
+
 			log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
 				"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
 
@@ -767,11 +809,15 @@ func (w *worker) updateSnapshot() {
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
 
+	StateLock(w.current.header.Number.Uint64())
 	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.tds.TrieStateWriter(), w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
+		StateUnlock(w.current.header.Number.Uint64())
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
 	}
+	StateUnlock(w.current.header.Number.Uint64())
+
 	if !w.chainConfig.IsByzantium(w.current.header.Number) {
 		w.current.tds.StartNewBuffer()
 	}
@@ -903,6 +949,8 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	tstart := time.Now()
 	parent := w.chain.CurrentBlock()
 
+	fmt.Println("#### parent", parent.Number().String(), parent.Hash().String(), parent.ParentHash().String())
+
 	if parent.Time() >= uint64(timestamp) {
 		timestamp = int64(parent.Time() + 1)
 	}
@@ -925,7 +973,14 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		header.Coinbase = w.coinbase
 	}
 	if err := w.engine.Prepare(w.chain, header); err != nil {
-		log.Error("Failed to prepare header for mining", "err", err)
+		log.Error("Failed to prepare header for mining",
+			"err", err,
+			"headerNumber", header.Number.Uint64(),
+			"headerRoot", header.Root.String(),
+			"headerParentHash", header.ParentHash.String(),
+			"parentNumber", parent.Number().Uint64(),
+			"parentHash", parent.Hash().String(),
+			"callers", debug.Callers(10))
 		ctx.CancelFunc()
 		return
 	}
@@ -1041,7 +1096,7 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 
 	block, err := NewBlock(w.engine, s, w.current.tds, w.chain.Config(), w.current.header, w.current.txs, uncles, w.current.receipts)
 	if err != nil {
-		ctx.CancelFunc()
+		fmt.Println("^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 1")
 		return err
 	}
 
@@ -1119,7 +1174,42 @@ func (w *worker) clearCanonicalChainContext() {
 	}
 }
 
+//fixme
+var stateLock = &struct{
+	m map[uint64]*sync.Mutex
+	mu sync.Mutex
+} {
+	make(map[uint64]*sync.Mutex),
+	sync.Mutex{},
+}
+
+func getStateLock(number uint64) *sync.Mutex {
+	stateLock.mu.Lock()
+	defer stateLock.mu.Unlock()
+
+	if mu, ok := stateLock.m[number]; ok {
+		return mu
+	}
+
+	mu := new(sync.Mutex)
+	stateLock.m[number] = mu
+	return mu
+}
+
+func StateLock(number uint64) {
+	return
+	getStateLock(number).Lock()
+}
+
+func StateUnlock(number uint64) {
+	return
+	getStateLock(number).Unlock()
+}
+
 func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
+	StateLock(header.Number.Uint64())
+	defer StateUnlock(header.Number.Uint64())
+
 	block, err := engine.FinalizeAndAssemble(chainConfig, header, s, txs, uncles, receipts)
 	if err != nil {
 		return nil, err
@@ -1131,7 +1221,7 @@ func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.Trie
 	}
 
 	if err = tds.ResolveStateTrie(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("newBlock on %s: %w", header.Number.String(), err)
 	}
 
 	root, err := tds.CalcTrieRoots(false)

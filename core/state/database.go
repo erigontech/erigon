@@ -21,6 +21,9 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+
+	"github.com/davecgh/go-spew/spew"
+
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"runtime"
@@ -185,6 +188,7 @@ func getTrieDBState(db ethdb.Database) *TrieDbState {
 	trieObjMu.RUnlock()
 
 	if !ok {
+		fmt.Println("yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1", db.ID(), spew.Sdump(trieObj))
 		return nil
 	}
 
@@ -200,6 +204,11 @@ func setTrieDBState(tds *TrieDbState, id uint64) {
 	}
 
 	ptr := unsafe.Pointer(tds)
+	runtime.SetFinalizer(tds, func(_ *TrieDbState ){
+		trieObjMu.Lock()
+		delete(trieObj, id)
+		trieObjMu.Unlock()
+	})
 	trieObj[id] = uintptr(ptr)
 }
 
@@ -245,14 +254,19 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 }
 
 func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	if tr := getTrieDBState(db); tr != nil {
+	if tr := getTrieDBState(db); tr != nil && tr.t != nil {
 		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
 			return tr, nil
 		}
 		return nil, fmt.Errorf("trieDBState expected %v, %v, got %v %v", blockNr, root, tr.getBlockNr(), tr.LastRoot())
+	} else {
+		fmt.Println("xxxx 1", tr == nil)
+		if tr != nil {
+			fmt.Println("xxxx 2", tr.t == nil)
+		}
 	}
 
-	return newTrieDbState(root, db, blockNr)
+	return NewTrieDbState(root, db, blockNr)
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
@@ -279,14 +293,13 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	n := tds.getBlockNr()
 	tp := trie.NewTriePruning(n)
 
-	cpy := TrieDbState{
+	return &TrieDbState{
 		t:       &tcopy,
 		tMu:     new(sync.Mutex),
 		db:      tds.db,
 		blockNr: n,
 		tp:      tp,
 	}
-	return &cpy
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
@@ -343,7 +356,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
-	if tds.tMu == nil {
+	if tds == nil || tds.tMu == nil {
 		return common.Hash{}
 	}
 	tds.tMu.Lock()
@@ -515,6 +528,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) erro
 		}
 	}
 	if resolver != nil {
+		//fixme тут ошибку получаем
 		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
 			return err
 		}

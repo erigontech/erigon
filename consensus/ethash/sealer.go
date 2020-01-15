@@ -22,6 +22,7 @@ import (
 	crand "crypto/rand"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"math/rand"
@@ -55,6 +56,7 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 		header.Nonce, header.MixDigest = types.BlockNonce{}, common.Hash{}
 		select {
 		case results <- consensus.ResultWithContext{ctx, block.WithSeal(header)}:
+			fmt.Println("+++++++++++++ 15")
 		default:
 			ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "fake", "sealhash", ethash.SealHash(block.Header()))
 		}
@@ -62,6 +64,7 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 	}
 	// If we're running a shared PoW, delegate sealing to it
 	if ethash.shared != nil {
+		fmt.Println("+++++++++++++ 10")
 		return ethash.shared.Seal(ctx, chain, block, results, stop)
 	}
 
@@ -72,6 +75,7 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 		seed, err := crand.Int(crand.Reader, big.NewInt(math.MaxInt64))
 		if err != nil {
 			ethash.lock.Unlock()
+			fmt.Println("+++++++++++++ 16")
 			return err
 		}
 		ethash.rand = rand.New(rand.NewSource(seed.Int64()))
@@ -105,18 +109,21 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 		select {
 		case <-stop:
 			// Outside abort, stop all miner threads
+			fmt.Println("+++++++++++++ 11")
 			ctx.CancelFunc()
 		case result = <-locals:
 			// One of the threads found a block, abort all others
 			select {
 			case results <- result:
+				fmt.Println("+++++++++++++ 19")
 			default:
+				fmt.Println("+++++++++++++ 12")
 				ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "local", "sealhash", ethash.SealHash(block.Header()))
 			}
-			ctx.CancelFunc()
+			//ctx.CancelFunc()
 		case <-ethash.update:
 			// Thread count was changed on user request, restart
-			ctx.CancelFunc()
+			fmt.Println("+++++++++++++ 13")
 			if err := ethash.Seal(ctx, chain, block, results, stop); err != nil {
 				ethash.config.Log.Error("Failed to restart sealing after update", "err", err)
 			}

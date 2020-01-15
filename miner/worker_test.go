@@ -706,30 +706,3 @@ func testAdjustInterval(t *testing.T, testCase *testCase, chainConfig *params.Ch
 		t.Error("interval reset timeout")
 	}
 }
-
-func TestMining(t *testing.T) {
-	ethash := ethash.NewFaker()
-	defer ethash.Close()
-
-	testCase, err := getTestCase()
-	if err != nil {
-		t.Error(err)
-	}
-
-	const num = 10
-
-	b := newTestBackend(t, testCase, testCase.ethashChainConfig, ethash, ethdb.NewMemDatabase(), num)
-	w := newTestWorker(testCase, testCase.ethashChainConfig, ethash, b, hooks{}, false)
-	defer w.close()
-
-	w.start()
-
-	timer := time.NewTicker(10 * time.Millisecond)
-	defer timer.Stop()
-	for range timer.C {
-		b := w.pendingBlock()
-		if b != nil && b.NumberU64() >= num {
-			break
-		}
-	}
-}

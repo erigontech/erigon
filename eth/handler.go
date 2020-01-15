@@ -1117,7 +1117,9 @@ func (pm *ProtocolManager) BroadcastTxs(txs types.Transactions) {
 func (pm *ProtocolManager) minedBroadcastLoop() {
 	// automatically stops if unsubscribe
 	for obj := range pm.minedBlockSub.Chan() {
+		fmt.Println("************************ got a block 1")
 		if ev, ok := obj.Data.(core.NewMinedBlockEvent); ok {
+			fmt.Println("************************ got a block 2", ev.Block.Number().Uint64(), ev.Block.Hash().String(), ev.Block.Root().String())
 			pm.BroadcastBlock(ev.Block, true)  // First propagate block to peers
 			pm.BroadcastBlock(ev.Block, false) // Only then announce to the rest
 		}

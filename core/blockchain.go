@@ -686,6 +686,9 @@ func (bc *BlockChain) insert(block *types.Block) {
 	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
 	rawdb.WriteHeadBlockHash(bc.db, block.Hash())
 
+	//fixme: может восстановить
+	//bc.InsertHeaderChain([]*types.Header{block.Header()}, 1)
+
 	bc.currentBlock.Store(block)
 	headBlockGauge.Update(int64(block.NumberU64()))
 
@@ -1236,6 +1239,10 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 // WriteBlockWithState writes the block and all associated state to the database.
 func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, state *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+	fmt.Println("################ Writing", block.Number().Uint64(), block.Hash().String(), block.Root().String())
+	defer fmt.Println("################ Writing END", block.Number().Uint64(), block.Hash().String(), block.Root().String())
+
+	/*
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1243,6 +1250,7 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
+	*/
 
 	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
 }
@@ -1250,12 +1258,14 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
+	fmt.Println("////////// 1")
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
+		fmt.Println("$$$$$$$$$$ 1")
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
 	//localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
@@ -1263,29 +1273,38 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 
 	// Irrelevant of the canonical status, write the block itself to the database
 	if common.IsCanceled(ctx) {
-		return NonStatTy, ctx.Err()
+		fmt.Println("$$$$$$$$$$ 2.0")
+		//return NonStatTy, ctx.Err()
 	}
 	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
+		fmt.Println("$$$$$$$$$$ 2")
 		return NonStatTy, err
 	}
 	rawdb.WriteBlock(ctx, bc.db, block)
 
 	if tds != nil {
+		fmt.Println("$$$$$$$$$$ 2.1")
 		if common.IsCanceled(ctx) {
-			return NonStatTy, ctx.Err()
+			//fixme: restore
+			fmt.Println("$$$$$$$$$$ 2.1.1")
+			//return NonStatTy, ctx.Err()
 		}
 		tds.SetBlockNr(block.NumberU64())
 	}
 
 	ctx = bc.WithContext(ctx, block.Number())
 	if stateDb != nil {
+		fmt.Println("////////// 2")
 		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+			fmt.Println("$$$$$$$$$$ 3")
 			return NonStatTy, err
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
 		if common.IsCanceled(ctx) {
-			return NonStatTy, ctx.Err()
+			//fixme: restore
+			fmt.Println("$$$$$$$$$$ 4")
+			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
@@ -1310,24 +1329,34 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//}
 	//if reorg {
 	// Reorganise the chain if the parent is not the head block
+	fmt.Println("////////// 3")
 	if block.ParentHash() != currentBlock.Hash() {
+		fmt.Println("////////// 4")
 		if common.IsCanceled(ctx) {
-			return NonStatTy, ctx.Err()
+			fmt.Println("$$$$$$$$$$ 4.1")
+			//return NonStatTy, ctx.Err()
 		}
 		if err := bc.reorg(currentBlock, block); err != nil {
+			fmt.Println("$$$$$$$$$$ 4.2")
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
+	fmt.Println("////////// 5")
 	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
+		fmt.Println("////////// 6")
 		if common.IsCanceled(ctx) {
-			return NonStatTy, ctx.Err()
+			fmt.Println("$$$$$$$$$$ 4.3")
+			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
+	fmt.Println("////////// 7")
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
+		fmt.Println("////////// 8")
 		if common.IsCanceled(ctx) {
-			return NonStatTy, ctx.Err()
+			fmt.Println("$$$$$$$$$$ 4.4")
+			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
@@ -1339,7 +1368,9 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//}
 
 	// Set new head.
+	fmt.Println("////////// 9")
 	if status == CanonStatTy {
+		fmt.Println("////////// 10")
 		bc.insert(block)
 	}
 	bc.futureBlocks.Remove(block.Hash())
@@ -2075,6 +2106,7 @@ Callers: %v
 // of the header retrieval mechanisms already need to verify nonces, as well as
 // because nonces can be verified sparsely, not needing to check each.
 func (bc *BlockChain) InsertHeaderChain(chain []*types.Header, checkFreq int) (int, error) {
+	//fixme не вызывается при майнинге
 	start := time.Now()
 	if bc.db == nil {
 		if i, err := bc.hc.ValidateHeaderChain(chain, checkFreq); err != nil {

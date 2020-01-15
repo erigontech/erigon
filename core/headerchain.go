@@ -135,6 +135,7 @@ func (hc *HeaderChain) GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash
 // in two scenarios: pure-header mode of operation (light clients), or properly
 // separated header/block phases (non-archive clients).
 func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (status WriteStatus, err error) {
+	fmt.Println("%%%%%%%%%%%%%%%% WriteHeader")
 	// Cache some values to prevent constant recalculation
 	var (
 		hash   = header.Hash()
@@ -270,6 +271,7 @@ func (hc *HeaderChain) ValidateHeaderChain(chain []*types.Header, checkFreq int)
 // of the header retrieval mechanisms already need to verfy nonces, as well as
 // because nonces can be verified sparsely, not needing to check each.
 func (hc *HeaderChain) InsertHeaderChain(chain []*types.Header, writeHeader WhCallback, start time.Time) (int, error) {
+	fmt.Println("%%%%%%%%%%%%%%%% InsertHeaderChain")
 	// Collect some import statistics to report on
 	stats := struct{ processed, ignored int }{}
 	// All headers passed verification, import them into the database
@@ -418,6 +420,7 @@ func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header 
 	}
 	header := rawdb.ReadHeader(hc.chainDb, hash, number)
 	if header == nil {
+		fmt.Println("GOTCHA!!!!", number, hash.String())
 		return nil
 	}
 	// Cache the found header for next time and return

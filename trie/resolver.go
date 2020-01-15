@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	dbg "github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -27,7 +28,7 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
 		return err
 	}
-	log.Info("Rebuilt top of account trie and verified", "root hash", n)
+	log.Info("Rebuilt top of account trie and verified", "root hash", n, "callers", dbg.Callers(10))
 	return nil
 }
 
@@ -338,9 +339,13 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		}
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("for block %d: %w", blockNr, err)
 	}
-	return tr.finaliseRoot()
+
+	if err = tr.finaliseRoot(); err != nil {
+		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
+	}
+	return nil
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
