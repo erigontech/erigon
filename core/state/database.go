@@ -356,7 +356,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	if err := tds.ResolveStateTrie(); err != nil {
+	if _, err := tds.ResolveStateTrie(false); err != nil {
 		return nil, err
 	}
 	return tds.UpdateStateTrie()
@@ -432,7 +432,8 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
-func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys) error {
+func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, collectWitnesses bool) ([]*trie.Witness, error) {
+	var witnesses []*trie.Witness
 	var resolver *trie.Resolver
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
@@ -444,11 +445,13 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys)
 		}
 	}
 	if resolver != nil {
+		resolver.CollectWitnesses(collectWitnesses)
 		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return err
+			return witnesses, err
 		}
+		witnesses = resolver.PopCollectedWitnesses()
 	}
-	return nil
+	return witnesses, nil
 }
 
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
@@ -505,7 +508,8 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) error {
+func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, collectWitnesses bool) ([]*trie.Witness, error) {
+	var witnesses []*trie.Witness
 	var resolver *trie.Resolver
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
@@ -517,12 +521,14 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) erro
 		}
 	}
 	if resolver != nil {
+		resolver.CollectWitnesses(collectWitnesses)
 		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return err
+			return witnesses, err
 		}
+		witnesses = resolver.PopCollectedWitnesses()
 		resolver = nil
 	}
-	return nil
+	return witnesses, nil
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -541,7 +547,8 @@ func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouche
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie() error {
+func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness, error) {
+	var witnesses []*trie.Witness
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -551,7 +558,7 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		tds.aggregateBuffer.merge(tds.currentBuffer)
 	}
 	if tds.aggregateBuffer == nil {
-		return nil
+		return witnesses, nil
 	}
 
 	tds.tMu.Lock()
@@ -562,23 +569,30 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
-	if err := tds.resolveAccountTouches(accountTouches); err != nil {
-		return err
+	var resolverWitnesses []*trie.Witness
+	var err error
+	if resolverWitnesses, err = tds.resolveAccountTouches(accountTouches, extractWitnesses); err != nil {
+		return witnesses, err
+
 	}
+	witnesses = resolverWitnesses
 
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
 	}
 
-	if err := tds.resolveStorageTouches(storageTouches); err != nil {
-		return err
+	if resolverWitnesses, err = tds.resolveStorageTouches(storageTouches, extractWitnesses); err != nil {
+		return witnesses, err
 	}
+
+	witnesses = append(witnesses, resolverWitnesses...)
+
 	if tds.resolveReads {
 		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
-			return err
+			return witnesses, err
 		}
 	}
-	return nil
+	return witnesses, nil
 }
 
 // CalcTrieRoots calculates trie roots without modifying the state trie
@@ -831,7 +845,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if err := tds.ResolveStateTrie(); err != nil {
+	if _, err := tds.ResolveStateTrie(false); err != nil {
 		return err
 	}
 
