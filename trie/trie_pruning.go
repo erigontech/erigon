@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -78,8 +77,6 @@ func (tp *TriePruning) SetCreateNodeFunc(f func(prefix []byte)) {
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
 func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
-	defer func(t time.Time) { fmt.Println("trie_pruning.go:74", time.Since(t)) }(time.Now())
-
 	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return

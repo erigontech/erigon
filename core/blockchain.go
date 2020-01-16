@@ -120,12 +120,13 @@ type CacheConfig struct {
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruneTimeout        time.Duration
-	ArchiveSyncInterval uint64
-	DownloadOnly        bool
-	NoHistory           bool
+	BlocksBeforePruning     uint64
+	BlocksToPrune           uint64
+	PruneTimeout            time.Duration
+	ArchiveSyncInterval     uint64
+	DownloadOnly            bool
+	NoHistory               bool
+	NoIntermediateTrieCache bool
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -372,6 +373,7 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 			return nil, err
 		}
 		tds.SetNoHistory(bc.NoHistory())
+		tds.NoIntermediateCache(bc.NoIntermediateTrieCache())
 		tds.SetResolveReads(bc.resolveReads)
 		tds.EnablePreimages(bc.enablePreimages)
 		if err := tds.Rebuild(); err != nil {
@@ -2212,6 +2214,22 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	return bc.cacheConfig.NoHistory || isArchiveInterval
 }
 
+func (bc *BlockChain) NoIntermediateTrieCache() bool {
+	return bc.cacheConfig.NoIntermediateTrieCache
+}
+
+func (bc *BlockChain) IsNoIntermediateTrieCache(currentBlock *big.Int) bool {
+	if currentBlock == nil {
+		return bc.cacheConfig.NoHistory
+	}
+
+	if !bc.cacheConfig.NoHistory {
+		return false
+	}
+
+	return true
+}
+
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
 	bc.highestKnownBlockMu.Lock()
 	if bc.highestKnownBlock < h {
@@ -2229,6 +2247,7 @@ func (bc *BlockChain) GetHeightKnownBlock() uint64 {
 func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
 	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
+	ctx = params.WithNoIntermediateTrieCache(ctx, bc.NoIntermediateTrieCache(), bc.IsNoIntermediateTrieCache)
 	return ctx
 }
 

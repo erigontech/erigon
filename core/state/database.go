@@ -256,6 +256,9 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 }
 
 func (tds *TrieDbState) putIntermediateCache(prefix []byte, subtrieHash []byte) {
+	if tds.noIntermediateCache {
+		return
+	}
 	if len(prefix) == 0 {
 		return
 	}
@@ -269,6 +272,9 @@ func (tds *TrieDbState) putIntermediateCache(prefix []byte, subtrieHash []byte) 
 }
 
 func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
+	if tds.noIntermediateCache {
+		return
+	}
 	if len(prefix) == 0 {
 		return
 	}
@@ -301,6 +307,9 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 
 func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
+}
+func (tds *TrieDbState) NoIntermediateCache(v bool) {
+	tds.noIntermediateCache = v
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
