@@ -17,16 +17,16 @@
 package trie
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"hash"
+
+	"golang.org/x/crypto/sha3"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
-	"golang.org/x/crypto/sha3"
 )
 
 type hasher struct {
@@ -71,15 +71,18 @@ func returnHasherToPool(h *hasher) {
 	}
 }
 
-// hash collapses a node down into a hash node, also returning a copy of the
-// original node initialized with the computed hash to replace the original one.
+// hash calculates node's RLP for hashing
+// and stores the RLP if len(RLP) < 32 and not force,
+// otherwise it stores hash(RLP).
+// It also updates flags.hash of the node.
 func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
-	//n.makedirty()
 	return h.hashInternal(n, force, storeTo, 0)
 }
 
-// hash collapses a node down into a hash node, also returning a copy of the
-// original node initialized with the computed hash to replace the original one.
+// hashInternal calculates node's RLP for hashing
+// and stores the RLP if len(RLP) < 32 and not force,
+// otherwise it stores hash(RLP).
+// It also updates flags.hash of the node.
 func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
 		copy(storeTo, hn)
@@ -90,14 +93,14 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		return common.HashLength, nil
 	}
 	// Trie not processed yet or needs storage, walk the children
-	children, err := h.hashChildren(n, bufOffset)
+	nodeRlp, err := h.hashChildren(n, bufOffset)
 	if err != nil {
 		return 0, err
 	}
 
-	hashLen := h.store(children, force, storeTo)
+	refLen := h.nodeRef(nodeRlp, force, storeTo)
 
-	if hashLen == common.HashLength {
+	if refLen == common.HashLength {
 		switch n := n.(type) {
 		case *accountNode:
 			n.hashCorrect = true
@@ -109,7 +112,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 			n.flags.dirty = false
 		}
 	}
-	return hashLen, nil
+	return refLen, nil
 }
 
 func writeRlpPrefix(buffer []byte, pos int) []byte {
@@ -136,9 +139,9 @@ func writeRlpPrefix(buffer []byte, pos int) []byte {
 	}
 }
 
-// hashChildren replaces the children of a node with their hashes if the encoded
-// size of the child is larger than a hash, returning the collapsed node as well
-// as a replacement for the original node with the child hashes cached in.
+// hashChildren replaces the children of a node with their hashes
+// if the RLP-encoded size of the child is >= 32,
+// returning node's RLP with the child hashes cached in.
 // DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 	buffer := h.buffers[bufOffset:]
@@ -304,39 +307,22 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 	return enc.DoubleRLPLen(), nil
 }
 
-func EncodeAsValue(data []byte) ([]byte, error) {
-	tmp := new(bytes.Buffer)
-	err := rlp.Encode(tmp, valueNode(data))
-	if err != nil {
-		return nil, err
-	}
-	return tmp.Bytes(), nil
-}
-
-// store hashes the node n and if we have a storage layer specified, it writes
-// the key/value pair to it and tracks any node->child references as well as any
-// node->external trie references.
-func (h *hasher) store(children []byte, force bool, storeTo []byte) int {
-	if children == nil {
+// nodeRef writes either node's RLP (if less than 32 bytes) or its hash
+// to storeTo and returns the size of the reference written.
+// force enforces the hashing even for short RLPs.
+func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) int {
+	if nodeRlp == nil {
 		copy(storeTo, emptyHash[:])
 		return 32
 	}
-	if len(children) < 32 && !force {
-		copy(storeTo, children)
-		return len(children)
+	if len(nodeRlp) < 32 && !force {
+		copy(storeTo, nodeRlp)
+		return len(nodeRlp)
 	}
 	h.sha.Reset()
-	h.sha.Write(children)
-	h.sha.Read(storeTo[:32]) // Only squize first 32 bytes
+	h.sha.Write(nodeRlp)
+	h.sha.Read(storeTo[:32]) // Only squeeze first 32 bytes
 	return 32
-}
-
-func (h *hasher) makeHashNode(data []byte) hashNode {
-	n := make(hashNode, h.sha.Size())
-	h.sha.Reset()
-	h.sha.Write(data)
-	h.sha.Read(n)
-	return n
 }
 
 func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (int, error) {

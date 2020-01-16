@@ -981,8 +981,8 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	}
 
 	tds.tMu.Lock()
-	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	defer tds.tMu.Unlock()
+	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {

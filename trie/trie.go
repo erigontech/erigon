@@ -1108,11 +1108,11 @@ func (t *Trie) Hash() common.Hash {
 	return common.BytesToHash(hash.(hashNode))
 }
 
-// DeepHash returns internal hash of a node reachable by the specified key prefix
+// DeepHash returns internal hash of a node reachable by the specified key prefix.
 // Note that if the prefix points into the middle of a key for a leaf node or of an extention
 // node, it will return the hash of a modified leaf node or extension node, where the
 // key prefix is removed from the key.
-// First returned value is `true` if the node with the specified prefix is found
+// First returned value is `true` if the node with the specified prefix is found.
 func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	hexPrefix := keybytesToHex(keyPrefix)
 	if t.binary {
@@ -1122,9 +1122,6 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	if !gotValue {
 		return false, common.Hash{}
 	}
-	//if accNode==nil {
-	//	return gotValue, common.Hash{}
-	//}
 	if accNode.hashCorrect {
 		return true, accNode.Root
 	}
