@@ -98,7 +98,10 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		return 0, err
 	}
 
-	refLen := h.nodeRef(nodeRlp, force, storeTo)
+	refLen, err := h.nodeRef(nodeRlp, force, storeTo)
+	if err != nil {
+		return 0, err
+	}
 
 	if refLen == common.HashLength {
 		switch n := n.(type) {
@@ -310,19 +313,26 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 // nodeRef writes either node's RLP (if less than 32 bytes) or its hash
 // to storeTo and returns the size of the reference written.
 // force enforces the hashing even for short RLPs.
-func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) int {
+func (h *hasher) nodeRef(nodeRlp []byte, force bool, storeTo []byte) (int, error) {
 	if nodeRlp == nil {
 		copy(storeTo, emptyHash[:])
-		return 32
+		return 32, nil
 	}
 	if len(nodeRlp) < 32 && !force {
 		copy(storeTo, nodeRlp)
-		return len(nodeRlp)
+		return len(nodeRlp), nil
 	}
 	h.sha.Reset()
-	h.sha.Write(nodeRlp)
-	h.sha.Read(storeTo[:32]) // Only squeeze first 32 bytes
-	return 32
+	if _, err := h.sha.Write(nodeRlp); err != nil {
+		return 0, err
+	}
+
+	// Only squeeze first 32 bytes
+	if _, err := h.sha.Read(storeTo[:32]); err != nil {
+		return 0, err
+	}
+
+	return 32, nil
 }
 
 func (h *hasher) hashChild(child node, buffer []byte, pos int, bufOffset int) (int, error) {
