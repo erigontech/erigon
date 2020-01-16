@@ -152,7 +152,8 @@ func Stateless(
 	binary bool,
 	createDb CreateDbFunc,
 	starkBlocksFile string,
-	starkStatsBase string) {
+	starkStatsBase string,
+	witnessDatabasePath string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -228,6 +229,18 @@ func Stateless(
 	blockProcessingStartTime := time.Now()
 
 	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
+
+	var witnessDB *WitnessDB
+
+	if witnessDatabasePath != "" {
+		var db ethdb.Database
+		db, err = createDb(witnessDatabasePath)
+		check(err)
+		witnessDB, err = NewWitnessDB(db)
+		check(err)
+		fmt.Printf("witnesses will be stored to a db at path: %s\n", witnessDatabasePath)
+		defer db.Close()
+	}
 
 	for !interrupt {
 		trace := blockNum == 50111 // false // blockNum == 545080
@@ -325,6 +338,11 @@ func Stateless(
 			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
+			}
+
+			if witnessDB != nil {
+				// saving successful witnesses to a file
+				witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, blockWitness)
 			}
 		}
 
