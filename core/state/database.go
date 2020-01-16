@@ -236,11 +236,8 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	var intermediateCache ethdb.MinDatabase = db
 	t.SetUnloadFunc(func(prefix []byte, subtrieHash []byte) {
 		if len(prefix) == 0 {
-			//log.Warn("IntermediateTrieCache: empty prefix for Put")
 			return
 		}
-		//defer func(t time.Time) { fmt.Println("IntermediateTrieHashesBucket.Put", time.Since(t)) }(time.Now())
-
 		k := make([]byte, len(prefix))
 		v := make([]byte, len(subtrieHash))
 		copy(k, prefix)
@@ -250,6 +247,15 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		}
 	})
 	tp := trie.NewTriePruning(blockNr)
+	tp.SetCreateNodeFunc(func(prefix []byte) {
+		if len(prefix) == 0 {
+			return
+		}
+
+		if err := intermediateCache.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
+			log.Warn("could not put IntermediateTrieHashesBucket", "err", err)
+		}
+	})
 
 	tds := &TrieDbState{
 		t:                 t,

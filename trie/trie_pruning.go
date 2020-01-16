@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 )
@@ -43,6 +44,8 @@ type TriePruning struct {
 
 	// Current timestamp
 	blockNr uint64
+
+	createNodeFunc func(prefix []byte)
 }
 
 func NewTriePruning(oldestGeneration uint64) *TriePruning {
@@ -52,6 +55,7 @@ func NewTriePruning(oldestGeneration uint64) *TriePruning {
 		accountTimestamps: make(map[string]uint64),
 		accounts:          make(map[uint64]map[string]struct{}),
 		generationCounts:  make(map[uint64]int),
+		createNodeFunc:    func([]byte) {},
 	}
 }
 
@@ -63,6 +67,10 @@ func (tp *TriePruning) BlockNr() uint64 {
 	return tp.blockNr
 }
 
+func (tp *TriePruning) SetCreateNodeFunc(f func(prefix []byte)) {
+	tp.createNodeFunc = f
+}
+
 // Updates a node to the current timestamp
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
@@ -70,11 +78,17 @@ func (tp *TriePruning) BlockNr() uint64 {
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
 func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
+	defer func(t time.Time) { fmt.Println("trie_pruning.go:74", time.Since(t)) }(time.Now())
+
 	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
 	}
 	if !del {
+		if !exists { // Created New node
+			tp.createNodeFunc(keyNibblesToBytes([]byte(hexS)))
+		}
+
 		var newMap map[string]struct{}
 		if m, ok := tp.accounts[newTimestamp]; ok {
 			newMap = m

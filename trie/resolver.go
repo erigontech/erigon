@@ -306,7 +306,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
 			}
-			tr.groups, err = GenStructStep(tr.hackWrapperForHashOnly, tr.curr.Bytes(), succ, tr.hb, data, tr.groups, false)
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), succ, tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
@@ -332,21 +332,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					return err
 				}
 			}
-			for _, l := range tr.hb.invalidatePrefixes {
-				// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-				tr.invalidateIntermediateCache(keyNibblesToBytes(append(tr.skipped.Bytes(), succ[:l]...)))
-			}
 		} else {
-			/* Here we can invalidate storage, but I don't see how we can fill this cache in Trie.unload
-			for _, l := range tr.hb.invalidatePrefixes {
-				tr.invalidationKey.Reset()
-				// hash_of_address_of_account|incarnation|some_prefix_of(hash_of_storage_position) => hash_of_subtrie
-				tr.invalidationKey.Write(k[:common.HashLength+8])
-				tr.invalidationKey.Write(tr.skipped.Bytes())
-				tr.invalidationKey.Write(tr.succ.Bytes()[:l])
-				tr.invalidateIntermediateCache(tr.invalidationKey.Bytes())
-			}
-			*/
 			tr.value.Reset()
 			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
@@ -354,24 +340,6 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.hb.invalidatePrefixes = []int{}
 	}
 	return nil
-}
-
-func (tr *Resolver) invalidateIntermediateCache(key []byte) {
-	if tr.intermediateTrieHashesDb == nil {
-		return
-	}
-	if len(key) == 0 {
-		return
-	}
-	if err := tr.intermediateTrieHashesDb.Delete(dbutils.IntermediateTrieHashesBucket, key); err != nil {
-		log.Warn("could not Delete from IntermediateTrieHashesBucket", "err", err)
-	}
-}
-
-func (tr *Resolver) hackWrapperForHashOnly(prefix []byte) bool {
-	//fmt.Printf("Yuou called hackWrapperForHashOnly with: %d\n", len(prefix))
-	tr.hb.nodePrefixLen = len(prefix) // hack, will use this field in HashBuilder.afterBranch method for caching
-	return tr.currentRs.HashOnly(prefix)
 }
 
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
@@ -385,7 +353,6 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		}
 		return fmt.Errorf("Unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
-	tr.intermediateTrieHashesDb = db
 	if tr.accounts {
 		if tr.historical {
 			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
