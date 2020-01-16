@@ -1219,15 +1219,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			t.unloadFunc(hex, p.child1.hash())
+			t.unloadFunc(keyNibblesToBytes(hex), p.child1.hash())
 			p.child1 = hnode
 		case i2:
-			t.unloadFunc(hex, p.child2.hash())
+			t.unloadFunc(keyNibblesToBytes(hex), p.child2.hash())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-		t.unloadFunc(hex, p.Children[idx].hash())
+		t.unloadFunc(keyNibblesToBytes(hex), p.Children[idx].hash())
 		p.Children[idx] = hnode
 	case *accountNode:
 		//t.unloadFunc(hex, p.storage.hash(), &p.Account)

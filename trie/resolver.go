@@ -334,7 +334,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 			}
 			for _, l := range tr.hb.invalidatePrefixes {
 				// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-				tr.invalidateIntermediateCache(append(tr.skipped.Bytes(), succ[:l]...))
+				tr.invalidateIntermediateCache(keyNibblesToBytes(append(tr.skipped.Bytes(), succ[:l]...)))
 			}
 		} else {
 			/* Here we can invalidate storage, but I don't see how we can fill this cache in Trie.unload
