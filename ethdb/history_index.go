@@ -112,7 +112,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		return nil, ErrKeyNotFound
 	}
 
-	csB := tx.Bucket(dbutils.ChangeSetBucket)
+	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
 	if csB == nil {
 		return nil, ErrKeyNotFound
 	}
@@ -163,7 +163,7 @@ func BoltDBFindStorageByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timesta
 		return nil, ErrKeyNotFound
 	}
 
-	csB := tx.Bucket(dbutils.ChangeSetBucket)
+	csB := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
 	if csB == nil {
 		return nil, ErrKeyNotFound
 	}

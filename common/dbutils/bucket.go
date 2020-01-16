@@ -37,8 +37,11 @@ var (
 	ContractCodeBucket = []byte("contractCode")
 
 	// key - encoded timestamp(block number) + history bucket(hAT/hST)
-	// value - encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
-	ChangeSetBucket = []byte("ChangeSet")
+	// value - encoded AccountChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
+	ChangeSetBucket = []byte("AccountChangeSet")
+
+	AccountChangeSetBucket = []byte("ACS")
+	StorageChangeSetBucket = []byte("SCS")
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = []byte("DatabaseVersion")

@@ -168,11 +168,11 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 // PutS adds a new entry to the historical buckets:
-// hBucket (unless changeSetBucketOnly) and ChangeSet.
+// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
 func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
 	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
 	hKey := bucketKey(hBucket, composite)
-	changeSetKey := bucketKey(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(encodedTS, hBucket))
+	changeSetKey := bucketKey(dbutils.ChangeSetByIndexBucket(hBucket), encodedTS)
 
 	return db.db.Update(func(tx *badger.Txn) error {
 		if !changeSetBucketOnly {
@@ -198,44 +198,42 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 	})
 }
 
-// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. AccountChangeSet).
 func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
-	prefix := bucketKey(dbutils.ChangeSetBucket, encodedTS)
+	accountChangeSetKey := bucketKey(dbutils.AccountChangeSetBucket, encodedTS)
+	storageChangeSetKey := bucketKey(dbutils.StorageChangeSetBucket, encodedTS)
 	return db.db.Update(func(tx *badger.Txn) error {
-		var keys [][]byte
-		it := tx.NewIterator(badger.DefaultIteratorOptions)
-		defer it.Close()
-		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			k := item.Key()
-
-			var changedAccounts []byte
-			err := item.Value(func(v []byte) error {
-				changedAccounts = v
+		f := func(changeSetKey []byte, hBucket []byte) error {
+			item, err := tx.Get(changeSetKey)
+			if err != nil {
+				return err
+			}
+			var changes []byte
+			err = item.Value(func(v []byte) error {
+				changes = v
 				return nil
 			})
 			if err != nil {
 				return err
 			}
 
-			bucket := k[len(prefix):]
-			err = dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
+			err = dbutils.Walk(changes, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
-				return tx.Delete(bucketKey(bucket, kk))
+				return tx.Delete(bucketKey(hBucket, kk))
 			})
 			if err != nil {
 				return err
 			}
 
-			keys = append(keys, k)
+			return tx.Delete(item.Key())
 		}
-		for _, k := range keys {
-			if err := tx.Delete(k); err != nil {
-				return err
-			}
+		err := f(accountChangeSetKey, dbutils.AccountsHistoryBucket)
+		if err != nil {
+			return err
 		}
-		return nil
+
+		return f(storageChangeSetKey, dbutils.StorageHistoryBucket)
 	})
 }
 
@@ -419,9 +417,10 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:               db,
-		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
+		db:                      db,
+		puts:                    newPuts(),
+		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
 	}
 	return m
 }

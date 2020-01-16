@@ -1,7 +1,6 @@
 package tests
 
 import (
-	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"math/big"
@@ -653,42 +652,41 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		AccountSuffixRecordsByTimestamp: make(map[uint64]uint32),
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
-	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
-
-		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
-			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
-				panic("multiple account suffix records")
-			}
-			stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
+		if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
+			panic("multiple account suffix records")
 		}
-		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
-			if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
-				panic("multiple storage suffix records")
-			}
-			stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
-		}
+		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
 
-		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
-			err := dbutils.Walk(v, func(k, _ []byte) error {
-				compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
-				_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
-				if err != nil {
-					stat.ErrAccountsInHistory++
-					return nil
-				}
-				stat.NumOfChangesInAccountsHistory++
-
-				return nil
-			})
+		innerErr := dbutils.Walk(v, func(k, _ []byte) error {
+			compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
+			_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 			if err != nil {
-				return false, err
+				stat.ErrAccountsInHistory++
+				return nil
 			}
+			stat.NumOfChangesInAccountsHistory++
+			return nil
+		})
+		if innerErr != nil {
+			return false, innerErr
 		}
 
 		return true, nil
 	})
+	if err != nil {
+		return stateStats{}, err
+	}
+	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		timestamp, _ := dbutils.DecodeTimestamp(key)
+		if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
+			panic("multiple storage suffix records")
+		}
+		stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
 
+		return true, nil
+	})
 	if err != nil {
 		return stateStats{}, err
 	}

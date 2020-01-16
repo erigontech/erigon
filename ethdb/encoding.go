@@ -82,9 +82,9 @@ func decode7to8(b []byte) []byte {
 	return out
 }
 
-// addToChangeSet is not part the ChangeSet API, and it is only used in the test settings.
+// addToChangeSet is not part the AccountChangeSet API, and it is only used in the test settings.
 // In the production settings, ChangeSets encodings are never modified.
-// In production settings (mutation.PutS) we always first populate ChangeSet object,
+// In production settings (mutation.PutS) we always first populate AccountChangeSet object,
 // then encode it once, and then only work with the encoding
 func addToChangeSet(b []byte, key []byte, value []byte) ([]byte, error) {
 	var m int
@@ -97,7 +97,7 @@ func addToChangeSet(b []byte, key []byte, value []byte) ([]byte, error) {
 		n = int(binary.BigEndian.Uint32(b[0:4]))
 		m = int(binary.BigEndian.Uint32(b[4:8]))
 		if len(key) != m {
-			return nil, fmt.Errorf("wrong key size in ChangeSet: expected %d, actual %d", m, len(key))
+			return nil, fmt.Errorf("wrong key size in AccountChangeSet: expected %d, actual %d", m, len(key))
 		}
 	}
 	pos := 4

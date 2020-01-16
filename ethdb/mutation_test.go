@@ -2,6 +2,7 @@ package ethdb
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -24,24 +25,22 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	acc := make([]*accounts.Account, 10)
 	addrHashes := make([]common.Hash, 10)
 	for i := range acc {
+		fmt.Println(i)
 		acc[i], addrHashes[i] = randomAccount(t)
 		b := make([]byte, acc[i].EncodingLengthForStorage())
 		acc[i].EncodeForStorage(b)
-		err := db.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
+		err := mutDB.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
+
 	_, err := mutDB.Commit()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	csData, err := db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +79,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
+	_, err = db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != ErrKeyNotFound {
 		t.Fatal("changeset must be deleted")
 	}
@@ -180,11 +179,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,11 +203,7 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal("incorrect account changeset")
 	}
 
-	csData, err = db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.StorageHistoryBucket))
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,7 +321,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.AccountsHistoryBucket))
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,16 +340,10 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	expectedData, err := expectedChangeSet.Encode()
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect changeset")
 	}
 
-	csData, err = db.Get(dbutils.ChangeSetBucket, dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(1), dbutils.StorageHistoryBucket))
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
 	if err != nil {
 		t.Fatal(err)
 	}

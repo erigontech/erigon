@@ -92,10 +92,11 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 
 type mutation struct {
 	puts puts // Map buckets to map[key]value
-	//map[timestamp]map[hBucket]listOfChangedKeys
-	changeSetByBlock map[uint64]map[string]*dbutils.ChangeSet
-	mu               sync.RWMutex
-	db               Database
+	//map[blockNumber]listOfChangedKeys
+	accountChangeSetByBlock map[uint64]*dbutils.ChangeSet
+	storageChangeSetByBlock map[uint64]*dbutils.ChangeSet
+	mu                      sync.RWMutex
+	db                      Database
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
@@ -123,16 +124,20 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
-	bucketMap, ok := m.changeSetByBlock[timestamp]
-	if !ok {
-		return nil, ErrKeyNotFound
+	switch {
+	case bytes.Equal(bucket, dbutils.AccountsHistoryBucket):
+		if _, ok := m.accountChangeSetByBlock[timestamp]; !ok {
+			m.accountChangeSetByBlock[timestamp] = dbutils.NewChangeSet()
+		}
+		return m.accountChangeSetByBlock[timestamp], nil
+	case bytes.Equal(bucket, dbutils.StorageHistoryBucket):
+		if _, ok := m.storageChangeSetByBlock[timestamp]; !ok {
+			m.storageChangeSetByBlock[timestamp] = dbutils.NewChangeSet()
+		}
+		return m.storageChangeSetByBlock[timestamp], nil
+	default:
+		panic("incorrect bucket")
 	}
-	changeSet, ok := bucketMap[string(bucket)]
-	if !ok {
-		return nil, ErrKeyNotFound
-	}
-
-	return changeSet, nil
 }
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
@@ -196,25 +201,20 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	hBucketStr := string(hBucket)
-	changesByBucket, ok := m.changeSetByBlock[timestamp]
-	if !ok {
-		changesByBucket = make(map[string]*dbutils.ChangeSet)
-		m.changeSetByBlock[timestamp] = changesByBucket
-	}
-	changeSet, ok := changesByBucket[hBucketStr]
-	if !ok {
-		changeSet = dbutils.NewChangeSet()
-	}
-
-	err := changeSet.Add(key, value)
+	changeSet, err := m.getChangeSetByBlockNoLock(hBucket, timestamp)
 	if err != nil {
 		return err
 	}
-	changesByBucket[hBucketStr] = changeSet
+
+	err = changeSet.Add(key, value)
+	if err != nil {
+		return err
+	}
+
 	if noHistory {
 		return nil
 	}
+
 	if !debug.IsThinHistory() {
 		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 		m.puts.Set(hBucket, composite, value)
@@ -284,18 +284,25 @@ func (m *mutation) Delete(bucket, key []byte) error {
 
 // Deletes all keys with specified suffix(blockNum) from all the buckets
 func (m *mutation) DeleteTimestamp(timestamp uint64) error {
-	encodedTS := dbutils.EncodeTimestamp(timestamp)
+	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	changedAccounts, err := m.Get(dbutils.AccountChangeSetBucket, changeSetKey)
+	if err != nil && err != ErrKeyNotFound {
+		return err
+	}
+
+	changedStorage, err := m.Get(dbutils.StorageChangeSetBucket, changeSetKey)
+	if err != nil && err != ErrKeyNotFound {
+		return err
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	err := m.Walk(dbutils.ChangeSetBucket, encodedTS, uint(8*len(encodedTS)), func(k, changedAccounts []byte) (bool, error) {
-		// k = encodedTS + hBucket
-		hBucket := k[len(encodedTS):]
-		hBucketStr := string(hBucket)
-		if debug.IsThinHistory() {
+	if debug.IsThinHistory() {
+		if len(changedAccounts) > 0 {
 			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
-				indexBytes, err := m.getNoLock(hBucket, kk)
-				if err != nil {
+				indexBytes, getErr := m.getNoLock(dbutils.AccountsHistoryBucket, kk)
+				if getErr != nil {
 					return nil
 				}
 				var (
@@ -304,42 +311,79 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 					removeErr error
 				)
 
-				if bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
-					v, isEmpty, removeErr = RemoveFromIndex(indexBytes, timestamp)
-				} else if bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-					v, isEmpty, removeErr = RemoveFromStorageIndex(indexBytes, timestamp)
-				} else {
-					panic("unexpected bucket")
-				}
+				v, isEmpty, removeErr = RemoveFromIndex(indexBytes, timestamp)
 				if removeErr != nil {
 					return removeErr
 				}
 				if isEmpty {
-					m.puts.DeleteStr(hBucketStr, kk)
+					m.puts.DeleteStr(string(dbutils.AccountsHistoryBucket), kk)
 				} else {
-					m.puts.SetStr(hBucketStr, kk, v)
+					m.puts.SetStr(string(dbutils.AccountsHistoryBucket), kk, v)
 				}
 				return nil
 			})
 			if innerErr != nil {
-				return false, innerErr
+				return innerErr
 			}
-			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
-		} else {
+			m.puts.DeleteStr(string(dbutils.AccountChangeSetBucket), changeSetKey)
+		}
+
+		if len(changedStorage) > 0 {
+			innerErr := dbutils.Walk(changedStorage, func(kk, _ []byte) error {
+				indexBytes, getErr := m.getNoLock(dbutils.StorageHistoryBucket, kk)
+				if getErr != nil {
+					return nil
+				}
+				var (
+					v         []byte
+					isEmpty   bool
+					removeErr error
+				)
+
+				v, isEmpty, removeErr = RemoveFromStorageIndex(indexBytes, timestamp)
+				if removeErr != nil {
+					return removeErr
+				}
+				if isEmpty {
+					m.puts.DeleteStr(string(dbutils.StorageHistoryBucket), kk)
+				} else {
+					m.puts.SetStr(string(dbutils.StorageHistoryBucket), kk, v)
+				}
+				return nil
+			})
+			if innerErr != nil {
+				return innerErr
+			}
+			m.puts.DeleteStr(string(dbutils.StorageChangeSetBucket), changeSetKey)
+		}
+
+	} else {
+		if len(changedAccounts) > 0 {
 			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
-				m.puts.DeleteStr(hBucketStr, composite)
+				m.puts.DeleteStr(string(dbutils.AccountsHistoryBucket), composite)
 				return nil
 			})
 
 			if innerErr != nil {
-				return false, innerErr
+				return innerErr
 			}
-			m.puts.DeleteStr(string(dbutils.ChangeSetBucket), k)
+			m.puts.DeleteStr(string(dbutils.AccountChangeSetBucket), changeSetKey)
 		}
-		return true, nil
-	})
-	return err
+		if len(changedStorage) > 0 {
+			innerErr := dbutils.Walk(changedStorage, func(kk, _ []byte) error {
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				m.puts.DeleteStr(string(dbutils.StorageHistoryBucket), composite)
+				return nil
+			})
+
+			if innerErr != nil {
+				return innerErr
+			}
+			m.puts.DeleteStr(string(dbutils.StorageChangeSetBucket), changeSetKey)
+		}
+	}
+	return nil
 }
 
 func (m *mutation) Commit() (uint64, error) {
@@ -348,72 +392,82 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.changeSetByBlock) > 0 {
-		changeSetStr := string(dbutils.ChangeSetBucket)
-		for timestamp, changesByBucket := range m.changeSetByBlock {
-			encodedTS := dbutils.EncodeTimestamp(timestamp)
-			for hBucketStr, changes := range changesByBucket {
-				hBucket := []byte(hBucketStr)
-				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
-				if debug.IsThinHistory() && !bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-					changedKeys := changes.ChangedKeys()
-					for k := range changedKeys {
-						var (
-							v   []byte
-							key []byte
-							err error
-						)
-						switch {
-						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
-							key = []byte(k)
-						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
-							key = []byte(k)[:common.HashLength+common.IncarnationLength]
-						default:
-							key = []byte(k)
-
-						}
-						value, err := m.getNoLock(hBucket, key)
-						if err == ErrKeyNotFound {
-							if m.db != nil {
-								value, err = m.db.Get(hBucket, key)
-								if err != nil && err != ErrKeyNotFound {
-									return 0, err
-								}
+	if len(m.accountChangeSetByBlock) > 0 {
+		for timestamp, changes := range m.accountChangeSetByBlock {
+			if debug.IsThinHistory() {
+				changedKeys := changes.ChangedKeys()
+				for k := range changedKeys {
+					var (
+						v   []byte
+						key []byte
+						err error
+					)
+					value, err := m.getNoLock(dbutils.AccountsHistoryBucket, key)
+					if err == ErrKeyNotFound {
+						if m.db != nil {
+							value, err = m.db.Get(dbutils.AccountsHistoryBucket, key)
+							if err != nil && err != ErrKeyNotFound {
+								return 0, err
 							}
 						}
-
-						switch {
-						case bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
-							v, err = AppendToIndex(value, timestamp)
-							if err != nil {
-								log.Error("mutation, append to index", "err", err, "timestamp", timestamp)
-								continue
-							}
-							m.puts.SetStr(hBucketStr, []byte(k), v)
-						case bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
-							v, err = AppendToStorageIndex(value, []byte(k)[common.HashLength+common.IncarnationLength:common.HashLength+common.IncarnationLength+common.HashLength], timestamp)
-							if err != nil {
-								log.Error("mutation, append to storage index", "err", err, "timestamp", timestamp)
-								continue
-							}
-							m.puts.SetStr(hBucketStr, key, v)
-						default:
-							fmt.Println(hBucketStr, hBucket)
-							panic("incorrect")
-						}
-
 					}
+					v, err = AppendToIndex(value, timestamp)
+					if err != nil {
+						log.Error("mutation, append to index", "err", err, "timestamp", timestamp)
+						continue
+					}
+					m.puts.Set(dbutils.AccountsHistoryBucket, []byte(k), v)
 				}
-				sort.Sort(changes)
-				dat, err := changes.Encode()
-				if err != nil {
-					return 0, err
-				}
-				m.puts.SetStr(changeSetStr, changeSetKey, dat)
 			}
+			sort.Sort(changes)
+			dat, err := changes.Encode()
+			if err != nil {
+				return 0, err
+			}
+			m.puts.Set(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
+		}
+
+	}
+	if len(m.storageChangeSetByBlock) > 0 {
+		for timestamp, changes := range m.storageChangeSetByBlock {
+			if debug.IsThinHistory() {
+				changedKeys := changes.ChangedKeys()
+				for k := range changedKeys {
+					var (
+						v   []byte
+						key []byte
+						err error
+					)
+					key = []byte(k)[:common.HashLength+common.IncarnationLength]
+					value, err := m.getNoLock(dbutils.StorageHistoryBucket, key)
+					if err == ErrKeyNotFound {
+						if m.db != nil {
+							value, err = m.db.Get(dbutils.StorageHistoryBucket, key)
+							if err != nil && err != ErrKeyNotFound {
+								return 0, err
+							}
+						}
+					}
+
+					v, err = AppendToStorageIndex(value, []byte(k)[common.HashLength+common.IncarnationLength:common.HashLength+common.IncarnationLength+common.HashLength], timestamp)
+					if err != nil {
+						log.Error("mutation, append to storage index", "err", err, "timestamp", timestamp)
+						continue
+					}
+					m.puts.Set(dbutils.StorageHistoryBucket, key, v)
+				}
+			}
+			sort.Sort(changes)
+			dat, err := changes.Encode()
+			if err != nil {
+				return 0, err
+			}
+			m.puts.Set(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
 		}
 	}
-	m.changeSetByBlock = make(map[uint64]map[string]*dbutils.ChangeSet)
+
+	m.accountChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
+	m.storageChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
 
 	tuples := common.NewTuples(m.puts.Size(), 3, 1)
 	for bucketStr, bt := range m.puts {
@@ -438,7 +492,8 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.changeSetByBlock = make(map[uint64]map[string]*dbutils.ChangeSet)
+	m.accountChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
+	m.storageChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
 	m.puts = make(puts)
 }
 
@@ -464,9 +519,10 @@ func (m *mutation) Close() {
 
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:               m,
-		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
+		db:                      m,
+		puts:                    newPuts(),
+		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
 	}
 	return mm
 }
@@ -581,9 +637,10 @@ func (d *RWCounterDecorator) MemCopy() Database {
 }
 func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:               d,
-		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
+		db:                      d,
+		puts:                    newPuts(),
+		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
 	}
 	return mm
 }

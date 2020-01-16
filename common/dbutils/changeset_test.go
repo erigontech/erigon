@@ -10,7 +10,7 @@ import (
 )
 
 func createTestChangeSet() []byte {
-	// empty ChangeSet first
+	// empty AccountChangeSet first
 	ch := NewChangeSet()
 	// add some entries
 	_ = ch.Add(common.FromHex("56fb07ee"), common.FromHex("f7f6db1eb17c6d582078e0ffdd0c"))
@@ -21,7 +21,7 @@ func createTestChangeSet() []byte {
 }
 
 func TestEncoding(t *testing.T) {
-	// empty ChangeSet first
+	// empty AccountChangeSet first
 	ch := NewChangeSet()
 	_, err := ch.Encode()
 	assert.NoError(t, err)

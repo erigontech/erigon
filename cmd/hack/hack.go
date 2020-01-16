@@ -912,20 +912,34 @@ func relayoutKeys() {
 	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	var count int
+	var accountChangeSetCount, storageChangeSetCount int
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.ChangeSetBucket)
+		b := tx.Bucket(dbutils.AccountChangeSetBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			count++
+			accountChangeSetCount++
 		}
 		return nil
 	})
 	check(err)
-	fmt.Printf("Records: %d\n", count)
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageChangeSetBucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			storageChangeSetCount++
+		}
+		return nil
+	})
+	check(err)
+	fmt.Printf("Account changeset: %d\n", accountChangeSetCount)
+	fmt.Printf("Storage changeset: %d\n", storageChangeSetCount)
+	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
 }
 
 func upgradeBlocks() {

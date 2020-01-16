@@ -1,5 +1,7 @@
 package dbutils
 
+import "bytes"
+
 // EncodeTimestamp has the property: if a < b, then Encoding(a) < Encoding(b) lexicographically
 func EncodeTimestamp(timestamp uint64) []byte {
 	var suffix []byte
@@ -28,4 +30,14 @@ func DecodeTimestamp(suffix []byte) (uint64, []byte) {
 		timestamp = (timestamp << 8) | uint64(suffix[i])
 	}
 	return timestamp, suffix[bytecount:]
+}
+
+func ChangeSetByIndexBucket(b []byte) []byte {
+	if bytes.Equal(b, AccountsHistoryBucket) {
+		return AccountChangeSetBucket
+	}
+	if bytes.Equal(b, StorageHistoryBucket) {
+		return StorageChangeSetBucket
+	}
+	panic("wrong bucket")
 }

@@ -109,6 +109,7 @@ func calculateNumOfPrunedBlocks(currentBlock, lastPrunedBlock uint64, blocksBefo
 		return lastPrunedBlock, lastPrunedBlock, false
 	}
 }
+
 func (p *BasicPruner) Stop() {
 	p.stop <- struct{}{}
 	p.wg.Wait()
@@ -134,7 +135,7 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 	keysToRemove := newKeysToRemove()
-	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 		if timestamp < blockNumFrom {
 			return true, nil
@@ -143,20 +144,39 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.ChangeSet = append(keysToRemove.ChangeSet, key)
+		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, key)
 
-		err := dbutils.Walk(v, func(cKey, _ []byte) error {
+		innerErr := dbutils.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
-				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
-			}
-			if bytes.HasSuffix(cKey, dbutils.StorageHistoryBucket) {
-				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
-			}
+			keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
 			return nil
 		})
-		if err != nil {
-			return false, err
+		if innerErr != nil {
+			return false, innerErr
+		}
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		timestamp, _ := dbutils.DecodeTimestamp(key)
+		if timestamp < blockNumFrom {
+			return true, nil
+		}
+		if timestamp > blockNumTo {
+			return false, nil
+		}
+
+		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, key)
+
+		innerErr := dbutils.Walk(v, func(cKey, _ []byte) error {
+			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
+			keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
+			return nil
+		})
+		if innerErr != nil {
+			return false, innerErr
 		}
 		return true, nil
 	})
@@ -172,7 +192,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 }
 
 func batchDelete(db ethdb.Database, keys *keysToRemove) error {
-	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.ChangeSet))
+	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.AccountChangeSet))
 	iterator := LimitIterator(keys, DeleteLimit)
 	for iterator.HasMore() {
 		iterator.ResetLimit()
@@ -200,14 +220,16 @@ func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
 		AccountHistoryKeys: make([][]byte, 0),
 		StorageHistoryKeys: make([][]byte, 0),
-		ChangeSet:          make([][]byte, 0),
+		AccountChangeSet:   make([][]byte, 0),
+		StorageChangeSet:   make([][]byte, 0),
 	}
 }
 
 type keysToRemove struct {
 	AccountHistoryKeys [][]byte
 	StorageHistoryKeys [][]byte
-	ChangeSet          [][]byte
+	AccountChangeSet   [][]byte
+	StorageChangeSet   [][]byte
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
@@ -243,8 +265,11 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
 		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
 	}
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
-		return i.k.ChangeSet[i.currentNum], dbutils.ChangeSetBucket, true
+	if bytes.Equal(i.currentBucket, dbutils.AccountChangeSetBucket) {
+		return i.k.AccountChangeSet[i.currentNum], dbutils.AccountChangeSetBucket, true
+	}
+	if bytes.Equal(i.currentBucket, dbutils.StorageChangeSetBucket) {
+		return i.k.StorageChangeSet[i.currentNum], dbutils.StorageChangeSetBucket, true
 	}
 	return nil, nil, false
 }
@@ -254,7 +279,7 @@ func (i *limitIterator) ResetLimit() {
 }
 
 func (i *limitIterator) HasMore() bool {
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.ChangeSet) == i.currentNum {
+	if bytes.Equal(i.currentBucket, dbutils.StorageChangeSetBucket) && len(i.k.StorageChangeSet) == i.currentNum {
 		return false
 	}
 	return true
@@ -270,7 +295,12 @@ func (i *limitIterator) updateBucket() {
 	}
 
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.ChangeSetBucket
+		i.currentBucket = dbutils.AccountChangeSetBucket
+		i.currentNum = 0
+	}
+
+	if bytes.Equal(i.currentBucket, dbutils.AccountChangeSetBucket) && len(i.k.AccountChangeSet) == i.currentNum {
+		i.currentBucket = dbutils.StorageChangeSetBucket
 		i.currentNum = 0
 	}
 }

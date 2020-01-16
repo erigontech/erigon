@@ -17,7 +17,6 @@
 package state_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -622,13 +621,16 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	}
 
 	fmt.Println("==========================CHANGESET===========================")
-	err = blockchain.ChainDb().Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
-		if bytes.HasSuffix(k, dbutils.AccountsHistoryBucket) {
-			stats.ChangeSetHAT += uint64(len(v))
-		}
-		if bytes.HasSuffix(k, dbutils.StorageHistoryBucket) {
-			stats.ChangeSetHST += uint64(len(v))
-		}
+	err = blockchain.ChainDb().Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		stats.ChangeSetHAT += uint64(len(v))
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = blockchain.ChainDb().Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k []byte, v []byte) (b bool, e error) {
+		stats.ChangeSetHST += uint64(len(v))
 		return true, nil
 	})
 	if err != nil {

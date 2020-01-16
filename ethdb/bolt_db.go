@@ -87,7 +87,7 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 }
 
 // PutS adds a new entry to the historical buckets:
-// hBucket (unless changeSetBucketOnly) and ChangeSet.
+// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
 func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
 	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
 	changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
@@ -125,7 +125,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			}
 		}
 
-		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetBucket, true)
+		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetByIndexBucket(hBucket), true)
 		if err != nil {
 			return err
 		}
@@ -218,7 +218,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([
 	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.ChangeSetBucket)
+		b := tx.Bucket(dbutils.ChangeSetByIndexBucket(hBucket))
 		if b == nil {
 			return nil
 		}
@@ -619,19 +619,21 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 }
 
 // DeleteTimestamp removes data for a given timestamp (block number)
-// from all historical buckets (incl. ChangeSet).
+// from all historical buckets (incl. AccountChangeSet, StorageChangeSet).
 func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		sb := tx.Bucket(dbutils.ChangeSetBucket)
-		if sb == nil {
-			return nil
-		}
-		var keys [][]byte
-		c := sb.Cursor()
-		for k, v := c.Seek(encodedTS); k != nil && bytes.HasPrefix(k, encodedTS); k, v = c.Next() {
-			// k = encodedTS + hBucket
-			hb := tx.Bucket(k[len(encodedTS):])
+	return db.db.Update(func(tx *bolt.Tx) error {
+		removeChangeSetAndHistory := func(changeSetBucket []byte, historyBucket []byte) error {
+			sb := tx.Bucket(changeSetBucket)
+			if sb == nil {
+				return nil
+			}
+
+			v, _ := sb.Get(encodedTS)
+			if len(v) == 0 {
+				return ErrKeyNotFound
+			}
+			hb := tx.Bucket(historyBucket)
 			if hb == nil {
 				return nil
 			}
@@ -642,16 +644,14 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if err != nil {
 				return err
 			}
-			keys = append(keys, k)
+			return sb.Delete(encodedTS)
 		}
-		for _, k := range keys {
-			if err := sb.Delete(k); err != nil {
-				return err
-			}
+		innerErr := removeChangeSetAndHistory(dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket)
+		if innerErr != nil {
+			return innerErr
 		}
-		return nil
+		return removeChangeSetAndHistory(dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket)
 	})
-	return err
 }
 
 func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
@@ -698,9 +698,10 @@ func (db *BoltDatabase) DB() *bolt.DB {
 
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:               db,
-		puts:             newPuts(),
-		changeSetByBlock: make(map[uint64]map[string]*dbutils.ChangeSet),
+		db:                      db,
+		puts:                    newPuts(),
+		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
 	}
 	return m
 }

@@ -20,7 +20,7 @@ import (
 	"errors"
 )
 
-// TODO [Andrew] Add some comments about historical buckets & ChangeSet.
+// TODO [Andrew] Add some comments about historical buckets & AccountChangeSet.
 // https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
 
 // ErrKeyNotFound is returned when key isn't found in the database.
@@ -32,7 +32,7 @@ type Putter interface {
 	Put(bucket, key, value []byte) error
 
 	// PutS adds a new entry to the historical buckets:
-	// hBucket (unless changeSetBucketOnly) and ChangeSet.
+	// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
 	// timestamp == block number
 	PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error
 }
@@ -68,7 +68,7 @@ type Deleter interface {
 	// Delete removes a single entry.
 	Delete(bucket, key []byte) error
 
-	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
+	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. AccountChangeSet).
 	// timestamp == block number
 	DeleteTimestamp(timestamp uint64) error
 }

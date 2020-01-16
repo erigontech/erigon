@@ -17,7 +17,6 @@
 package ethdb
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -32,14 +31,44 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-	if err := db.Walk(dbutils.ChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := dbutils.DecodeTimestamp(k)
+	if err := db.Walk(dbutils.AccountChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
 
 		if dbutils.Len(v) > 0 {
-			bucketStr := string(common.CopyBytes(bucket))
+			bucketStr := string(dbutils.AccountsHistoryBucket)
+			var t map[string][]byte
+			var ok bool
+			if t, ok = m[bucketStr]; !ok {
+				t = make(map[string][]byte)
+				m[bucketStr] = t
+			}
+
+			err := dbutils.Walk(v, func(k, vv []byte) error {
+				if _, ok = t[string(k)]; !ok {
+					t[string(k)] = vv
+				}
+
+				return nil
+			})
+			if err != nil {
+				return false, err
+			}
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+	if err := db.Walk(dbutils.StorageChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
+		if timestamp > timestampSrc {
+			return false, nil
+		}
+
+		if dbutils.Len(v) > 0 {
+			bucketStr := string(dbutils.StorageHistoryBucket)
 			var t map[string][]byte
 			var ok bool
 			if t, ok = m[bucketStr]; !ok {
@@ -77,11 +106,9 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
 	var keys [][]byte
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
-	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		keyTimestamp, bucket := dbutils.DecodeTimestamp(k)
-		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
-			return true, nil
-		}
+	if err := db.Walk(dbutils.AccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
+		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
+
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
