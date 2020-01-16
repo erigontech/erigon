@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
-	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -997,7 +996,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				tr := trie.New(common.Hash{})
 
 				for i := 0; i < n && responseSize < softResponseLimit; i++ {
-					contractPrefix := make([]byte, common.HashLength+state.IncarnationLength)
+					contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 					copy(contractPrefix, addrHash.Bytes())
 					binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^uint64(1))
 					// TODO [Issue 99] support incarnations

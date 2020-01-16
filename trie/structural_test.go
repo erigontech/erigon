@@ -60,8 +60,8 @@ func TestV2HashBuilding(t *testing.T) {
 
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
-	var curr OneBytesTape
-	var valueTape OneBytesTape
+	var curr bytes.Buffer
+	var valueTape bytes.Buffer
 	var groups []uint16
 	for i, key := range keys {
 		curr.Reset()
@@ -80,11 +80,11 @@ func TestV2HashBuilding(t *testing.T) {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
 		}
-		valueTape.Buffer.Reset()
+		valueTape.Reset()
 		if i%2 == 0 {
-			valueTape.Buffer.Write(valueLong)
+			valueTape.Write(valueLong)
 		} else {
-			valueTape.Buffer.Write(valueShort)
+			valueTape.Write(valueShort)
 		}
 	}
 	curr.Reset()
@@ -128,8 +128,8 @@ func TestV2Resolution(t *testing.T) {
 
 	hb := NewHashBuilder(false)
 	var succ bytes.Buffer
-	var curr OneBytesTape
-	var valueTape OneBytesTape
+	var curr bytes.Buffer
+	var valueTape bytes.Buffer
 	var groups []uint16
 	for _, key := range keys {
 		curr.Reset()
@@ -148,8 +148,8 @@ func TestV2Resolution(t *testing.T) {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
 		}
-		valueTape.Buffer.Reset()
-		valueTape.Buffer.Write(value)
+		valueTape.Reset()
+		valueTape.Write(value)
 	}
 	curr.Reset()
 	curr.Write(succ.Bytes())

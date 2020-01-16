@@ -60,10 +60,10 @@ func convertDatabaseToCBOR(db *bolt.DB, maxTxOperations uint) error {
 			k = common.CopyBytes(k)
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}
+		fmt.Printf("Transaction completed with %d records\n", i)
 		i = 0
 	}
 	return nil

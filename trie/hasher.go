@@ -278,7 +278,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, error) {
 	h.bw.Setup(buffer, pos)
 
-	var val RlpSerializable
+	var val rlphacks.RlpSerializable
 
 	if h.valueNodesRlpEncoded {
 		val = rlphacks.RlpEncodedBytes(vn)

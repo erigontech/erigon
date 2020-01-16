@@ -166,7 +166,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 				firstB := firstTx.Bucket(bucketName)
 				return b.ForEach(func(k, v []byte) error {
 					if firstB != nil {
-						if firstV, _ := firstB.Get(k); bytes.Equal(v, firstV) {
+						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
 							// Skip the record that is the same as in the first Db
 							return nil
 						}
@@ -605,20 +605,21 @@ func initialState1() error {
 		rs.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
-	bwb := trie.NewBlockWitnessBuilder(false)
+
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if err = bwb.MakeBlockWitness(quadTrie, rs, codeMap); err != nil {
+
+	var witness *trie.Witness
+
+	if witness, err = quadTrie.ExtractWitness(0, false, rs, codeMap); err != nil {
 		return err
 	}
-	var witness bytes.Buffer
-	if _, err = bwb.WriteTo(&witness); err != nil {
-		return err
-	}
+
 	var witnessTrie *trie.Trie
 	var witnessCodeMap map[common.Hash][]byte
-	if witnessTrie, witnessCodeMap, err = trie.BlockWitnessToTrie(witness.Bytes(), false); err != nil {
+
+	if witnessTrie, witnessCodeMap, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
 		return err
 	}
 	if _, err = statePicture(witnessTrie, witnessCodeMap, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {

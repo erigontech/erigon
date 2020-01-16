@@ -9,7 +9,6 @@ require (
 	github.com/StackExchange/wmi v0.0.0-20190523213315-cbe66965904d // indirect
 	github.com/VictoriaMetrics/fastcache v1.5.4
 	github.com/aristanetworks/goarista v0.0.0-20170210015632-ea17b1a17847
-	github.com/armon/go-radix v1.0.0
 	github.com/blend/go-sdk v2.0.0+incompatible // indirect
 	github.com/boltdb/bolt v1.3.1 // indirect
 	github.com/btcsuite/btcd v0.0.0-20171128150713-2e60448ffcc6

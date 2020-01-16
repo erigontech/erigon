@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"math/big"
@@ -13,14 +12,12 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -55,7 +52,7 @@ type APIImpl struct {
 
 // PrivateDebugAPI
 type PrivateDebugAPI interface {
-	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error)
+	StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
@@ -86,46 +83,31 @@ func NewPrivateDebugAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	var blockNumber uint64
 
-	err := api.db.View(ctx, func(tx *remote.Tx) error {
-		b, err := tx.Bucket(dbutils.HeadHeaderKey)
+	if err := api.db.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		blockNumber, err = remote.ReadLastBlockNumber(tx)
 		if err != nil {
 			return err
 		}
-
-		if b == nil {
-			return fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
-		}
-		blockHashData, err := b.Get(dbutils.HeadHeaderKey)
-		if err != nil {
-			return err
-		}
-		if len(blockHashData) != common.HashLength {
-			return fmt.Errorf("head header hash not found or wrong size: %x", blockHashData)
-		}
-		b1, err := tx.Bucket(dbutils.HeaderNumberPrefix)
-		if err != nil {
-			return err
-		}
-
-		if b1 == nil {
-			return fmt.Errorf("bucket %s not found", dbutils.HeaderNumberPrefix)
-		}
-		blockNumberData, err := b1.Get(blockHashData)
-		if err != nil {
-			return err
-		}
-
-		if len(blockNumberData) != 8 {
-			return fmt.Errorf("head block number not found or wrong size: %x", blockNumberData)
-		}
-		blockNumber = binary.BigEndian.Uint64(blockNumberData)
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		return 0, err
 	}
 
 	return hexutil.Uint64(blockNumber), nil
+}
+
+type blockGetter struct {
+	dbReader rawdb.DatabaseReader
+}
+
+func (g *blockGetter) GetBlockByHash(hash common.Hash) *types.Block {
+	return rawdb.ReadBlockByHash(g.dbReader, hash)
+
+}
+
+func (g *blockGetter) GetBlock(hash common.Hash, number uint64) *types.Block {
+	return rawdb.ReadBlock(g.dbReader, hash, number)
 }
 
 type chainContext struct {
@@ -245,17 +227,8 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 }
 
 // StorageRangeAt re-implementation of eth/api.go:StorageRangeAt
-func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
-	if block == nil {
-		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", blockHash)
-	}
-	parent := rawdb.ReadBlock(api.dbReader, block.ParentHash(), block.NumberU64()-1)
-	if parent == nil {
-		return eth.StorageRangeResult{}, fmt.Errorf("block %x not found", block.ParentHash())
-	}
-
-	_, _, _, dbstate, _, err := api.computeTxEnv(ctx, block.Hash(), len(block.Transactions())-1)
+func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Hash, txIndex uint64, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int) (eth.StorageRangeResult, error) {
+	_, _, _, dbstate, err := eth.ComputeTxEnv(ctx, &blockGetter{api.dbReader}, params.MainnetChainConfig, &chainContext{db: api.dbReader}, api.dbReader, blockHash, txIndex)
 	if err != nil {
 		return eth.StorageRangeResult{}, err
 	}
@@ -263,46 +236,6 @@ func (api *PrivateDebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash co
 	//dbstate.SetBlockNr(block.NumberU64())
 	//statedb.CommitBlock(api.eth.chainConfig.IsEIP158(block.Number()), dbstate)
 	return eth.StorageRangeAt(dbstate, contractAddress, keyStart, maxResult)
-}
-
-// computeTxEnv returns the execution environment of a certain transaction.
-func (api *PrivateDebugAPIImpl) computeTxEnv(ctx context.Context, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, uint64, error) {
-	// Create the parent state database
-	block := rawdb.ReadBlockByHash(api.dbReader, blockHash)
-	if block == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("block %x not found", blockHash)
-	}
-	parent := rawdb.ReadBlock(api.dbReader, block.ParentHash(), block.NumberU64()-1)
-	if parent == nil {
-		return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("parent %x not found", block.ParentHash())
-	}
-	statedb, dbstate := api.computeIntraBlockState(parent)
-	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(params.MainnetChainConfig, block.Number())
-
-	for idx, tx := range block.Transactions() {
-		select {
-		default:
-		case <-ctx.Done():
-			return nil, vm.Context{}, nil, nil, 0, ctx.Err()
-		}
-
-		// Assemble the transaction call message and return if the requested offset
-		msg, _ := tx.AsMessage(signer)
-		EVMcontext := core.NewEVMContext(msg, block.Header(), &chainContext{db: api.dbReader}, nil)
-		if idx == txIndex {
-			return msg, EVMcontext, statedb, dbstate, parent.NumberU64(), nil
-		}
-		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, params.MainnetChainConfig, vm.Config{})
-		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-			return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
-		}
-		// Ensure any modifications are committed to the state
-		// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-		_ = statedb.FinalizeTx(vmenv.ChainConfig().WithEIPsFlags(context.Background(), block.Number()), dbstate)
-	}
-	return nil, vm.Context{}, nil, nil, 0, fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
 }
 
 // computeIntraBlockState retrieves the state database associated with a certain block.

@@ -40,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -629,7 +630,7 @@ func (api *PrivateDebugAPI) TraceTransaction(ctx context.Context, hash common.Ha
 	if tx == nil {
 		return nil, fmt.Errorf("transaction %#x not found", hash)
 	}
-	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.ChainDb(), blockHash, int(index))
+	msg, vmctx, statedb, _, err := ComputeTxEnv(ctx, api.eth.blockchain, api.eth.blockchain.Config(), api.eth.blockchain, api.eth.ChainDb(), blockHash, index)
 	if err != nil {
 		return nil, err
 	}
@@ -699,20 +700,28 @@ func (api *PrivateDebugAPI) traceTx(ctx context.Context, message core.Message, v
 	}
 }
 
+type BlockGetter interface {
+	// GetBlockByHash retrieves a block from the database by hash, caching it if found.
+	GetBlockByHash(hash common.Hash) *types.Block
+	// GetBlock retrieves a block from the database by hash and number,
+	// caching it if found.
+	GetBlock(hash common.Hash, number uint64) *types.Block
+}
+
 // computeTxEnv returns the execution environment of a certain transaction.
-func ComputeTxEnv(ctx context.Context, blockchain *core.BlockChain, chainDb ethdb.Getter, blockHash common.Hash, txIndex int) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
+func ComputeTxEnv(ctx context.Context, blockGetter BlockGetter, cfg *params.ChainConfig, chain core.ChainContext, chainDb ethdb.Getter, blockHash common.Hash, txIndex uint64) (core.Message, vm.Context, *state.IntraBlockState, *state.DbState, error) {
 	// Create the parent state database
-	block := blockchain.GetBlockByHash(blockHash)
+	block := blockGetter.GetBlockByHash(blockHash)
 	if block == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("block %x not found", blockHash)
 	}
-	parent := blockchain.GetBlock(block.ParentHash(), block.NumberU64()-1)
+	parent := blockGetter.GetBlock(block.ParentHash(), block.NumberU64()-1)
 	if parent == nil {
 		return nil, vm.Context{}, nil, nil, fmt.Errorf("parent %x not found", block.ParentHash())
 	}
 	statedb, dbstate := ComputeIntraBlockState(chainDb, parent)
 	// Recompute transactions up to the target index.
-	signer := types.MakeSigner(blockchain.Config(), block.Number())
+	signer := types.MakeSigner(cfg, block.Number())
 
 	for idx, tx := range block.Transactions() {
 		select {
@@ -723,12 +732,12 @@ func ComputeTxEnv(ctx context.Context, blockchain *core.BlockChain, chainDb ethd
 
 		// Assemble the transaction call message and return if the requested offset
 		msg, _ := tx.AsMessage(signer)
-		EVMcontext := core.NewEVMContext(msg, block.Header(), blockchain, nil)
-		if idx == txIndex {
+		EVMcontext := core.NewEVMContext(msg, block.Header(), chain, nil)
+		if idx == int(txIndex) {
 			return msg, EVMcontext, statedb, dbstate, nil
 		}
 		// Not yet the searched for transaction, execute on top of the current state
-		vmenv := vm.NewEVM(EVMcontext, statedb, blockchain.Config(), vm.Config{})
+		vmenv := vm.NewEVM(EVMcontext, statedb, cfg, vm.Config{})
 		if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 			return nil, vm.Context{}, nil, nil, fmt.Errorf("transaction %x failed: %v", tx.Hash(), err)
 		}
