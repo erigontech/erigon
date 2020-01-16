@@ -3,7 +3,6 @@ package trie
 import (
 	"bytes"
 	"fmt"
-	"io"
 	"runtime/debug"
 	"sort"
 	"strings"
@@ -50,7 +49,6 @@ type Resolver struct {
 	rss        []*ResolveSet
 	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
 	succ       bytes.Buffer
-	skipped    bytes.Buffer
 	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groups     []uint16
 	a          accounts.Account
@@ -185,7 +183,6 @@ func (tr *Resolver) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
-	tr.skipped.Reset()
 	if tr.curr.Len() > 0 {
 		var err error
 		var data GenStructStepData
@@ -268,30 +265,18 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		tr.skipped.Reset()
-
 		i := 0
-		var to io.ByteWriter
 		for _, b := range k {
 			if i >= skip {
-				to = &tr.succ
-			} else {
-				to = &tr.skipped
+				tr.succ.WriteByte(b / 16)
 			}
-			//nolint:errcheck
-			to.WriteByte(b / 16)
 			i++
 			if i >= skip {
-				to = &tr.succ
-			} else {
-				to = &tr.skipped
+				tr.succ.WriteByte(b % 16)
 			}
-			//nolint:errcheck
-			to.WriteByte(b % 16)
 			i++
 		}
 		tr.succ.WriteByte(16)
-		var succ = tr.succ.Bytes()
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
@@ -306,7 +291,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
 			}
-			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), succ, tr.hb, data, tr.groups, false)
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
@@ -337,7 +322,6 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 			tr.value.Write(v)
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
-		tr.hb.invalidatePrefixes = []int{}
 	}
 	return nil
 }
