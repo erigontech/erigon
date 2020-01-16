@@ -232,30 +232,7 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		return nil, err
 	}
 	t := trie.New(root)
-
-	var intermediateCache ethdb.MinDatabase = db
-	t.SetUnloadFunc(func(prefix []byte, subtrieHash []byte) {
-		if len(prefix) == 0 {
-			return
-		}
-		k := make([]byte, len(prefix))
-		v := make([]byte, len(subtrieHash))
-		copy(k, prefix)
-		copy(v, subtrieHash)
-		if err := intermediateCache.Put(dbutils.IntermediateTrieHashesBucket, k, v); err != nil {
-			log.Warn("could not put IntermediateTrieHashesBucket", "err", err)
-		}
-	})
 	tp := trie.NewTriePruning(blockNr)
-	tp.SetCreateNodeFunc(func(prefix []byte) {
-		if len(prefix) == 0 {
-			return
-		}
-
-		if err := intermediateCache.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
-			log.Warn("could not put IntermediateTrieHashesBucket", "err", err)
-		}
-	})
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -272,8 +249,32 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})
+	t.SetUnloadFunc(tds.putIntermediateCache)
+	tp.SetCreateNodeFunc(tds.delIntermediateCache)
 
 	return tds, nil
+}
+
+func (tds *TrieDbState) putIntermediateCache(prefix []byte, subtrieHash []byte) {
+	if len(prefix) == 0 {
+		return
+	}
+	k := make([]byte, len(prefix))
+	v := make([]byte, len(subtrieHash))
+	copy(k, prefix)
+	copy(v, subtrieHash)
+	if err := tds.db.Put(dbutils.IntermediateTrieHashesBucket, k, v); err != nil {
+		log.Warn("could not put IntermediateTrieHashesBucket", "err", err)
+	}
+}
+
+func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
+	if len(prefix) == 0 {
+		return
+	}
+	if err := tds.db.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
+		log.Warn("could not delete IntermediateTrieHashesBucket", "err", err)
+	}
 }
 
 func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -318,6 +319,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		tp:          tp,
 		hashBuilder: trie.NewHashBuilder(false),
 	}
+
+	cpy.t.SetUnloadFunc(cpy.putIntermediateCache)
+	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
+
 	return &cpy
 }
 
