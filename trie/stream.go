@@ -181,6 +181,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
 	var hashRef *common.Hash
+	var hashRefStorage *common.Hash
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
 	var a accounts.Account
 	var fieldSet uint32
@@ -194,7 +195,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	makeData := func(fieldSet uint32, hashRef *common.Hash) GenStructStepData {
 		if hashRef != nil {
 			return GenStructStepHashData{*hashRef}
-		} else if fieldSet == 0 {
+		} else if fieldSet == AccountFieldSetNotAccount {
 			return GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(value.Bytes())}
 		} else {
 			return GenStructStepAccountData{
@@ -219,7 +220,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
 					var err error
-					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
@@ -238,7 +239,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succ.Write(hex)
 			if curr.Len() > 0 {
 				var err error
-				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
+				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -261,6 +262,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 						return common.Hash{}, err
 					}
 				}
+				hashRef = nil
 			case AHashStreamItem:
 				h := s.hashes[hi]
 				hi++
@@ -273,7 +275,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
 				var err error
-				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -285,10 +287,11 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				si++
 				value.Reset()
 				value.Write(v)
+				hashRefStorage = nil
 			case SHashStreamItem:
 				h := s.hashes[hi]
 				hi++
-				hashRef = &h
+				hashRefStorage = &h
 			}
 		}
 		ki++
@@ -300,7 +303,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
 			var err error
-			sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+			sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
@@ -318,7 +321,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	succ.Reset()
 	if curr.Len() > 0 {
 		var err error
-		groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
+		groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -394,7 +397,7 @@ func HashWithModifications(
 		}
 	}
 	rs := &ResolveSet{minLength: 0, hexes: sortable(stream.hexes), inited: true, lteIndex: 0}
-	oldStream := ToStream(t, rs, false)
+	oldStream := ToStream(t, rs, trace)
 	if trace {
 		fmt.Printf("len(oldStream.hexes)=%d\n", len(oldStream.hexes))
 		for _, hex := range oldStream.hexes {

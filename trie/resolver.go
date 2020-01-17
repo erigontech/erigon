@@ -175,7 +175,7 @@ func (tr *Resolver) finaliseRoot() error {
 				Incarnation: tr.a.Incarnation,
 			}
 		}
-		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 		if err != nil {
 			return err
 		}
@@ -269,7 +269,7 @@ func (tr *Resolver) Walker(keyIdx int, k []byte, v []byte) error {
 					Incarnation: tr.a.Incarnation,
 				}
 			}
-			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
