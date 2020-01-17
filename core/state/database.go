@@ -1261,3 +1261,11 @@ func (tds *TrieDbState) getBlockNr() uint64 {
 func (tds *TrieDbState) setBlockNr(n uint64) {
 	atomic.StoreUint64(&tds.blockNr, n)
 }
+
+// GetNodeByHash gets node's RLP by hash.
+func (tds *TrieDbState) GetNodeByHash(hash common.Hash) []byte {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	return tds.t.GetNodeByHash(hash)
+}

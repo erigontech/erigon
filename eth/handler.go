@@ -646,14 +646,11 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			} else if err != nil {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
-			// TODO [Andrew] proper implementation
-			if hash == tds.LastRoot() {
-				node := tds.Trie().Root()
-				data = append(data, node)
-				bytes += len(node)
-			} else {
-				data = append(data, nil)
-			}
+
+			node := tds.GetNodeByHash(hash)
+			data = append(data, node)
+			bytes += len(node)
+
 			// TODO [Andrew] serve byte codes
 			// TODO [Andrew] storage nodes
 		}

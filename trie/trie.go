@@ -21,9 +21,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var (
@@ -50,6 +52,9 @@ type Trie struct {
 	Version uint8
 
 	binary bool
+
+	// TODO [Andrew] cache eviction on hash invalidation and node deletion/unloading
+	hashMap map[common.Hash]node
 }
 
 // New creates a trie with an existing root node from db.
@@ -62,6 +67,7 @@ func New(root common.Hash) *Trie {
 	trie := &Trie{
 		touchFunc:     func([]byte, bool) {},
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
+		hashMap:       make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -81,6 +87,7 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 	trie := &Trie{
 		touchFunc:     func([]byte, bool) {},
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
+		hashMap:       make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -513,48 +520,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
 	}
 }
-
-//
-//func convertToDuoNode(orig *shortNode, pos uint64) node {
-//	// Otherwise branch out at the index where they differ.
-//	var c1 node
-//	if len(nKey) == matchlen+1 {
-//		c1 = n.Val
-//	} else {
-//		s1 := &shortNode{Key: hexToCompact(nKey[matchlen+1:]), Val: n.Val}
-//		c1 = s1
-//	}
-//	var c2 node
-//	if len(key) == pos+matchlen+1 {
-//		c2 = value
-//	} else {
-//		s2 := &shortNode{Key: hexToCompact(key[pos+matchlen+1:]), Val: value}
-//		c2 = s2
-//	}
-//	branch := &duoNode{}
-//	if nKey[matchlen] < key[pos+matchlen] {
-//		branch.child1 = c1
-//		branch.child2 = c2
-//	} else {
-//		branch.child1 = c2
-//		branch.child2 = c1
-//	}
-//	branch.mask = (1 << (nKey[matchlen])) | (1 << (key[pos+matchlen]))
-//	branch.flags.dirty = true
-//
-//	// Replace this shortNode with the branch if it occurs at index 0.
-//	if matchlen == 0 {
-//		t.touchFunc(key[:pos], false)
-//		newNode = branch // current node leaves the generation, but new node branch joins it
-//	} else {
-//		// Otherwise, replace it with a short node leading up to the branch.
-//		t.touchFunc(key[:pos+matchlen], false)
-//		n.Key = hexToCompact(key[pos : pos+matchlen])
-//		n.Val = branch
-//		newNode = n
-//	}
-//	updated = true
-//}
 
 func (t *Trie) hook(hex []byte, n node) {
 	var nd = t.root
@@ -1282,5 +1247,25 @@ func (t *Trie) hashRoot() (node, error) {
 	defer returnHasherToPool(h)
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])
+	// TODO [Andrew] non-root nodes (callback in hasher?)
+	t.hashMap[hn] = t.root
 	return hashNode(hn[:]), nil
+}
+
+// GetNodeByHash gets node's RLP by hash.
+func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
+	nd := t.hashMap[hash]
+	if nd == nil || nd.dirty() || !bytes.Equal(nd.hash(), hash.Bytes()) {
+		return nil
+	}
+
+	h := t.newHasherFunc()
+	defer returnHasherToPool(h)
+
+	rlp, err := h.hashChildren(nd, 0)
+	if err != nil {
+		log.Warn("GetNodeByHash error while producing node RLP", "err", err)
+		return nil
+	}
+	return rlp
 }

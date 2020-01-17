@@ -331,18 +331,20 @@ func testGetNodeData(t *testing.T, protocol int) {
 		t.Fatalf("failed to read node data response: %v", err)
 	}
 	if msg.Code != NodeDataMsg {
-		t.Fatalf("response packet code mismatch: have %x, want %x", msg.Code, 0x0c)
+		t.Fatalf("response packet code mismatch: have %x, want %x", msg.Code, NodeDataMsg)
 	}
 	var data [][]byte
 	if err := msg.Decode(&data); err != nil {
 		t.Fatalf("failed to decode response node data: %v", err)
 	}
 
-	// Verify that we get the root node back
-	tds, err := pm.blockchain.GetTrieDbState()
-	assert.NoError(t, err)
-	root := tds.Trie().Root()
-	assert.Equal(t, [][]byte{root}, data)
+	// Verify that we get the right nodes back
+	if len(data) != len(hashes) {
+		t.Fatalf("response size mismatch: have %x, want %x", len(data), len(hashes))
+	}
+	for i := 0; i < len(hashes); i++ {
+		assert.Equal(t, hashes[i], crypto.Keccak256Hash(data[i]))
+	}
 }
 
 // Tests that the transaction receipts can be retrieved based on hashes.
