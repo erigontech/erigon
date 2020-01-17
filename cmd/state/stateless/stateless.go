@@ -3,6 +3,7 @@ package stateless
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -236,10 +237,20 @@ func Stateless(
 		var db ethdb.Database
 		db, err = createDb(witnessDatabasePath)
 		check(err)
-		witnessDB, err = NewWitnessDB(db)
-		check(err)
-		fmt.Printf("witnesses will be stored to a db at path: %s\n", witnessDatabasePath)
 		defer db.Close()
+
+		statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
+
+		file, err := os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+		check(err)
+		defer file.Close()
+
+		statsFileCsv := csv.NewWriter(file)
+		defer statsFileCsv.Flush()
+
+		witnessDB, err = NewWitnessDB(db, statsFileCsv)
+		check(err)
+		fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s", witnessDatabasePath, statsFilePath)
 	}
 
 	for !interrupt {

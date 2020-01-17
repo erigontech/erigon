@@ -3,6 +3,7 @@ package stateless
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/csv"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -15,11 +16,15 @@ var (
 )
 
 type WitnessDB struct {
-	putter ethdb.Putter
+	putter      ethdb.Putter
+	statsWriter *csv.Writer
 }
 
-func NewWitnessDB(putter ethdb.Putter) (*WitnessDB, error) {
-	return &WitnessDB{putter}, nil
+func NewWitnessDB(putter ethdb.Putter, statsWriter *csv.Writer) (*WitnessDB, error) {
+	statsWriter.Write([]string{
+		"blockNum", "maxTrieSize", "witnessesSize",
+	})
+	return &WitnessDB{putter, statsWriter}, nil
 }
 
 func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveWitnesses []*trie.Witness) {
@@ -28,20 +33,29 @@ func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveW
 	var buf bytes.Buffer
 
 	for i, witness := range resolveWitnesses {
-		var stats *trie.BlockWitnessStats
-		var err error
-		if stats, err = witness.WriteTo(&buf); err != nil {
+		if _, err := witness.WriteTo(&buf); err != nil {
 			panic(fmt.Errorf("error while writing witness to a buffer: %w", err))
 		}
-		fmt.Printf("\nwritten witness for block %v cacheSize %v -> %v bytes\n", blockNumber, maxTrieSize, stats.BlockWitnessSize())
 		if i < len(resolveWitnesses)-1 {
 			buf.WriteByte(newTrieOp)
 		}
 	}
 
-	err := db.putter.Put(witnessesBucket, key, buf.Bytes())
+	bytes := buf.Bytes()
+	err := db.putter.Put(witnessesBucket, key, bytes)
+
 	if err != nil {
 		panic(fmt.Errorf("error while upserting witness: %w", err))
+	}
+
+	err = db.statsWriter.Write([]string{
+		fmt.Sprintf("%v", blockNumber),
+		fmt.Sprintf("%v", maxTrieSize),
+		fmt.Sprintf("%v", len(bytes)),
+	})
+
+	if err != nil {
+		panic(fmt.Errorf("error while writing stats: %w", err))
 	}
 }
 
