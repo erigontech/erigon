@@ -65,7 +65,6 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		blockNr:    blockNr,
 		hb:         NewHashBuilder(false),
 	}
-	tr.CollectWitnesses(true)
 	return &tr
 }
 
@@ -172,7 +171,6 @@ func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 }
 
 func (tr *Resolver) finaliseRoot() error {
-	defer func() { fmt.Printf("resolver witnesses = %+v\n", tr.witnesses) }()
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()

@@ -282,10 +282,16 @@ func Stateless(
 			return
 		}
 
-		if err = tds.ResolveStateTrie(); err != nil {
+		var resolveWitnesses []*trie.Witness
+		if resolveWitnesses, err = tds.ResolveStateTrie(witnessDB != nil); err != nil {
 			fmt.Printf("Failed to resolve state trie: %v\n", err)
 			return
 		}
+
+		if len(resolveWitnesses) > 0 {
+			witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+		}
+
 		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
@@ -338,11 +344,6 @@ func Stateless(
 			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
-			}
-
-			if witnessDB != nil {
-				// saving successful witnesses to a file
-				witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, blockWitness)
 			}
 		}
 
