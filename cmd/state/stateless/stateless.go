@@ -241,7 +241,8 @@ func Stateless(
 
 		statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
 
-		file, err := os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+		var file *os.File
+		file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 		check(err)
 		defer file.Close()
 

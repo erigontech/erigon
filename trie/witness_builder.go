@@ -229,11 +229,11 @@ func (b *WitnessBuilder) makeBlockWitness(
 			fmt.Printf("b.hashOnly.HashOnly(%x) -> %v\n", hex, hashOnly)
 		}
 		if hashOnly {
-			hashNode, err := b.makeHashNode(n, force, limiter.HashFunc)
+			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
 			if err != nil {
 				return err
 			}
-			return b.addHashOp(hashNode)
+			return b.addHashOp(hn)
 		}
 
 		i1, i2 := n.childrenIdx()
@@ -249,11 +249,11 @@ func (b *WitnessBuilder) makeBlockWitness(
 	case *fullNode:
 		hashOnly := limiter != nil && limiter.HashOnly.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
-			hashNode, err := b.makeHashNode(n, force, limiter.HashFunc)
+			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
 			if err != nil {
 				return err
 			}
-			return b.addHashOp(hashNode)
+			return b.addHashOp(hn)
 		}
 
 		var mask uint32
