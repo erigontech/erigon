@@ -21,9 +21,12 @@ type WitnessDB struct {
 }
 
 func NewWitnessDB(putter ethdb.Putter, statsWriter *csv.Writer) (*WitnessDB, error) {
-	statsWriter.Write([]string{
+	err := statsWriter.Write([]string{
 		"blockNum", "maxTrieSize", "witnessesSize",
 	})
+	if err != nil {
+		return nil, err
+	}
 	return &WitnessDB{putter, statsWriter}, nil
 }
 
