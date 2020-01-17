@@ -351,21 +351,25 @@ func (bc *BlockChain) EnablePreimages(ep bool) {
 
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 	if bc.trieDbState == nil {
-		var err error
 		currentBlockNr := bc.CurrentBlock().NumberU64()
-		bc.trieDbState, err = bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
+		trieDbState, err := bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
 		if err != nil {
-			bc.trieDbState = nil
 			return nil, err
 		}
+		bc.setTrieDbState(trieDbState)
 		log.Info("Creation complete.")
 	}
 	return bc.trieDbState, nil
 }
 
+func (bc *BlockChain) setTrieDbState(trieDbState *state.TrieDbState) {
+	log.Warn("trieDbState has been changed", "isNil", trieDbState==nil, "callers", debug.Callers(20))
+	bc.trieDbState = trieDbState
+}
+
 func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
 	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
-		log.Info("Creating IntraBlockState from latest state", "block", blockNr)
+		log.Info("Creating IntraBlockState from latest state", "block", blockNr, "isNIl", bc.trieDbState == nil)
 		tds, err := state.NewTrieDbState(root, bc.db, blockNr)
 		if err != nil {
 			log.Error("Creation aborted", "error", err)
@@ -1646,14 +1650,14 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, err
 			}
 
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, err
 			}
 
@@ -1661,20 +1665,20 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err = bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, err
 			}
 
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, err
 			}
 		}
@@ -1690,7 +1694,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			//t1 := time.Now()
 			if err != nil {
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
 				return k, err
 			}
@@ -1712,7 +1716,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
 			if err != nil {
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
 				return k, err
 			}
@@ -1731,7 +1735,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
-			bc.trieDbState = nil
+			bc.setTrieDbState(nil)
 			return k, err
 		}
 		//atomic.StoreUint32(&followupInterrupt, 1)
@@ -1779,7 +1783,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
-				bc.trieDbState = nil
+				bc.setTrieDbState(nil)
 				return 0, err
 			}
 			if bc.trieDbState != nil {

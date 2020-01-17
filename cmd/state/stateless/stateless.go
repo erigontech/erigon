@@ -152,7 +152,7 @@ func Stateless(
 	blockProcessingStartTime := time.Now()
 
 	for !interrupt {
-		trace := false // blockNum == 545080
+		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -229,7 +229,7 @@ func Stateless(
 
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 50492)
 			if err != nil {
 				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
 				return

@@ -175,6 +175,9 @@ func (s *Stateless) UpdateAccountCode(addrHash common.Hash, incarnation uint64, 
 	if _, ok := s.codeMap[codeHash]; !ok {
 		s.codeMap[codeHash] = code
 	}
+	if s.trace {
+		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", addrHash, codeHash)
+	}
 	return nil
 }
 
@@ -200,6 +203,9 @@ func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Addres
 		m[seckey] = v
 	} else {
 		m[seckey] = nil
+	}
+	if s.trace {
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
 	}
 	return nil
 }
