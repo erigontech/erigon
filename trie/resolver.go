@@ -35,23 +35,25 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 // One resolver per trie (prefix).
 // See also ResolveRequest in trie.go
 type Resolver struct {
-	accounts   bool // Is this a resolver for accounts or for storage
-	topLevels  int  // How many top levels of the trie to keep (not roll into hashes)
-	requests   []*ResolveRequest
-	reqIndices []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
-	keyIdx     int
-	currentReq *ResolveRequest // Request currently being handled
-	currentRs  *ResolveSet     // ResolveSet currently being used
-	historical bool
-	blockNr    uint64
-	hb         *HashBuilder
-	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
-	rss        []*ResolveSet
-	curr       bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
-	succ       bytes.Buffer
-	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
-	groups     []uint16
-	a          accounts.Account
+	accounts         bool // Is this a resolver for accounts or for storage
+	topLevels        int  // How many top levels of the trie to keep (not roll into hashes)
+	requests         []*ResolveRequest
+	reqIndices       []int // Indices pointing back to request slice from slices returned by PrepareResolveParams
+	keyIdx           int
+	currentReq       *ResolveRequest // Request currently being handled
+	currentRs        *ResolveSet     // ResolveSet currently being used
+	historical       bool
+	blockNr          uint64
+	hb               *HashBuilder
+	fieldSet         uint32 // fieldSet for the next invocation of genStructStep
+	rss              []*ResolveSet
+	curr             bytes.Buffer // Current key for the structure generation algorithm, as well as the input tape for the hash builder
+	succ             bytes.Buffer
+	value            bytes.Buffer // Current value to be used as the value tape for the hash builder
+	groups           []uint16
+	a                accounts.Account
+	collectWitnesses bool       // if true, stores witnesses for all the subtries that are being resolved
+	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -63,7 +65,19 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		blockNr:    blockNr,
 		hb:         NewHashBuilder(false),
 	}
+	tr.CollectWitnesses(true)
 	return &tr
+}
+
+func (tr *Resolver) CollectWitnesses(c bool) {
+	tr.collectWitnesses = c
+}
+
+// PopCollectedWitnesses returns all the collected witnesses and clears the storage in this resolver
+func (tr *Resolver) PopCollectedWitnesses() []*Witness {
+	result := tr.witnesses
+	tr.witnesses = nil
+	return result
 }
 
 func (tr *Resolver) SetHistorical(h bool) {
@@ -158,6 +172,7 @@ func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 }
 
 func (tr *Resolver) finaliseRoot() error {
+	defer func() { fmt.Printf("resolver witnesses = %+v\n", tr.witnesses) }()
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
 	tr.succ.Reset()
@@ -183,6 +198,19 @@ func (tr *Resolver) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
+
+		if tr.collectWitnesses {
+			if tr.witnesses == nil {
+				tr.witnesses = make([]*Witness, 0)
+			}
+
+			witness, err := extractWitnessFromRootNode(hbRoot, tr.blockNr, tr.hb.trace, nil, nil)
+			if err != nil {
+				return fmt.Errorf("error while extracting witness for resolver: %w", err)
+			}
+
+			tr.witnesses = append(tr.witnesses, witness)
+		}
 
 		if tr.currentReq.RequiresRLP {
 			hasher := newHasher(false)
