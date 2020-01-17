@@ -165,6 +165,12 @@ func Stateless(
 		interruptCh <- true
 	}()
 
+	timeF, err := os.Create("timings.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer timeF.Close()
+
 	witnessThreshold = 0
 
 	ethDb, err := createDb(chaindata)
@@ -236,6 +242,7 @@ func Stateless(
 		if block == nil {
 			break
 		}
+		execStart := time.Now()
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -263,6 +270,9 @@ func Stateless(
 			return
 		}
 
+		execTime1 := time.Since(execStart)
+		execStart = time.Now()
+
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
@@ -273,6 +283,7 @@ func Stateless(
 			fmt.Printf("Failed to resolve state trie: %v\n", err)
 			return
 		}
+		execTime2 := time.Since(execStart)
 		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
@@ -327,7 +338,7 @@ func Stateless(
 				finalRootFail = true
 			}
 		}
-
+		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
 			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 50492)
@@ -336,11 +347,14 @@ func Stateless(
 				return
 			}
 		}
+		execTime3 := time.Since(execStart)
+		execStart = time.Now()
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
+		execTime4 := time.Since(execStart)
 		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -413,6 +427,7 @@ func Stateless(
 
 			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
+		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d\n", blockNum, execTime1.Nanoseconds(), execTime2.Nanoseconds(), execTime3.Nanoseconds(), execTime4.Nanoseconds())
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
