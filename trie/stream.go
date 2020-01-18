@@ -46,7 +46,8 @@ const (
 // Stream represents the collection of key-value pairs, sorted by keys, where values may belong
 // to three different types - accounts, strage item leaves, and intermediate hashes
 type Stream struct {
-	hexes     [][]byte
+	keyBytes  []byte
+	keySizes  []uint8
 	itemTypes []StreamItem
 	aValues   []*accounts.Account
 	sValues   [][]byte
@@ -70,15 +71,15 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("valueNode %x\n", hex)
 		}
-		s.hexes = append(s.hexes, hex)
+		s.keyBytes = append(s.keyBytes, hex...)
+		s.keySizes = append(s.keySizes, uint8(len(hex)))
 		s.sValues = append(s.sValues, []byte(n))
 		s.itemTypes = append(s.itemTypes, StorageStreamItem)
 	case *shortNode:
 		if trace {
 			fmt.Printf("shortNode %x\n", hex)
 		}
-		hexVal := concat(hex, n.Key...)
-		toStream(n.Val, hexVal, accounts, rs, hr, false, s, trace)
+		toStream(n.Val, append(hex, n.Key...), accounts, rs, hr, false, s, trace)
 	case *duoNode:
 		if trace {
 			fmt.Printf("duoNode %x\n", hex)
@@ -89,7 +90,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			if _, err := hr.hash(n, force, hn[:]); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
-			s.hexes = append(s.hexes, hex)
+			s.keyBytes = append(s.keyBytes, hex...)
+			s.keySizes = append(s.keySizes, uint8(len(hex)))
 			s.hashes = append(s.hashes, hn)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -98,14 +100,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			}
 		} else {
 			i1, i2 := n.childrenIdx()
-			hex1 := make([]byte, len(hex)+1)
-			copy(hex1, hex)
-			hex1[len(hex)] = i1
-			hex2 := make([]byte, len(hex)+1)
-			copy(hex2, hex)
-			hex2[len(hex)] = i2
-			toStream(n.child1, hex1, accounts, rs, hr, false, s, trace)
-			toStream(n.child2, hex2, accounts, rs, hr, false, s, trace)
+			toStream(n.child1, append(hex, i1), accounts, rs, hr, false, s, trace)
+			toStream(n.child2, append(hex, i2), accounts, rs, hr, false, s, trace)
 		}
 	case *fullNode:
 		if trace {
@@ -117,7 +113,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			if _, err := hr.hash(n, force, hn[:]); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
-			s.hexes = append(s.hexes, hex)
+			s.keyBytes = append(s.keyBytes, hex...)
+			s.keySizes = append(s.keySizes, uint8(len(hex)))
 			s.hashes = append(s.hashes, hn)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -127,7 +124,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		} else {
 			for i, child := range n.Children {
 				if child != nil {
-					toStream(child, concat(hex, byte(i)), accounts, rs, hr, false, s, trace)
+					toStream(child, append(hex, byte(i)), accounts, rs, hr, false, s, trace)
 				}
 			}
 		}
@@ -135,7 +132,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("accountNode %x\n", hex)
 		}
-		s.hexes = append(s.hexes, hex)
+		s.keyBytes = append(s.keyBytes, hex...)
+		s.keySizes = append(s.keySizes, uint8(len(hex)))
 		s.aValues = append(s.aValues, &n.Account)
 		s.itemTypes = append(s.itemTypes, AccountStreamItem)
 		hashOnly := rs.HashOnly(hex)
@@ -157,7 +155,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if hashOnly {
 			var hn common.Hash
 			copy(hn[:], []byte(n))
-			s.hexes = append(s.hexes, hex)
+			s.keyBytes = append(s.keyBytes, hex...)
+			s.keySizes = append(s.keySizes, uint8(len(hex)))
 			s.hashes = append(s.hashes, hn)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -213,8 +212,10 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	}
 
 	hashOnly := func(_ []byte) bool { return !trace }
-	for ki < len(s.hexes) {
-		hex := s.hexes[ki]
+	offset := 0
+	for ki < len(s.keySizes) {
+		size := int(s.keySizes[ki])
+		hex := s.keyBytes[offset : offset+size]
 		newItemType := s.itemTypes[ki]
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
 			// If there was an open storage "sub-stream", close it and set the storage flag on
@@ -299,6 +300,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			}
 		}
 		ki++
+		offset += size
 	}
 	// If there was an open storage "sub-stream", close it and set the storage flag on
 	if succStorage.Len() > 0 {
@@ -353,7 +355,8 @@ func HashWithModifications(
 	defer returnHasherToPool(hr)
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		hexes:     make([][]byte, keyCount),
+		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength+1)+len(sKeys)*(4*common.HashLength+2)),
+		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,
 		sValues:   sValues,
@@ -363,6 +366,7 @@ func HashWithModifications(
 	var ki, ai, si int
 	// Convert all account keys and storage keys to HEX encoding and merge them into one sorted list
 	// when we merge, the keys are never equal
+	offset := 0
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
 			accountKeyHex = keybytesToHex(aKeys[ai][:])
@@ -373,39 +377,56 @@ func HashWithModifications(
 			si++
 		}
 		if accountKeyHex == nil {
-			stream.hexes[ki] = storageKeyHex
+			copy(stream.keyBytes[offset:], storageKeyHex)
+			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
-			storageKeyHex = nil // consumed
 			ki++
+			offset += len(storageKeyHex)
+			storageKeyHex = nil // consumed
 		} else if storageKeyHex == nil {
-			stream.hexes[ki] = accountKeyHex
+			copy(stream.keyBytes[offset:], accountKeyHex)
+			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
-			accountKeyHex = nil // consumed
 			ki++
+			offset += len(accountKeyHex)
+			accountKeyHex = nil // consumed
 		} else if bytes.Compare(accountKeyHex, storageKeyHex) < 0 {
-			stream.hexes[ki] = accountKeyHex
+			copy(stream.keyBytes[offset:], accountKeyHex)
+			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
+			ki++
+			offset += len(accountKeyHex)
 			accountKeyHex = nil // consumed
-			ki++
 		} else {
-			stream.hexes[ki] = storageKeyHex
+			copy(stream.keyBytes[offset:], storageKeyHex)
+			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
-			storageKeyHex = nil // consumed
 			ki++
+			offset += len(storageKeyHex)
+			storageKeyHex = nil // consumed
 		}
 	}
 	if trace {
-		fmt.Printf("len(stream.hexes)=%d\n", len(stream.hexes))
-		for _, hex := range stream.hexes {
-			fmt.Printf("%x\n", hex)
+		fmt.Printf("len(stream.hexes)=%d\n", keyCount)
+		printOffset := 0
+		for _, size := range stream.keySizes {
+			fmt.Printf("%x\n", stream.keyBytes[printOffset:printOffset+int(size)])
+			printOffset += int(size)
 		}
 	}
-	rs := &ResolveSet{minLength: 0, hexes: sortable(stream.hexes), inited: true, lteIndex: 0}
+	rs := NewResolveSet(0)
+	offset = 0
+	for _, size := range stream.keySizes {
+		rs.AddHex(stream.keyBytes[offset : offset+int(size)])
+		offset += int(size)
+	}
 	oldStream := ToStream(t, rs, trace)
 	if trace {
-		fmt.Printf("len(oldStream.hexes)=%d\n", len(oldStream.hexes))
-		for _, hex := range oldStream.hexes {
-			fmt.Printf("%x\n", hex)
+		fmt.Printf("len(oldStream.hexes)=%d\n", len(oldStream.keySizes))
+		printOffset := 0
+		for _, size := range oldStream.keySizes {
+			fmt.Printf("%x\n", oldStream.keyBytes[printOffset:printOffset+int(size)])
+			printOffset += int(size)
 		}
 	}
 	// Now we merge old and new streams, preferring the new
@@ -417,30 +438,38 @@ func HashWithModifications(
 	var oldItemType, itemType StreamItem
 	var newStream Stream
 
-	oldKeyCount := len(oldStream.hexes)
+	offset = 0
+	oldOffset := 0
+	oldKeyCount := len(oldStream.keySizes)
 	for hex != nil || oldHex != nil || oldKi < oldKeyCount || ki < keyCount {
 		if oldHex == nil && oldKi < oldKeyCount {
-			oldHex = oldStream.hexes[oldKi]
+			oldSize := int(oldStream.keySizes[oldKi])
+			oldHex = oldStream.keyBytes[oldOffset : oldOffset+oldSize]
 			oldItemType = oldStream.itemTypes[oldKi]
 			oldKi++
+			oldOffset += oldSize
 		}
 		if hex == nil && ki < keyCount {
-			hex = stream.hexes[ki]
+			size := int(stream.keySizes[ki])
+			hex = stream.keyBytes[offset : offset+size]
 			itemType = stream.itemTypes[ki]
 			ki++
+			offset += size
 		}
 		if oldHex == nil {
 			switch itemType {
 			case AccountStreamItem:
 				if stream.aValues[ai] != nil {
-					newStream.hexes = append(newStream.hexes, hex)
+					newStream.keyBytes = append(newStream.keyBytes, hex...)
+					newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 					newStream.aValues = append(newStream.aValues, stream.aValues[ai])
 					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
 				}
 				ai++
 			case StorageStreamItem:
 				if len(stream.sValues[si]) > 0 {
-					newStream.hexes = append(newStream.hexes, hex)
+					newStream.keyBytes = append(newStream.keyBytes, hex...)
+					newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 					newStream.sValues = append(newStream.sValues, stream.sValues[si])
 					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 				}
@@ -450,7 +479,8 @@ func HashWithModifications(
 			}
 			hex = nil // consumed
 		} else if hex == nil {
-			newStream.hexes = append(newStream.hexes, oldHex)
+			newStream.keyBytes = append(newStream.keyBytes, oldHex...)
+			newStream.keySizes = append(newStream.keySizes, uint8(len(oldHex)))
 			switch oldItemType {
 			case AccountStreamItem:
 				newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
@@ -485,7 +515,8 @@ func HashWithModifications(
 			} else {
 				switch bytes.Compare(oldHex, hex) {
 				case -1:
-					newStream.hexes = append(newStream.hexes, oldHex)
+					newStream.keyBytes = append(newStream.keyBytes, oldHex...)
+					newStream.keySizes = append(newStream.keySizes, uint8(len(oldHex)))
 					switch oldItemType {
 					case AccountStreamItem:
 						newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
@@ -509,14 +540,16 @@ func HashWithModifications(
 					switch itemType {
 					case AccountStreamItem:
 						if stream.aValues[ai] != nil {
-							newStream.hexes = append(newStream.hexes, hex)
+							newStream.keyBytes = append(newStream.keyBytes, hex...)
+							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
 							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
 						}
 						ai++
 					case StorageStreamItem:
 						if len(stream.sValues[si]) > 0 {
-							newStream.hexes = append(newStream.hexes, hex)
+							newStream.keyBytes = append(newStream.keyBytes, hex...)
+							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 							newStream.sValues = append(newStream.sValues, stream.sValues[si])
 							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 						}
@@ -529,7 +562,8 @@ func HashWithModifications(
 					switch itemType {
 					case AccountStreamItem:
 						if stream.aValues[ai] != nil {
-							newStream.hexes = append(newStream.hexes, hex)
+							newStream.keyBytes = append(newStream.keyBytes, hex...)
+							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
 							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
 						}
@@ -537,7 +571,8 @@ func HashWithModifications(
 						oldAi++ // Discard old values
 					case StorageStreamItem:
 						if len(stream.sValues[si]) > 0 {
-							newStream.hexes = append(newStream.hexes, hex)
+							newStream.keyBytes = append(newStream.keyBytes, hex...)
+							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
 							newStream.sValues = append(newStream.sValues, stream.sValues[si])
 							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 						}
@@ -553,9 +588,11 @@ func HashWithModifications(
 		}
 	}
 	if trace {
-		fmt.Printf("len(newStream.hexes)=%d\n", len(newStream.hexes))
-		for _, hex := range newStream.hexes {
-			fmt.Printf("%x\n", hex)
+		fmt.Printf("len(newStream.hexes)=%d\n", len(newStream.keySizes))
+		printOffset := 0
+		for _, size := range newStream.keySizes {
+			fmt.Printf("%x\n", newStream.keyBytes[printOffset:printOffset+int(size)])
+			printOffset += int(size)
 		}
 	}
 	return StreamHash(&newStream, storagePrefixLen, trace)
