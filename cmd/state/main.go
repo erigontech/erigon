@@ -8,6 +8,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
+
+	"net/http"
+	_ "net/http/pprof"
 )
 
 func main() {
@@ -25,6 +28,10 @@ func main() {
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
 	glogger.Verbosity(log.LvlInfo)
+
+	go func() {
+		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
+	}()
 
 	commands.Execute()
 }
