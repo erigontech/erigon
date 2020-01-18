@@ -52,6 +52,8 @@ type Resolver struct {
 	value      bytes.Buffer // Current value to be used as the value tape for the hash builder
 	groups     []uint16
 	a          accounts.Account
+	leafData   GenStructStepLeafData
+	accData    GenStructStepAccountData
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -165,15 +167,15 @@ func (tr *Resolver) finaliseRoot() error {
 		var err error
 		var data GenStructStepData
 		if tr.fieldSet == 0 {
-			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
+			data = &tr.leafData
 		} else {
-			data = GenStructStepAccountData{
-				FieldSet:    tr.fieldSet,
-				StorageSize: tr.a.StorageSize,
-				Balance:     &tr.a.Balance,
-				Nonce:       tr.a.Nonce,
-				Incarnation: tr.a.Incarnation,
-			}
+			tr.accData.FieldSet = tr.fieldSet
+			tr.accData.StorageSize = tr.a.StorageSize
+			tr.accData.Balance.Set(&tr.a.Balance)
+			tr.accData.Nonce = tr.a.Nonce
+			tr.accData.Incarnation = tr.a.Incarnation
+			data = &tr.accData
 		}
 		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 		if err != nil {
