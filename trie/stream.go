@@ -54,14 +54,35 @@ type Stream struct {
 	hashes    []common.Hash
 }
 
+// Reset sets all slices to zero sizes, without de-allocating
+func (s *Stream) Reset() {
+	if len(s.keyBytes) > 0 {
+		s.keyBytes = s.keyBytes[:0]
+	}
+	if len(s.keySizes) > 0 {
+		s.keySizes = s.keySizes[:0]
+	}
+	if len(s.itemTypes) > 0 {
+		s.itemTypes = s.itemTypes[:0]
+	}
+	if len(s.aValues) > 0 {
+		s.aValues = s.aValues[:0]
+	}
+	if len(s.sValues) > 0 {
+		s.sValues = s.sValues[:0]
+	}
+	if len(s.hashes) > 0 {
+		s.hashes = s.hashes[:0]
+	}
+}
+
 // ToStream generates the stream of key hexes, and corresponding values, with branch nodes
 // folded into hashes according to givin ResolveSet `rs`
-func ToStream(t *Trie, rs *ResolveSet, trace bool) *Stream {
+func ToStream(t *Trie, st *Stream, rs *ResolveSet, trace bool) {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
-	var st Stream
-	toStream(t.root, []byte{}, true, rs, hr, true, &st, trace)
-	return &st
+	st.Reset()
+	toStream(t.root, []byte{}, true, rs, hr, true, st, trace)
 }
 
 func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, trace bool) {
@@ -349,6 +370,7 @@ func HashWithModifications(
 	aKeys common.Hashes, aValues []*accounts.Account,
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
+	oldStream, newStream *Stream, // Streams that will be reused for old and new stream
 	trace bool,
 ) (common.Hash, error) {
 	hr := newHasher(false)
@@ -420,7 +442,7 @@ func HashWithModifications(
 		rs.AddHex(stream.keyBytes[offset : offset+int(size)])
 		offset += int(size)
 	}
-	oldStream := ToStream(t, rs, trace)
+	ToStream(t, oldStream, rs, trace)
 	if trace {
 		fmt.Printf("len(oldStream.hexes)=%d\n", len(oldStream.keySizes))
 		printOffset := 0
@@ -436,7 +458,7 @@ func HashWithModifications(
 	si = 0
 	var oldHex, hex []byte
 	var oldItemType, itemType StreamItem
-	var newStream Stream
+	newStream.Reset()
 
 	offset = 0
 	oldOffset := 0
@@ -595,5 +617,5 @@ func HashWithModifications(
 			printOffset += int(size)
 		}
 	}
-	return StreamHash(&newStream, storagePrefixLen, trace)
+	return StreamHash(newStream, storagePrefixLen, trace)
 }

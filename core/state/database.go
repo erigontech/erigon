@@ -175,6 +175,8 @@ type TrieDbState struct {
 	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
 	tp                *trie.TriePruning
+	oldStream         trie.Stream
+	newStream         trie.Stream
 }
 
 var (
@@ -596,7 +598,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.oldStream, &tds.newStream, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
