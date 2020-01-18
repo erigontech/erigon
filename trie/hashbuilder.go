@@ -496,12 +496,12 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	return nil
 }
 
-func (hb *HashBuilder) hash(hash common.Hash) error {
+func (hb *HashBuilder) hash(hash []byte) error {
 	if hb.trace {
 		fmt.Printf("HASH\n")
 	}
 	hb.hashStack = append(hb.hashStack, 0x80+common.HashLength)
-	hb.hashStack = append(hb.hashStack, hash[:]...)
+	hb.hashStack = append(hb.hashStack, hash...)
 	hb.nodeStack = append(hb.nodeStack, nil)
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
