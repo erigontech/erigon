@@ -187,6 +187,9 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	var fieldSet uint32
 	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
+	var hashData GenStructStepHashData
+	var leafData GenStructStepLeafData
+	var accData GenStructStepAccountData
 
 	hb.Reset()
 	curr.Reset()
@@ -194,17 +197,18 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 
 	makeData := func(fieldSet uint32, hashRef *common.Hash) GenStructStepData {
 		if hashRef != nil {
-			return GenStructStepHashData{*hashRef}
+			copy(hashData.Hash[:], hashRef[:])
+			return &hashData
 		} else if fieldSet == AccountFieldSetNotAccount {
-			return GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(value.Bytes())}
+			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
+			return &leafData
 		} else {
-			return GenStructStepAccountData{
-				FieldSet:    fieldSet,
-				StorageSize: a.StorageSize,
-				Balance:     &a.Balance,
-				Nonce:       a.Nonce,
-				Incarnation: a.Incarnation,
-			}
+			accData.FieldSet = fieldSet
+			accData.StorageSize = a.StorageSize
+			accData.Balance.Set(&a.Balance)
+			accData.Nonce = a.Nonce
+			accData.Incarnation = a.Incarnation
+			return &accData
 		}
 	}
 
