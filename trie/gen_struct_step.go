@@ -53,7 +53,7 @@ type GenStructStepData interface {
 type GenStructStepAccountData struct {
 	FieldSet    uint32
 	StorageSize uint64
-	Balance     *big.Int // nil-able
+	Balance     big.Int
 	Nonce       uint64
 	Incarnation uint64
 }
@@ -143,11 +143,11 @@ func GenStructStep(
 					fmt.Printf("GenStructStepAccountData %x[%x] %d %d %d %b\n", curr, curr[:remainderStart], v.Balance, v.Nonce, v.Incarnation, v.FieldSet)
 				}
 				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}
