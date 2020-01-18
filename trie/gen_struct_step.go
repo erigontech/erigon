@@ -129,7 +129,7 @@ func GenStructStep(
 			emitHash := hashOnly(curr[:maxLen])
 
 			switch v := data.(type) {
-			case GenStructStepHashData:
+			case *GenStructStepHashData:
 				if trace {
 					fmt.Printf("GenStructStepHashData\n")
 				}
@@ -138,7 +138,7 @@ func GenStructStep(
 					return nil, err
 				}
 				buildExtensions = true
-			case GenStructStepAccountData:
+			case *GenStructStepAccountData:
 				if trace {
 					fmt.Printf("GenStructStepAccountData %x[%x] %d %d %d %b\n", curr, curr[:remainderStart], v.Balance, v.Nonce, v.Incarnation, v.FieldSet)
 				}
@@ -151,7 +151,7 @@ func GenStructStep(
 						return nil, err
 					}
 				}
-			case GenStructStepLeafData:
+			case *GenStructStepLeafData:
 				if trace {
 					fmt.Printf("GenStructStepLeafData %x[%x] %x\n", curr, curr[:remainderStart], v.Value)
 				}
