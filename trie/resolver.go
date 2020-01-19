@@ -68,6 +68,26 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	return &tr
 }
 
+// Reset prepares the Resolver for reuse
+func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
+	tr.accounts = forAccounts
+	tr.topLevels = topLevels
+	tr.requests = tr.requests[:0]
+	tr.reqIndices = tr.reqIndices[:0]
+	tr.blockNr = blockNr
+	tr.keyIdx = 0
+	tr.currentReq = nil
+	tr.currentRs = nil
+	tr.fieldSet = 0
+	tr.rss = tr.rss[:0]
+	tr.curr.Reset()
+	tr.succ.Reset()
+	tr.value.Reset()
+	tr.groups = tr.groups[:0]
+	tr.a.Reset()
+	tr.hb.Reset()
+}
+
 func (tr *Resolver) SetHistorical(h bool) {
 	tr.historical = h
 }
@@ -120,7 +140,7 @@ func (tr *Resolver) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	tr.rss = nil
+	tr.rss = tr.rss[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
