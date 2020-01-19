@@ -178,6 +178,7 @@ type TrieDbState struct {
 	oldStream         trie.Stream
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
+	resolver          *trie.Resolver
 }
 
 var (
@@ -437,18 +438,21 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
 func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys) error {
-	var resolver *trie.Resolver
+	var firstRequest = true
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, false, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, false, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, false, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+	if !firstRequest {
+		if err := tds.resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
 			return err
 		}
 	}
@@ -510,21 +514,23 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
 func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) error {
-	var resolver *trie.Resolver
+	var firstRequest = true
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, true, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+	if !firstRequest {
+		if err := tds.resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
 			return err
 		}
-		resolver = nil
 	}
 	return nil
 }

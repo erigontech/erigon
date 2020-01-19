@@ -532,7 +532,7 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	return nil
 }
 
-func (a *Account) DecodeForStorage(enc []byte) error {
+func (a *Account) Reset() {
 	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
@@ -541,6 +541,10 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	copy(a.CodeHash[:], emptyCodeHash[:])
 	a.StorageSize = 0
 	a.HasStorageSize = false
+}
+
+func (a *Account) DecodeForStorage(enc []byte) error {
+	a.Reset()
 
 	var fieldSet = enc[0]
 	var pos = 1
