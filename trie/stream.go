@@ -51,7 +51,7 @@ type Stream struct {
 	itemTypes []StreamItem
 	aValues   []*accounts.Account
 	sValues   [][]byte
-	hashes    []common.Hash
+	hashes    []byte
 }
 
 // Reset sets all slices to zero sizes, without de-allocating
@@ -82,10 +82,11 @@ func ToStream(t *Trie, st *Stream, rs *ResolveSet, trace bool) {
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
 	st.Reset()
-	toStream(t.root, []byte{}, true, rs, hr, true, st, trace)
+	var hn common.Hash
+	toStream(t.root, []byte{}, true, rs, hr, true, st, hn[:], trace)
 }
 
-func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, trace bool) {
+func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, hashBuf []byte, trace bool) {
 	switch n := nd.(type) {
 	case nil:
 	case valueNode:
@@ -100,20 +101,19 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("shortNode %x\n", hex)
 		}
-		toStream(n.Val, append(hex, n.Key...), accounts, rs, hr, false, s, trace)
+		toStream(n.Val, append(hex, n.Key...), accounts, rs, hr, false, s, hashBuf, trace)
 	case *duoNode:
 		if trace {
 			fmt.Printf("duoNode %x\n", hex)
 		}
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
-			var hn common.Hash
-			if _, err := hr.hash(n, force, hn[:]); err != nil {
+			if _, err := hr.hash(n, force, hashBuf); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
 			s.keyBytes = append(s.keyBytes, hex...)
 			s.keySizes = append(s.keySizes, uint8(len(hex)))
-			s.hashes = append(s.hashes, hn)
+			s.hashes = append(s.hashes, hashBuf...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
 			} else {
@@ -121,8 +121,8 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			}
 		} else {
 			i1, i2 := n.childrenIdx()
-			toStream(n.child1, append(hex, i1), accounts, rs, hr, false, s, trace)
-			toStream(n.child2, append(hex, i2), accounts, rs, hr, false, s, trace)
+			toStream(n.child1, append(hex, i1), accounts, rs, hr, false, s, hashBuf, trace)
+			toStream(n.child2, append(hex, i2), accounts, rs, hr, false, s, hashBuf, trace)
 		}
 	case *fullNode:
 		if trace {
@@ -130,13 +130,12 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		}
 		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
-			var hn common.Hash
-			if _, err := hr.hash(n, force, hn[:]); err != nil {
+			if _, err := hr.hash(n, force, hashBuf); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
 			s.keyBytes = append(s.keyBytes, hex...)
 			s.keySizes = append(s.keySizes, uint8(len(hex)))
-			s.hashes = append(s.hashes, hn)
+			s.hashes = append(s.hashes, hashBuf...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
 			} else {
@@ -145,7 +144,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		} else {
 			for i, child := range n.Children {
 				if child != nil {
-					toStream(child, append(hex, byte(i)), accounts, rs, hr, false, s, trace)
+					toStream(child, append(hex, byte(i)), accounts, rs, hr, false, s, hashBuf, trace)
 				}
 			}
 		}
@@ -160,7 +159,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		hashOnly := rs.HashOnly(hex)
 		if !n.IsEmptyRoot() && !hashOnly {
 			if n.storage != nil {
-				toStream(n.storage, hex, false /*accounts*/, rs, hr, true /*force*/, s, trace)
+				toStream(n.storage, hex, false /*accounts*/, rs, hr, true /*force*/, s, hashBuf, trace)
 			}
 		}
 	case hashNode:
@@ -174,11 +173,12 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			}
 		}
 		if hashOnly {
-			var hn common.Hash
-			copy(hn[:], []byte(n))
 			s.keyBytes = append(s.keyBytes, hex...)
 			s.keySizes = append(s.keySizes, uint8(len(hex)))
-			s.hashes = append(s.hashes, hn)
+			if len([]byte(n)) != 32 {
+				panic(fmt.Sprintf("%d %x", len([]byte(n)), []byte(n)))
+			}
+			s.hashes = append(s.hashes, []byte(n)...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
 			} else {
@@ -200,10 +200,11 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
-	var hashRef *common.Hash
-	var hashRefStorage *common.Hash
+	var hashRef []byte
+	var hashRefStorage []byte
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
-	var a accounts.Account
+	var aRoot common.Hash
+	var aEmptyRoot = true
 	var fieldSet uint32
 	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
@@ -215,19 +216,15 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	curr.Reset()
 	currStorage.Reset()
 
-	makeData := func(fieldSet uint32, hashRef *common.Hash) GenStructStepData {
+	makeData := func(fieldSet uint32, hashRef []byte) GenStructStepData {
 		if hashRef != nil {
-			copy(hashData.Hash[:], hashRef[:])
+			copy(hashData.Hash[:], hashRef)
 			return &hashData
 		} else if fieldSet == AccountFieldSetNotAccount {
 			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
 			return &leafData
 		} else {
 			accData.FieldSet = fieldSet
-			accData.StorageSize = a.StorageSize
-			accData.Balance.Set(&a.Balance)
-			accData.Nonce = a.Nonce
-			accData.Incarnation = a.Incarnation
 			return &accData
 		}
 	}
@@ -253,8 +250,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 					currStorage.Reset()
 					fieldSet += AccountFieldRootOnly
 				}
-			} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-				if err := hb.hash(a.Root[:]); err != nil {
+			} else if itemType == AccountStreamItem && !aEmptyRoot {
+				if err := hb.hash(aRoot[:]); err != nil {
 					return common.Hash{}, err
 				}
 				fieldSet += AccountFieldRootOnly
@@ -276,7 +273,13 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				if s.aValues[ai] == nil {
 					return common.Hash{}, fmt.Errorf("s.aValues[%d] == nil", ai)
 				}
-				a.Copy(s.aValues[ai])
+				var a *accounts.Account = s.aValues[ai]
+				accData.StorageSize = a.StorageSize
+				accData.Balance.Set(&a.Balance)
+				accData.Nonce = a.Nonce
+				accData.Incarnation = a.Incarnation
+				aEmptyRoot = a.IsEmptyRoot()
+				copy(aRoot[:], a.Root[:])
 				ai++
 				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
 				if a.HasStorageSize {
@@ -290,9 +293,9 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				}
 				hashRef = nil
 			case AHashStreamItem:
-				h := s.hashes[hi]
-				hi++
-				hashRef = &h
+				hashRef = s.hashes[hi : hi+common.HashLength]
+				hi += common.HashLength
+
 			}
 		} else {
 			currStorage.Reset()
@@ -315,9 +318,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				value.Write(v)
 				hashRefStorage = nil
 			case SHashStreamItem:
-				h := s.hashes[hi]
-				hi++
-				hashRefStorage = &h
+				hashRefStorage = s.hashes[hi : hi+common.HashLength]
+				hi += common.HashLength
 			}
 		}
 		ki++
@@ -337,8 +339,8 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			currStorage.Reset()
 			fieldSet += AccountFieldRootOnly
 		}
-	} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-		if err := hb.hash(a.Root[:]); err != nil {
+	} else if itemType == AccountStreamItem && !aEmptyRoot {
+		if err := hb.hash(aRoot[:]); err != nil {
 			return common.Hash{}, err
 		}
 		fieldSet += AccountFieldRootOnly
@@ -513,12 +515,12 @@ func HashWithModifications(
 				oldSi++
 				newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 			case AHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-				oldHi++
+				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi:oldHi+common.HashLength]...)
+				oldHi += common.HashLength
 				newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
 			case SHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-				oldHi++
+				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi:oldHi+common.HashLength]...)
+				oldHi += common.HashLength
 				newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
 			}
 			oldHex = nil // consumed
@@ -549,12 +551,12 @@ func HashWithModifications(
 						oldSi++
 						newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
 					case AHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-						oldHi++
+						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi:oldHi+common.HashLength]...)
+						oldHi += common.HashLength
 						newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
 					case SHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-						oldHi++
+						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi:oldHi+common.HashLength]...)
+						oldHi += common.HashLength
 						newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
 					}
 					oldHex = nil // consumed
