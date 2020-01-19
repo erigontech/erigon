@@ -46,8 +46,12 @@ func NewHashBuilder(trace bool) *HashBuilder {
 
 // Reset makes the HashBuilder suitable for reuse
 func (hb *HashBuilder) Reset() {
-	hb.hashStack = hb.hashStack[:0]
-	hb.nodeStack = hb.nodeStack[:0]
+	if len(hb.hashStack) > 0 {
+		hb.hashStack = hb.hashStack[:0]
+	}
+	if len(hb.nodeStack) > 0 {
+		hb.nodeStack = hb.nodeStack[:0]
+	}
 }
 
 func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error {
