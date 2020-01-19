@@ -10,6 +10,7 @@ import (
 	"github.com/mattn/go-isatty"
 
 	"net/http"
+	//nolint:gosec
 	_ "net/http/pprof"
 )
 
