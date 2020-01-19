@@ -290,11 +290,12 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
-		t:       &tcopy,
-		tMu:     new(sync.Mutex),
-		db:      tds.db,
-		blockNr: n,
-		tp:      tp,
+		t:           &tcopy,
+		tMu:         new(sync.Mutex),
+		db:          tds.db,
+		blockNr:     n,
+		tp:          tp,
+		hashBuilder: trie.NewHashBuilder(false),
 	}
 	return &cpy
 }
