@@ -31,6 +31,7 @@ type HashBuilder struct {
 	keyPrefix [1]byte
 	lenPrefix [4]byte
 	valBuf    [96]byte // Enough to accomodate hash encoding of any account
+	b         [1]byte  // Buffer for single byte
 	trace     bool     // Set to true when HashBuilder is required to print trace information for diagnostics
 }
 
@@ -99,7 +100,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 		kl = 1
 	}
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, hb.hashBuf[:], val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 	if err != nil {
 		return err
 	}
@@ -111,7 +112,7 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, hash []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, val rlphacks.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
 	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
@@ -120,7 +121,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 
 	if totalLen+pt < common.HashLength {
 		// Embedded node
-		hb.byteArrayWriter.Setup(hash[:], 0)
+		hb.byteArrayWriter.Setup(hb.hashBuf[:], 0)
 		writer = hb.byteArrayWriter
 	} else {
 		hb.sha.Reset()
@@ -134,14 +135,13 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	if _, err := writer.Write(hb.keyPrefix[:kp]); err != nil {
 		return err
 	}
-	var b [1]byte
-	b[0] = compact0
-	if _, err := writer.Write(b[:]); err != nil {
+	hb.b[0] = compact0
+	if _, err := writer.Write(hb.b[:]); err != nil {
 		return err
 	}
 	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := writer.Write(b[:]); err != nil {
+		hb.b[0] = key[ni]*16 + key[ni+1]
+		if _, err := writer.Write(hb.b[:]); err != nil {
 			return err
 		}
 		ni += 2
@@ -152,8 +152,8 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 	}
 
 	if reader != nil {
-		hash[0] = 0x80 + common.HashLength
-		if _, err := reader.Read(hash[1:]); err != nil {
+		hb.hashBuf[0] = 0x80 + common.HashLength
+		if _, err := reader.Read(hb.hashBuf[1:]); err != nil {
 			return err
 		}
 	}
@@ -177,8 +177,8 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
-	hb.acc.Root = EmptyRoot
-	hb.acc.CodeHash = EmptyCodeHash
+	copy(hb.acc.Root[:], EmptyRoot[:])
+	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
@@ -225,8 +225,6 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 		fmt.Printf("ACCOUNTLEAFHASH %d (%b)\n", length, fieldSet)
 	}
 	key := keyHex[len(keyHex)-length:]
-	hb.acc.Root = EmptyRoot
-	hb.acc.CodeHash = EmptyCodeHash
 	hb.acc.Nonce = nonce
 	hb.acc.Balance.Set(balance)
 	hb.acc.Initialised = true
@@ -238,10 +236,14 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 	if fieldSet&uint32(4) != 0 {
 		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
+	} else {
+		copy(hb.acc.Root[:], EmptyRoot[:])
 	}
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		popped++
+	} else {
+		copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
 	}
 	return hb.accountLeafHashWithKey(key, popped)
 }
@@ -280,7 +282,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	hb.acc.EncodeForHashing(hb.valBuf[:])
 	val := rlphacks.RlpEncodedBytes(hb.valBuf[:valLen])
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, hb.hashBuf[:], val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, val)
 	if err != nil {
 		return err
 	}
@@ -324,8 +326,6 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 	}
 	branchHash := hb.hashStack[len(hb.hashStack)-hashStackStride:]
 	// Compute the total length of binary representation
-	var keyPrefix [1]byte
-	var lenPrefix [4]byte
 	var kp, kl int
 	// Write key
 	var compactLen int
@@ -348,29 +348,28 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
+		hb.keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
 		kl = 1
 	}
 	totalLen := kp + kl + 33
-	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
+	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
 	hb.sha.Reset()
-	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	if _, err := hb.sha.Write(keyPrefix[:kp]); err != nil {
+	if _, err := hb.sha.Write(hb.keyPrefix[:kp]); err != nil {
 		return err
 	}
-	var b [1]byte
-	b[0] = compact0
-	if _, err := hb.sha.Write(b[:]); err != nil {
+	hb.b[0] = compact0
+	if _, err := hb.sha.Write(hb.b[:]); err != nil {
 		return err
 	}
 	for i := 1; i < compactLen; i++ {
-		b[0] = key[ni]*16 + key[ni+1]
-		if _, err := hb.sha.Write(b[:]); err != nil {
+		hb.b[0] = key[ni]*16 + key[ni+1]
+		if _, err := hb.sha.Write(hb.b[:]); err != nil {
 			return err
 		}
 		ni += 2

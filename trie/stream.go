@@ -83,36 +83,38 @@ func ToStream(t *Trie, st *Stream, rs *ResolveSet, trace bool) {
 	defer returnHasherToPool(hr)
 	st.Reset()
 	var hn common.Hash
-	toStream(t.root, []byte{}, true, rs, hr, true, st, hn[:], trace)
+	var hex []byte
+	toStream(t.root, &hex, true, rs, hr, true, st, hn[:], trace)
 }
 
-func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, hashBuf []byte, trace bool) {
+func toStream(nd node, hex *[]byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, hashBuf []byte, trace bool) {
 	switch n := nd.(type) {
 	case nil:
 	case valueNode:
 		if trace {
 			fmt.Printf("valueNode %x\n", hex)
 		}
-		s.keyBytes = append(s.keyBytes, hex...)
-		s.keySizes = append(s.keySizes, uint8(len(hex)))
+		s.keyBytes = append(s.keyBytes, *hex...)
+		s.keySizes = append(s.keySizes, uint8(len(*hex)))
 		s.sValues = append(s.sValues, []byte(n))
 		s.itemTypes = append(s.itemTypes, StorageStreamItem)
 	case *shortNode:
 		if trace {
 			fmt.Printf("shortNode %x\n", hex)
 		}
-		toStream(n.Val, append(hex, n.Key...), accounts, rs, hr, false, s, hashBuf, trace)
+		*hex = append(*hex, n.Key...)
+		toStream(n.Val, hex, accounts, rs, hr, false, s, hashBuf, trace)
 	case *duoNode:
 		if trace {
 			fmt.Printf("duoNode %x\n", hex)
 		}
-		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := rs.HashOnly(*hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			if _, err := hr.hash(n, force, hashBuf); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
-			s.keyBytes = append(s.keyBytes, hex...)
-			s.keySizes = append(s.keySizes, uint8(len(hex)))
+			s.keyBytes = append(s.keyBytes, *hex...)
+			s.keySizes = append(s.keySizes, uint8(len(*hex)))
 			s.hashes = append(s.hashes, hashBuf...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -121,20 +123,24 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 			}
 		} else {
 			i1, i2 := n.childrenIdx()
-			toStream(n.child1, append(hex, i1), accounts, rs, hr, false, s, hashBuf, trace)
-			toStream(n.child2, append(hex, i2), accounts, rs, hr, false, s, hashBuf, trace)
+			hexLen := len(*hex)
+			*hex = append(*hex, i1)
+			toStream(n.child1, hex, accounts, rs, hr, false, s, hashBuf, trace)
+			*hex = (*hex)[:hexLen]
+			*hex = append(*hex, i2)
+			toStream(n.child2, hex, accounts, rs, hr, false, s, hashBuf, trace)
 		}
 	case *fullNode:
 		if trace {
 			fmt.Printf("fullNode %x\n", hex)
 		}
-		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := rs.HashOnly(*hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
 			if _, err := hr.hash(n, force, hashBuf); err != nil {
 				panic(fmt.Sprintf("could not hash duoNode: %v", err))
 			}
-			s.keyBytes = append(s.keyBytes, hex...)
-			s.keySizes = append(s.keySizes, uint8(len(hex)))
+			s.keyBytes = append(s.keyBytes, *hex...)
+			s.keySizes = append(s.keySizes, uint8(len(*hex)))
 			s.hashes = append(s.hashes, hashBuf...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -142,9 +148,12 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 				s.itemTypes = append(s.itemTypes, SHashStreamItem)
 			}
 		} else {
+			hexLen := len(*hex)
 			for i, child := range n.Children {
 				if child != nil {
-					toStream(child, append(hex, byte(i)), accounts, rs, hr, false, s, hashBuf, trace)
+					*hex = (*hex)[:hexLen]
+					*hex = append(*hex, byte(i))
+					toStream(child, hex, accounts, rs, hr, false, s, hashBuf, trace)
 				}
 			}
 		}
@@ -152,11 +161,11 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("accountNode %x\n", hex)
 		}
-		s.keyBytes = append(s.keyBytes, hex...)
-		s.keySizes = append(s.keySizes, uint8(len(hex)))
+		s.keyBytes = append(s.keyBytes, *hex...)
+		s.keySizes = append(s.keySizes, uint8(len(*hex)))
 		s.aValues = append(s.aValues, &n.Account)
 		s.itemTypes = append(s.itemTypes, AccountStreamItem)
-		hashOnly := rs.HashOnly(hex)
+		hashOnly := rs.HashOnly(*hex)
 		if !n.IsEmptyRoot() && !hashOnly {
 			if n.storage != nil {
 				toStream(n.storage, hex, false /*accounts*/, rs, hr, true /*force*/, s, hashBuf, trace)
@@ -166,18 +175,15 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 		if trace {
 			fmt.Printf("hashNode %x\n", hex)
 		}
-		hashOnly := rs.HashOnly(hex)
+		hashOnly := rs.HashOnly(*hex)
 		if !hashOnly {
-			if c := rs.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
+			if c := rs.Current(); len(c) == len(*hex)+1 && c[len(c)-1] == 16 {
 				hashOnly = true
 			}
 		}
 		if hashOnly {
-			s.keyBytes = append(s.keyBytes, hex...)
-			s.keySizes = append(s.keySizes, uint8(len(hex)))
-			if len([]byte(n)) != 32 {
-				panic(fmt.Sprintf("%d %x", len([]byte(n)), []byte(n)))
-			}
+			s.keyBytes = append(s.keyBytes, *hex...)
+			s.keySizes = append(s.keySizes, uint8(len(*hex)))
 			s.hashes = append(s.hashes, []byte(n)...)
 			if accounts {
 				s.itemTypes = append(s.itemTypes, AHashStreamItem)
@@ -185,7 +191,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 				s.itemTypes = append(s.itemTypes, SHashStreamItem)
 			}
 		} else {
-			panic(fmt.Errorf("unexpected hashNode: %s, at hex: %x (%d)", n, hex, len(hex)))
+			panic(fmt.Errorf("unexpected hashNode: %s, at hex: %x (%d)", n, hex, len(*hex)))
 		}
 	default:
 		panic(fmt.Errorf("unexpected node: %T", nd))

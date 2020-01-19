@@ -344,12 +344,13 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	}
 }
 
+// Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
 	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
-	a.Root = image.Root
-	a.CodeHash = image.CodeHash
+	copy(a.Root[:], image.Root[:])
+	copy(a.CodeHash[:], image.CodeHash[:])
 	a.Incarnation = image.Incarnation
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
@@ -536,8 +537,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.SetInt64(0)
-	a.Root = emptyRoot
-	a.CodeHash = emptyCodeHash
+	copy(a.Root[:], emptyRoot[:])
+	copy(a.CodeHash[:], emptyCodeHash[:])
 	a.StorageSize = 0
 	a.HasStorageSize = false
 
