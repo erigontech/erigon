@@ -347,6 +347,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
+		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	tds.tMu.Unlock()
 
