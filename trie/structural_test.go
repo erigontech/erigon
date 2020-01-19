@@ -293,7 +293,8 @@ func TestToStream(t *testing.T) {
 			i++
 		}
 		// Check that the hash of the stream is equal to the hash of the trie
-		streamHash, err := StreamHash(&s, 8, trace)
+		hb := NewHashBuilder(trace)
+		streamHash, err := StreamHash(&s, 8, hb, trace)
 		if trace {
 			fmt.Printf("want:\n%s\n", tr.root.fstring(""))
 		}

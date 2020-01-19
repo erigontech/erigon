@@ -7,7 +7,6 @@ import (
 	"math/bits"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -31,7 +30,8 @@ type HashBuilder struct {
 	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	keyPrefix [1]byte
 	lenPrefix [4]byte
-	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
+	valBuf    [96]byte // Enough to accomodate hash encoding of any account
+	trace     bool     // Set to true when HashBuilder is required to print trace information for diagnostics
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -277,10 +277,8 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 		kl = 1
 	}
 	valLen := hb.acc.EncodingLengthForHashing()
-	valBuf := pool.GetBuffer(valLen)
-	defer pool.PutBuffer(valBuf)
-	hb.acc.EncodeForHashing(valBuf.B)
-	val := rlphacks.RlpEncodedBytes(valBuf.B)
+	hb.acc.EncodeForHashing(hb.valBuf[:])
+	val := rlphacks.RlpEncodedBytes(hb.valBuf[:valLen])
 
 	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, hb.hashBuf[:], val)
 	if err != nil {
