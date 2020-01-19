@@ -321,8 +321,9 @@ func NewBlockChain(db ethdb.Database, cacheConfig *CacheConfig, chainConfig *par
 		}
 	}
 	// Load any existing snapshot, regenerating it if loading failed
-	bc.snaps = snapshot.New(bc.db, bc.stateCache.TrieDB(), bc.cacheConfig.SnapshotLimit, bc.CurrentBlock().Root())
-
+	if bc.cacheConfig.SnapshotLimit > 0 {
+		bc.snaps = snapshot.New(bc.db, bc.stateCache.TrieDB(), bc.cacheConfig.SnapshotLimit, bc.CurrentBlock().Root())
+	}
 	// Take ownership of this particular state
 	go bc.update()
 	if !cacheConfig.Disabled {
@@ -563,8 +564,9 @@ func (bc *BlockChain) FastSyncCommitHead(hash common.Hash) error {
 	bc.chainmu.Unlock()
 
 	// Destroy any existing state snapshot and regenerate it in the background
-	bc.snaps.Rebuild(block.Root())
-
+	if bc.snaps != nil {
+		bc.snaps.Rebuild(block.Root())
+	}
 	log.Info("Committed new head block", "number", block.Number(), "hash", hash)
 	return nil
 }
