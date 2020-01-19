@@ -130,18 +130,12 @@ func GenStructStep(
 
 			switch v := data.(type) {
 			case *GenStructStepHashData:
-				if trace {
-					fmt.Printf("GenStructStepHashData\n")
-				}
 				/* building a hash */
 				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true
 			case *GenStructStepAccountData:
-				if trace {
-					fmt.Printf("GenStructStepAccountData %x[%x] %d %d %d %b\n", curr, curr[:remainderStart], v.Balance, v.Nonce, v.Incarnation, v.FieldSet)
-				}
 				if emitHash {
 					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
@@ -152,9 +146,6 @@ func GenStructStep(
 					}
 				}
 			case *GenStructStepLeafData:
-				if trace {
-					fmt.Printf("GenStructStepLeafData %x[%x] %x\n", curr, curr[:remainderStart], v.Value)
-				}
 				/* building leafs */
 				if emitHash {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
