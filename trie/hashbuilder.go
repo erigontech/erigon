@@ -24,12 +24,14 @@ var EmptyCodeHash = crypto.Keccak256Hash(nil)
 type HashBuilder struct {
 	byteArrayWriter *ByteArrayWriter
 
-	hashStack []byte           // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
-	nodeStack []node           // Stack of nodes
-	acc       accounts.Account // Working account instance (to avoid extra allocations)
-	sha       keccakState      // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
-
-	trace bool // Set to true when HashBuilder is required to print trace information for diagnostics
+	hashStack []byte                // Stack of sub-slices, each 33 bytes each, containing RLP encodings of node hashes (or of nodes themselves, if shorter than 32 bytes)
+	nodeStack []node                // Stack of nodes
+	acc       accounts.Account      // Working account instance (to avoid extra allocations)
+	sha       keccakState           // Keccak primitive that can absorb data (Write), and get squeezed to the hash out (Read)
+	hashBuf   [hashStackStride]byte // RLP representation of hash (or un-hashes value)
+	keyPrefix [1]byte
+	lenPrefix [4]byte
+	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -68,10 +70,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 
 // To be called internally
 func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializable) error {
-	var hash [hashStackStride]byte // RLP representation of hash (or of un-hashed value if short)
 	// Compute the total length of binary representation
-	var keyPrefix [1]byte
-	var lenPrefix [4]byte
 	var kp, kl int
 	// Write key
 	var compactLen int
@@ -93,28 +92,28 @@ func (hb *HashBuilder) leafHashWithKeyVal(key []byte, val rlphacks.RlpSerializab
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = 0x80 + byte(compactLen)
+		hb.keyPrefix[0] = 0x80 + byte(compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
 		kl = 1
 	}
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash[:], val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, hb.hashBuf[:], val)
 	if err != nil {
 		return err
 	}
 
-	hb.hashStack = append(hb.hashStack, hash[:]...)
+	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	if len(hb.hashStack) > hashStackStride*len(hb.nodeStack) {
 		hb.nodeStack = append(hb.nodeStack, nil)
 	}
 	return nil
 }
 
-func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyPrefix [1]byte, compact0 byte, ni int, lenPrefix [4]byte, hash []byte, val rlphacks.RlpSerializable) error {
+func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, compact0 byte, ni int, hash []byte, val rlphacks.RlpSerializable) error {
 	totalLen := kp + kl + val.DoubleRLPLen()
-	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalLen)
+	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalLen)
 
 	var writer io.Writer
 	var reader io.Reader
@@ -129,10 +128,10 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, keyP
 		reader = hb.sha
 	}
 
-	if _, err := writer.Write(lenPrefix[:pt]); err != nil {
+	if _, err := writer.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
-	if _, err := writer.Write(keyPrefix[:kp]); err != nil {
+	if _, err := writer.Write(hb.keyPrefix[:kp]); err != nil {
 		return err
 	}
 	var b [1]byte
@@ -249,10 +248,7 @@ func (hb *HashBuilder) accountLeafHash(length int, keyHex []byte, storageSize ui
 
 // To be called internally
 func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
-	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	// Compute the total length of binary representation
-	var keyPrefix [1]byte
-	var lenPrefix [4]byte
 	var kp, kl int
 	// Write key
 	var compactLen int
@@ -274,7 +270,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 		}
 	}
 	if compactLen > 1 {
-		keyPrefix[0] = byte(128 + compactLen)
+		hb.keyPrefix[0] = byte(128 + compactLen)
 		kp = 1
 		kl = compactLen
 	} else {
@@ -286,7 +282,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 	hb.acc.EncodeForHashing(valBuf.B)
 	val := rlphacks.RlpEncodedBytes(valBuf.B)
 
-	err := hb.completeLeafHash(kp, kl, compactLen, key, keyPrefix, compact0, ni, lenPrefix, hash[:], val)
+	err := hb.completeLeafHash(kp, kl, compactLen, key, compact0, ni, hb.hashBuf[:], val)
 	if err != nil {
 		return err
 	}
@@ -295,7 +291,7 @@ func (hb *HashBuilder) accountLeafHashWithKey(key []byte, popped int) error {
 		hb.hashStack = hb.hashStack[:len(hb.hashStack)-popped*hashStackStride]
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-popped]
 	}
-	hb.hashStack = append(hb.hashStack, hash[:]...)
+	hb.hashStack = append(hb.hashStack, hb.hashBuf[:]...)
 	hb.nodeStack = append(hb.nodeStack, nil)
 
 	return nil

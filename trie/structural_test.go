@@ -75,7 +75,7 @@ func TestV2HashBuilding(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, err = GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -90,7 +90,7 @@ func TestV2HashBuilding(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, err := GenStructStep(func(_ []byte) bool { return true }, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	builtHash := hb.rootHash()
@@ -143,7 +143,7 @@ func TestV2Resolution(t *testing.T) {
 		succ.WriteByte(16)
 		if curr.Len() > 0 {
 			var err error
-			groups, err = GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
+			groups, err = GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false)
 			if err != nil {
 				t.Errorf("Could not execute step of structGen algorithm: %v", err)
 			}
@@ -154,7 +154,7 @@ func TestV2Resolution(t *testing.T) {
 	curr.Reset()
 	curr.Write(succ.Bytes())
 	succ.Reset()
-	if _, err := GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
+	if _, err := GenStructStep(rs.HashOnly, curr.Bytes(), succ.Bytes(), hb, &GenStructStepLeafData{rlphacks.RlpSerializableBytes(valueTape.Bytes())}, groups, false); err != nil {
 		t.Errorf("Could not execute step of structGen algorithm: %v", err)
 	}
 	tr1 := New(common.Hash{})
@@ -240,17 +240,21 @@ func TestToStream(t *testing.T) {
 		for _, rsItem := range streamTest.rsHex {
 			rs.AddKey(common.FromHex(rsItem))
 		}
-		s := ToStream(tr, rs, trace)
-		if len(s.hexes) != len(streamTest.hexesExpected) {
-			t.Errorf("length of hexes is %d, expected %d", len(s.hexes), len(streamTest.hexesExpected))
+		var s Stream
+		ToStream(tr, &s, rs, trace)
+		if len(s.keySizes) != len(streamTest.hexesExpected) {
+			t.Errorf("length of hexes is %d, expected %d", len(s.keySizes), len(streamTest.hexesExpected))
 		}
-		for i, hex := range s.hexes {
+		offset := 0
+		for i, size := range s.keySizes {
 			if i < len(streamTest.hexesExpected) {
 				hexExpected := common.FromHex(streamTest.hexesExpected[i])
+				hex := s.keyBytes[offset : offset+int(size)]
 				if !bytes.Equal(hex, hexExpected) {
 					t.Errorf("hex[%d] = %x, expected %x", i, hex, hexExpected)
 				}
 			}
+			offset += int(size)
 		}
 		if len(s.aValues) != len(streamTest.aBalancesExpected) {
 			t.Errorf("length of aValues is %d, expected %d", len(s.aValues), len(streamTest.aBalancesExpected))
@@ -277,16 +281,19 @@ func TestToStream(t *testing.T) {
 		if len(s.hashes) != len(streamTest.hashesExpected) {
 			t.Errorf("length of hashes is %d, expected %d", len(s.hashes), len(streamTest.hashesExpected))
 		}
-		for i, hash := range s.hashes {
+		for i, hi := 0, 0; hi < len(s.hashes); hi += common.HashLength {
+			var hash common.Hash
+			copy(hash[:], s.hashes[hi:hi+common.HashLength])
 			if i < len(streamTest.hashesExpected) {
 				hashExpected := common.HexToHash(streamTest.hashesExpected[i])
 				if hash != hashExpected {
 					t.Errorf("hash[%d] = %x, expected %x", i, hash, hashExpected)
 				}
 			}
+			i++
 		}
 		// Check that the hash of the stream is equal to the hash of the trie
-		streamHash, err := StreamHash(s, 8, trace)
+		streamHash, err := StreamHash(&s, 8, trace)
 		if trace {
 			fmt.Printf("want:\n%s\n", tr.root.fstring(""))
 		}
