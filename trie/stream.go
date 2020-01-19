@@ -193,8 +193,7 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 }
 
 // StreamHash computes the hash of a stream, as if it was a trie
-func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error) {
-	hb := NewHashBuilder(trace)
+func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var succStorage bytes.Buffer
@@ -373,6 +372,7 @@ func HashWithModifications(
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
 	oldStream, newStream *Stream, // Streams that will be reused for old and new stream
+	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
 ) (common.Hash, error) {
 	hr := newHasher(false)
@@ -619,5 +619,5 @@ func HashWithModifications(
 			printOffset += int(size)
 		}
 	}
-	return StreamHash(newStream, storagePrefixLen, trace)
+	return StreamHash(newStream, storagePrefixLen, hb, trace)
 }

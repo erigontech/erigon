@@ -177,6 +177,7 @@ type TrieDbState struct {
 	tp                *trie.TriePruning
 	oldStream         trie.Stream
 	newStream         trie.Stream
+	hashBuilder       *trie.HashBuilder
 }
 
 var (
@@ -244,6 +245,7 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
 		savePreimages:     true,
+		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -598,7 +600,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.oldStream, &tds.newStream, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.oldStream, &tds.newStream, tds.hashBuilder, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
