@@ -450,15 +450,13 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 		}
 	}
 	hb.sha.Reset()
-	var lenPrefix [4]byte
-	pt := rlphacks.GenerateStructLen(lenPrefix[:], totalSize)
-	if _, err := hb.sha.Write(lenPrefix[:pt]); err != nil {
+	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
+	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
 		return err
 	}
 	// Output children hashes or embedded RLPs
 	i = 0
-	var b [1]byte
-	b[0] = rlp.EmptyStringCode
+	hb.b[0] = rlp.EmptyStringCode
 	for digit := uint(0); digit < 17; digit++ {
 		if ((uint16(1) << digit) & set) != 0 {
 			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
@@ -474,7 +472,7 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 			}
 			i++
 		} else {
-			if _, err := hb.sha.Write(b[:]); err != nil {
+			if _, err := hb.sha.Write(hb.b[:]); err != nil {
 				return err
 			}
 		}
