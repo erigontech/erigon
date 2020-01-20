@@ -7,7 +7,7 @@ import (
 type RlpSerializableBytes []byte
 
 func (b RlpSerializableBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
-	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLenDouble, prefixBuf, 8)
+	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLenDouble, prefixBuf)
 }
 
 func (b RlpSerializableBytes) RawBytes() []byte {
@@ -24,7 +24,7 @@ func (b RlpSerializableBytes) DoubleRLPLen() int {
 type RlpEncodedBytes []byte
 
 func (b RlpEncodedBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
-	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLen, prefixBuf, 4)
+	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLen, prefixBuf)
 }
 
 func (b RlpEncodedBytes) RawBytes() []byte {
@@ -35,7 +35,7 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 	return generateRlpPrefixLen(len(b)) + len(b)
 }
 
-func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte, prefixBufferSize uint) error {
+func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte) error {
 	// > 1 byte, write a prefix or prefixes first
 	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
 		prefixLen := prefixGenFunc(prefixBuf, 0, len(source))
@@ -50,7 +50,7 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 }
 
 func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
-	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf, 4)
+	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf)
 	if err != nil {
 		return 0, err
 	}
