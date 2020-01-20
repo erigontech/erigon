@@ -171,8 +171,6 @@ func Stateless(
 	}
 	defer timeF.Close()
 
-	witnessThreshold = 0
-
 	ethDb, err := createDb(chaindata)
 	check(err)
 	defer ethDb.Close()
