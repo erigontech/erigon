@@ -32,7 +32,8 @@ type HashBuilder struct {
 	lenPrefix [4]byte
 	valBuf    [128]byte // Enough to accomodate hash encoding of any account
 	b         [1]byte   // Buffer for single byte
-	trace     bool      // Set to true when HashBuilder is required to print trace information for diagnostics
+	prefixBuf [8]byte
+	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -151,7 +152,7 @@ func (hb *HashBuilder) completeLeafHash(kp, kl, compactLen int, key []byte, comp
 		ni += 2
 	}
 
-	if err := val.ToDoubleRLP(writer); err != nil {
+	if err := val.ToDoubleRLP(writer, hb.prefixBuf[:]); err != nil {
 		return err
 	}
 
