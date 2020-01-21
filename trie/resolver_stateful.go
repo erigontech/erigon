@@ -138,7 +138,7 @@ func (tr *ResolverStateful) RebuildTrie(
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
-		return fmt.Errorf("Unexpected resolution: %s at %s", b.String(), debug.Stack())
+		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 
 	var err error
