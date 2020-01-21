@@ -1230,7 +1230,6 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		t.unloadFunc(keyNibblesToBytes(hex), p.Children[idx].hash())
 		p.Children[idx] = hnode
 	case *accountNode:
-		//t.unloadFunc(hex, p.storage.hash(), &p.Account)
 		p.storage = hnode
 	}
 }

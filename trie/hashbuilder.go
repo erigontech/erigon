@@ -35,8 +35,7 @@ type HashBuilder struct {
 	prefixBuf [8]byte
 	trace     bool // Set to true when HashBuilder is required to print trace information for diagnostics
 
-	invalidatePrefixes []int
-	nodePrefixLen      int
+	nodePrefixLen int
 }
 
 // NewHashBuilder creates a new HashBuilder
@@ -426,8 +425,6 @@ func (hb *HashBuilder) branch(set uint16) error {
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
-
-	hb.invalidatePrefixes = append(hb.invalidatePrefixes, hb.nodePrefixLen)
 
 	return nil
 }

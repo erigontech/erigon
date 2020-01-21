@@ -194,6 +194,29 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 	return result
 }
 
+func squashNibbles(nibbles []byte) []byte {
+	if len(nibbles) < 1 {
+		return []byte{}
+	}
+	//if len(nibbles) < 2 {
+	//	return nibbles
+	//}
+
+	targetLen := len(nibbles)/2 + len(nibbles)%2
+	result := make([]byte, targetLen)
+	nibbleIndex := 0
+	for i := 0; i < len(result); i++ {
+		result[i] = nibbles[nibbleIndex] * 16
+		nibbleIndex++
+		if nibbleIndex < len(nibbles) {
+			result[i] += nibbles[nibbleIndex]
+			nibbleIndex++
+		}
+	}
+
+	return result
+}
+
 func keyBytesToNibbles(b []byte) []byte {
 	if len(b) < 1 {
 		return []byte{}
@@ -210,6 +233,8 @@ func keyBytesToNibbles(b []byte) []byte {
 
 	nibbleIndex := 0
 	for i := 1; i < len(b); i++ {
+		// HI_NIBBLE(b) = (b >> 4) & 0x0F
+		// LO_NIBBLE(b) = b & 0x0F
 		nibbles[nibbleIndex] = b[i] / 16
 		nibbleIndex++
 		if nibbleIndex < len(nibbles) {
