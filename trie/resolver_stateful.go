@@ -134,7 +134,7 @@ func (tr *ResolverStateful) RebuildTrie(
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder
-		fmt.Fprintf(&b, "ResolveWithDb(db=nil), tr.accounts: %t\n", accounts)
+		fmt.Fprintf(&b, "ResolveWithDb(db=nil), accounts: %t\n", accounts)
 		for i, sk := range startkeys {
 			fmt.Fprintf(&b, "sk %x, bits: %d\n", sk, fixedbits[i])
 		}
@@ -144,15 +144,15 @@ func (tr *ResolverStateful) RebuildTrie(
 	var err error
 	if accounts {
 		if historical {
-			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerAccounts)
 		} else {
-			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
 	} else {
 		if historical {
-			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)
+			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerStorage)
 		} else {
-			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.Walker)
+			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 		}
 	}
 	if err != nil {
@@ -161,8 +161,16 @@ func (tr *ResolverStateful) RebuildTrie(
 	return tr.finaliseRoot()
 }
 
+func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte) error {
+	return tr.Walker(true, keyIdx, k, v)
+}
+
+func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error {
+	return tr.Walker(false, keyIdx, k, v)
+}
+
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStateful) Walker(keyIdx int, k []byte, v []byte) error {
+func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
 	//fmt.Printf("keyIdx: %d key:%x  value:%x, accounts: %t\n", keyIdx, k, v, tr.accounts)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -212,7 +220,7 @@ func (tr *ResolverStateful) Walker(keyIdx int, k []byte, v []byte) error {
 			}
 		}
 		// Remember the current key and value
-		if tr.accounts {
+		if isAccount {
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return err
 			}
