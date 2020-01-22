@@ -1,4 +1,4 @@
-package dbutils
+package changeset
 
 import (
 	"bytes"
@@ -16,15 +16,14 @@ func createTestChangeSet() []byte {
 	_ = ch.Add(common.FromHex("56fb07ee"), common.FromHex("f7f6db1eb17c6d582078e0ffdd0c"))
 	_ = ch.Add(common.FromHex("a5e4c9a1"), common.FromHex("b1e9b5c16355eede662031dd621d08faf4ea"))
 	_ = ch.Add(common.FromHex("22bb06f4"), common.FromHex("862cf52b74f1cea41ddd8ffa4b3e7c7790"))
-	encoded, _ := ch.Encode()
+	encoded, _ := EncodeChangeSet(ch)
 	return encoded
 }
 
 func TestEncoding(t *testing.T) {
 	// empty AccountChangeSet first
 	ch := NewChangeSet()
-	_, err := ch.Encode()
-	assert.NoError(t, err)
+	_, err := EncodeChangeSet(ch)
 	assert.NoError(t, err)
 
 	// add some entries

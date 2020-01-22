@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -1247,7 +1248,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
 		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
 		if v != nil {
-			err = dbutils.Walk(v, func(key, value []byte) error {
+			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
 					incarnation := ^binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
 					if !printed {

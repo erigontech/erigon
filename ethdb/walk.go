@@ -18,6 +18,8 @@ package ethdb
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -37,7 +39,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			return false, nil
 		}
 
-		if dbutils.Len(v) > 0 {
+		if changeset.Len(v) > 0 {
 			bucketStr := string(dbutils.AccountsHistoryBucket)
 			var t map[string][]byte
 			var ok bool
@@ -46,15 +48,26 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				m[bucketStr] = t
 			}
 
-			err := dbutils.Walk(v, func(k, vv []byte) error {
-				if _, ok = t[string(k)]; !ok {
-					t[string(k)] = vv
-				}
-
-				return nil
-			})
-			if err != nil {
-				return false, err
+			var innerErr error
+			fmt.Println("AccountChangeSetBytes walk")
+			if debug.IsThinHistory() {
+				innerErr = changeset.AccountChangeSetBytes(v).Walk(func(kk, vv []byte) error {
+					fmt.Println(common.Bytes2Hex(kk), " - ", common.Bytes2Hex(vv))
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			} else {
+				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			}
+			if innerErr != nil {
+				return false, innerErr
 			}
 		}
 		return true, nil
@@ -67,7 +80,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 			return false, nil
 		}
 
-		if dbutils.Len(v) > 0 {
+		if changeset.Len(v) > 0 {
 			bucketStr := string(dbutils.StorageHistoryBucket)
 			var t map[string][]byte
 			var ok bool
@@ -75,16 +88,29 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				t = make(map[string][]byte)
 				m[bucketStr] = t
 			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			err := dbutils.Walk(v, func(k, vv []byte) error {
-				if _, ok = t[string(k)]; !ok {
-					t[string(k)] = vv
-				}
 
-				return nil
-			})
-			if err != nil {
-				return false, err
+			var innerErr error
+			fmt.Println("StorageChangeSetBytes walk")
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if debug.IsThinHistory() {
+				innerErr = changeset.StorageChangeSetBytes(v).Walk(func(kk, vv []byte) error {
+					fmt.Println(common.Bytes2Hex(kk), " - ", common.Bytes2Hex(vv))
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			} else {
+				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+
+			}
+			if innerErr != nil {
+				return false, innerErr
 			}
 		}
 		return true, nil
@@ -112,12 +138,20 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
-		err := dbutils.Walk(v, func(k, _ []byte) error {
-			keys = append(keys, k)
-			return nil
-		})
-		if err != nil {
-			return false, err
+		var innerErr error
+		if debug.IsThinHistory() {
+			innerErr = changeset.AccountChangeSetBytes(v).Walk(func(k, _ []byte) error {
+				keys = append(keys, k)
+				return nil
+			})
+		} else {
+			innerErr = changeset.Walk(v, func(k, _ []byte) error {
+				keys = append(keys, k)
+				return nil
+			})
+		}
+		if innerErr != nil {
+			return false, innerErr
 		}
 
 		return true, nil

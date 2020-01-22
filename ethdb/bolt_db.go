@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -636,7 +637,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			err := dbutils.Walk(v, func(kk, _ []byte) error {
+			err := changeset.Walk(v, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
 				return hb.Delete(kk)
 			})
@@ -699,8 +700,8 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return m
 }
@@ -708,7 +709,6 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
 	return 100 * 1024
-	//return 128
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

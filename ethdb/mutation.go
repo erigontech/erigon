@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -92,8 +93,8 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 type mutation struct {
 	puts puts // Map buckets to map[key]value
 	//map[blockNumber]listOfChangedKeys
-	accountChangeSetByBlock map[uint64]*dbutils.ChangeSet
-	storageChangeSetByBlock map[uint64]*dbutils.ChangeSet
+	accountChangeSetByBlock map[uint64]*changeset.ChangeSet
+	storageChangeSetByBlock map[uint64]*changeset.ChangeSet
 	mu                      sync.RWMutex
 	db                      Database
 }
@@ -126,18 +127,26 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) *changeset.ChangeSet {
 	switch {
 	case bytes.Equal(bucket, dbutils.AccountsHistoryBucket):
 		if _, ok := m.accountChangeSetByBlock[timestamp]; !ok {
-			m.accountChangeSetByBlock[timestamp] = dbutils.NewChangeSet()
+			if debug.IsThinHistory() {
+				m.accountChangeSetByBlock[timestamp] = changeset.NewAccountChangeSet()
+			} else {
+				m.accountChangeSetByBlock[timestamp] = changeset.NewChangeSet()
+			}
 		}
-		return m.accountChangeSetByBlock[timestamp], nil
+		return m.accountChangeSetByBlock[timestamp]
 	case bytes.Equal(bucket, dbutils.StorageHistoryBucket):
 		if _, ok := m.storageChangeSetByBlock[timestamp]; !ok {
-			m.storageChangeSetByBlock[timestamp] = dbutils.NewChangeSet()
+			if debug.IsThinHistory() {
+				m.storageChangeSetByBlock[timestamp] = changeset.NewStorageChangeSet()
+			} else {
+				m.storageChangeSetByBlock[timestamp] = changeset.NewChangeSet()
+			}
 		}
-		return m.storageChangeSetByBlock[timestamp], nil
+		return m.storageChangeSetByBlock[timestamp]
 	default:
 		panic("incorrect bucket")
 	}
@@ -204,12 +213,8 @@ func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	changeSet, err := m.getChangeSetByBlockNoLock(hBucket, timestamp)
-	if err != nil {
-		return err
-	}
-
-	err = changeSet.Add(key, value)
+	changeSet := m.getChangeSetByBlockNoLock(hBucket, timestamp)
+	err := changeSet.Add(key, value)
 	if err != nil {
 		return err
 	}
@@ -303,7 +308,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 
 	if debug.IsThinHistory() {
 		if len(changedAccounts) > 0 {
-			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
+			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
 				indexBytes, getErr := m.getNoLock(dbutils.AccountsHistoryBucket, kk)
 				if getErr != nil {
 					return nil
@@ -332,7 +337,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 		}
 
 		if len(changedStorage) > 0 {
-			innerErr := dbutils.Walk(changedStorage, func(kk, _ []byte) error {
+			innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
 				indexBytes, getErr := m.getNoLock(dbutils.StorageHistoryBucket, kk)
 				if getErr != nil {
 					return nil
@@ -362,7 +367,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 
 	} else {
 		if len(changedAccounts) > 0 {
-			innerErr := dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
+			innerErr := changeset.Walk(changedAccounts, func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(string(dbutils.AccountsHistoryBucket), composite)
 				return nil
@@ -374,7 +379,7 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 			m.puts.DeleteStr(string(dbutils.AccountChangeSetBucket), changeSetKey)
 		}
 		if len(changedStorage) > 0 {
-			innerErr := dbutils.Walk(changedStorage, func(kk, _ []byte) error {
+			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
 				m.puts.DeleteStr(string(dbutils.StorageHistoryBucket), composite)
 				return nil
@@ -423,7 +428,21 @@ func (m *mutation) Commit() (uint64, error) {
 				}
 			}
 			sort.Sort(changes)
-			dat, err := changes.Encode()
+			var (
+				dat []byte
+				err error
+			)
+			if debug.IsThinHistory() {
+				fmt.Println("AccountCommit")
+				for _, vv := range changes.Changes {
+					fmt.Println(common.Bytes2Hex(vv.Key), " - ", common.Bytes2Hex(vv.Value))
+				}
+
+				dat, err = changeset.EncodeAccounts(changes)
+			} else {
+				dat, err = changeset.EncodeChangeSet(changes)
+			}
+
 			if err != nil {
 				return 0, err
 			}
@@ -461,16 +480,32 @@ func (m *mutation) Commit() (uint64, error) {
 				}
 			}
 			sort.Sort(changes)
-			dat, err := changes.Encode()
-			if err != nil {
-				return 0, err
+			var (
+				dat []byte
+				err error
+			)
+			if debug.IsThinHistory() {
+				fmt.Println("StorageCommit")
+				for _, vv := range changes.Changes {
+					fmt.Println(common.Bytes2Hex(vv.Key), " - ", common.Bytes2Hex(vv.Value))
+				}
+				dat, err = changeset.EncodeStorage(changes)
+				if err != nil {
+					return 0, err
+				}
+			} else {
+				dat, err = changeset.EncodeChangeSet(changes)
+				if err != nil {
+					return 0, err
+				}
+
 			}
 			m.puts.Set(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
 		}
 	}
 
-	m.accountChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
-	m.storageChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
+	m.accountChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
+	m.storageChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
 
 	tuples := common.NewTuples(m.puts.Size(), 3, 1)
 	for bucketStr, bt := range m.puts {
@@ -495,8 +530,8 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.accountChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
-	m.storageChangeSetByBlock = make(map[uint64]*dbutils.ChangeSet)
+	m.accountChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
+	m.storageChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
 	m.puts = make(puts)
 }
 
@@ -524,8 +559,8 @@ func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:                      m,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return mm
 }
@@ -642,8 +677,8 @@ func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:                      d,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return mm
 }

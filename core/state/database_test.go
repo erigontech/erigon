@@ -328,6 +328,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
 	}
 
+	fmt.Println("-------Reorg")
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
 		t.Fatal(err)
@@ -479,6 +480,7 @@ func TestReorgOverStateChange(t *testing.T) {
 }
 
 func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
+	t.Skip()
 	if !debug.IsThinHistory() {
 		t.Skip()
 	}

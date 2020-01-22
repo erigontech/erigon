@@ -3,6 +3,7 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -45,7 +46,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if dbutils.Len(csData) != 10 {
+	if changeset.Len(csData) != 10 {
 		t.FailNow()
 	}
 	if debug.IsThinHistory() {
@@ -184,7 +185,7 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedChangeSet := dbutils.NewChangeSet()
+	expectedChangeSet := changeset.NewChangeSet()
 	for i := range addrHashes {
 		b := make([]byte, accHistory[i].EncodingLengthForStorage())
 		accHistory[i].EncodeForStorage(b)
@@ -195,7 +196,7 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	sort.Sort(expectedChangeSet)
-	expectedData, err := expectedChangeSet.Encode()
+	expectedData, err := changeset.EncodeChangeSet(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
 		spew.Dump("res", csData)
@@ -208,11 +209,11 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if dbutils.Len(csData) != numOfAccounts*numOfStateKeys {
+	if changeset.Len(csData) != numOfAccounts*numOfStateKeys {
 		t.FailNow()
 	}
 
-	expectedChangeSet = dbutils.NewChangeSet()
+	expectedChangeSet = changeset.NewChangeSet()
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
@@ -225,7 +226,11 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	sort.Sort(expectedChangeSet)
-	expectedData, err = expectedChangeSet.Encode()
+
+	expectedData, err = changeset.EncodeChangeSet(expectedChangeSet)
+	if debug.IsThinHistory() {
+		expectedData, err = changeset.EncodeStorage(expectedChangeSet)
+	}
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
 		spew.Dump("res", csData)
@@ -326,7 +331,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	expectedChangeSet := dbutils.NewChangeSet()
+	expectedChangeSet := changeset.NewChangeSet()
 	for i := range addrHashes {
 		b := make([]byte, accHistory[i].EncodingLengthForStorage())
 		accHistory[i].EncodeForStorage(b)
@@ -337,7 +342,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 	}
 
-	expectedData, err := expectedChangeSet.Encode()
+	expectedData, err := changeset.EncodeChangeSet(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
 		t.Fatal("incorrect changeset")
@@ -348,11 +353,11 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if dbutils.Len(csData) != numOfAccounts*numOfStateKeys {
+	if changeset.Len(csData) != numOfAccounts*numOfStateKeys {
 		t.FailNow()
 	}
 
-	expectedChangeSet = dbutils.NewChangeSet()
+	expectedChangeSet = changeset.NewChangeSet()
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
@@ -364,7 +369,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	expectedData, err = expectedChangeSet.Encode()
+	expectedData, err = changeset.EncodeStorage(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
 		spew.Dump("res", csData)

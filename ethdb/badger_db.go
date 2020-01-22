@@ -19,6 +19,7 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"io/ioutil"
 	"os"
 	"runtime"
@@ -181,13 +182,13 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			}
 		}
 
-		var sh dbutils.ChangeSet
+		var sh changeset.ChangeSet
 
 		err := sh.Add(key, value)
 		if err != nil {
 			return err
 		}
-		dat, err := sh.Encode()
+		dat, err := changeset.EncodeChangeSet(&sh)
 		if err != nil {
 			fmt.Println(err)
 			log.Error("PutS Decode suffix err", "err", err)
@@ -218,7 +219,7 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 				return err
 			}
 
-			err = dbutils.Walk(changes, func(kk, _ []byte) error {
+			err = changeset.Walk(changes, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
 				return tx.Delete(bucketKey(hBucket, kk))
 			})
@@ -419,8 +420,8 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*dbutils.ChangeSet),
+		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
+		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return m
 }

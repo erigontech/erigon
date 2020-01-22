@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"crypto/ecdsa"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 	"reflect"
 	"testing"
@@ -657,9 +658,9 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple account suffix records")
 		}
-		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
+		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changeset.Len(v))
 
-		innerErr := dbutils.Walk(v, func(k, _ []byte) error {
+		innerErr := changeset.Walk(v, func(k, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
 			_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 			if err != nil {
@@ -683,7 +684,7 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple storage suffix records")
 		}
-		stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
+		stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(changeset.Len(v))
 
 		return true, nil
 	})
