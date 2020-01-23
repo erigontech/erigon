@@ -68,7 +68,7 @@ var statelessCmd = &cobra.Command{
 			createDb,
 			starkBlocksFile,
 			starkStatsBase,
-			false, /* FIXME */
+			true, /* FIXME */
 			witnessDatabase,
 		)
 

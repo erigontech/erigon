@@ -139,11 +139,11 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 // the state DB.
 func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32) error {
 	var hf hookFunction
-	if tr.collectWitnesses {
-		hf = tr.extractWitnessAndHookSubtrie
-	} else {
-		hf = hookSubtrie
-	}
+	//if tr.collectWitnesses {
+	//	hf = tr.extractWitnessAndHookSubtrie
+	//} else {
+	hf = hookSubtrie
+	//}
 
 	sort.Stable(tr)
 	resolver := NewResolverStateless(tr.requests, hf)
