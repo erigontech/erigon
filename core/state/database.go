@@ -616,7 +616,7 @@ func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) 
 			return nil
 		}
 
-		return resolver.ResolveStateless(database, tds.blockNr)
+		return resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen)
 	}
 
 	return tds.resolveStateTrieWithFunc(resolveFunc)

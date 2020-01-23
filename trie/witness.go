@@ -8,7 +8,7 @@ import (
 
 // WitnessStorage is an interface representing a single
 type WitnessStorage interface {
-	GetWitnessesForBlock(uint64, uint32) []*Witness
+	GetWitnessesForBlock(uint64, uint32) ([]byte, error)
 }
 
 // WitnessVersion represents the current version of the block witness

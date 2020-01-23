@@ -137,7 +137,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 // ResolveStateless resolves and hooks subtries using a witnesses database instead of
 // the state DB.
-func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64) error {
+func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -147,7 +147,7 @@ func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64) error {
 
 	sort.Stable(tr)
 	resolver := NewResolverStateless(tr.requests, hf)
-	return resolver.RebuildTrie(db, blockNr)
+	return resolver.RebuildTrie(db, blockNr, trieLimit)
 }
 
 func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) error {
