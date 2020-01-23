@@ -217,10 +217,10 @@ func compressNibbles(nibbles []byte, out io.ByteWriter) {
 		panic(err)
 	}
 
-	for i := uint8(0); i < uint8(len(nibbles)); i++ {
+	for i := 0; i < len(nibbles); i++ {
 		b = nibbles[i] << 4
 		i++
-		if i < uint8(len(nibbles)) {
+		if i < len(nibbles) {
 			b += nibbles[i]
 		}
 		if err := out.WriteByte(b); err != nil {
@@ -236,19 +236,19 @@ func decompressNibbles(inBytes []byte, out io.ByteWriter) {
 		return
 	}
 
-	var nibblesAmount uint8 = inBytes[0]&0x0F + 1
+	var nibblesAmount int = int(inBytes[0]&0x0F) + 1
 
 	var b byte
-	var nibbleIndex uint8
-	for i := uint8(1); i < uint8(len(inBytes)); i++ {
-		b = inBytes[i] / 16 //(inBytes[i] >> 4) & 0x0F
+	var nibbleIndex int
+	for i := 1; i < len(inBytes); i++ {
+		b = (inBytes[i] >> 4) & 0x0F
 		if err := out.WriteByte(b); err != nil {
 			panic(err)
 		}
 
 		nibbleIndex++
 		if nibbleIndex < nibblesAmount {
-			b = inBytes[i] % 16 // & 0x0F
+			b = inBytes[i] & 0x0F
 			if err := out.WriteByte(b); err != nil {
 				panic(err)
 			}
