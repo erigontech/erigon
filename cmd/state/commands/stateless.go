@@ -7,17 +7,18 @@ import (
 )
 
 var (
-	statefile        string
-	triesize         uint32
-	preroot          bool
-	snapshotInterval uint64
-	snapshotFrom     uint64
-	witnessInterval  uint64
-	noverify         bool
-	bintries         bool
-	starkBlocksFile  string
-	starkStatsBase   string
-	witnessDatabase  string
+	statefile         string
+	triesize          uint32
+	preroot           bool
+	snapshotInterval  uint64
+	snapshotFrom      uint64
+	witnessInterval   uint64
+	noverify          bool
+	bintries          bool
+	starkBlocksFile   string
+	starkStatsBase    string
+	statelessResolver bool
+	witnessDatabase   string
 )
 
 func init() {
@@ -35,6 +36,7 @@ func init() {
 	statelessCmd.Flags().BoolVar(&bintries, "bintries", false, "use binary tries instead of hexary to generate/load block witnesses")
 	statelessCmd.Flags().StringVar(&starkBlocksFile, "starkBlocksFile", "", "file with the list of blocks for which to produce stark data")
 	statelessCmd.Flags().StringVar(&starkStatsBase, "starkStatsBase", "stark_stats", "template for names of the files to write stark stats in")
+	statelessCmd.Flags().BoolVar(&statelessResolver, "statelessResolver", false, "use a witness DB instead of the state when resolving tries")
 	statelessCmd.Flags().StringVar(&witnessDatabase, "witnessDbFile", "", "optional path to a database where to store witnesses (empty string -- do not store witnesses")
 	if err := statelessCmd.MarkFlagFilename("witnessDbFile", ""); err != nil {
 		panic(err)
@@ -68,7 +70,7 @@ var statelessCmd = &cobra.Command{
 			createDb,
 			starkBlocksFile,
 			starkStatsBase,
-			true, /* FIXME */
+			statelessResolver,
 			witnessDatabase,
 		)
 

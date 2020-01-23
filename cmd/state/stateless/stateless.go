@@ -235,6 +235,10 @@ func Stateless(
 	var witnessDBWriter *WitnessDBWriter
 	var witnessDBReader *WitnessDBReader
 
+	if useStatelessResolver && witnessDatabasePath == "" {
+		panic("to use stateless resolver, set the witness DB path")
+	}
+
 	if witnessDatabasePath != "" {
 		var db ethdb.Database
 		db, err = createDb(witnessDatabasePath)
@@ -243,6 +247,7 @@ func Stateless(
 
 		if useStatelessResolver {
 			witnessDBReader = NewWitnessDBReader(db)
+			fmt.Printf("Will use the stateless resolver with DB: %s\n", witnessDatabasePath)
 		} else {
 			statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
 
@@ -256,7 +261,7 @@ func Stateless(
 
 			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
 			check(err)
-			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s", witnessDatabasePath, statsFilePath)
+			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s\n", witnessDatabasePath, statsFilePath)
 		}
 
 	}
