@@ -82,9 +82,15 @@ func TestRebuildTrie(t *testing.T) {
 	}
 
 	// it should ignore duplicate resolve requests
-	resolver := NewResolverStateless([]*ResolveRequest{req1, req2, req21, req3, req31}, hookFunction)
+	resolver := NewResolverStateless([]*ResolveRequest{req1, req2, req21}, hookFunction)
 
-	err = resolver.RebuildTrie(&storage, 1, 1)
+	pos, err := resolver.RebuildTrie(&storage, 1, 1, 0)
+	if err != nil {
+		t.Error(err)
+	}
+
+	resolver = NewResolverStateless([]*ResolveRequest{req3, req31}, hookFunction)
+	_, err = resolver.RebuildTrie(&storage, 1, 1, pos)
 	if err != nil {
 		t.Error(err)
 	}
