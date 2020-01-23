@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 
@@ -172,11 +171,7 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 		hasTerminator = true
 	}
 
-	var result []byte
-
-	var out = &bytes.Buffer{}
-	compressNibbles(nibbles, out)
-	result = out.Bytes()
+	result := compressNibbles(nibbles)
 
 	if hasTerminator {
 		result[0] |= 1 << 7
@@ -191,68 +186,62 @@ func keyBytesToNibbles(b []byte) []byte {
 	}
 
 	hasTerminator := b[0]&(1<<7) != 0
-	var out = &bytes.Buffer{}
 
-	decompressNibbles(b, out)
-
+	nibbles := decompressNibbles(b)
 	if hasTerminator {
-		if err := out.WriteByte(0x10); err != nil {
-			panic(err)
-		}
-		return out.Bytes()
+		return append(nibbles, 0x10)
 	}
-	return out.Bytes()
+	return nibbles
 }
 
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
-func compressNibbles(nibbles []byte, out io.ByteWriter) {
+func compressNibbles(nibbles []byte) []byte {
 	if len(nibbles) < 1 {
-		return
+		return []byte{}
 	}
 
-	var b byte
-	b = byte(len(nibbles) - 1) // store amount_of_nibbles-1 in low_nibble of first byte
-	if err := out.WriteByte(b); err != nil {
-		panic(err)
-	}
+	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
+	result := make([]byte, targetLen)
 
-	for i := 0; i < len(nibbles); i++ {
-		b = nibbles[i] << 4
-		i++
-		if i < len(nibbles) {
-			b += nibbles[i]
-		}
-		if err := out.WriteByte(b); err != nil {
-			panic(err)
-		}
-	}
-}
-
-// HI_NIBBLE(b) = (b >> 4) & 0x0F
-// LO_NIBBLE(b) = b & 0x0F
-func decompressNibbles(inBytes []byte, out io.ByteWriter) {
-	if len(inBytes) < 1 {
-		return
-	}
-
-	var nibblesAmount int = int(inBytes[0]&0x0F) + 1
-
-	var b byte
-	var nibbleIndex int
-	for i := 1; i < len(inBytes); i++ {
-		b = (inBytes[i] >> 4) & 0x0F
-		if err := out.WriteByte(b); err != nil {
-			panic(err)
-		}
-
+	result[0] = byte(len(nibbles) - 1) // store amount_of_nibbles-1 in low_nibble of first byte
+	nibbleIndex := 0
+	for i := 1; i < len(result); i++ {
+		result[i] = nibbles[nibbleIndex] * 16
 		nibbleIndex++
-		if nibbleIndex < nibblesAmount {
-			b = inBytes[i] & 0x0F
-			if err := out.WriteByte(b); err != nil {
-				panic(err)
-			}
+		if nibbleIndex < len(nibbles) {
+			result[i] += nibbles[nibbleIndex]
 			nibbleIndex++
 		}
 	}
+
+	return result
+}
+
+// decompressNibbles
+// HI_NIBBLE(b) = (b >> 4) & 0x0F
+// LO_NIBBLE(b) = b & 0x0F
+//
+// HI_NIBBLE(first_byte) - bit flags, not used by this func
+// LO_NIBBLE(first_byte) - amount of nibbles
+func decompressNibbles(b []byte) []byte {
+	if len(b) < 1 {
+		return []byte{}
+	}
+
+	var nibblesAmount int = int(b[0]&0x0F) + 1
+
+	nibbles := make([]byte, nibblesAmount)
+
+	nibbleIndex := 0
+	for i := 1; i < len(b); i++ {
+		nibbles[nibbleIndex] = b[i] / 16
+		nibbleIndex++
+		if nibbleIndex < nibblesAmount {
+			nibbles[nibbleIndex] = b[i] % 16
+			nibbleIndex++
+		}
+	}
+
+	return nibbles
 }
