@@ -12,25 +12,24 @@ import (
 
 var (
 	witnessesBucket = []byte("witnesses")
-	newTrieOp       = byte(0xBB)
 )
 
-type WitnessDB struct {
+type WitnessDBWriter struct {
 	putter      ethdb.Putter
 	statsWriter *csv.Writer
 }
 
-func NewWitnessDB(putter ethdb.Putter, statsWriter *csv.Writer) (*WitnessDB, error) {
+func NewWitnessDBWriter(putter ethdb.Putter, statsWriter *csv.Writer) (*WitnessDBWriter, error) {
 	err := statsWriter.Write([]string{
 		"blockNum", "maxTrieSize", "witnessesSize",
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &WitnessDB{putter, statsWriter}, nil
+	return &WitnessDBWriter{putter, statsWriter}, nil
 }
 
-func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveWitnesses []*trie.Witness) {
+func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveWitnesses []*trie.Witness) {
 	key := deriveDbKey(blockNumber, maxTrieSize)
 
 	var buf bytes.Buffer
@@ -40,7 +39,7 @@ func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveW
 			panic(fmt.Errorf("error while writing witness to a buffer: %w", err))
 		}
 		if i < len(resolveWitnesses)-1 {
-			buf.WriteByte(newTrieOp)
+			buf.WriteByte(byte(trie.OpNewTrie))
 		}
 	}
 
@@ -60,6 +59,19 @@ func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveW
 	if err != nil {
 		panic(fmt.Errorf("error while writing stats: %w", err))
 	}
+}
+
+type WitnessDBReader struct {
+	getter ethdb.Getter
+}
+
+func NewWitnessDBReader(getter ethdb.Getter) *WitnessDBReader {
+	return &WitnessDBReader{getter}
+}
+
+func (db *WitnessDBReader) GetWitnessesForBlock(blockNumber uint64, maxTrieSize uint32) ([]byte, error) {
+	key := deriveDbKey(blockNumber, maxTrieSize)
+	return db.getter.Get(witnessesBucket, key)
 }
 
 func deriveDbKey(blockNumber uint64, maxTrieSize uint32) []byte {
