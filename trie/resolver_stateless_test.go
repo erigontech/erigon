@@ -118,19 +118,15 @@ func TestRebuildTrie(t *testing.T) {
 		t.Error(err)
 	}
 
-	var diff bytes.Buffer
-	resolvedTries[0].PrintDiff(trie1, &diff)
-	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
+	if !bytes.Equal(resolvedTries[0].Hash().Bytes(), trie1.Hash().Bytes()) {
+		t.Errorf("tries are different")
 	}
 
-	resolvedTries[1].PrintDiff(trie2, &diff)
-	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
+	if !bytes.Equal(resolvedTries[1].Hash().Bytes(), trie2.Hash().Bytes()) {
+		t.Errorf("tries are different")
 	}
 
-	resolvedTries[2].PrintDiff(trie3, &diff)
-	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
+	if !bytes.Equal(resolvedTries[2].Hash().Bytes(), trie3.Hash().Bytes()) {
+		t.Errorf("tries are different")
 	}
 }
