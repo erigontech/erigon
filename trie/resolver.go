@@ -121,6 +121,7 @@ const (
 	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
 )
 
+// ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
@@ -130,8 +131,23 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 
 	sort.Stable(tr)
-	tr2 := NewResolverStateful(tr.topLevels, tr.requests, hf)
-	return tr2.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+}
+
+// ResolveStateless resolves and hooks subtries using a witnesses database instead of
+// the state DB.
+func (tr *Resolver) ResolveStateless(db ethdb.Database, blockNr uint64) error {
+	var hf hookFunction
+	if tr.collectWitnesses {
+		hf = tr.extractWitnessAndHookSubtrie
+	} else {
+		hf = hookSubtrie
+	}
+
+	sort.Stable(tr)
+	resolver := NewResolverStateless(tr.requests, hf)
+	return resolver.RebuildTrie(db, blockNr)
 }
 
 func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) error {
