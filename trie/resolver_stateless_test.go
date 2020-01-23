@@ -51,7 +51,7 @@ func TestRebuildTrie(t *testing.T) {
 	}
 
 	var buff bytes.Buffer
-	_, err = w1.WriteTo(&buff))
+	_, err = w1.WriteTo(&buff)
 	if err != nil {
 		t.Error(err)
 	}
@@ -108,6 +108,10 @@ func TestRebuildTrie(t *testing.T) {
 		t.Error(err)
 	}
 
+	// we also support partial resolution with continuation (for storage tries)
+	// so basically we first resolve accounts, then storages separately
+	// but we still want to keep one entry in a DB per block, so we store the last read position
+	// and then use it as a start
 	resolver = NewResolverStateless([]*ResolveRequest{req3, req31}, hookFunction)
 	_, err = resolver.RebuildTrie(&storage, 1, 1, pos)
 	if err != nil {
@@ -127,6 +131,6 @@ func TestRebuildTrie(t *testing.T) {
 
 	resolvedTries[2].PrintDiff(trie3, &diff)
 	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s\n", string(diff.Bytes()))
+		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
 	}
 }
