@@ -232,7 +232,8 @@ func Stateless(
 
 	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
 
-	var witnessDB *WitnessDB
+	var witnessDBWriter *WitnessDBWriter
+	var witnessDBReader *WitnessDBReader
 
 	if witnessDatabasePath != "" {
 		var db ethdb.Database
@@ -240,19 +241,24 @@ func Stateless(
 		check(err)
 		defer db.Close()
 
-		statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
+		if useStatelessResolver {
+			witnessDBReader = NewWitnessDBReader(db)
+		} else {
+			statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
 
-		var file *os.File
-		file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
-		check(err)
-		defer file.Close()
+			var file *os.File
+			file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+			check(err)
+			defer file.Close()
 
-		statsFileCsv := csv.NewWriter(file)
-		defer statsFileCsv.Flush()
+			statsFileCsv := csv.NewWriter(file)
+			defer statsFileCsv.Flush()
 
-		witnessDB, err = NewWitnessDB(db, statsFileCsv)
-		check(err)
-		fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s", witnessDatabasePath, statsFilePath)
+			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
+			check(err)
+			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s", witnessDatabasePath, statsFilePath)
+		}
+
 	}
 
 	for !interrupt {
@@ -295,8 +301,8 @@ func Stateless(
 			return
 		}
 
-		if useStatelessResolver {
-			err = tds.ResolveStateTrieStateless(witnessDB)
+		if witnessDBReader != nil {
+			err = tds.ResolveStateTrieStateless(witnessDBReader)
 			if err != nil {
 				fmt.Printf("Failed to statelessly resolve state trie: %v\n", err)
 				return
@@ -309,13 +315,13 @@ func Stateless(
 			}
 		} else {
 			var resolveWitnesses []*trie.Witness
-			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDB != nil); err != nil {
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil); err != nil {
 				fmt.Printf("Failed to resolve state trie: %v\n", err)
 				return
 			}
 
 			if len(resolveWitnesses) > 0 {
-				witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
 			}
 		}
 
