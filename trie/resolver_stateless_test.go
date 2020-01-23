@@ -51,11 +51,30 @@ func TestRebuildTrie(t *testing.T) {
 	}
 
 	var buff bytes.Buffer
-	w1.WriteTo(&buff)
-	buff.WriteByte(byte(OpNewTrie))
-	w2.WriteTo(&buff)
-	buff.WriteByte(byte(OpNewTrie))
-	w3.WriteTo(&buff)
+	_, err = w1.WriteTo(&buff))
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = buff.WriteByte(byte(OpNewTrie))
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, err = w2.WriteTo(&buff)
+	if err != nil {
+		t.Error(err)
+	}
+
+	err = buff.WriteByte(byte(OpNewTrie))
+	if err != nil {
+		t.Error(err)
+	}
+
+	_, err = w3.WriteTo(&buff)
+	if err != nil {
+		t.Error(err)
+	}
 
 	storage := testWitnessStorage(buff.Bytes())
 
@@ -75,7 +94,7 @@ func TestRebuildTrie(t *testing.T) {
 		resolvedTries[currentTrie] = trie
 		currentTrie++
 		if !bytes.Equal(req.resolveHash.hash(), rootHash.Bytes()) {
-			return fmt.Errorf("root hash mismatch: expected %x got %x\n",
+			return fmt.Errorf("root hash mismatch: expected %x got %x",
 				req.resolveHash.hash(), rootHash.Bytes())
 		}
 		return nil
@@ -98,12 +117,12 @@ func TestRebuildTrie(t *testing.T) {
 	var diff bytes.Buffer
 	resolvedTries[0].PrintDiff(trie1, &diff)
 	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s\n", string(diff.Bytes()))
+		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
 	}
 
 	resolvedTries[1].PrintDiff(trie2, &diff)
 	if diff.Len() > 0 {
-		fmt.Errorf("tries are different: %s\n", string(diff.Bytes()))
+		fmt.Errorf("tries are different: %s", string(diff.Bytes()))
 	}
 
 	resolvedTries[2].PrintDiff(trie3, &diff)
