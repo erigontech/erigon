@@ -154,6 +154,7 @@ func Stateless(
 	createDb CreateDbFunc,
 	starkBlocksFile string,
 	starkStatsBase string,
+	useStatelessResolver bool,
 	witnessDatabasePath string) {
 
 	state.MaxTrieCacheGen = triesize
@@ -294,14 +295,17 @@ func Stateless(
 			return
 		}
 
-		var resolveWitnesses []*trie.Witness
-		if resolveWitnesses, err = tds.ResolveStateTrie(witnessDB != nil); err != nil {
-			fmt.Printf("Failed to resolve state trie: %v\n", err)
-			return
-		}
+		if useStatelessResolver {
+		} else {
+			var resolveWitnesses []*trie.Witness
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDB != nil); err != nil {
+				fmt.Printf("Failed to resolve state trie: %v\n", err)
+				return
+			}
 
-		if len(resolveWitnesses) > 0 {
-			witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+			if len(resolveWitnesses) > 0 {
+				witnessDB.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+			}
 		}
 
 		blockWitness = nil

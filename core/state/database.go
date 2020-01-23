@@ -432,8 +432,7 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
-func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, collectWitnesses bool) ([]*trie.Witness, error) {
-	var witnesses []*trie.Witness
+func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, resolveFunc func(*trie.Resolver) error) error {
 	var resolver *trie.Resolver
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
@@ -444,14 +443,7 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 			resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		resolver.CollectWitnesses(collectWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return witnesses, err
-		}
-		witnesses = resolver.PopCollectedWitnesses()
-	}
-	return witnesses, nil
+	return resolveFunc(resolver)
 }
 
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
@@ -508,8 +500,7 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, collectWitnesses bool) ([]*trie.Witness, error) {
-	var witnesses []*trie.Witness
+func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc func(*trie.Resolver) error) error {
 	var resolver *trie.Resolver
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
@@ -520,15 +511,7 @@ func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, coll
 			resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		resolver.CollectWitnesses(collectWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return witnesses, err
-		}
-		witnesses = resolver.PopCollectedWitnesses()
-		resolver = nil
-	}
-	return witnesses, nil
+	return resolveFunc(resolver)
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -544,6 +527,56 @@ func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) 
 func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouches [][]byte) {
 	return tds.resolveSetBuilder.ExtractTouches()
 }
+
+/*
+// ResolveStateTrieStateless uses a witness DB to resolve subtries
+func (tds *TrieDbState) ResolveStateTrieStateless(witnessDB string) error {
+	// Aggregating the current buffer, if any
+	if tds.currentBuffer != nil {
+		if tds.aggregateBuffer == nil {
+			tds.aggregateBuffer = &Buffer{}
+			tds.aggregateBuffer.initialise()
+		}
+		tds.aggregateBuffer.merge(tds.currentBuffer)
+	}
+	if tds.aggregateBuffer == nil {
+		return nil
+	}
+
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	// Prepare (resolve) storage tries so that actual modifications can proceed without database access
+	storageTouches, _ := tds.buildStorageTouches(tds.resolveReads, false)
+
+	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
+	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
+	var resolverWitnesses []*trie.Witness
+	var err error
+	if resolverWitnesses, err = tds.resolveAccountTouches(accountTouches, extractWitnesses); err != nil {
+		return err
+
+	}
+	witnesses = resolverWitnesses
+
+	if tds.resolveReads {
+		tds.populateAccountBlockProof(accountTouches)
+	}
+
+	if resolverWitnesses, err = tds.resolveStorageTouches(storageTouches, extractWitnesses); err != nil {
+		return witnesses, err
+	}
+
+	witnesses = append(witnesses, resolverWitnesses...)
+
+	if tds.resolveReads {
+		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
+			return witnesses, err
+		}
+	}
+	return witnesses, nil
+}
+*/
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
@@ -571,21 +604,35 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
 	var resolverWitnesses []*trie.Witness
 	var err error
-	if resolverWitnesses, err = tds.resolveAccountTouches(accountTouches, extractWitnesses); err != nil {
-		return witnesses, err
 
+	resolveFunc := func(resolver *trie.Resolver) error {
+		if resolver != nil {
+			resolver.CollectWitnesses(collectWitnesses)
+			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+				return witnesses, err
+			}
+			if collectWitnesses {
+				witnesses = resolver.PopCollectedWitnesses()
+				if resolverWitnesses == nil {
+					resolverWitnesses = witnesses
+				} else {
+					resolverWitnesses = append(resolverWitnesses, witnesses...)
+				}
+			}
+		}
 	}
-	witnesses = resolverWitnesses
+
+	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
+		return err
+	}
 
 	if tds.resolveReads {
 		tds.populateAccountBlockProof(accountTouches)
 	}
 
-	if resolverWitnesses, err = tds.resolveStorageTouches(storageTouches, extractWitnesses); err != nil {
-		return witnesses, err
+	if err = tds.resolveStorageTouches(storageTouches, resolveFunc); err != nil {
+		return err
 	}
-
-	witnesses = append(witnesses, resolverWitnesses...)
 
 	if tds.resolveReads {
 		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
