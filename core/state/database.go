@@ -607,23 +607,24 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 
 	resolveFunc := func(resolver *trie.Resolver) error {
 		if resolver != nil {
-			resolver.CollectWitnesses(collectWitnesses)
+			resolver.CollectWitnesses(extractWitnesses)
 			if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-				return witnesses, err
+				return err
 			}
-			if collectWitnesses {
-				witnesses = resolver.PopCollectedWitnesses()
-				if resolverWitnesses == nil {
-					resolverWitnesses = witnesses
+			if extractWitnesses {
+				resolverWitnesses = resolver.PopCollectedWitnesses()
+				if witnesses == nil {
+					witnesses = resolverWitnesses
 				} else {
-					resolverWitnesses = append(resolverWitnesses, witnesses...)
+					witnesses = append(witnesses, resolverWitnesses...)
 				}
 			}
 		}
+		return nil
 	}
 
 	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
-		return err
+		return witnesses, err
 	}
 
 	if tds.resolveReads {
@@ -631,7 +632,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 	}
 
 	if err = tds.resolveStorageTouches(storageTouches, resolveFunc); err != nil {
-		return err
+		return witnesses, err
 	}
 
 	if tds.resolveReads {
