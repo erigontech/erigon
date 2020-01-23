@@ -611,12 +611,19 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 
 // ResolveStateTrieStateless uses a witness DB to resolve subtries
 func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
+	var startPos int64
 	resolveFunc := func(resolver *trie.Resolver) error {
 		if resolver == nil {
 			return nil
 		}
 
-		return resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen)
+		pos, err := resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen, startPos)
+		if err != nil {
+			return err
+		}
+
+		startPos = pos
+		return nil
 	}
 
 	return tds.resolveStateTrieWithFunc(resolveFunc)
