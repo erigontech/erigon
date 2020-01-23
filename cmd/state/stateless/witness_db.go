@@ -12,7 +12,6 @@ import (
 
 var (
 	witnessesBucket = []byte("witnesses")
-	newTrieOp       = byte(0xBB)
 )
 
 type WitnessDB struct {
@@ -40,7 +39,7 @@ func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveW
 			panic(fmt.Errorf("error while writing witness to a buffer: %w", err))
 		}
 		if i < len(resolveWitnesses)-1 {
-			buf.WriteByte(newTrieOp)
+			buf.WriteByte(byte(trie.OpNewTrie))
 		}
 	}
 
