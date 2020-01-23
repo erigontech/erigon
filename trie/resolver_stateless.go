@@ -2,7 +2,6 @@ package trie
 
 import (
 	"bytes"
-	"fmt"
 )
 
 type ResolverStateless struct {
@@ -23,32 +22,36 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 		return err
 	}
 
-	fmt.Printf("serialized=%v\n", serializedWitness)
-
 	witnessReader := bytes.NewReader(serializedWitness)
 
+	var prevReq *ResolveRequest
+	requestIndex := 0
+
 	for witnessReader.Len() > 0 {
-		fmt.Printf("iteration N\n")
+		req := r.requests[requestIndex]
+		if prevReq == nil ||
+			!bytes.Equal(req.contract, prevReq.contract) ||
+			!bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
+			witness, err := NewWitnessFromReader(witnessReader, false /*trace*/)
 
-		witness, err := NewWitnessFromReader(witnessReader, true /*trace*/)
+			if err != nil {
+				return err
+			}
 
-		fmt.Printf("witness = %+v, err = %v\n", witness, err)
+			trie, _, err := BuildTrieFromWitness(witness, false /*is-binary*/, false /*trace*/)
+			if err != nil {
+				return err
+			}
+			rootNode := trie.root
+			rootHash := trie.Hash()
 
-		if err != nil {
-			return err
+			err = r.hookFunction(req, rootNode, rootHash)
+			if err != nil {
+				return err
+			}
+			prevReq = req
 		}
-
-		trie, _, err := BuildTrieFromWitness(witness, false /*is-binary*/, false /*trace*/)
-		if err != nil {
-			return err
-		}
-		rootNode := trie.root
-		rootHash := trie.Hash()
-		/*FIXME: fix later*/
-		err = r.hookFunction(nil, rootNode, rootHash)
-		if err != nil {
-			return err
-		}
+		requestIndex++
 	}
 
 	return nil

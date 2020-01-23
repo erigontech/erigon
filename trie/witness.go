@@ -91,7 +91,6 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 			return nil, err
 		}
 		var op WitnessOperator
-		fmt.Printf("read opcode=%v\n", opcode)
 		switch OperatorKindCode(opcode[0]) {
 		case OpHash:
 			op = &OperatorHash{}
