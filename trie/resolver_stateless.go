@@ -1,6 +1,9 @@
 package trie
 
-import "bytes"
+import (
+	"bytes"
+	"fmt"
+)
 
 type ResolverStateless struct {
 	requests     []*ResolveRequest
@@ -19,11 +22,18 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 	if err != nil {
 		return err
 	}
+
+	fmt.Printf("serialized=%v\n", serializedWitness)
+
 	witnessReader := bytes.NewReader(serializedWitness)
 
 	for witnessReader.Len() > 0 {
+		fmt.Printf("iteration N\n")
 
-		witness, err := NewWitnessFromReader(witnessReader, false /*trace*/)
+		witness, err := NewWitnessFromReader(witnessReader, true /*trace*/)
+
+		fmt.Printf("witness = %+v, err = %v\n", witness, err)
+
 		if err != nil {
 			return err
 		}
@@ -34,11 +44,12 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 		}
 		rootNode := trie.root
 		rootHash := trie.Hash()
-		err = r.hookFunction(r.requests[0], rootNode, rootHash)
+		/*FIXME: fix later*/
+		err = r.hookFunction(nil, rootNode, rootHash)
 		if err != nil {
 			return err
 		}
 	}
 
-	panic("not implemented")
+	return nil
 }
