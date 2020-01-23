@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -8,6 +9,54 @@ import (
 
 	"github.com/stretchr/testify/assert"
 )
+
+func TestCompressNibbles(t *testing.T) {
+	cases := []struct {
+		in     string
+		expect string
+	}{
+		{in: "00", expect: "0000"},
+		{in: "0000", expect: "0100"},
+		{in: "000000", expect: "020000"},
+		{in: "000001", expect: "020010"},
+		{in: "01", expect: "0010"},
+		{in: "010203040506070809", expect: "081234567890"},
+		{in: "0f0000", expect: "02f000"},
+		{in: "0f", expect: "00f0"},
+		{in: "0f00", expect: "01f0"},
+	}
+
+	compressedOut := &bytes.Buffer{}
+	decompressedOut := &bytes.Buffer{}
+	for _, tc := range cases {
+		in := strToNibs(tc.in)
+		compressNibbles(in, compressedOut)
+		compressed := compressedOut.Bytes()
+		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
+		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
+		compressedOut.Reset()
+
+		decompressNibbles(compressed, decompressedOut)
+		decompressed := decompressedOut.Bytes()
+		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
+		decompressedOut.Reset()
+	}
+}
+
+func BenchmarkParseNib(b *testing.B) {
+	in := []byte("0f09090909090909090f090")
+	//out := bytes.NewBuffer(make([]byte, 40))
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		keyNibblesToBytes(in)
+		//compressNibbles(in, out)
+		//_ = out.Bytes()
+		//out.Reset()
+		//n2bV1Compressed(in)
+		//n2bV1(in)
+		//n2bV2(in)
+	}
+}
 
 func TestN2bV1Compressed_Others(t *testing.T) {
 	fmt.Printf("Res: %x\n", n2bV1Compressed([]byte("00010b")))
@@ -54,17 +103,6 @@ func TestN2bV1Compressed_CompressionLevel(t *testing.T) {
 	fmt.Println("LenAfter:", lenArr(r))
 	for i := 0; i < len(o); i++ {
 		fmt.Printf("%s -> %x\n", o[i], r[i])
-	}
-}
-
-func BenchmarkParseNib(b *testing.B) {
-	val := []byte("0f09090909090909090f090")
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		//keyNibblesToBytes(val)
-		n2bV1Compressed(val)
-		//n2bV1(val)
-		//n2bV2(val)
 	}
 }
 
@@ -172,8 +210,10 @@ func lenArr(a [][]byte) int {
 }
 
 func n2bV1Compressed(in []byte) []byte {
+	res := &bytes.Buffer{}
 	if in[len(in)-1] != 0 {
-		return squashNibbles(in)
+		compressNibbles(in, res)
+		return res.Bytes()
 	}
 
 	var amountOfZeroes int
@@ -186,7 +226,9 @@ func n2bV1Compressed(in []byte) []byte {
 	nonZero := len(in) - amountOfZeroes
 	var lead []byte
 	if nonZero != 0 {
-		lead = squashNibbles(in[:len(in)-amountOfZeroes])
+		res.Reset()
+		compressNibbles(in, res)
+		lead = res.Bytes()
 	}
 	rest := n2bV2(in[len(in)-amountOfZeroes:], uint(amountOfZeroes))
 	return append(lead, rest...)
