@@ -106,6 +106,9 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 			op = &OperatorEmptyRoot{}
 		case OpExtension:
 			op = &OperatorExtension{}
+		case OpNewTrie:
+			/* end of the current trie, end the function */
+			break
 		default:
 			return nil, fmt.Errorf("unexpected opcode while reading witness: %x", opcode[0])
 		}
