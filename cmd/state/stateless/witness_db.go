@@ -62,6 +62,10 @@ func (db *WitnessDB) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveW
 	}
 }
 
+func (db *WitnessDB) GetWitnessesForBlock(blockNumber uint64, maxTrieSize uint32) []*trie.Witness {
+	panic("boo")
+}
+
 func deriveDbKey(blockNumber uint64, maxTrieSize uint32) []byte {
 	buffer := make([]byte, 8+4)
 

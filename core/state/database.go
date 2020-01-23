@@ -610,7 +610,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 }
 
 // ResolveStateTrieStateless uses a witness DB to resolve subtries
-func (tds *TrieDbState) ResolveStateTrieStateless(database ethdb.Database) error {
+func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
 	resolveFunc := func(resolver *trie.Resolver) error {
 		if resolver == nil {
 			return nil

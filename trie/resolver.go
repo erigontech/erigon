@@ -137,7 +137,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 // ResolveStateless resolves and hooks subtries using a witnesses database instead of
 // the state DB.
-func (tr *Resolver) ResolveStateless(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
