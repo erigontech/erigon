@@ -295,6 +295,159 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 	}
 }
 
+// StreamMergeIterator merges an Iterator and a Stream
+type StreamMergeIterator struct {
+	it          *Iterator
+	s           *Stream
+	trace       bool
+	ki, ai, si  int
+	offset      int
+	hex         []byte
+	itemType    StreamItem
+	oldItemType StreamItem
+	oldHex      []byte
+	oldHexCopy  []byte
+	oldAVal     *accounts.Account
+	oldHash     []byte
+	oldHashCopy []byte
+	oldVal      []byte
+}
+
+// NewStreamMergeIterator create a brand new StreamMergeIterator
+func NewStreamMergeIterator(it *Iterator, s *Stream, trace bool) *StreamMergeIterator {
+	smi := &StreamMergeIterator{
+		it:    it,
+		s:     s,
+		trace: trace,
+	}
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = it.Next()
+	return smi
+}
+
+// Reset prepares StreamMergeIterator for reuse
+func (smi *StreamMergeIterator) Reset(it *Iterator, s *Stream, trace bool) {
+	smi.it = it
+	smi.s = s
+	smi.trace = trace
+	smi.ki = 0
+	smi.ai = 0
+	smi.si = 0
+	smi.offset = 0
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = it.Next()
+}
+
+// Next returns the next item in the merged iterator
+func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
+	for {
+		if smi.trace {
+			fmt.Printf("smi.hex %x, smi.ki %d, len(smi.s.keySizes) %d, smi.oldItemType %d smi.oldHex %x\n", smi.hex, smi.ki, len(smi.s.keySizes), smi.oldItemType, smi.oldHex)
+		}
+		if smi.hex == nil && smi.ki >= len(smi.s.keySizes) && smi.oldItemType == NoItem {
+			return NoItem, nil, nil, nil, nil
+		}
+		if smi.hex == nil && smi.ki < len(smi.s.keySizes) {
+			size := int(smi.s.keySizes[smi.ki])
+			smi.hex = smi.s.keyBytes[smi.offset : smi.offset+size]
+			smi.itemType = smi.s.itemTypes[smi.ki]
+			smi.ki++
+			smi.offset += size
+		}
+		hex := smi.hex // Save it to be able to use it even after assigning to nil
+		if smi.oldHex == nil {
+			smi.hex = nil // To be consumed
+			switch smi.itemType {
+			case AccountStreamItem:
+				ai := smi.ai
+				smi.ai++
+				if smi.s.aValues[ai] != nil {
+					return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+				}
+			case StorageStreamItem:
+				si := smi.si
+				smi.si++
+				if len(smi.s.sValues[si]) > 0 {
+					return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+				}
+			default:
+				panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+			}
+		} else if hex == nil {
+			if len(smi.oldHexCopy) > 0 {
+				smi.oldHexCopy = smi.oldHexCopy[:0]
+			}
+			smi.oldHexCopy = append(smi.oldHexCopy, smi.oldHex...)
+			oldItemType := smi.oldItemType
+			oldAVal := smi.oldAVal
+			if len(smi.oldHashCopy) > 0 {
+				smi.oldHashCopy = smi.oldHashCopy[:0]
+			}
+			smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
+			oldVal := smi.oldVal
+			smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+			return oldItemType, smi.oldHexCopy, oldAVal, smi.oldHashCopy, oldVal
+		} else {
+			// Special case - account gets deleted
+			if smi.itemType == AccountStreamItem && smi.s.aValues[smi.ai] == nil && bytes.HasPrefix(smi.oldHex, hex) {
+				smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+			} else {
+				switch bytes.Compare(smi.oldHex, hex) {
+				case -1:
+					if len(smi.oldHexCopy) > 0 {
+						smi.oldHexCopy = smi.oldHexCopy[:0]
+					}
+					smi.oldHexCopy = append(smi.oldHexCopy, smi.oldHex...)
+					oldItemType := smi.oldItemType
+					oldAVal := smi.oldAVal
+					if len(smi.oldHashCopy) > 0 {
+						smi.oldHashCopy = smi.oldHashCopy[:0]
+					}
+					smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
+					oldVal := smi.oldVal
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+					return oldItemType, smi.oldHexCopy, oldAVal, smi.oldHashCopy, oldVal
+				case 1:
+					smi.hex = nil // To be consumed
+					switch smi.itemType {
+					case AccountStreamItem:
+						ai := smi.ai
+						smi.ai++
+						if smi.s.aValues[ai] != nil {
+							return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+						}
+					case StorageStreamItem:
+						si := smi.si
+						smi.si++
+						if len(smi.s.sValues[si]) > 0 {
+							return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+						}
+					default:
+						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+					}
+				case 0:
+					smi.hex = nil // To be consumed
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+					switch smi.itemType {
+					case AccountStreamItem:
+						ai := smi.ai
+						smi.ai++
+						if smi.s.aValues[ai] != nil {
+							return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+						}
+					case StorageStreamItem:
+						si := smi.si
+						smi.si++
+						if len(smi.s.sValues[si]) > 0 {
+							return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+						}
+					default:
+						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+					}
+				}
+			}
+		}
+	}
+}
+
 // StreamHash computes the hash of a stream, as if it was a trie
 func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
 	var succ bytes.Buffer
@@ -548,136 +701,27 @@ func HashWithModifications(
 		offset += int(size)
 	}
 	// Now we merge old and new streams, preferring the new
-	ki = 0
-	ai = 0
-	si = 0
-	var hex []byte
-	var itemType StreamItem
 	newStream.Reset()
 
 	oldIt := NewIterator(t, rs, hr, trace)
-	oldItemType, oldHex, oldAVal, oldHash, oldVal := oldIt.Next()
 
-	offset = 0
-	for hex != nil || oldItemType != NoItem || ki < keyCount {
-		if hex == nil && ki < keyCount {
-			size := int(stream.keySizes[ki])
-			hex = stream.keyBytes[offset : offset+size]
-			itemType = stream.itemTypes[ki]
-			ki++
-			offset += size
-		}
-		if oldHex == nil {
-			switch itemType {
-			case AccountStreamItem:
-				if stream.aValues[ai] != nil {
-					newStream.keyBytes = append(newStream.keyBytes, hex...)
-					newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-					newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-				}
-				ai++
-			case StorageStreamItem:
-				if len(stream.sValues[si]) > 0 {
-					newStream.keyBytes = append(newStream.keyBytes, hex...)
-					newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-					newStream.sValues = append(newStream.sValues, stream.sValues[si])
-					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-				}
-				si++
-			default:
-				return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == nil): %d", itemType)
-			}
-			hex = nil // consumed
-		} else if hex == nil {
-			newStream.keyBytes = append(newStream.keyBytes, oldHex...)
-			newStream.keySizes = append(newStream.keySizes, uint8(len(oldHex)))
-			switch oldItemType {
-			case AccountStreamItem:
-				newStream.aValues = append(newStream.aValues, oldAVal)
-				newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-			case StorageStreamItem:
-				newStream.sValues = append(newStream.sValues, oldVal)
-				newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-			case AHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldHash...)
-				newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-			case SHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldHash...)
-				newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
-			}
-			oldItemType, oldHex, oldAVal, oldHash, oldVal = oldIt.Next()
-		} else {
-			// Special case - account gets deleted
-			if itemType == AccountStreamItem && stream.aValues[ai] == nil && bytes.HasPrefix(oldHex, hex) {
-				oldHex = nil
-			} else {
-				switch bytes.Compare(oldHex, hex) {
-				case -1:
-					newStream.keyBytes = append(newStream.keyBytes, oldHex...)
-					newStream.keySizes = append(newStream.keySizes, uint8(len(oldHex)))
-					switch oldItemType {
-					case AccountStreamItem:
-						newStream.aValues = append(newStream.aValues, oldAVal)
-						newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-					case StorageStreamItem:
-						newStream.sValues = append(newStream.sValues, oldVal)
-						newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-					case AHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldHash...)
-						newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-					case SHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldHash...)
-						newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
-					}
-					oldItemType, oldHex, oldAVal, oldHash, oldVal = oldIt.Next()
-				case 1:
-					switch itemType {
-					case AccountStreamItem:
-						if stream.aValues[ai] != nil {
-							newStream.keyBytes = append(newStream.keyBytes, hex...)
-							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-						}
-						ai++
-					case StorageStreamItem:
-						if len(stream.sValues[si]) > 0 {
-							newStream.keyBytes = append(newStream.keyBytes, hex...)
-							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-							newStream.sValues = append(newStream.sValues, stream.sValues[si])
-							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-						}
-						si++
-					default:
-						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex > hex): %d", itemType)
-					}
-					hex = nil // consumed
-				case 0:
-					switch itemType {
-					case AccountStreamItem:
-						if stream.aValues[ai] != nil {
-							newStream.keyBytes = append(newStream.keyBytes, hex...)
-							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-						}
-						ai++
-					case StorageStreamItem:
-						if len(stream.sValues[si]) > 0 {
-							newStream.keyBytes = append(newStream.keyBytes, hex...)
-							newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-							newStream.sValues = append(newStream.sValues, stream.sValues[si])
-							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-						}
-						si++
-					default:
-						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == hex): %d", itemType)
-					}
-					hex = nil // consumed
-					oldItemType, oldHex, oldAVal, oldHash, oldVal = oldIt.Next()
-				}
-			}
+	it := NewStreamMergeIterator(oldIt, &stream, trace)
+	for itemType, hex, aVal, hash, val := it.Next(); itemType != NoItem; itemType, hex, aVal, hash, val = it.Next() {
+		newStream.keyBytes = append(newStream.keyBytes, hex...)
+		newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
+		switch itemType {
+		case AccountStreamItem:
+			newStream.aValues = append(newStream.aValues, aVal)
+			newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
+		case StorageStreamItem:
+			newStream.sValues = append(newStream.sValues, val)
+			newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
+		case AHashStreamItem:
+			newStream.hashes = append(newStream.hashes, hash...)
+			newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
+		case SHashStreamItem:
+			newStream.hashes = append(newStream.hashes, hash...)
+			newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
 		}
 	}
 	if trace {
