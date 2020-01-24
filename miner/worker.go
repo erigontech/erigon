@@ -607,10 +607,7 @@ func (w *worker) taskLoop() {
 		case task := <-w.taskCh:
 			if w.newTaskHook != nil {
 				//fixme datarace in the tests
-				num := task.block.Number().Uint64()
-				StateLock(num)
 				w.newTaskHook(task)
-				StateUnlock(num)
 			}
 
 			// Reject duplicate sealing work due to resubmitting.
@@ -620,7 +617,7 @@ func (w *worker) taskLoop() {
 				continue
 			}
 			// Interrupt previous sealing operation
-			//interrupt()
+			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
 
 			if w.skipSealHook != nil && w.skipSealHook(task) {
@@ -694,17 +691,12 @@ func (w *worker) resultLoop() {
 				logs = append(logs, receipt.Logs...)
 			}
 			// Commit block and state to database.
-			//fixme data race
-			StateLock(block.Number().Uint64())
 			_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
-			//_, err := w.chain.InsertChain(types.Blocks{block})
 			if err != nil {
-				StateUnlock(block.Number().Uint64())
 				log.Error("Failed writing block to chain", "err", err)
 				fmt.Println("+++++++ 7")
 				continue
 			}
-			StateUnlock(block.Number().Uint64())
 
 			log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
 				"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
@@ -714,6 +706,12 @@ func (w *worker) resultLoop() {
 
 			// Insert the block into the set of pending ones to resultLoop for confirmations
 			w.unconfirmed.Insert(block.NumberU64(), block.Hash())
+
+			_, err = w.chain.InsertChain(types.Blocks{block})
+			if err != nil {
+				log.Error("Failed writing block to chain", "err", err)
+				fmt.Println("+++++++ 7.1")
+			}
 
 		case <-w.exitCh:
 			return
@@ -809,14 +807,11 @@ func (w *worker) updateSnapshot() {
 func (w *worker) commitTransaction(tx *types.Transaction, coinbase common.Address) ([]*types.Log, error) {
 	snap := w.current.state.Snapshot()
 
-	StateLock(w.current.header.Number.Uint64())
 	receipt, err := core.ApplyTransaction(w.chainConfig, w.chain, &coinbase, w.current.gasPool, w.current.state, w.current.tds.TrieStateWriter(), w.current.header, tx, &w.current.header.GasUsed, *w.chain.GetVMConfig())
 	if err != nil {
-		StateUnlock(w.current.header.Number.Uint64())
 		w.current.state.RevertToSnapshot(snap)
 		return nil, err
 	}
-	StateUnlock(w.current.header.Number.Uint64())
 
 	if !w.chainConfig.IsByzantium(w.current.header.Number) {
 		w.current.tds.StartNewBuffer()
@@ -1196,20 +1191,7 @@ func getStateLock(number uint64) *sync.Mutex {
 	return mu
 }
 
-func StateLock(number uint64) {
-	return
-	getStateLock(number).Lock()
-}
-
-func StateUnlock(number uint64) {
-	return
-	getStateLock(number).Unlock()
-}
-
 func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {
-	StateLock(header.Number.Uint64())
-	defer StateUnlock(header.Number.Uint64())
-
 	block, err := engine.FinalizeAndAssemble(chainConfig, header, s, txs, uncles, receipts)
 	if err != nil {
 		return nil, err

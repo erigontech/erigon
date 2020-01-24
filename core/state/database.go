@@ -171,21 +171,7 @@ type TrieDbState struct {
 	tp              *trie.TriePruning
 }
 
-var (
-	trieObj   = make(map[uint64]uintptr)
-	trieObjMu sync.RWMutex
-)
-
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	tds, err := newTrieDbState(root, db, blockNr)
-	if err != nil {
-		return nil, err
-	}
-
-	return tds, nil
-}
-
-func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
