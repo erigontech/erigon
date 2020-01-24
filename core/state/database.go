@@ -314,6 +314,12 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 }
 
 func (tds *TrieDbState) putIntermediateCache(prefix []byte, nodeHash []byte) {
+	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+	if len(prefix) == 0 {
+		return
+	}
 	if err := putIntermediateCache(tds.db, prefix, nodeHash); err != nil {
 		log.Warn("could not put intermediate trie cache", "err", err)
 	}
@@ -321,6 +327,12 @@ func (tds *TrieDbState) putIntermediateCache(prefix []byte, nodeHash []byte) {
 }
 
 func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
+	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+	if len(prefix) == 0 {
+		return
+	}
 	if err := delIntermediateCache(tds.db, prefix); err != nil {
 		log.Warn("could not delete intermediate trie cache", "err", err)
 	}

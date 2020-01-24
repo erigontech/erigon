@@ -10,9 +10,6 @@ import (
 )
 
 func putIntermediateCache(db ethdb.Putter, prefix []byte, subtrieHash []byte) error {
-	if len(prefix) == 0 {
-		return nil
-	}
 	v := make([]byte, len(subtrieHash))
 	copy(v, subtrieHash)
 
@@ -29,10 +26,6 @@ func putIntermediateCache(db ethdb.Putter, prefix []byte, subtrieHash []byte) er
 }
 
 func delIntermediateCache(db ethdb.Deleter, prefix []byte) error {
-	if len(prefix) == 0 {
-		return nil
-	}
-
 	k := &bytes.Buffer{}
 	if err := trie.CompressNibbles(prefix, k); err != nil {
 		return err

@@ -27,6 +27,7 @@ func putIntermediateCache(db ethdb.Putter, prefix []byte, subtrieHash []byte) er
 	return nil
 }
 
+// CompressNibbles - supports only even number of nibbles
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
 func CompressNibbles(nibbles []byte, out io.ByteWriter) error {
@@ -61,12 +62,10 @@ func CompressNibbles(nibbles []byte, out io.ByteWriter) error {
 	return nil
 }
 
-// DecompressNibbles
+// DecompressNibbles - supports only even number of nibbles
+//
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
-//
-// HI_NIBBLE(first_byte) - bit flags, not used by this func
-// LO_NIBBLE(first_byte) - amount of nibbles
 func DecompressNibbles(in []byte, out io.ByteWriter) error {
 	if len(in) < 1 {
 		return nil
