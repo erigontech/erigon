@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -24,7 +25,7 @@ func TestCompressNibbles(t *testing.T) {
 	compressBuf := &bytes.Buffer{}
 	decompressBuf := &bytes.Buffer{}
 	for _, tc := range cases {
-		in := strToNibs(tc.in)
+		in := common.Hex2Bytes(tc.in)
 		err := CompressNibbles(in, compressBuf)
 		compressed := compressBuf.Bytes()
 		assert.Nil(t, err)
@@ -38,22 +39,4 @@ func TestCompressNibbles(t *testing.T) {
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
 		decompressBuf.Reset()
 	}
-}
-
-func strToNibs(in string) []uint8 {
-	nibs := []byte(in)
-	res := make([]uint8, len(in)/2+len(in)%2)
-	for i := 0; i < len(nibs)-1; i = i + 2 {
-		a := nibToUint8(nibs[i+1 : i+2])
-		res[i/2] = a
-	}
-	return res
-}
-
-func nibToUint8(in []byte) uint8 {
-	nib, err := strconv.ParseUint(string(in), 16, 4)
-	if err != nil {
-		panic(err)
-	}
-	return uint8(nib)
 }
