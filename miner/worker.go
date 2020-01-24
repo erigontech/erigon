@@ -149,7 +149,6 @@ type worker struct {
 	// Channels
 	newWorkCh          chan *newWorkReq
 	taskCh             chan *task
-	resultCh           chan consensus.ResultWithContext
 	startCh            chan struct{}
 	exitCh             chan struct{}
 	resubmitIntervalCh chan time.Duration
@@ -183,7 +182,7 @@ type worker struct {
 	canonicalMiningMu sync.Mutex
 	sideMining        []consensus.Cancel
 	sideMiningMu      sync.Mutex
-	n int
+	n                 int
 }
 
 type hooks struct {
@@ -212,12 +211,11 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		pendingTasks:       make(map[common.Hash]*task),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
-		resultCh:           make(chan consensus.ResultWithContext, resultQueueSize),
 		exitCh:             make(chan struct{}),
 		startCh:            make(chan struct{}, 1),
 		resubmitIntervalCh: make(chan time.Duration),
 		resubmitAdjustCh:   make(chan *intervalAdjust, resubmitAdjustChanSize),
-		n: rand.Intn(100),
+		n:                  rand.Intn(100),
 	}
 
 	// Submit first work to initialize pending state.
@@ -269,7 +267,7 @@ func (w *worker) pendingBlock() *types.Block {
 
 func (w *worker) init() {
 	w.initOnce.Do(func() {
-		time.Sleep(5*time.Second)
+		time.Sleep(5 * time.Second)
 		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
 		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
 		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
@@ -293,7 +291,6 @@ func (w *worker) init() {
 		go w.mainLoop()
 		go w.newWorkLoop(timer, recommit, commit)
 		go w.chainEvents(timestamp, commit)
-		go w.resultLoop()
 		go w.taskLoop()
 	})
 }
@@ -494,7 +491,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 
-	t := time.NewTicker(100*time.Millisecond)
+	t := time.NewTicker(100 * time.Millisecond)
 	defer t.Stop()
 
 	for {
@@ -629,9 +626,12 @@ func (w *worker) taskLoop() {
 			w.pendingMu.Unlock()
 
 			fmt.Println("+++++++ 2")
-			if err := w.engine.Seal(task.ctx, w.chain, task.block, w.resultCh, stopCh); err != nil {
+			resultCh := make(chan consensus.ResultWithContext, 1)
+			if err := w.engine.Seal(task.ctx, w.chain, task.block, resultCh, stopCh); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 			}
+
+			w.insertToChain(<-resultCh)
 			fmt.Println("+++++++ 3")
 		case <-w.exitCh:
 			interrupt()
@@ -640,82 +640,71 @@ func (w *worker) taskLoop() {
 	}
 }
 
-// resultLoop is a standalone goroutine to handle sealing result submitting
-// and flush relative data to the database.
-func (w *worker) resultLoop() {
-	fmt.Println("+++++++++++ 0000")
-	for {
-		select {
-		case result := <-w.resultCh:
-			fmt.Println("+++++++ 4", result.Header())
-			// Short circuit when receiving empty result.
-			block := result.Block
-			if block == nil {
-				continue
-			}
-			// Short circuit when receiving duplicate result caused by resubmitting.
-			if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
-				fmt.Println("+++++++ 5")
-				continue
-			}
-			var (
-				sealhash = w.engine.SealHash(block.Header())
-				hash     = block.Hash()
-			)
-			w.pendingMu.RLock()
-			task, exist := w.pendingTasks[sealhash]
-			w.pendingMu.RUnlock()
-			if !exist {
-				fmt.Println("+++++++ 6")
-				log.Error("Block found but no relative pending task", "number", block.Number(), "sealhash", sealhash, "hash", hash)
-				continue
-			}
-			// Different block could share same sealhash, deep copy here to prevent write-write conflict.
-			var (
-				receipts = make([]*types.Receipt, len(task.receipts))
-				logs     []*types.Log
-			)
-			for i, receipt := range task.receipts {
-				// add block location fields
-				receipt.BlockHash = hash
-				receipt.BlockNumber = block.Number()
-				receipt.TransactionIndex = uint(i)
+func (w *worker) insertToChain(result consensus.ResultWithContext) {
+	fmt.Println("+++++++ 4", result.Header())
+	// Short circuit when receiving empty result.
+	block := result.Block
+	if block == nil {
+		// continue
+	}
+	// Short circuit when receiving duplicate result caused by resubmitting.
+	if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
+		fmt.Println("+++++++ 5")
+		// continue
+	}
+	var (
+		sealhash = w.engine.SealHash(block.Header())
+		hash     = block.Hash()
+	)
+	w.pendingMu.RLock()
+	task, exist := w.pendingTasks[sealhash]
+	w.pendingMu.RUnlock()
+	if !exist {
+		fmt.Println("+++++++ 6")
+		log.Error("Block found but no relative pending task", "number", block.Number(), "sealhash", sealhash, "hash", hash)
+		// continue
+	}
+	// Different block could share same sealhash, deep copy here to prevent write-write conflict.
+	var (
+		receipts = make([]*types.Receipt, len(task.receipts))
+		logs     []*types.Log
+	)
+	for i, receipt := range task.receipts {
+		// add block location fields
+		receipt.BlockHash = hash
+		receipt.BlockNumber = block.Number()
+		receipt.TransactionIndex = uint(i)
 
-				receipts[i] = new(types.Receipt)
-				*receipts[i] = *receipt
-				// Update the block hash in all logs since it is now available and not when the
-				// receipt/log of individual transactions were created.
-				for _, log := range receipt.Logs {
-					log.BlockHash = hash
-				}
-				logs = append(logs, receipt.Logs...)
-			}
-			// Commit block and state to database.
-			_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
-			if err != nil {
-				log.Error("Failed writing block to chain", "err", err)
-				fmt.Println("+++++++ 7")
-				continue
-			}
-
-			log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
-				"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
-
-			// Broadcast the block and announce chain insertion event
-			w.mux.Post(core.NewMinedBlockEvent{Block: block})
-
-			// Insert the block into the set of pending ones to resultLoop for confirmations
-			w.unconfirmed.Insert(block.NumberU64(), block.Hash())
-
-			_, err = w.chain.InsertChain(types.Blocks{block})
-			if err != nil {
-				log.Error("Failed writing block to chain", "err", err)
-				fmt.Println("+++++++ 7.1")
-			}
-
-		case <-w.exitCh:
-			return
+		receipts[i] = new(types.Receipt)
+		*receipts[i] = *receipt
+		// Update the block hash in all logs since it is now available and not when the
+		// receipt/log of individual transactions were created.
+		for _, log := range receipt.Logs {
+			log.BlockHash = hash
 		}
+		logs = append(logs, receipt.Logs...)
+	}
+	// Commit block and state to database.
+	_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
+	if err != nil {
+		log.Error("Failed writing block to chain", "err", err)
+		fmt.Println("+++++++ 7")
+		// continue
+	}
+
+	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
+		"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
+
+	// Broadcast the block and announce chain insertion event
+	w.mux.Post(core.NewMinedBlockEvent{Block: block})
+
+	// Insert the block into the set of pending ones to resultLoop for confirmations
+	w.unconfirmed.Insert(block.NumberU64(), block.Hash())
+
+	_, err = w.chain.InsertChain(types.Blocks{block})
+	if err != nil {
+		log.Error("Failed writing block to chain", "err", err)
+		fmt.Println("+++++++ 7.1")
 	}
 }
 
@@ -1170,10 +1159,10 @@ func (w *worker) clearCanonicalChainContext() {
 }
 
 //fixme
-var stateLock = &struct{
-	m map[uint64]*sync.Mutex
+var stateLock = &struct {
+	m  map[uint64]*sync.Mutex
 	mu sync.Mutex
-} {
+}{
 	make(map[uint64]*sync.Mutex),
 	sync.Mutex{},
 }
