@@ -369,7 +369,7 @@ func (bc *BlockChain) setTrieDbState(trieDbState *state.TrieDbState) {
 
 func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
 	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
-		log.Info("Creating IntraBlockState from latest state", "block", blockNr, "isNIl", bc.trieDbState == nil)
+		log.Info("Creating IntraBlockState from latest state", "block", blockNr, "isNIl", bc.trieDbState == nil, "callers", debug.Callers(20))
 		tds, err := state.NewTrieDbState(root, bc.db, blockNr)
 		if err != nil {
 			log.Error("Creation aborted", "error", err)
@@ -1246,6 +1246,7 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 	fmt.Println("################ Writing", block.Number().Uint64(), block.Hash().String(), block.Root().String())
 	defer fmt.Println("################ Writing END", block.Number().Uint64(), block.Hash().String(), block.Root().String())
 
+	// fixme
 	/*
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
@@ -1254,7 +1255,7 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
-	*/
+	 */
 
 	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
 }
@@ -1262,35 +1263,30 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 // writeBlockWithState writes the block and all associated state to the database,
 // but is expects the chain mutex to be held.
 func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Block, receipts []*types.Receipt, logs []*types.Log, stateDb *state.IntraBlockState, tds *state.TrieDbState, emitHeadEvent bool) (status WriteStatus, err error) {
-	fmt.Println("////////// 1")
 	// Make sure no inconsistent state is leaked during insertion
 	currentBlock := bc.CurrentBlock()
 
 	// Calculate the total difficulty of the block
 	ptd := bc.GetTd(block.ParentHash(), block.NumberU64()-1)
 	if ptd == nil {
-		fmt.Println("$$$$$$$$$$ 1")
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
 	//localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
 	externTd := new(big.Int).Add(block.Difficulty(), ptd)
 
 	// Irrelevant of the canonical status, write the block itself to the database
+	//fixme restore all common.IsCanceled handling
 	if common.IsCanceled(ctx) {
-		fmt.Println("$$$$$$$$$$ 2.0")
 		//return NonStatTy, ctx.Err()
 	}
 	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
-		fmt.Println("$$$$$$$$$$ 2")
 		return NonStatTy, err
 	}
 	rawdb.WriteBlock(ctx, bc.db, block)
 
 	if tds != nil {
-		fmt.Println("$$$$$$$$$$ 2.1")
 		if common.IsCanceled(ctx) {
 			//fixme: restore
-			fmt.Println("$$$$$$$$$$ 2.1.1")
 			//return NonStatTy, ctx.Err()
 		}
 		tds.SetBlockNr(block.NumberU64())
@@ -1298,16 +1294,13 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 
 	ctx = bc.WithContext(ctx, block.Number())
 	if stateDb != nil {
-		fmt.Println("////////// 2")
 		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
-			fmt.Println("$$$$$$$$$$ 3")
 			return NonStatTy, err
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
 		if common.IsCanceled(ctx) {
 			//fixme: restore
-			fmt.Println("$$$$$$$$$$ 4")
 			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
@@ -1333,33 +1326,24 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//}
 	//if reorg {
 	// Reorganise the chain if the parent is not the head block
-	fmt.Println("////////// 3")
+
 	if block.ParentHash() != currentBlock.Hash() {
-		fmt.Println("////////// 4")
 		if common.IsCanceled(ctx) {
-			fmt.Println("$$$$$$$$$$ 4.1")
 			//return NonStatTy, ctx.Err()
 		}
 		if err := bc.reorg(currentBlock, block); err != nil {
-			fmt.Println("$$$$$$$$$$ 4.2")
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
-	fmt.Println("////////// 5")
 	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
-		fmt.Println("////////// 6")
 		if common.IsCanceled(ctx) {
-			fmt.Println("$$$$$$$$$$ 4.3")
 			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
-	fmt.Println("////////// 7")
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
-		fmt.Println("////////// 8")
 		if common.IsCanceled(ctx) {
-			fmt.Println("$$$$$$$$$$ 4.4")
 			//return NonStatTy, ctx.Err()
 		}
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
@@ -1372,9 +1356,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	//}
 
 	// Set new head.
-	fmt.Println("////////// 9")
 	if status == CanonStatTy {
-		fmt.Println("////////// 10")
 		bc.insert(block)
 	}
 	bc.futureBlocks.Remove(block.Hash())
@@ -1519,7 +1501,11 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		externTd = externTd.Add(externTd, header.Difficulty)
 	}
 	if localTd.Cmp(externTd) >= 0 {
-		log.Warn("Ignoring the chain segment because of insufficient difficulty", "external", externTd, "local", localTd)
+		log.Warn("Ignoring the chain segment because of insufficient difficulty",
+			"external", externTd, "local", localTd,
+			"insertingNumber", chain[0].NumberU64(),
+			"currentNumber", bc.CurrentBlock().Number().Uint64(),
+		)
 		// But we still write the blocks to the database because others might build on top of them
 		td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
 		for _, block := range chain {
