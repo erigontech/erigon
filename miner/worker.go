@@ -1241,7 +1241,7 @@ func GetState(blockchain *core.BlockChain, parent *types.Block) (*state.IntraBlo
 		return nil, nil, err
 	}
 
-	tds, err := state.GetTrieDbState(parent.Root(), blockchain.ChainDb(), parent.NumberU64())
+	tds, err := blockchain.GetTrieDbStateByBlock(parent.Root(), parent.NumberU64())
 	if err != nil {
 		return nil, nil, err
 	}

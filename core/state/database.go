@@ -21,18 +21,15 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
-
-	"github.com/davecgh/go-spew/spew"
-
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"io"
 	"runtime"
 	"sort"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru"
+
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -179,46 +176,11 @@ var (
 	trieObjMu sync.RWMutex
 )
 
-func getTrieDBState(db ethdb.Database) *TrieDbState {
-	if db == nil {
-		return nil
-	}
-	trieObjMu.RLock()
-	tr, ok := trieObj[db.ID()]
-	trieObjMu.RUnlock()
-
-	if !ok {
-		fmt.Println("yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy 1", db.ID(), spew.Sdump(trieObj))
-		return nil
-	}
-
-	return (*TrieDbState)(unsafe.Pointer(tr))
-}
-
-func setTrieDBState(tds *TrieDbState, id uint64) {
-	trieObjMu.Lock()
-	defer trieObjMu.Unlock()
-
-	if tds == nil {
-		return
-	}
-
-	ptr := unsafe.Pointer(tds)
-	runtime.SetFinalizer(tds, func(_ *TrieDbState ){
-		trieObjMu.Lock()
-		delete(trieObj, id)
-		trieObjMu.Unlock()
-	})
-	trieObj[id] = uintptr(ptr)
-}
-
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	tds, err := newTrieDbState(root, db, blockNr)
 	if err != nil {
 		return nil, err
 	}
-
-	setTrieDBState(tds, db.ID())
 
 	return tds, nil
 }
@@ -251,22 +213,6 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	})
 
 	return tds, nil
-}
-
-func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	if tr := getTrieDBState(db); tr != nil && tr.t != nil {
-		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
-			return tr, nil
-		}
-		return nil, fmt.Errorf("trieDBState expected %v, %v, got %v %v", blockNr, root, tr.getBlockNr(), tr.LastRoot())
-	} else {
-		fmt.Println("xxxx 1", tr == nil)
-		if tr != nil {
-			fmt.Println("xxxx 2", tr.t == nil)
-		}
-	}
-
-	return NewTrieDbState(root, db, blockNr)
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
