@@ -339,13 +339,13 @@ func Stateless(
 		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			//			for j := 0; j < 100; j++ {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 1)
-			if err != nil {
-				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
-				return
+			for j := 0; j < 100; j++ {
+				preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 1)
+				if err != nil {
+					fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
+					return
+				}
 			}
-			//			}
 		}
 		execTime3 := time.Since(execStart)
 		execStart = time.Now()
