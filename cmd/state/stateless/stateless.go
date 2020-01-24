@@ -313,12 +313,6 @@ func Stateless(
 				fmt.Printf("Failed to statelessly resolve state trie: %v\n", err)
 				return
 			}
-
-			//_, err = tds.UpdateStateTrie()
-			//if err != nil {
-			//	fmt.Printf("The state trie wasn't fully resolved statelessly: %v\n", err)
-			//	return
-			//}
 		} else {
 			var resolveWitnesses []*trie.Witness
 			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil); err != nil {
