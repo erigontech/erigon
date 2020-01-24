@@ -656,26 +656,21 @@ func getStat(db ethdb.Database) (stateStats, error) {
 	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 
-		changedAccounts, err := dbutils.DecodeChangeSet(v)
-		if err != nil {
-			return false, err
-		}
-
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
 			if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple account suffix records")
 			}
-			stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
+			stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
 		}
 		if bytes.HasSuffix(key, dbutils.StorageHistoryBucket) {
 			if _, ok := stat.StorageSuffixRecordsByTimestamp[timestamp]; ok {
 				panic("multiple storage suffix records")
 			}
-			stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(changedAccounts.Len())
+			stat.StorageSuffixRecordsByTimestamp[timestamp] = uint32(dbutils.Len(v))
 		}
 
 		if bytes.HasSuffix(key, dbutils.AccountsHistoryBucket) {
-			err := changedAccounts.Walk(func(k, _ []byte) error {
+			err := dbutils.Walk(v, func(k, _ []byte) error {
 				compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
 				_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 				if err != nil {

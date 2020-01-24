@@ -176,10 +176,10 @@ func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, fo
 func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error) {
 	hb := NewHashBuilder(trace)
 	var succ bytes.Buffer
-	var curr OneBytesTape
+	var curr bytes.Buffer
 	var succStorage bytes.Buffer
-	var currStorage OneBytesTape
-	var value OneBytesTape
+	var currStorage bytes.Buffer
+	var value bytes.Buffer
 	var hashRef *common.Hash
 	var hashRefStorage *common.Hash
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
@@ -203,6 +203,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				StorageSize: a.StorageSize,
 				Balance:     &a.Balance,
 				Nonce:       a.Nonce,
+				Incarnation: a.Incarnation,
 			}
 		}
 	}

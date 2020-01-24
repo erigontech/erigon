@@ -136,10 +136,10 @@ func days() []chart.GridLine {
 }
 
 func mychart() {
-	blocks, hours, dbsize, trienodes, heap := readData("geth.csv")
-	//blocks0, hours0, _, _, _ := readData("geth.csv")
+	blocks, hours, dbsize, trienodes, heap := readData("bolt.csv")
+	blocks0, hours0, dbsize0, _, _ := readData("badger.csv")
 	mainSeries := &chart.ContinuousSeries{
-		Name: "Cumulative sync time (SSD)",
+		Name: "Cumulative sync time (bolt)",
 		Style: chart.Style{
 			Show:        true,
 			StrokeColor: chart.ColorBlue,
@@ -148,20 +148,18 @@ func mychart() {
 		XValues: blocks,
 		YValues: hours,
 	}
-	/*
-		hddSeries := &chart.ContinuousSeries{
-			Name: "Cumulative sync time (HDD)",
-			Style: chart.Style{
-				Show:        true,
-				StrokeColor: chart.ColorRed,
-				FillColor:   chart.ColorRed.WithAlpha(100),
-			},
-			XValues: blocks0,
-			YValues: hours0,
-		}
-	*/
+	badgerSeries := &chart.ContinuousSeries{
+		Name: "Cumulative sync time (badger)",
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorRed,
+			FillColor:   chart.ColorRed.WithAlpha(100),
+		},
+		XValues: blocks0,
+		YValues: hours0,
+	}
 	dbsizeSeries := &chart.ContinuousSeries{
-		Name: "Database size",
+		Name: "Database size (bolt)",
 		Style: chart.Style{
 			Show:        true,
 			StrokeColor: chart.ColorBlack,
@@ -169,6 +167,16 @@ func mychart() {
 		YAxis:   chart.YAxisSecondary,
 		XValues: blocks,
 		YValues: dbsize,
+	}
+	dbsizeSeries0 := &chart.ContinuousSeries{
+		Name: "Database size (badger)",
+		Style: chart.Style{
+			Show:        true,
+			StrokeColor: chart.ColorOrange,
+		},
+		YAxis:   chart.YAxisSecondary,
+		XValues: blocks,
+		YValues: dbsize0,
 	}
 
 	graph1 := chart.Chart{
@@ -223,8 +231,9 @@ func mychart() {
 		},
 		Series: []chart.Series{
 			mainSeries,
-			//hddSeries,
+			badgerSeries,
 			dbsizeSeries,
+			dbsizeSeries0,
 		},
 	}
 
@@ -873,6 +882,15 @@ func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	}
 }
 
+func printCurrentBlockNumber(chaindata string) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	hash := rawdb.ReadHeadBlockHash(ethDb)
+	number := rawdb.ReadHeaderNumber(ethDb, hash)
+	fmt.Printf("Block number: %d\n", *number)
+}
+
 func printTxHashes() {
 	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
 	check(err)
@@ -1161,6 +1179,26 @@ func testMemBolt() {
 	check(err)
 }
 
+func printBucket(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	f, err := os.Create("bucket.txt")
+	check(err)
+	defer f.Close()
+	fb := bufio.NewWriter(f)
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
+		c := b.Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			fmt.Fprintf(fb, "%x %x\n", k, v)
+		}
+		return nil
+	})
+	check(err)
+	fb.Flush()
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -1180,7 +1218,9 @@ func main() {
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}
-	//mychart()
+	if *action == "syncChart" {
+		mychart()
+	}
 	//testRebuild()
 	if *action == "testRewind" {
 		testRewind(*chaindata, *block, *rewind)
@@ -1227,5 +1267,11 @@ func main() {
 	//fmt.Printf("\u00b3\n")
 	if *action == "dumpStorage" {
 		dumpStorage()
+	}
+	if *action == "current" {
+		printCurrentBlockNumber(*chaindata)
+	}
+	if *action == "bucket" {
+		printBucket(*chaindata)
 	}
 }

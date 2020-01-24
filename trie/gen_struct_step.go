@@ -21,16 +21,17 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int, keyHex []byte, val RlpSerializable) error
-	leafHash(length int, keyHex []byte, val RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
+	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
+	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -54,12 +55,13 @@ type GenStructStepAccountData struct {
 	StorageSize uint64
 	Balance     *big.Int // nil-able
 	Nonce       uint64
+	Incarnation uint64
 }
 
 func (GenStructStepAccountData) GenStructStepData() {}
 
 type GenStructStepLeafData struct {
-	Value RlpSerializable
+	Value rlphacks.RlpSerializable
 }
 
 func (GenStructStepLeafData) GenStructStepData() {}
@@ -141,11 +143,11 @@ func GenStructStep(
 					fmt.Printf("GenStructStepAccountData %x[%x] %d %d %d %b\n", curr, curr[:remainderStart], v.Balance, v.Nonce, v.Incarnation, v.FieldSet)
 				}
 				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}

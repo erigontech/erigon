@@ -1184,7 +1184,7 @@ func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.Trie
 		return nil, err
 	}
 
-	if err = tds.ResolveStateTrie(); err != nil {
+	if _, err = tds.ResolveStateTrie(false); err != nil {
 		return nil, fmt.Errorf("newBlock on %s: %w", header.Number.String(), err)
 	}
 

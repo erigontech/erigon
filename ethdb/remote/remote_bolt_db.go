@@ -73,6 +73,7 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 //
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *Tx) error {
@@ -101,69 +102,9 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	return db.Get(hBucket, composite)
-}
-
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	var dat []byte
-	err := db.db.View(context.Background(), func(tx *Tx) error {
-		{
-			hB, err := tx.Bucket(hBucket)
-			if err != nil {
-				return err
-			}
-
-			if hB == nil {
-				return ethdb.ErrKeyNotFound
-			}
-			hC, err := hB.Cursor()
-			if err != nil {
-				return err
-			}
-
-			hK, hV := hC.Seek(composite)
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
-				return nil
-			}
-			if hC.Err() != nil {
-				return hC.Err()
-			}
-		}
-		{
-			b, err := tx.Bucket(bucket)
-			if err != nil {
-				return err
-			}
-
-			if b == nil {
-				return ethdb.ErrKeyNotFound
-			}
-			c, err := b.Cursor()
-			if err != nil {
-				return err
-			}
-
-			k, v := c.Seek(key)
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
-			}
-			if c.Err() != nil {
-				return c.Err()
-			}
-		}
-
-		return ethdb.ErrKeyNotFound
-	})
-	return dat, err
+	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
 }
 
 func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
@@ -181,7 +122,11 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 		if err != nil {
 			return err
 		}
-		k, v := c.Seek(startkey)
+		k, v, err := c.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
 		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
 			goOn, err := walker(k, v)
 			if err != nil {
@@ -190,9 +135,12 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 			if !goOn {
 				break
 			}
-			k, v = c.Next()
+			k, v, err = c.Next()
+			if err != nil {
+				return err
+			}
 		}
-		return c.Err()
+		return nil
 	})
 	return err
 }
@@ -218,7 +166,11 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 			return err
 		}
 
-		k, v := c.Seek(startkey)
+		k, v, err := c.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
 		for k != nil {
 			// Adjust rangeIdx if needed
 			if fixedbytes > 0 {
@@ -235,9 +187,12 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 						}
 					}
 					if cmp < 0 {
-						k, v = c.SeekTo(startkey)
+						k, v, err = c.SeekTo(startkey)
+						if err != nil {
+							return err
+						}
 						if k == nil {
-							return c.Err()
+							return nil
 						}
 					} else if cmp > 0 {
 						rangeIdx++
@@ -254,10 +209,12 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 					return err
 				}
 			}
-			k, v = c.Next()
+			k, v, err = c.Next()
+			if err != nil {
+				return err
+			}
 		}
-
-		return c.Err()
+		return nil
 	})
 	return err
 }
@@ -296,8 +253,16 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 		if err != nil {
 			return err
 		}
-		k, v := c.Seek(startkey)
-		hK, hV := hC.Seek(startkey)
+		k, v, err := c.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
+		hK, hV, err := hC.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
 		goOn := true
 		for goOn {
 			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
@@ -318,7 +283,10 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
-				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				if err != nil {
+					return err
+				}
 
 				continue
 			}
@@ -342,20 +310,20 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v, err = c.Next()
+					if err != nil {
+						return err
+					}
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], ethdb.EndSuffix)
-					hK, hV = hC.SeekTo(keyBuffer)
+					hK, hV, err = hC.SeekTo(keyBuffer)
+					if err != nil {
+						return err
+					}
 				}
 			}
-		}
-		if hC.Err() != nil {
-			return hC.Err()
-		}
-		if c.Err() != nil {
-			return c.Err()
 		}
 
 		return err
@@ -375,7 +343,6 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
 	if err := db.db.View(context.Background(), func(tx *Tx) error {
-		var err error
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -407,8 +374,16 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			return err
 		}
 
-		k, v := c.Seek(startkey)
-		hK, hV := hC.Seek(startkey)
+		k, v, err := c.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
+		hK, hV, err := hC.Seek(startkey)
+		if err != nil {
+			return err
+		}
+
 		goOn := true
 		for goOn { // k != nil
 			fit := k != nil
@@ -429,7 +404,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 							}
 						}
 						if cmp < 0 {
-							k, v = c.SeekTo(startkey)
+							k, v, err = c.SeekTo(startkey)
+							if err != nil {
+								return err
+							}
+
 							if k == nil {
 								cmp = 1
 							}
@@ -447,7 +426,10 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 							}
 						}
 						if hCmp < 0 {
-							hK, hV = hC.SeekTo(startkey)
+							hK, hV, err = hC.SeekTo(startkey)
+							if err != nil {
+								return err
+							}
 
 							if hK == nil {
 								hCmp = 1
@@ -469,7 +451,10 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			if hKFit && bytes.Compare(hK[l:], encodedTS) < 0 {
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
-				hK, hV = hC.SeekTo(keyBuffer[:sl])
+				hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				if err != nil {
+					return err
+				}
 
 				continue
 			}
@@ -486,7 +471,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				cmp = bytes.Compare(k, hK[:l])
 			}
 			if cmp < 0 {
-				hK1, _ := hC1.Seek(k)
+				hK1, _, sErr := hC1.Seek(k)
+				if sErr != nil {
+					return sErr
+				}
+
 				if bytes.HasPrefix(hK1, k) {
 					err = walker(keyIdx, k, v)
 					goOn = err == nil
@@ -497,26 +486,23 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 			}
 			if goOn {
 				if cmp <= 0 {
-					k, v = c.Next()
+					k, v, err = c.Next()
+					if err != nil {
+						return err
+					}
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], ethdb.EndSuffix)
-					hK, hV = hC.SeekTo(keyBuffer)
+					hK, hV, err = hC.SeekTo(keyBuffer)
+					if err != nil {
+						return err
+					}
 				}
 			}
 		}
 		if err != nil {
 			return err
-		}
-		if c.Err() != nil {
-			return c.Err()
-		}
-		if hC.Err() != nil {
-			return hC.Err()
-		}
-		if hC1.Err() != nil {
-			return hC1.Err()
 		}
 		return nil
 	}); err != nil {
