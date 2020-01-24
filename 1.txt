@@ -1,0 +1,1365 @@
+[32mINFO [0m[01-24|13:43:56.981] Starting peer-to-peer node               [32minstance[0m=turbo-geth/v1.9.9/linux-amd64/go1.13.5
+[32mINFO [0m[01-24|13:43:56.981] Allocated trie memory caches             [32mclean[0m=0.00B [32mdirty[0m=0.00B
+[32mINFO [0m[01-24|13:43:56.981] Opening Database (Bolt) 
+[32mINFO [0m[01-24|13:43:57.012] Writing custom genesis block 
+[32mINFO [0m[01-24|13:43:57.352] Initialised chain configuration          [32mconfig[0m="{ChainID: 18 Homestead: 0 DAO: <nil> DAOSupport: true EIP150: 0 EIP155: 10 EIP158: 10 EIP2027: <nil> Byzantium: 1700000 Constantinople: 4230000 Petersburg: 4939394 Istanbul: 6485846, Muir Glacier: 7117117, Engine: ethash}"
+[32mINFO [0m[01-24|13:43:57.352] Disk storage enabled for ethash caches   [32mdir[0m=/tmp/739290445/geth/ethash [32mcount[0m=3
+[32mINFO [0m[01-24|13:43:57.352] Disk storage enabled for ethash DAGs     [32mdir[0m=/home/eugene/.ethash       [32mcount[0m=2
+[32mINFO [0m[01-24|13:43:57.352] Initialising Ethereum protocol           [32mversions[0m="[64 63]" [32mnetwork[0m=18
+[33mWARN [0m[01-24|13:43:57.352] Upgrade blockchain database version      [33mfrom[0m=<nil> [33mto[0m=7
+[32mINFO [0m[01-24|13:43:57.369] Loaded most recent local header          [32mnumber[0m=0 [32mhash[0m=4b3c2d…346e5b [32mtd[0m=655360 [32mage[0m=50y9mo2w
+[32mINFO [0m[01-24|13:43:57.369] Loaded most recent local full block      [32mnumber[0m=0 [32mhash[0m=4b3c2d…346e5b [32mtd[0m=655360 [32mage[0m=50y9mo2w
+[32mINFO [0m[01-24|13:43:57.369] Loaded most recent local fast block      [32mnumber[0m=0 [32mhash[0m=4b3c2d…346e5b [32mtd[0m=655360 [32mage[0m=50y9mo2w
+[32mINFO [0m[01-24|13:43:57.369] Pruner started 
+[32mINFO [0m[01-24|13:43:57.369] Regenerated local transaction journal    [32mtransactions[0m=0 [32maccounts[0m=0
+[32mINFO [0m[01-24|13:43:57.369] Initialising Firehose protocol           [32mversions[0m=[1]
+[32mINFO [0m[01-24|13:43:57.494] New local node record                    [32mseq[0m=1 [32mid[0m=a7b9d08166de793f [32mip[0m=127.0.0.1 [32mudp[0m=0 [32mtcp[0m=33203
+[32mINFO [0m[01-24|13:43:57.494] Started P2P networking                   [32mself[0m="enode://9f5f60bc4adf81a44ff653aa4bbab3d2a7ee58f8c854b0b56187c769a9b00aef08920d2df8f98915c57ac78576ee58b2543dff1ff4e5060451c0a3b2541407ec@127.0.0.1:33203?discport=0"
+[32mINFO [0m[01-24|13:44:00.708] Updated mining threads                   [32mthreads[0m=1
+[32mINFO [0m[01-24|13:44:00.708] Transaction pool price threshold updated [32mprice[0m=1
+[32mINFO [0m[01-24|13:44:00.708] Etherbase automatically configured       [32maddress[0m=0x2e132615A1094e008dd8E0816fE822B287db9205
+@@@@@@@@@@@ Start 67
+[32mINFO [0m[01-24|13:44:03.708] Setting new local account                [32maddress[0m=0xc671bd8bAee5A50393FD611b132fD28f1A2868Ac
+[32mINFO [0m[01-24|13:44:03.709] Setting new local account                [32maddress[0m=0x8562C4a5C2b9223B80a53f091414Ece9C5215a68
+[32mINFO [0m[01-24|13:44:03.709] Setting new local account                [32maddress[0m=0x84913B676Dc373ebab260986936e1ae064c8e25D
+[32mINFO [0m[01-24|13:44:03.710] Setting new local account                [32maddress[0m=0x2197Ff46D7E58efba859CC5F76aFbF0934030b67
+[32mINFO [0m[01-24|13:44:03.710] Setting new local account                [32maddress[0m=0xA51B51C5e5e14F90D0061D7Fc33d5f1E7f8375Ab
+[32mINFO [0m[01-24|13:44:03.711] Setting new local account                [32maddress[0m=0xC49948a3f4Ea6e05fbd434C24690D56740201E81
+[32mINFO [0m[01-24|13:44:03.711] Setting new local account                [32maddress[0m=0x251375F16f7422a333019D47be1004853Fc81d1f
+[32mINFO [0m[01-24|13:44:03.711] Setting new local account                [32maddress[0m=0xce785bA94DF42f7E355668C75CF8517c424797dD
+[32mINFO [0m[01-24|13:44:03.712] Setting new local account                [32maddress[0m=0xF2DA1c00fB334A6E6FDfBC614B828AB7dA368BAd
+[32mINFO [0m[01-24|13:44:03.713] Setting new local account                [32maddress[0m=0x1223D0d158a9105796961A9C96fc30cF20566A1D
+[32mINFO [0m[01-24|13:44:03.713] Setting new local account                [32maddress[0m=0x9f92425fe005384984E54402E4D7a5C0e0f3c4b2
+[32mINFO [0m[01-24|13:44:03.713] Setting new local account                [32maddress[0m=0x003ac64Fc050d371343c02FAD97257b9c5Bdb319
+[32mINFO [0m[01-24|13:44:03.714] Setting new local account                [32maddress[0m=0x620832904C06a29839b93068777D71bAC5cb97dD
+[32mINFO [0m[01-24|13:44:03.714] Setting new local account                [32maddress[0m=0x90B8441cB95D587D8F76c0891C003F4c54dC3014
+[32mINFO [0m[01-24|13:44:03.715] Setting new local account                [32maddress[0m=0x9E99588d585B0DC77CA084DdFe31fc8DF2416ed2
+[32mINFO [0m[01-24|13:44:03.716] Setting new local account                [32maddress[0m=0x3F101C7F751f312550266c7717Bd701b152e3042
+[32mINFO [0m[01-24|13:44:03.716] Setting new local account                [32maddress[0m=0x574FD3655F99c1fA5957dFD54dDCAEa4EeBf4826
+[32mINFO [0m[01-24|13:44:03.716] Setting new local account                [32maddress[0m=0x7d8cE89207C3e830e9F7bc9b5af4adA3341995Bb
+[32mINFO [0m[01-24|13:44:03.717] Setting new local account                [32maddress[0m=0x4F3c99cfc68Edb6F87bd31a1763FDa938e17745B
+[32mINFO [0m[01-24|13:44:03.717] Setting new local account                [32maddress[0m=0x4303D966dea73360b1e2232d6e65cfCdA0e0585c
+[32mINFO [0m[01-24|13:44:03.718] Setting new local account                [32maddress[0m=0xd40B069D09b3dd0401E1431CBf6581eaC491dc7F
+[32mINFO [0m[01-24|13:44:03.718] Setting new local account                [32maddress[0m=0x158DF2e8d0f6e565F2d77925858F21b248240c6e
+[32mINFO [0m[01-24|13:44:03.719] Setting new local account                [32maddress[0m=0x62957082ff4492DfF2030F82739e253D8641419E
+[32mINFO [0m[01-24|13:44:03.719] Setting new local account                [32maddress[0m=0x372AA0414F91922476085249Aa4F0b5991Fae331
+[32mINFO [0m[01-24|13:44:03.719] Setting new local account                [32maddress[0m=0xDA24C8f9A5dc62796dE3Ee164FDdb451f3Fd9EFC
+[32mINFO [0m[01-24|13:44:03.720] Setting new local account                [32maddress[0m=0x0683bc2AcBC633b04D995cEfe7Ed1ceE50e82862
+[32mINFO [0m[01-24|13:44:03.721] Setting new local account                [32maddress[0m=0xd270A36588f47268d652C6a36adfC91ca5F5f1e6
+[32mINFO [0m[01-24|13:44:03.722] Setting new local account                [32maddress[0m=0x542435224fa28DAED38fBCCdc93DcDAa87E8eB80
+[32mINFO [0m[01-24|13:44:03.722] Setting new local account                [32maddress[0m=0x232149f665079C783dFcc35b4605D79F0dddaF0c
+[32mINFO [0m[01-24|13:44:03.723] Setting new local account                [32maddress[0m=0x39ea668cfE12016cEBE42E0d1244F5B1B57C063B
+[32mINFO [0m[01-24|13:44:03.723] Setting new local account                [32maddress[0m=0xd09c5CC09E8449c34ec0EA9b84cE3d8C8EB49055
+[32mINFO [0m[01-24|13:44:03.724] Setting new local account                [32maddress[0m=0x35431565063d66f221308f37FEeD12385B82725A
+[32mINFO [0m[01-24|13:44:03.724] Setting new local account                [32maddress[0m=0x4678Cc1ef80DD4c9017C5F560245784e7ff42684
+[32mINFO [0m[01-24|13:44:03.725] Setting new local account                [32maddress[0m=0xbb47e9e18ddA8B7d069766a67B796d946d5389dF
+[32mINFO [0m[01-24|13:44:03.725] Setting new local account                [32maddress[0m=0x4b0cBB7c35752a5b5E8dEd8aa42E22876920632C
+[32mINFO [0m[01-24|13:44:03.726] Setting new local account                [32maddress[0m=0xd83957546eeBD1C4a9bB1C41c1A78a0eA91B0901
+[32mINFO [0m[01-24|13:44:03.726] Setting new local account                [32maddress[0m=0xa006ebe7F45D9D0953474c31a18D1c823a52fB83
+[32mINFO [0m[01-24|13:44:03.727] Setting new local account                [32maddress[0m=0x936377894b2A66D06160F452C03DdD7F332F410c
+[32mINFO [0m[01-24|13:44:03.728] Setting new local account                [32maddress[0m=0x3e9B34205B3462ed80DeF737Cb213292f9C36B43
+[32mINFO [0m[01-24|13:44:03.728] Setting new local account                [32maddress[0m=0x1Ec3a877c07DBC24b8D99DDE9dDC38706cE87582
+[32mINFO [0m[01-24|13:44:03.729] Setting new local account                [32maddress[0m=0x17675475B9EAf37ea325Abf0CE1Ff42C38116E45
+[32mINFO [0m[01-24|13:44:03.729] Setting new local account                [32maddress[0m=0x8785688f44BBb3d9d96Ac62af85F2768e272170B
+[32mINFO [0m[01-24|13:44:03.730] Setting new local account                [32maddress[0m=0x5E52dDEf080D736359Af157ce943A6787B9Fa4BB
+[32mINFO [0m[01-24|13:44:03.730] Setting new local account                [32maddress[0m=0x25795A29d158AE9577d7875698F56052d6d45BA4
+[32mINFO [0m[01-24|13:44:03.731] Setting new local account                [32maddress[0m=0xA6E85F7a9D8809DA8945234fD558CeccF0E64b0a
+[32mINFO [0m[01-24|13:44:03.731] Setting new local account                [32maddress[0m=0xf4180d3C88eC8748C7A823c9F240172D84210DF7
+[32mINFO [0m[01-24|13:44:03.732] Setting new local account                [32maddress[0m=0x9fb763a9B9Dc654Aa070847cF32CB40AD8543d1E
+[32mINFO [0m[01-24|13:44:03.732] Setting new local account                [32maddress[0m=0x1E8F8cF8B89ef7390C74368306E9D668D78431c2
+[32mINFO [0m[01-24|13:44:03.733] Setting new local account                [32maddress[0m=0xAE7b918DFc8ec6DD187C1191eF1d09c5986BFEe1
+[32mINFO [0m[01-24|13:44:03.735] Setting new local account                [32maddress[0m=0x35496000964446D90202529Ac59Ee3646bde866E
+[32mINFO [0m[01-24|13:44:03.736] Setting new local account                [32maddress[0m=0x98FE0E32f17FD5c85b5bb464548F41D66421f5EB
+[32mINFO [0m[01-24|13:44:03.736] Setting new local account                [32maddress[0m=0x035e31d4bf92710f24F704B4a1337586C20a6b9B
+[32mINFO [0m[01-24|13:44:03.737] Setting new local account                [32maddress[0m=0xc3F93FCe7f5658a04D95373E24e83ABF495414c6
+[32mINFO [0m[01-24|13:44:03.739] Setting new local account                [32maddress[0m=0x4F9d298B15deAAB20a0845594A6B5E03134A3e92
+[32mINFO [0m[01-24|13:44:03.741] Setting new local account                [32maddress[0m=0x1ed99A609D28836376630574cbd4a129a0587931
+[32mINFO [0m[01-24|13:44:03.742] Setting new local account                [32maddress[0m=0x88B64bA5cE08Ce0759b00F46C8Ce0d3E5A88D3D7
+[32mINFO [0m[01-24|13:44:03.743] Setting new local account                [32maddress[0m=0x3d39d7d2d32Ba4DcbD5c93839f49f3886dDC082d
+[32mINFO [0m[01-24|13:44:03.744] Setting new local account                [32maddress[0m=0x97E99B4fD5f8F10a28992C8d0C67e2976430C57F
+[32mINFO [0m[01-24|13:44:03.745] Setting new local account                [32maddress[0m=0xfC8315ddd346831C53798AB8dba9E94F4eB7010e
+[32mINFO [0m[01-24|13:44:03.746] Setting new local account                [32maddress[0m=0x01FCDB2eBd729929751297b2c453B266D82e6A13
+[32mINFO [0m[01-24|13:44:03.747] Setting new local account                [32maddress[0m=0xd1B4D13614d00b8FA7BA3D021924dC5449146b40
+[32mINFO [0m[01-24|13:44:03.748] Setting new local account                [32maddress[0m=0x58fC954dcb9Ede7Da08ba6D06b2943Fd407966Cc
+[32mINFO [0m[01-24|13:44:03.749] Setting new local account                [32maddress[0m=0x34c1bfD6D03e00d1746eaC84baaE4c6464208dF6
+[32mINFO [0m[01-24|13:44:03.749] Setting new local account                [32maddress[0m=0xa5b3D4286FF06509801644024059fC75e0FDf2EC
+[32mINFO [0m[01-24|13:44:03.750] Setting new local account                [32maddress[0m=0x04a78dDA6BACFe4e688DD3CF4529c8adE66e81bB
+[32mINFO [0m[01-24|13:44:03.750] Setting new local account                [32maddress[0m=0xda3c180fE602383e894fAF0B78C05F2f92D9a63e
+[32mINFO [0m[01-24|13:44:03.752] Setting new local account                [32maddress[0m=0x3cc844A6Bac07D07dF6eCCB52e861b8D39d5e3e1
+[32mINFO [0m[01-24|13:44:03.753] Setting new local account                [32maddress[0m=0xA8F2261Dc436EC5cc1E5311df20b84f1fcc6d750
+[32mINFO [0m[01-24|13:44:03.753] Setting new local account                [32maddress[0m=0x3DdD2dE6887828B2A251549f496b43b25a7eC33f
+[32mINFO [0m[01-24|13:44:03.754] Setting new local account                [32maddress[0m=0x1Bc2d8714f36E41DA2Dd6c759b43c6b4e1a0cEFb
+[32mINFO [0m[01-24|13:44:03.755] Setting new local account                [32maddress[0m=0x5ab0cccE57fa58ff89886AF876f055a018Ea79Eb
+[32mINFO [0m[01-24|13:44:03.755] Setting new local account                [32maddress[0m=0x076EaD2634Adbf2Bc172Aa102515Bf02fF9477bD
+[32mINFO [0m[01-24|13:44:03.756] Setting new local account                [32maddress[0m=0x2998478ebd49Ce33e3Ac9455159bE420f8785f2B
+[32mINFO [0m[01-24|13:44:03.756] Setting new local account                [32maddress[0m=0xCF10258fAAeF6f87288A1f0a7a7df277Da975C91
+[32mINFO [0m[01-24|13:44:03.758] Setting new local account                [32maddress[0m=0x1de82120d530c6A594EEC1014363998A7B0711fd
+[32mINFO [0m[01-24|13:44:03.761] Setting new local account                [32maddress[0m=0x6e6CD5Ba0333f3E615E013A84eBefa2414f2e153
+[32mINFO [0m[01-24|13:44:03.762] Setting new local account                [32maddress[0m=0x5d73F1f2113cBDC0d49ef4CE1CC3C3dAC83e9b0c
+[32mINFO [0m[01-24|13:44:03.762] Setting new local account                [32maddress[0m=0x5E8F3108aAB382f3ac33839b0bFd2a9AFeE44E3b
+[32mINFO [0m[01-24|13:44:03.762] Setting new local account                [32maddress[0m=0x24066A4252d07b8c46A93e15659EC53A80A237B5
+[32mINFO [0m[01-24|13:44:03.763] Setting new local account                [32maddress[0m=0x3bE4ae2020080eFe82d66Eb4442Aae35Cc1DfAd8
+[32mINFO [0m[01-24|13:44:03.764] Setting new local account                [32maddress[0m=0x1f11dACcA887862d76Dd825fB8138fB29e005313
+[32mINFO [0m[01-24|13:44:03.765] Setting new local account                [32maddress[0m=0xBA70C824ca0BdfC6CD57F354495eD9d6e92d8F22
+[32mINFO [0m[01-24|13:44:03.766] Setting new local account                [32maddress[0m=0x9Eb9E744AE2F18d4Ec6F1DEF02d506c112c454eC
+[32mINFO [0m[01-24|13:44:03.767] Setting new local account                [32maddress[0m=0x1D3270d464639Aef9fC05CE7FFB251f4FfEF09FA
+[32mINFO [0m[01-24|13:44:03.770] Setting new local account                [32maddress[0m=0x43ba85fD93aD623973029D0DF1B6fd16C2BC8826
+[32mINFO [0m[01-24|13:44:03.772] Setting new local account                [32maddress[0m=0xec360C239D399356C7B278f8C835cB66a4211934
+[32mINFO [0m[01-24|13:44:03.773] Setting new local account                [32maddress[0m=0x27a4FbD1C1756cAeb92C3F9F19e502dd3f8d2090
+[32mINFO [0m[01-24|13:44:03.775] Setting new local account                [32maddress[0m=0xaC093069a1a7fA63aA52dEBD581f6aEEF91DE5A5
+[32mINFO [0m[01-24|13:44:03.775] Setting new local account                [32maddress[0m=0x05708727BaB13bCc352144B1cF232985095Ceffb
+[32mINFO [0m[01-24|13:44:03.776] Setting new local account                [32maddress[0m=0x7aa13b20d91E2a94C438183ABF64e12B5d99fddE
+[32mINFO [0m[01-24|13:44:03.776] Setting new local account                [32maddress[0m=0x771e9c232841C3c35b593beFC6E801AfEcc7CeBE
+[32mINFO [0m[01-24|13:44:03.780] Setting new local account                [32maddress[0m=0xf4aaeD8F0A549E80F906F6dD90852e17f4ba9dF6
+[32mINFO [0m[01-24|13:44:03.780] Setting new local account                [32maddress[0m=0x5D0648529527Ddab9A70d2D64F9C8a8aE79d2faB
+[32mINFO [0m[01-24|13:44:03.781] Setting new local account                [32maddress[0m=0x490291aC4a78a409787037A584AECCf2fF0F28bf
+[32mINFO [0m[01-24|13:44:03.788] Setting new local account                [32maddress[0m=0xf5EEEADe7008245f81eF52EE7bBF3Ed8967538e5
+[32mINFO [0m[01-24|13:44:03.790] Setting new local account                [32maddress[0m=0x5753dB9Ae36a46d47E332F0157dAA87BC58E2cCb
+[32mINFO [0m[01-24|13:44:03.790] Setting new local account                [32maddress[0m=0x0B1FC000cc589d0EDAA7B3B136460B692E5f13f0
+[32mINFO [0m[01-24|13:44:03.792] Setting new local account                [32maddress[0m=0xE3Ff8a07b431Cd660534B6DC9c92E11667F1F759
+[32mINFO [0m[01-24|13:44:03.793] Setting new local account                [32maddress[0m=0xC3B5b050161Dd81dcB701e8d78571BbF661990F1
+[32mINFO [0m[01-24|13:44:03.793] Setting new local account                [32maddress[0m=0xeD9DB86eC0F7741F0E770bc094332042156f9797
+[32mINFO [0m[01-24|13:44:03.794] Setting new local account                [32maddress[0m=0x9455743E8de851136AacF1ae6C20016FdA8B4AF2
+[32mINFO [0m[01-24|13:44:03.796] Setting new local account                [32maddress[0m=0x7F343C969C7c81c5bCc3B795Ae23D7667eF3F497
+[32mINFO [0m[01-24|13:44:03.801] Setting new local account                [32maddress[0m=0xef70e7f798509a655F1920ca508ed4A5178744FD
+[32mINFO [0m[01-24|13:44:03.804] Setting new local account                [32maddress[0m=0xdef44f5982aa3832daD01Ff24b3533eac33C15F7
+[32mINFO [0m[01-24|13:44:03.806] Setting new local account                [32maddress[0m=0x52DBde7BF8365037AC0a0164ed51c4F7e2Ef3801
+[32mINFO [0m[01-24|13:44:03.810] Setting new local account                [32maddress[0m=0xe2C80237d0ceD9316517b53cA306fABd170248Af
+[32mINFO [0m[01-24|13:44:03.819] Setting new local account                [32maddress[0m=0xB641be736814315469ff107FB2e41d495222B779
+[32mINFO [0m[01-24|13:44:03.821] Setting new local account                [32maddress[0m=0x62d91803B9B88eEd2c8E521B9c9B8641864cc6e1
+[32mINFO [0m[01-24|13:44:03.826] Setting new local account                [32maddress[0m=0x672eFed7A0B7dcd264271E44996091e078A43051
+[32mINFO [0m[01-24|13:44:03.829] Setting new local account                [32maddress[0m=0x5D5A92a28f95d9C5042F0A2bddEc6FcC17C0A200
+[32mINFO [0m[01-24|13:44:03.832] Setting new local account                [32maddress[0m=0xF2ed1c1BAD879880bBB8Bd29B45d0f3C62b1ACF2
+[32mINFO [0m[01-24|13:44:03.837] Setting new local account                [32maddress[0m=0x09e5Decfde87513078144D16891ce3b7b68DEcF0
+[32mINFO [0m[01-24|13:44:03.839] Setting new local account                [32maddress[0m=0x9D4bCDe1bfB6513bec95028C5D06B4281d1Dc9f5
+[32mINFO [0m[01-24|13:44:03.850] Setting new local account                [32maddress[0m=0x3b63dBE24294e73ADa0b20f1263499028904f7F8
+[32mINFO [0m[01-24|13:44:03.858] Setting new local account                [32maddress[0m=0x8F0ae607a1b4995b5E9B7F057056F1E5E1b3EFe2
+[32mINFO [0m[01-24|13:44:03.859] Setting new local account                [32maddress[0m=0xFDE468722045E96af65fDc8c44027E09fF8Bb3BC
+[32mINFO [0m[01-24|13:44:03.862] Setting new local account                [32maddress[0m=0x8975b3C6339d71b5D765E28E92B7A4Fe51ff42CC
+[32mINFO [0m[01-24|13:44:03.865] Setting new local account                [32maddress[0m=0x43b35Ac1Cd6469b4eC88D95190fFa9AADF679984
+[32mINFO [0m[01-24|13:44:03.865] Setting new local account                [32maddress[0m=0x55BE3c4122C6F1cF925aF3091B409cDB59F23Bfe
+[32mINFO [0m[01-24|13:44:03.869] Setting new local account                [32maddress[0m=0x1724356ef339f9761D33C8ae5591e827a4339995
+[32mINFO [0m[01-24|13:44:03.878] Setting new local account                [32maddress[0m=0x3DC038dDF72A698FE5252525Dd3641Db67D66FBD
+[32mINFO [0m[01-24|13:44:03.882] Setting new local account                [32maddress[0m=0xCC50f7d5373Bea12814357f98d69CbCde4B9064D
+[32mINFO [0m[01-24|13:44:03.884] Setting new local account                [32maddress[0m=0x190d4BAE9d37601eC6F70414B11C5Af9abb6c4ee
+[32mINFO [0m[01-24|13:44:03.896] Setting new local account                [32maddress[0m=0x1127c6E4c75b54E155AD880cD1129f357Abb1AF8
+[32mINFO [0m[01-24|13:44:03.897] Setting new local account                [32maddress[0m=0x11eC30978f55AA9bFB7645Ec1c03FC5EfCa90960
+[32mINFO [0m[01-24|13:44:03.908] Setting new local account                [32maddress[0m=0x873dc57848104A884E1F9dF6B473f1b0188cc9F0
+[32mINFO [0m[01-24|13:44:04.332] Setting new local account                [32maddress[0m=0xc8f2638ca5dA1BC2c2123F002380491993333C1c
++++++++++++ 0000
+!!!!!!! 1
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!! 1.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:05.714] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:05.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:05.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=6186 [32msys[0m=70848 [32mnumGC[0m=5
+[32mINFO [0m[01-24|13:44:05.716] Creation complete. 
+[32mINFO [0m[01-24|13:44:05.718] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=d6e7d1…eab079 [32muncles[0m=0 [32mtxs[0m=0 [32mgas[0m=0 [32mfees[0m=0 [32melapsed[0m=4.115ms
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:05.763] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=02d5d0…1ab6bd [32muncles[0m=0 [32mtxs[0m=530 [32mgas[0m=11130000 [32mfees[0m=1.113000351 [32melapsed[0m=48.728ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:06.714] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:06.715] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:06.715] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=10020 [32msys[0m=71360 [32mnumGC[0m=9
+[32mINFO [0m[01-24|13:44:06.715] Creation complete. 
++++++++++ 999
++++++++ 2
+[32mINFO [0m[01-24|13:44:06.739] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=d3be62…606613 [32muncles[0m=0 [32mtxs[0m=540 [32mgas[0m=11340000 [32mfees[0m=1.134000359 [32melapsed[0m=24.585ms
++++++++ 3
++++++++++++++ 11
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:07.714] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:07.715] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:07.715] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=11480 [32msys[0m=71360 [32mnumGC[0m=28
+[32mINFO [0m[01-24|13:44:07.715] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:07.744] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=ce0d01…13d73a [32muncles[0m=0 [32mtxs[0m=550 [32mgas[0m=11550000 [32mfees[0m=1.155000366 [32melapsed[0m=29.651ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:08.714] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:08.715] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:08.715] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=13186 [32msys[0m=71360 [32mnumGC[0m=48
+[32mINFO [0m[01-24|13:44:08.715] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:08.740] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=80d8e4…3f4655 [32muncles[0m=0 [32mtxs[0m=560 [32mgas[0m=11760000 [32mfees[0m=1.176000374 [32melapsed[0m=25.629ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:09.714] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:09.715] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:09.715] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=15182 [32msys[0m=71360 [32mnumGC[0m=66
+[32mINFO [0m[01-24|13:44:09.715] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:09.744] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=e36994…3877b0 [32muncles[0m=0 [32mtxs[0m=570 [32mgas[0m=11970000 [32mfees[0m=1.197000378 [32melapsed[0m=29.264ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:10.715] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:10.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:10.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=16085 [32msys[0m=71360 [32mnumGC[0m=83
+[32mINFO [0m[01-24|13:44:10.716] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:10.743] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=4c7a63…babe33 [32muncles[0m=0 [32mtxs[0m=580 [32mgas[0m=12180000 [32mfees[0m=1.218000385 [32melapsed[0m=28.500ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:11.715] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:11.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:11.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=17754 [32msys[0m=71360 [32mnumGC[0m=98
+[32mINFO [0m[01-24|13:44:11.716] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:11.747] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=dda1ba…11a09e [32muncles[0m=0 [32mtxs[0m=590 [32mgas[0m=12390000 [32mfees[0m=1.239000391 [32melapsed[0m=32.255ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+[32mINFO [0m[01-24|13:44:11.915] Setting new local account                [32maddress[0m=0xBF5a25EA92552c7158797599719B12417A85D7BA
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:12.715] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:12.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:12.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=23335 [32msys[0m=71360 [32mnumGC[0m=112
+[32mINFO [0m[01-24|13:44:12.716] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:12.743] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=e2cac2…a96954 [32muncles[0m=0 [32mtxs[0m=599 [32mgas[0m=12579000 [32mfees[0m=1.257900396 [32melapsed[0m=28.422ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:13.715] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:13.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:13.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=23225 [32msys[0m=71744 [32mnumGC[0m=125
+[32mINFO [0m[01-24|13:44:13.716] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:13.745] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=ee3920…822299 [32muncles[0m=0 [32mtxs[0m=609 [32mgas[0m=12789000 [32mfees[0m=1.278900403 [32melapsed[0m=30.260ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!! 2
+!!!!!!! 2.1 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x0000000000000000000000000000000000000000000000000000000000000000
+[32mINFO [0m[01-24|13:44:14.715] Creating IntraBlockState from latest state [32mblock[0m=0
+[32mINFO [0m[01-24|13:44:14.716] Rebuilt top of account trie and verified [32mroot hash[0m="<61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031> " [32mcallers[0m="[github.com/ledgerwatch/turbo-geth/trie.(*Trie).Rebuild github.com/ledgerwatch/turbo-geth/core/state.(*TrieDbState).Rebuild github.com/ledgerwatch/turbo-geth/core.(*BlockChain).GetTrieDbStateByBlock github.com/ledgerwatch/turbo-geth/miner.GetState github.com/ledgerwatch/turbo-geth/miner.(*worker).makeCurrent github.com/ledgerwatch/turbo-geth/miner.(*worker).commitNewWork github.com/ledgerwatch/turbo-geth/miner.(*worker).mainLoop runtime.goexit]"
+[32mINFO [0m[01-24|13:44:14.716] Memory after rebuild                     [32mnodes[0m=39 [32malloc[0m=26084 [32msys[0m=71808 [32mnumGC[0m=137
+[32mINFO [0m[01-24|13:44:14.716] Creation complete. 
++++++++++ 999
++++++++ 2
++++++++ 3
++++++++++++++ 11
+[32mINFO [0m[01-24|13:44:14.750] Commit new mining work                   [32mnumber[0m=1 [32msealhash[0m=79ba6e…fe0337 [32muncles[0m=0 [32mtxs[0m=619 [32mgas[0m=12999000 [32mfees[0m=1.29990041  [32melapsed[0m=34.645ms
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
+=== 67 0 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b 0x61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031
++++++++++++++ 19
++++++++ 4 &{[75 60 45 243 193 63 153 154 49 243 65 245 172 107 33 59 110 122 145 98 170 223 185 193 31 125 33 74 62 52 110 91] [29 204 77 232 222 199 93 122 171 133 181 103 182 204 212 26 211 18 69 27 148 138 116 19 240 161 66 253 64 212 147 71] [46 19 38 21 161 9 78 0 141 216 224 129 111 232 34 178 135 219 146 5] [2 116 248 41 229 168 216 144 190 239 29 51 151 234 152 52 46 251 10 225 234 122 64 12 104 82 55 22 254 157 10 98] [79 109 156 35 174 29 103 83 200 158 78 196 207 131 30 98 105 154 33 210 110 221 176 26 35 201 200 138 157 224 72 248] [133 249 41 53 95 186 166 14 74 74 124 250 11 15 229 252 145 53 56 71 116 160 117 37 75 171 6 183 179 253 109 124] [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0] 623680 1 24975587 12999000 1579862645 [222 131 1 9 9 138 116 117 114 98 111 45 103 101 116 104 136 103 111 49 46 49 51 46 53 133 108 105 110 117 120] [201 166 180 152 104 175 60 135 90 21 36 115 192 35 240 218 190 181 199 117 64 247 19 205 245 195 62 11 174 19 30 96] [53 205 33 197 107 80 7 164]}
+################ Writing 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+////////// 1
+$$$$$$$$$$ 2.1
+////////// 2
+////////// 3
+////////// 5
+////////// 7
+////////// 9
+////////// 10
+################ Writing END 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+[32mINFO [0m[01-24|13:44:14.982] Successfully sealed new block            [32mnumber[0m=1 [32msealhash[0m=79ba6e…fe0337 [32mhash[0m=9c6d85…8b456c [32melapsed[0m=232.814ms
+[32mINFO [0m[01-24|13:44:14.982] 🔨 mined potential block                  [32mnumber[0m=1 [32mhash[0m=9c6d85…8b456c
+!!!!!!! 3 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c
+!!!!!!! 3.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:14.983] Inserting chain                          [32mstart[0m=1 [32mend[0m=1
+************************ got a block 1
+************************ got a block 2 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+[32mINFO [0m[01-24|13:44:14.983] Creating IntraBlockState from latest state [32mblock[0m=1
+[33mWARN [0m[01-24|13:44:14.983] Ignoring the chain segment because of insufficient difficulty [33mexternal[0m=1279040 [33mlocal[0m=1279040
+[33mWARN [0m[01-24|13:44:14.983] Saving                                   [33mblock[0m=1 [33mhash[0m=9c6d85…8b456c
+[31mERROR[0m[01-24|13:44:14.983] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:14.983] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:15.983] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:15.985] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:15.985] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:16.983] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:16.985] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:16.985] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:17.983] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:17.985] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:17.986] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:18.984] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:18.986] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:18.986] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:19.984] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:19.986] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:19.986] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:20.984] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:20.986] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:20.986] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:21.984] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:21.987] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:21.987] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:22.985] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:22.987] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:22.987] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:23.985] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:23.985] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:23.985] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:24.985] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:24.986] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:24.986] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:25.991] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:25.993] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:25.993] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:26.986] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:26.989] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:26.989] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+[32mINFO [0m[01-24|13:44:27.986] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:27.988] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:27.988] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:28.986] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:28.989] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:28.989] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:29.986] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:29.989] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:29.989] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:30.992] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:30.993] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:30.993] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:31.987] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:31.990] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:31.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:32.987] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:32.989] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:32.989] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:33.987] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:33.990] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:33.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:34.988] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:34.989] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:34.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:35.994] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:35.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:35.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:36.988] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:36.990] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:36.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:37.988] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:37.990] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:37.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:38.989] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:38.991] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:38.991] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:39.989] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:39.991] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:39.991] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:40.995] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:40.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:40.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:41.989] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:41.991] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:41.991] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:42.989] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:42.990] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:42.990] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+[32mINFO [0m[01-24|13:44:43.990] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:43.992] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:43.992] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:44.990] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:44.992] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:44.992] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:45.996] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:45.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:45.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:46.990] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:46.992] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:46.992] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:47.991] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:47.993] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:47.993] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:48.991] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:48.993] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:48.993] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:49.991] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:49.993] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:49.993] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:50.997] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:51.000] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:51.000] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:51.992] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:51.994] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:51.994] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:52.992] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:52.994] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:52.994] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:53.992] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:53.994] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:53.994] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:54.993] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:54.994] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:54.995] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:55.998] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:55.999] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:55.999] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:56.993] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:56.995] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:56.995] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:57.993] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:57.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:57.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:58.994] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:58.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:58.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:44:59.994] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:44:59.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:44:59.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:00.994] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:00.997] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:00.998] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:01.994] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:01.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:01.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:02.995] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:02.997] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:02.998] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:03.995] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:03.996] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:03.996] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:04.995] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:04.995] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:04.995] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:06.001] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:06.002] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:06.002] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:06.995] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:06.997] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:06.997] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:07.996] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:07.997] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:07.998] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:08.996] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:08.998] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:08.998] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:09.996] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:09.998] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:09.999] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!! 2
+!!!!!!! 2.1 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+#### parent 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x4b3c2df3c13f999a31f341f5ac6b213b6e7a9162aadfb9c11f7d214a3e346e5b
+[32mINFO [0m[01-24|13:45:11.002] Creating IntraBlockState from latest state [32mblock[0m=1
+[31mERROR[0m[01-24|13:45:11.004] Rebuiling aborted                        [31merror[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+[31mERROR[0m[01-24|13:45:11.004] Failed to create mining context          [31merr[0m="error in finaliseRoot, for block 1: mismatching hash: <0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62>  61a3ecd7d5c8e0477c87264f45be122237945e69326aaaf62aa558b1fcc3a031 for prefix , resolveHex , resolvePos 0"
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+=== 67 1 0x9c6d854fe60940fa38bb47fb9ba1b15b6c50b61b2ba61ce30a27065cdd8b456c 0x0274f829e5a8d890beef1d3397ea98342efb0ae1ea7a400c68523716fe9d0a62
+signal: interrupt
