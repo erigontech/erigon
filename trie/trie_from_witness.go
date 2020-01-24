@@ -88,6 +88,12 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 	if trace {
 		fmt.Printf("\n")
 	}
+	if !hb.hasRoot() {
+		if isBinary {
+			return NewBinary(EmptyRoot), nil, nil
+		}
+		return New(EmptyRoot), nil, nil
+	}
 	r := hb.root()
 	var tr *Trie
 	if isBinary {
