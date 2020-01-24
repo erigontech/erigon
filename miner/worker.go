@@ -157,7 +157,6 @@ type worker struct {
 	current      *environment                 // An environment for current running cycle.
 	localUncles  map[common.Hash]*types.Block // A set of side blocks generated locally as the possible uncle blocks.
 	remoteUncles map[common.Hash]*types.Block // A set of side blocks as the possible uncle blocks.
-	unconfirmed  *unconfirmedBlocks           // A set of locally mined blocks pending canonicalness confirmations.
 
 	mu       sync.RWMutex // The lock used to protect the coinbase and extra fields
 	coinbase common.Address
@@ -207,7 +206,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		hooks:              h,
 		localUncles:        make(map[common.Hash]*types.Block),
 		remoteUncles:       make(map[common.Hash]*types.Block),
-		unconfirmed:        newUnconfirmedBlocks(eth.BlockChain(), miningLogAtDepth),
 		pendingTasks:       make(map[common.Hash]*task),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
@@ -698,9 +696,6 @@ func (w *worker) insertToChain(result consensus.ResultWithContext) {
 	// Broadcast the block and announce chain insertion event
 	w.mux.Post(core.NewMinedBlockEvent{Block: block})
 
-	// Insert the block into the set of pending ones to resultLoop for confirmations
-	w.unconfirmed.Insert(block.NumberU64(), block.Hash())
-
 	_, err = w.chain.InsertChain(types.Blocks{block})
 	if err != nil {
 		log.Error("Failed writing block to chain", "err", err)
@@ -1093,8 +1088,6 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 
 		select {
 		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now(), ctx: ctx}:
-			w.unconfirmed.Shift(block.NumberU64() - 1)
-
 			feesWei := new(big.Int)
 			for i, tx := range block.Transactions() {
 				feesWei.Add(feesWei, new(big.Int).Mul(new(big.Int).SetUint64(receipts[i].GasUsed), tx.GasPrice()))
