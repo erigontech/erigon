@@ -14,15 +14,11 @@ func TestCompressNibbles(t *testing.T) {
 		in     string
 		expect string
 	}{
-		{in: "00", expect: "0000"},
-		{in: "0000", expect: "0100"},
-		{in: "000000", expect: "020000"},
-		{in: "000001", expect: "020010"},
-		{in: "01", expect: "0010"},
-		{in: "010203040506070809", expect: "081234567890"},
-		{in: "0f0000", expect: "02f000"},
-		{in: "0f", expect: "00f0"},
-		{in: "0f00", expect: "01f0"},
+		{in: "0000", expect: "00"},
+		{in: "0102", expect: "12"},
+		{in: "0102030405060708090f", expect: "123456789f"},
+		{in: "0f000101", expect: "f011"},
+		{in: "", expect: ""},
 	}
 
 	compressBuf := &bytes.Buffer{}
@@ -34,11 +30,13 @@ func TestCompressNibbles(t *testing.T) {
 		assert.Nil(t, err)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
+		compressBuf.Reset()
 
 		err = DecompressNibbles(compressed, decompressBuf)
 		assert.Nil(t, err)
-		decompressed := compressBuf.Bytes()
+		decompressed := decompressBuf.Bytes()
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
+		decompressBuf.Reset()
 	}
 }
 

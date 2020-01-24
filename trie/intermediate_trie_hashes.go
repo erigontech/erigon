@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 
@@ -31,32 +32,18 @@ func putIntermediateCache(db ethdb.Putter, prefix []byte, subtrieHash []byte) er
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
 func CompressNibbles(nibbles []byte, out io.ByteWriter) error {
-	if len(nibbles) < 1 {
-		return nil
-	}
-
-	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
-
-	// store amount_of_nibbles-1 in low_nibble of first byte
-	if err := out.WriteByte(byte(len(nibbles) - 1)); err != nil {
-		return err
+	if len(nibbles)%2 != 0 {
+		return errors.New("this method supports only arrays of even nibbles")
 	}
 
 	var b byte
-
-	nibbleIndex := 0
-	for i := 1; i < targetLen; i++ {
-		b = (nibbles[nibbleIndex] << 4) & 0xF0
-		nibbleIndex++
-		if nibbleIndex < len(nibbles) {
-			b |= nibbles[nibbleIndex] & 0x0F
-			nibbleIndex++
-		}
+	for i := 0; i < len(nibbles); i += 2 {
+		b = (nibbles[i] << 4) & 0xF0
+		b |= nibbles[i+1] & 0x0F
 
 		if err := out.WriteByte(b); err != nil {
 			return err
 		}
-
 	}
 
 	return nil
@@ -67,25 +54,14 @@ func CompressNibbles(nibbles []byte, out io.ByteWriter) error {
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
 func DecompressNibbles(in []byte, out io.ByteWriter) error {
-	if len(in) < 1 {
-		return nil
-	}
-
-	var nibblesAmount int = (len(in) - 1) * 2
-
-	nibbleIndex := 0
-	for i := 1; i < len(in); i++ {
+	for i := 0; i < len(in); i++ {
+		//fmt.Printf("%x\n", (in[i]>>4)&0x0F)
 		if err := out.WriteByte((in[i] >> 4) & 0x0F); err != nil {
 			return err
 		}
-
-		nibbleIndex++
-		if nibbleIndex < nibblesAmount {
-			if err := out.WriteByte(in[i] & 0x0F); err != nil {
-				return err
-			}
-
-			nibbleIndex++
+		//fmt.Printf("%x\n", in[i]&0x0F)
+		if err := out.WriteByte(in[i] & 0x0F); err != nil {
+			return err
 		}
 	}
 
