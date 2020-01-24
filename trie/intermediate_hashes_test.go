@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"testing"
@@ -24,13 +25,19 @@ func TestCompressNibbles(t *testing.T) {
 		{in: "0f00", expect: "01f0"},
 	}
 
+	compressBuf := &bytes.Buffer{}
+	decompressBuf := &bytes.Buffer{}
 	for _, tc := range cases {
 		in := strToNibs(tc.in)
-		compressed := compressNibbles(in)
+		err := CompressNibbles(in, compressBuf)
+		compressed := compressBuf.Bytes()
+		assert.Nil(t, err)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
 
-		decompressed := decompressNibbles(compressed)
+		err = DecompressNibbles(compressed, decompressBuf)
+		assert.Nil(t, err)
+		decompressed := compressBuf.Bytes()
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
 	}
 }
@@ -44,6 +51,7 @@ func strToNibs(in string) []uint8 {
 	}
 	return res
 }
+
 func nibToUint8(in []byte) uint8 {
 	nib, err := strconv.ParseUint(string(in), 16, 4)
 	if err != nil {

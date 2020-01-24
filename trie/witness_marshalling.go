@@ -165,16 +165,30 @@ func keyNibblesToBytes(nibbles []byte) []byte {
 	if len(nibbles) < 1 {
 		return []byte{}
 	}
+	if len(nibbles) < 2 {
+		return nibbles
+	}
 	hasTerminator := false
 	if nibbles[len(nibbles)-1] == 0x10 {
 		nibbles = nibbles[:len(nibbles)-1]
 		hasTerminator = true
 	}
 
-	result := compressNibbles(nibbles)
+	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
 
+	result := make([]byte, targetLen)
+	nibbleIndex := 0
+	result[0] = byte(len(nibbles) % 2) // parity bit
+	for i := 1; i < len(result); i++ {
+		result[i] = nibbles[nibbleIndex] * 16
+		nibbleIndex++
+		if nibbleIndex < len(nibbles) {
+			result[i] += nibbles[nibbleIndex]
+			nibbleIndex++
+		}
+	}
 	if hasTerminator {
-		result[0] |= 1 << 7
+		result[0] |= 1 << 1
 	}
 
 	return result
@@ -184,64 +198,27 @@ func keyBytesToNibbles(b []byte) []byte {
 	if len(b) < 1 {
 		return []byte{}
 	}
-
-	hasTerminator := b[0]&(1<<7) != 0
-
-	nibbles := decompressNibbles(b)
-	if hasTerminator {
-		return append(nibbles, 0x10)
-	}
-	return nibbles
-}
-
-// HI_NIBBLE(b) = (b >> 4) & 0x0F
-// LO_NIBBLE(b) = b & 0x0F
-func compressNibbles(nibbles []byte) []byte {
-	if len(nibbles) < 1 {
-		return []byte{}
+	if len(b) < 2 {
+		return b
 	}
 
-	targetLen := len(nibbles)/2 + len(nibbles)%2 + 1
-	result := make([]byte, targetLen)
+	hasTerminator := b[0]&(1<<1) != 0
 
-	result[0] = byte(len(nibbles) - 1) // store amount_of_nibbles-1 in low_nibble of first byte
-	nibbleIndex := 0
-	for i := 1; i < len(result); i++ {
-		result[i] = nibbles[nibbleIndex] * 16
-		nibbleIndex++
-		if nibbleIndex < len(nibbles) {
-			result[i] += nibbles[nibbleIndex]
-			nibbleIndex++
-		}
-	}
+	targetLen := (len(b)-1)*2 - int(b[0]&1)
 
-	return result
-}
-
-// decompressNibbles
-// HI_NIBBLE(b) = (b >> 4) & 0x0F
-// LO_NIBBLE(b) = b & 0x0F
-//
-// HI_NIBBLE(first_byte) - bit flags, not used by this func
-// LO_NIBBLE(first_byte) - amount of nibbles
-func decompressNibbles(b []byte) []byte {
-	if len(b) < 1 {
-		return []byte{}
-	}
-
-	var nibblesAmount int = int(b[0]&0x0F) + 1
-
-	nibbles := make([]byte, nibblesAmount)
+	nibbles := make([]byte, targetLen)
 
 	nibbleIndex := 0
 	for i := 1; i < len(b); i++ {
 		nibbles[nibbleIndex] = b[i] / 16
 		nibbleIndex++
-		if nibbleIndex < nibblesAmount {
+		if nibbleIndex < len(nibbles) {
 			nibbles[nibbleIndex] = b[i] % 16
 			nibbleIndex++
 		}
 	}
-
+	if hasTerminator {
+		return append(nibbles, 0x10)
+	}
 	return nibbles
 }

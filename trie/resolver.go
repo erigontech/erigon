@@ -337,6 +337,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 		}
 		return fmt.Errorf("Unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
+
 	if tr.accounts {
 		if tr.historical {
 			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.Walker)

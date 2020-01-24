@@ -158,25 +158,26 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                 *trie.Trie
-	tMu               *sync.Mutex
-	db                ethdb.Database
-	blockNr           uint64
-	buffers           []*Buffer
-	aggregateBuffer   *Buffer // Merge of all buffers
-	currentBuffer     *Buffer
-	codeCache         *lru.Cache
-	codeSizeCache     *lru.Cache
-	historical        bool
-	noHistory         bool
-	resolveReads      bool
-	savePreimages     bool
-	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TriePruning
-	oldStream         trie.Stream
-	newStream         trie.Stream
-	hashBuilder       *trie.HashBuilder
-	resolver          *trie.Resolver
+	t                   *trie.Trie
+	tMu                 *sync.Mutex
+	db                  ethdb.Database
+	blockNr             uint64
+	buffers             []*Buffer
+	aggregateBuffer     *Buffer // Merge of all buffers
+	currentBuffer       *Buffer
+	codeCache           *lru.Cache
+	codeSizeCache       *lru.Cache
+	historical          bool
+	noHistory           bool
+	resolveReads        bool
+	savePreimages       bool
+	noIntermediateCache bool
+	resolveSetBuilder   *trie.ResolveSetBuilder
+	tp                  *trie.TriePruning
+	oldStream           trie.Stream
+	newStream           trie.Stream
+	hashBuilder         *trie.HashBuilder
+	resolver            *trie.Resolver
 }
 
 var (
@@ -249,38 +250,13 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
 	})
-	t.SetUnloadFunc(tds.putIntermediateCache)
-	tp.SetCreateNodeFunc(tds.delIntermediateCache)
+
+	if !tds.noIntermediateCache {
+		t.SetUnloadFunc(tds.putIntermediateCache)
+		tp.SetCreateNodeFunc(tds.delIntermediateCache)
+	}
 
 	return tds, nil
-}
-
-func (tds *TrieDbState) putIntermediateCache(prefix []byte, subtrieHash []byte) {
-	if tds.noIntermediateCache {
-		return
-	}
-	if len(prefix) == 0 {
-		return
-	}
-	k := make([]byte, len(prefix))
-	v := make([]byte, len(subtrieHash))
-	copy(k, prefix)
-	copy(v, subtrieHash)
-	if err := tds.db.Put(dbutils.IntermediateTrieHashesBucket, k, v); err != nil {
-		log.Warn("could not put IntermediateTrieHashesBucket", "err", err)
-	}
-}
-
-func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
-	if tds.noIntermediateCache {
-		return
-	}
-	if len(prefix) == 0 {
-		return
-	}
-	if err := tds.db.Delete(dbutils.IntermediateTrieHashesBucket, prefix); err != nil {
-		log.Warn("could not delete IntermediateTrieHashesBucket", "err", err)
-	}
 }
 
 func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -329,10 +305,25 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		hashBuilder: trie.NewHashBuilder(false),
 	}
 
-	cpy.t.SetUnloadFunc(cpy.putIntermediateCache)
-	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
+	if !tds.noIntermediateCache {
+		cpy.t.SetUnloadFunc(cpy.putIntermediateCache)
+		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
+	}
 
 	return &cpy
+}
+
+func (tds *TrieDbState) putIntermediateCache(prefix []byte, nodeHash []byte) {
+	if err := putIntermediateCache(tds.db, prefix, nodeHash); err != nil {
+		log.Warn("could not put intermediate trie cache", "err", err)
+	}
+
+}
+
+func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
+	if err := delIntermediateCache(tds.db, prefix); err != nil {
+		log.Warn("could not delete intermediate trie cache", "err", err)
+	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
