@@ -449,19 +449,20 @@ func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValu
 }
 
 // StreamHash computes the hash of a stream, as if it was a trie
-func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
+func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
+	var hashBuf common.Hash
+	var hashBufStorage common.Hash
 	var hashRef []byte
 	var hashRefStorage []byte
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
 	var aRoot common.Hash
 	var aEmptyRoot = true
 	var fieldSet uint32
-	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
 	var hashData GenStructStepHashData
 	var leafData GenStructStepLeafData
@@ -485,11 +486,7 @@ func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (c
 	}
 
 	hashOnly := func(_ []byte) bool { return !trace }
-	offset := 0
-	for ki < len(s.keySizes) {
-		size := int(s.keySizes[ki])
-		hex := s.keyBytes[offset : offset+size]
-		newItemType := s.itemTypes[ki]
+	for newItemType, hex, aVal, hash, val := it.Next(); newItemType != NoItem; newItemType, hex, aVal, hash, val = it.Next() {
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
 			// If there was an open storage "sub-stream", close it and set the storage flag on
 			if succStorage.Len() > 0 {
@@ -525,17 +522,13 @@ func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (c
 			itemType = newItemType
 			switch itemType {
 			case AccountStreamItem:
-				if s.aValues[ai] == nil {
-					return common.Hash{}, fmt.Errorf("s.aValues[%d] == nil", ai)
-				}
-				var a *accounts.Account = s.aValues[ai]
+				var a *accounts.Account = aVal
 				accData.StorageSize = a.StorageSize
 				accData.Balance.Set(&a.Balance)
 				accData.Nonce = a.Nonce
 				accData.Incarnation = a.Incarnation
 				aEmptyRoot = a.IsEmptyRoot()
 				copy(aRoot[:], a.Root[:])
-				ai++
 				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
 				if a.HasStorageSize {
 					fieldSet += AccountFieldSSizeOnly
@@ -548,9 +541,8 @@ func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (c
 				}
 				hashRef = nil
 			case AHashStreamItem:
-				hashRef = s.hashes[hi : hi+common.HashLength]
-				hi += common.HashLength
-
+				copy(hashBuf[:], hash)
+				hashRef = hashBuf[:]
 			}
 		} else {
 			currStorage.Reset()
@@ -567,18 +559,14 @@ func StreamHash(s *Stream, storagePrefixLen int, hb *HashBuilder, trace bool) (c
 			sItemType = newItemType
 			switch sItemType {
 			case StorageStreamItem:
-				v := s.sValues[si]
-				si++
 				value.Reset()
-				value.Write(v)
+				value.Write(val)
 				hashRefStorage = nil
 			case SHashStreamItem:
-				hashRefStorage = s.hashes[hi : hi+common.HashLength]
-				hi += common.HashLength
+				copy(hashBufStorage[:], hash)
+				hashRefStorage = hashBufStorage[:]
 			}
 		}
-		ki++
-		offset += size
 	}
 	// If there was an open storage "sub-stream", close it and set the storage flag on
 	if succStorage.Len() > 0 {
@@ -706,31 +694,5 @@ func HashWithModifications(
 	oldIt := NewIterator(t, rs, hr, trace)
 
 	it := NewStreamMergeIterator(oldIt, &stream, trace)
-	for itemType, hex, aVal, hash, val := it.Next(); itemType != NoItem; itemType, hex, aVal, hash, val = it.Next() {
-		newStream.keyBytes = append(newStream.keyBytes, hex...)
-		newStream.keySizes = append(newStream.keySizes, uint8(len(hex)))
-		switch itemType {
-		case AccountStreamItem:
-			newStream.aValues = append(newStream.aValues, aVal)
-			newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-		case StorageStreamItem:
-			newStream.sValues = append(newStream.sValues, val)
-			newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-		case AHashStreamItem:
-			newStream.hashes = append(newStream.hashes, hash...)
-			newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-		case SHashStreamItem:
-			newStream.hashes = append(newStream.hashes, hash...)
-			newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
-		}
-	}
-	if trace {
-		fmt.Printf("len(newStream.hexes)=%d\n", len(newStream.keySizes))
-		printOffset := 0
-		for _, size := range newStream.keySizes {
-			fmt.Printf("%x\n", newStream.keyBytes[printOffset:printOffset+int(size)])
-			printOffset += int(size)
-		}
-	}
-	return StreamHash(newStream, storagePrefixLen, hb, trace)
+	return StreamHash(it, storagePrefixLen, hb, trace)
 }
