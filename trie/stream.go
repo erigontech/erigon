@@ -165,6 +165,30 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("shortNode %x\n", it.hex)
 			}
 			it.hex = append(it.hex, n.Key...)
+			switch v := n.Val.(type) {
+			case hashNode:
+				it.top--
+				if accounts {
+					return AHashStreamItem, it.hex, nil, []byte(v), nil
+				}
+				return SHashStreamItem, it.hex, nil, []byte(v), nil
+			case valueNode:
+				it.top--
+				return StorageStreamItem, it.hex, nil, nil, []byte(v)
+			case *accountNode:
+				hashOnly := it.rs.HashOnly(it.hex)
+				if !hashOnly && v.storage != nil {
+					it.nodeStack[l] = v.storage
+					it.iStack[l] = 0
+					it.hashOnlyStack[l] = false
+					it.lenStack[l] = len(it.hex)
+					it.accountStack[l] = false
+					it.forceStack[l] = true
+				} else {
+					it.top--
+				}
+				return AccountStreamItem, it.hex, &v.Account, nil, nil
+			}
 			it.nodeStack[l] = n.Val
 			it.iStack[l] = 0
 			it.hashOnlyStack[l] = false
@@ -190,15 +214,15 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				}
 			} else {
 				i1, i2 := n.childrenIdx()
-				hexLen := len(it.hex)
 				if index <= int(i1) {
-					it.nodeStack[l] = n
 					it.iStack[l] = int(i2)
-					it.hashOnlyStack[l] = hashOnly
-					it.lenStack[l] = hexLen
-					it.accountStack[l] = accounts
-					it.forceStack[l] = force
 					it.hex = append(it.hex, i1)
+					if v, ok := n.child1.(hashNode); ok {
+						if accounts {
+							return AHashStreamItem, it.hex, nil, []byte(v), nil
+						}
+						return SHashStreamItem, it.hex, nil, []byte(v), nil
+					}
 					l++
 					it.top++
 					if l >= len(it.nodeStack) {
@@ -218,6 +242,13 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 				} else {
 					it.hex = append(it.hex, i2)
+					if v, ok := n.child2.(hashNode); ok {
+						it.top--
+						if accounts {
+							return AHashStreamItem, it.hex, nil, []byte(v), nil
+						}
+						return SHashStreamItem, it.hex, nil, []byte(v), nil
+					}
 					it.nodeStack[l] = n.child2
 					it.iStack[l] = 0
 					it.hashOnlyStack[l] = false
@@ -244,7 +275,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					return SHashStreamItem, it.hex, nil, it.hn[:], nil
 				}
 			} else {
-				hexLen := len(it.hex)
 				var i1, i2 int
 				i1Found := false
 				i2Found := false
@@ -261,13 +291,14 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 				}
 				if i2Found {
-					it.nodeStack[l] = n
 					it.iStack[l] = int(i2)
-					it.hashOnlyStack[l] = hashOnly
-					it.lenStack[l] = hexLen
-					it.accountStack[l] = accounts
-					it.forceStack[l] = force
 					it.hex = append(it.hex, byte(i1))
+					if v, ok := n.Children[i1].(hashNode); ok {
+						if accounts {
+							return AHashStreamItem, it.hex, nil, []byte(v), nil
+						}
+						return SHashStreamItem, it.hex, nil, []byte(v), nil
+					}
 					l++
 					it.top++
 					if l >= len(it.nodeStack) {
@@ -287,6 +318,13 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 				} else {
 					it.hex = append(it.hex, byte(i1))
+					if v, ok := n.Children[i1].(hashNode); ok {
+						it.top--
+						if accounts {
+							return AHashStreamItem, it.hex, nil, []byte(v), nil
+						}
+						return SHashStreamItem, it.hex, nil, []byte(v), nil
+					}
 					it.nodeStack[l] = n.Children[i1]
 					it.iStack[l] = 0
 					it.hashOnlyStack[l] = false
@@ -300,7 +338,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("accountNode %x\n", it.hex)
 			}
 			hashOnly := it.rs.HashOnly(it.hex)
-			if !n.IsEmptyRoot() && !hashOnly && n.storage != nil {
+			if !hashOnly && n.storage != nil {
 				it.nodeStack[l] = n.storage
 				it.iStack[l] = 0
 				it.hashOnlyStack[l] = false
@@ -315,22 +353,11 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("hashNode %x\n", it.hex)
 			}
-			hashOnly := it.rs.HashOnly(it.hex)
-			if !hashOnly {
-				if c := it.rs.Current(); len(c) == len(it.hex)+1 && c[len(c)-1] == 16 {
-					hashOnly = true
-				}
-			}
 			it.top--
-			if hashOnly {
-				if accounts {
-					return AHashStreamItem, it.hex, nil, []byte(n), nil
-				} else {
-					return SHashStreamItem, it.hex, nil, []byte(n), nil
-				}
-			} else {
-				panic(fmt.Errorf("unexpected hashNode: %s, at hex: %x (%d)", n, it.hex, len(it.hex)))
+			if accounts {
+				return AHashStreamItem, it.hex, nil, []byte(n), nil
 			}
+			return SHashStreamItem, it.hex, nil, []byte(n), nil
 		default:
 			panic(fmt.Errorf("unexpected node: %T", nd))
 		}
