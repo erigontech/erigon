@@ -142,37 +142,38 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		if l == 0 {
 			return NoItem, nil, nil, nil, nil
 		}
-		nd := it.nodeStack[l-1]
-		hexLen := it.lenStack[l-1]
+		l--
+		nd := it.nodeStack[l]
+		hexLen := it.lenStack[l]
 		it.hex = it.hex[:hexLen]
-		index := it.iStack[l-1]
-		hashOnly := it.hashOnlyStack[l-1]
-		accounts := it.accountStack[l-1]
-		force := it.forceStack[l-1]
-		it.nodeStack = it.nodeStack[:l-1]
-		it.iStack = it.iStack[:l-1]
-		it.hashOnlyStack = it.hashOnlyStack[:l-1]
-		it.lenStack = it.lenStack[:l-1]
-		it.accountStack = it.accountStack[:l-1]
-		it.forceStack = it.forceStack[:l-1]
+		index := it.iStack[l]
+		hashOnly := it.hashOnlyStack[l]
+		accounts := it.accountStack[l]
+		force := it.forceStack[l]
 		switch n := nd.(type) {
 		case nil:
 		case valueNode:
 			if it.trace {
 				fmt.Printf("valueNode %x\n", it.hex)
 			}
+			it.nodeStack = it.nodeStack[:l]
+			it.iStack = it.iStack[:l]
+			it.hashOnlyStack = it.hashOnlyStack[:l]
+			it.lenStack = it.lenStack[:l]
+			it.accountStack = it.accountStack[:l]
+			it.forceStack = it.forceStack[:l]
 			return StorageStreamItem, it.hex, nil, nil, []byte(n)
 		case *shortNode:
 			if it.trace {
 				fmt.Printf("shortNode %x\n", it.hex)
 			}
 			it.hex = append(it.hex, n.Key...)
-			it.nodeStack = append(it.nodeStack, n.Val)
-			it.iStack = append(it.iStack, 0)
-			it.hashOnlyStack = append(it.hashOnlyStack, false)
-			it.lenStack = append(it.lenStack, len(it.hex))
-			it.accountStack = append(it.accountStack, accounts)
-			it.forceStack = append(it.forceStack, false)
+			it.nodeStack[l] = n.Val
+			it.iStack[l] = 0
+			it.hashOnlyStack[l] = false
+			it.lenStack[l] = len(it.hex)
+			it.accountStack[l] = accounts
+			it.forceStack[l] = false
 		case *duoNode:
 			if it.trace {
 				fmt.Printf("duoNode %x\n", it.hex)
@@ -184,6 +185,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
 					panic(fmt.Sprintf("could not hash duoNode: %v", err))
 				}
+				it.nodeStack = it.nodeStack[:l]
+				it.iStack = it.iStack[:l]
+				it.hashOnlyStack = it.hashOnlyStack[:l]
+				it.lenStack = it.lenStack[:l]
+				it.accountStack = it.accountStack[:l]
+				it.forceStack = it.forceStack[:l]
 				if accounts {
 					return AHashStreamItem, it.hex, nil, it.hn[:], nil
 				} else {
@@ -193,12 +200,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				i1, i2 := n.childrenIdx()
 				hexLen := len(it.hex)
 				if index <= int(i1) {
-					it.nodeStack = append(it.nodeStack, n)
-					it.iStack = append(it.iStack, int(i2))
-					it.hashOnlyStack = append(it.hashOnlyStack, hashOnly)
-					it.lenStack = append(it.lenStack, hexLen)
-					it.accountStack = append(it.accountStack, accounts)
-					it.forceStack = append(it.forceStack, force)
+					it.nodeStack[l] = n
+					it.iStack[l] = int(i2)
+					it.hashOnlyStack[l] = hashOnly
+					it.lenStack[l] = hexLen
+					it.accountStack[l] = accounts
+					it.forceStack[l] = force
 					it.hex = append(it.hex, i1)
 					it.nodeStack = append(it.nodeStack, n.child1)
 					it.iStack = append(it.iStack, 0)
@@ -208,12 +215,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.forceStack = append(it.forceStack, false)
 				} else {
 					it.hex = append(it.hex, i2)
-					it.nodeStack = append(it.nodeStack, n.child2)
-					it.iStack = append(it.iStack, 0)
-					it.hashOnlyStack = append(it.hashOnlyStack, false)
-					it.lenStack = append(it.lenStack, len(it.hex))
-					it.accountStack = append(it.accountStack, accounts)
-					it.forceStack = append(it.forceStack, false)
+					it.nodeStack[l] = n.child2
+					it.iStack[l] = 0
+					it.hashOnlyStack[l] = false
+					it.lenStack[l] = len(it.hex)
+					it.accountStack[l] = accounts
+					it.forceStack[l] = false
 				}
 			}
 		case *fullNode:
@@ -227,6 +234,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
 					panic(fmt.Sprintf("could not hash duoNode: %v", err))
 				}
+				it.nodeStack = it.nodeStack[:l]
+				it.iStack = it.iStack[:l]
+				it.hashOnlyStack = it.hashOnlyStack[:l]
+				it.lenStack = it.lenStack[:l]
+				it.accountStack = it.accountStack[:l]
+				it.forceStack = it.forceStack[:l]
 				if accounts {
 					return AHashStreamItem, it.hex, nil, it.hn[:], nil
 				} else {
@@ -250,12 +263,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					}
 				}
 				if i2Found {
-					it.nodeStack = append(it.nodeStack, n)
-					it.iStack = append(it.iStack, int(i2))
-					it.hashOnlyStack = append(it.hashOnlyStack, hashOnly)
-					it.lenStack = append(it.lenStack, hexLen)
-					it.accountStack = append(it.accountStack, accounts)
-					it.forceStack = append(it.forceStack, force)
+					it.nodeStack[l] = n
+					it.iStack[l] = int(i2)
+					it.hashOnlyStack[l] = hashOnly
+					it.lenStack[l] = hexLen
+					it.accountStack[l] = accounts
+					it.forceStack[l] = force
 					it.hex = append(it.hex, byte(i1))
 					it.nodeStack = append(it.nodeStack, n.Children[i1])
 					it.iStack = append(it.iStack, 0)
@@ -265,12 +278,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.forceStack = append(it.forceStack, false)
 				} else {
 					it.hex = append(it.hex, byte(i1))
-					it.nodeStack = append(it.nodeStack, n.Children[i1])
-					it.iStack = append(it.iStack, 0)
-					it.hashOnlyStack = append(it.hashOnlyStack, false)
-					it.lenStack = append(it.lenStack, len(it.hex))
-					it.accountStack = append(it.accountStack, accounts)
-					it.forceStack = append(it.forceStack, false)
+					it.nodeStack[l] = n.Children[i1]
+					it.iStack[l] = 0
+					it.hashOnlyStack[l] = false
+					it.lenStack[l] = len(it.hex)
+					it.accountStack[l] = accounts
+					it.forceStack[l] = false
 				}
 			}
 		case *accountNode:
@@ -278,15 +291,20 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				fmt.Printf("accountNode %x\n", it.hex)
 			}
 			hashOnly := it.rs.HashOnly(it.hex)
-			if !n.IsEmptyRoot() && !hashOnly {
-				if n.storage != nil {
-					it.nodeStack = append(it.nodeStack, n.storage)
-					it.iStack = append(it.iStack, 0)
-					it.hashOnlyStack = append(it.hashOnlyStack, false)
-					it.lenStack = append(it.lenStack, len(it.hex))
-					it.accountStack = append(it.accountStack, false)
-					it.forceStack = append(it.forceStack, true)
-				}
+			if !n.IsEmptyRoot() && !hashOnly && n.storage != nil {
+				it.nodeStack[l] = n.storage
+				it.iStack[l] = 0
+				it.hashOnlyStack[l] = false
+				it.lenStack[l] = len(it.hex)
+				it.accountStack[l] = false
+				it.forceStack[l] = true
+			} else {
+				it.nodeStack = it.nodeStack[:l]
+				it.iStack = it.iStack[:l]
+				it.hashOnlyStack = it.hashOnlyStack[:l]
+				it.lenStack = it.lenStack[:l]
+				it.accountStack = it.accountStack[:l]
+				it.forceStack = it.forceStack[:l]
 			}
 			return AccountStreamItem, it.hex, &n.Account, nil, nil
 		case hashNode:
@@ -299,6 +317,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					hashOnly = true
 				}
 			}
+			it.nodeStack = it.nodeStack[:l]
+			it.iStack = it.iStack[:l]
+			it.hashOnlyStack = it.hashOnlyStack[:l]
+			it.lenStack = it.lenStack[:l]
+			it.accountStack = it.accountStack[:l]
+			it.forceStack = it.forceStack[:l]
 			if hashOnly {
 				if accounts {
 					return AHashStreamItem, it.hex, nil, []byte(n), nil
