@@ -69,7 +69,10 @@ func BenchmarkComp2Buf(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		buf := pool.GetBuffer(64)
 		buf.Reset()
-		Compress2(in, buf)
+		err := Compress2(in, buf)
+		if err != nil {
+			panic(err)
+		}
 		k := buf.Bytes()
 		_ = k
 		pool.PutBuffer(buf)
