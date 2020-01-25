@@ -80,30 +80,32 @@ func (s *Stream) Reset() {
 
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
-	hr           *hasher
-	rs           *ResolveSet
-	hn           common.Hash
-	hex          []byte
-	nodeStack    []node
-	iStack       []int
-	lenStack     []int
-	accountStack []bool
-	forceStack   []bool
-	trace        bool
+	hr            *hasher
+	rs            *ResolveSet
+	hn            common.Hash
+	hex           []byte
+	nodeStack     []node
+	iStack        []int
+	hashOnlyStack []bool
+	lenStack      []int
+	accountStack  []bool
+	forceStack    []bool
+	trace         bool
 }
 
 // NewIterator creates a new iterator from scratch from a given trie and resolve set
 func NewIterator(t *Trie, rs *ResolveSet, hr *hasher, trace bool) *Iterator {
 	return &Iterator{
-		hr:           hr,
-		rs:           rs,
-		hex:          []byte{},
-		nodeStack:    []node{t.root},
-		iStack:       []int{0},
-		lenStack:     []int{0},
-		accountStack: []bool{true},
-		forceStack:   []bool{true},
-		trace:        trace,
+		hr:            hr,
+		rs:            rs,
+		hex:           []byte{},
+		nodeStack:     []node{t.root},
+		iStack:        []int{0},
+		hashOnlyStack: []bool{false},
+		lenStack:      []int{0},
+		accountStack:  []bool{true},
+		forceStack:    []bool{true},
+		trace:         trace,
 	}
 }
 
@@ -119,6 +121,9 @@ func (it *Iterator) Reset(t *Trie, rs *ResolveSet, trace bool) {
 		it.iStack = it.iStack[:0]
 	}
 	it.lenStack = append(it.lenStack, 0)
+	if len(it.hashOnlyStack) > 0 {
+		it.hashOnlyStack = it.hashOnlyStack[:0]
+	}
 	if len(it.accountStack) > 0 {
 		it.accountStack = it.accountStack[:0]
 	}
@@ -141,10 +146,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		hexLen := it.lenStack[l-1]
 		it.hex = it.hex[:hexLen]
 		index := it.iStack[l-1]
+		hashOnly := it.hashOnlyStack[l-1]
 		accounts := it.accountStack[l-1]
 		force := it.forceStack[l-1]
 		it.nodeStack = it.nodeStack[:l-1]
 		it.iStack = it.iStack[:l-1]
+		it.hashOnlyStack = it.hashOnlyStack[:l-1]
 		it.lenStack = it.lenStack[:l-1]
 		it.accountStack = it.accountStack[:l-1]
 		it.forceStack = it.forceStack[:l-1]
@@ -162,6 +169,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			it.hex = append(it.hex, n.Key...)
 			it.nodeStack = append(it.nodeStack, n.Val)
 			it.iStack = append(it.iStack, 0)
+			it.hashOnlyStack = append(it.hashOnlyStack, false)
 			it.lenStack = append(it.lenStack, len(it.hex))
 			it.accountStack = append(it.accountStack, accounts)
 			it.forceStack = append(it.forceStack, false)
@@ -169,7 +177,9 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("duoNode %x\n", it.hex)
 			}
-			hashOnly := it.rs.HashOnly(it.hex) // Save this because rs can move on to other keys during the recursive invocation
+			if index == 0 {
+				hashOnly = it.rs.HashOnly(it.hex)
+			}
 			if hashOnly {
 				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
 					panic(fmt.Sprintf("could not hash duoNode: %v", err))
@@ -185,12 +195,14 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				if index <= int(i1) {
 					it.nodeStack = append(it.nodeStack, n)
 					it.iStack = append(it.iStack, int(i2))
+					it.hashOnlyStack = append(it.hashOnlyStack, hashOnly)
 					it.lenStack = append(it.lenStack, hexLen)
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, force)
 					it.hex = append(it.hex, i1)
 					it.nodeStack = append(it.nodeStack, n.child1)
 					it.iStack = append(it.iStack, 0)
+					it.hashOnlyStack = append(it.hashOnlyStack, false)
 					it.lenStack = append(it.lenStack, len(it.hex))
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, false)
@@ -198,6 +210,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.hex = append(it.hex, i2)
 					it.nodeStack = append(it.nodeStack, n.child2)
 					it.iStack = append(it.iStack, 0)
+					it.hashOnlyStack = append(it.hashOnlyStack, false)
 					it.lenStack = append(it.lenStack, len(it.hex))
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, false)
@@ -207,7 +220,9 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("fullNode %x[%d]\n", it.hex, index)
 			}
-			hashOnly := it.rs.HashOnly(it.hex) // Save this because rs can move on to other keys during the recursive invocation
+			if index == 0 {
+				hashOnly = it.rs.HashOnly(it.hex)
+			}
 			if hashOnly {
 				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
 					panic(fmt.Sprintf("could not hash duoNode: %v", err))
@@ -237,12 +252,14 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				if i2Found {
 					it.nodeStack = append(it.nodeStack, n)
 					it.iStack = append(it.iStack, int(i2))
+					it.hashOnlyStack = append(it.hashOnlyStack, hashOnly)
 					it.lenStack = append(it.lenStack, hexLen)
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, force)
 					it.hex = append(it.hex, byte(i1))
 					it.nodeStack = append(it.nodeStack, n.Children[i1])
 					it.iStack = append(it.iStack, 0)
+					it.hashOnlyStack = append(it.hashOnlyStack, false)
 					it.lenStack = append(it.lenStack, len(it.hex))
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, false)
@@ -250,6 +267,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.hex = append(it.hex, byte(i1))
 					it.nodeStack = append(it.nodeStack, n.Children[i1])
 					it.iStack = append(it.iStack, 0)
+					it.hashOnlyStack = append(it.hashOnlyStack, false)
 					it.lenStack = append(it.lenStack, len(it.hex))
 					it.accountStack = append(it.accountStack, accounts)
 					it.forceStack = append(it.forceStack, false)
@@ -264,6 +282,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				if n.storage != nil {
 					it.nodeStack = append(it.nodeStack, n.storage)
 					it.iStack = append(it.iStack, 0)
+					it.hashOnlyStack = append(it.hashOnlyStack, false)
 					it.lenStack = append(it.lenStack, len(it.hex))
 					it.accountStack = append(it.accountStack, false)
 					it.forceStack = append(it.forceStack, true)
