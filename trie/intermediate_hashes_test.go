@@ -55,12 +55,27 @@ k := out[:l]
 func CompressNibbles5(nibbles []byte, out *[64]byte) (outLength int)
 
 
-BenchmarkComp3-12           	21000265	        50.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkComp3NoBuf-12      	28899375	        43.3 ns/op	      16 B/op	       1 allocs/op
-BenchmarkComp4-12           	25476853	        49.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkComp5-12           	55080958	        22.4 ns/op	       0 B/op	       0 allocs/op
-BenchmarkComp6-12           	25799130	        52.5 ns/op	      16 B/op	       1 allocs/op
+BenchmarkComp2Buf-12            	14348829	        79.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComp3Buf-12            	26500005	        45.4 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComp3MakeOutside-12    	31024833	        36.3 ns/op	      16 B/op	       1 allocs/op
+BenchmarkComp4BufAppend-12      	23995503	        48.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComp5-12               	51967686	        22.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkComp6-12               	32402132	        35.8 ns/op	      16 B/op	       1 allocs/op
 */
+func BenchmarkComp2Buf(b *testing.B) {
+	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		buf := pool.GetBuffer(64)
+		buf.Reset()
+		Compress2(in, buf)
+		k := buf.Bytes()
+		_ = k
+		pool.PutBuffer(buf)
+	}
+}
+
 func BenchmarkComp3Buf(b *testing.B) {
 	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
 
