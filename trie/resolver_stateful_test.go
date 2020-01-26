@@ -61,12 +61,13 @@ func TestRebuild(t *testing.T) {
 func TestResolve1(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	v := "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
 
 	req := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("bfb355c9a7c26a9c173a9c30e1fb2895fd9908726a8d3dd097203b207d852cf5").Bytes()),
 	}
@@ -76,19 +77,24 @@ func TestResolve1(t *testing.T) {
 	require.Nil(t, err)
 
 	//t.Errorf("TestResolve1 resolved:\n%s\n", req.resolved.fstring(""))
+	expectPrinted := "\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestResolve2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	v := "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
 
 	req := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaabbbbbaaaaabbbbbaaaaabbbbbaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("38eb1d28b717978c8cb21b6939dc69ba445d5dea67ca0e948bbf0aef9f1bc2fb").Bytes()),
 	}
@@ -98,19 +104,24 @@ func TestResolve2(t *testing.T) {
 	require.Nil(t, err)
 
 	//t.Errorf("TestResolve2 resolved:\n%s\n", req.resolved.fstring(""))
+	expectPrinted := "\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestResolve2Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	v := "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
 
 	req := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("38eb1d28b717978c8cb21b6939dc69ba445d5dea67ca0e948bbf0aef9f1bc2fb").Bytes()),
 	}
@@ -120,22 +131,26 @@ func TestResolve2Keep(t *testing.T) {
 	require.Nil(t, err)
 
 	// t.Errorf("TestResolve2Keep resolved:\n%s\n", tc.resolved.fstring(""))
-	// assert.Equal(t, "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421", req.t.Hash().String())
+	expectPrinted := "\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestResolve3Keep(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	v := "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
 
 	req := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("b780e7d2bc3b7ab7f85084edb2fff42facefa0df9dd1e8190470f277d8183e7c").Bytes()),
 	}
@@ -145,41 +160,47 @@ func TestResolve3Keep(t *testing.T) {
 	require.Nil(t, err, "resolve error")
 
 	//t.Errorf("TestResolve3Keep resolved:\n%s\n", tc.resolved.fstring(""))
+
+	expectPrinted := "\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestTrieResolver(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.StorageBucket, []byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	v := "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	err := db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("aaaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("aaaaaccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("baaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("bbaaaccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("bbaaaccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), common.Hex2Bytes(v))
 	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, []byte("bccccccccccccccccccccccccccccccc"), []byte("xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"))
+	err = db.Put(dbutils.StorageBucket, common.Hex2Bytes("bccccccccccccccccccccccccccccccc"), common.Hex2Bytes(v))
 	require.Nil(t, err)
 
 	req1 := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  10, // 5 bytes is 10 nibbles
 		resolveHash: hashNode(common.HexToHash("38eb1d28b717978c8cb21b6939dc69ba445d5dea67ca0e948bbf0aef9f1bc2fb").Bytes()),
 	}
 	req2 := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("bbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 1 bytes is 2 nibbles
 		resolveHash: hashNode(common.HexToHash("dc2332366fcf65ad75d09901e199e3dd52a5389ad85ff1d853803c5f40cbde56").Bytes()),
 	}
 	req3 := &ResolveRequest{
 		t:           tr,
-		resolveHex:  keybytesToHex([]byte("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
+		resolveHex:  keybytesToHex(common.Hex2Bytes("bbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
 		resolvePos:  2, // 1 bytes is 2 nibbles
 		resolveHash: hashNode(common.HexToHash("df6fd126d62ec79182d9ab6f879b63dfacb9ce2e1cb765b17b9752de9c2cbaa7").Bytes()),
 	}
@@ -190,6 +211,11 @@ func TestTrieResolver(t *testing.T) {
 
 	err = resolver.ResolveWithDb(db, 0)
 	require.Nil(t, err, "resolve error")
+
+	expectPrinted := "\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestTwoStorageItems(t *testing.T) {
@@ -258,6 +284,11 @@ func TestTwoStorageItems(t *testing.T) {
 	require.Nil(t, err, "resolve error")
 
 	assert.Equal(t, rootHash.String(), tr.Hash().String())
+
+	expectPrinted := "s(0d:f(7:s(0b060909000100050701090100010d0a0b0e0b07070104040f020a030308050c080003030a0c0d030a0f09070e090402030a0609050e08010a0d010e0b0510:v(02))15:s(060906060c0907010005010c030d05040e0c05090106020600060503010409030a05010400040a0000020804020f05060000090d070e050c0f040a080c0710:v(03))))\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestTwoAccounts(t *testing.T) {
@@ -281,6 +312,11 @@ func TestTwoAccounts(t *testing.T) {
 	require.Nil(t, err, "resolve error")
 
 	assert.Equal(t, expect.String(), tr.Hash().String())
+
+	expectPrinted := "s(00:h(0dee9ab52e096dcc54037c30b3d183a0b06316cbcf49070a419b32ed2d2d64eb))\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
 
 func TestTwoAccountsNegative(t *testing.T) {
@@ -330,4 +366,9 @@ func TestTwoAccounts_IntermediateCache(t *testing.T) {
 	require.Nil(t, err, "resolve error")
 
 	assert.Equal(t, expect.String(), tr.Hash().String())
+
+	expectPrinted := "f(0:s(00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010:v(f849808502540be400a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))10:s(0a:h(61b4ae1d35aa975e1951b4c67340e7bcceec1a9057617105b4f791b5b80aec3f))15:s(0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f10:v(f8448064a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc)))\n"
+	printed := bytes.Buffer{}
+	tr.Print(&printed)
+	assert.Equal(t, expectPrinted, printed.String())
 }
