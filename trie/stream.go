@@ -80,7 +80,6 @@ func (s *Stream) Reset() {
 
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
-	hr            *hasher
 	rs            *ResolveSet
 	hn            common.Hash
 	hex           []byte
@@ -89,15 +88,13 @@ type Iterator struct {
 	hashOnlyStack []bool
 	lenStack      []int
 	accountStack  []bool
-	forceStack    []bool
 	top           int // Top of the stack
 	trace         bool
 }
 
 // NewIterator creates a new iterator from scratch from a given trie and resolve set
-func NewIterator(t *Trie, rs *ResolveSet, hr *hasher, trace bool) *Iterator {
+func NewIterator(t *Trie, rs *ResolveSet, trace bool) *Iterator {
 	return &Iterator{
-		hr:            hr,
 		rs:            rs,
 		hex:           []byte{},
 		nodeStack:     []node{t.root},
@@ -105,7 +102,6 @@ func NewIterator(t *Trie, rs *ResolveSet, hr *hasher, trace bool) *Iterator {
 		hashOnlyStack: []bool{false},
 		lenStack:      []int{0},
 		accountStack:  []bool{true},
-		forceStack:    []bool{true},
 		top:           1,
 		trace:         trace,
 	}
@@ -130,10 +126,6 @@ func (it *Iterator) Reset(t *Trie, rs *ResolveSet, trace bool) {
 		it.accountStack = it.accountStack[:0]
 	}
 	it.accountStack = append(it.accountStack, true)
-	if len(it.forceStack) > 0 {
-		it.forceStack = it.forceStack[:0]
-	}
-	it.forceStack = append(it.forceStack, true)
 	it.top = 1
 	it.trace = trace
 }
@@ -151,7 +143,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		index := it.iStack[l]
 		hashOnly := it.hashOnlyStack[l]
 		accounts := it.accountStack[l]
-		force := it.forceStack[l]
 		switch n := nd.(type) {
 		case nil:
 		case valueNode:
@@ -183,7 +174,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.hashOnlyStack[l] = false
 					it.lenStack[l] = len(it.hex)
 					it.accountStack[l] = false
-					it.forceStack[l] = true
 				} else {
 					it.top--
 				}
@@ -194,7 +184,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			it.hashOnlyStack[l] = false
 			it.lenStack[l] = len(it.hex)
 			it.accountStack[l] = accounts
-			it.forceStack[l] = false
 		case *duoNode:
 			if it.trace {
 				fmt.Printf("duoNode %x\n", it.hex)
@@ -203,14 +192,11 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hashOnly = it.rs.HashOnly(it.hex)
 			}
 			if hashOnly {
-				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
-					panic(fmt.Sprintf("could not hash duoNode: %v", err))
-				}
 				it.top--
 				if accounts {
-					return AHashStreamItem, it.hex, nil, it.hn[:], nil
+					return AHashStreamItem, it.hex, nil, n.hash(), nil
 				} else {
-					return SHashStreamItem, it.hex, nil, it.hn[:], nil
+					return SHashStreamItem, it.hex, nil, n.hash(), nil
 				}
 			} else {
 				i1, i2 := n.childrenIdx()
@@ -231,14 +217,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						it.hashOnlyStack = append(it.hashOnlyStack, false)
 						it.lenStack = append(it.lenStack, len(it.hex))
 						it.accountStack = append(it.accountStack, accounts)
-						it.forceStack = append(it.forceStack, false)
 					} else {
 						it.nodeStack[l] = n.child1
 						it.iStack[l] = 0
 						it.hashOnlyStack[l] = false
 						it.lenStack[l] = len(it.hex)
 						it.accountStack[l] = accounts
-						it.forceStack[l] = false
 					}
 				} else {
 					it.hex = append(it.hex, i2)
@@ -254,7 +238,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.hashOnlyStack[l] = false
 					it.lenStack[l] = len(it.hex)
 					it.accountStack[l] = accounts
-					it.forceStack[l] = false
 				}
 			}
 		case *fullNode:
@@ -265,14 +248,11 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				hashOnly = it.rs.HashOnly(it.hex)
 			}
 			if hashOnly {
-				if _, err := it.hr.hash(n, force, it.hn[:]); err != nil {
-					panic(fmt.Sprintf("could not hash duoNode: %v", err))
-				}
 				it.top--
 				if accounts {
-					return AHashStreamItem, it.hex, nil, it.hn[:], nil
+					return AHashStreamItem, it.hex, nil, n.hash(), nil
 				} else {
-					return SHashStreamItem, it.hex, nil, it.hn[:], nil
+					return SHashStreamItem, it.hex, nil, n.hash(), nil
 				}
 			} else {
 				var i1, i2 int
@@ -307,14 +287,12 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 						it.hashOnlyStack = append(it.hashOnlyStack, false)
 						it.lenStack = append(it.lenStack, len(it.hex))
 						it.accountStack = append(it.accountStack, accounts)
-						it.forceStack = append(it.forceStack, false)
 					} else {
 						it.nodeStack[l] = n.Children[i1]
 						it.iStack[l] = 0
 						it.hashOnlyStack[l] = false
 						it.lenStack[l] = len(it.hex)
 						it.accountStack[l] = accounts
-						it.forceStack[l] = false
 					}
 				} else {
 					it.hex = append(it.hex, byte(i1))
@@ -330,7 +308,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					it.hashOnlyStack[l] = false
 					it.lenStack[l] = len(it.hex)
 					it.accountStack[l] = accounts
-					it.forceStack[l] = false
 				}
 			}
 		case *accountNode:
@@ -344,7 +321,6 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				it.hashOnlyStack[l] = false
 				it.lenStack[l] = len(it.hex)
 				it.accountStack[l] = false
-				it.forceStack[l] = true
 			} else {
 				it.top--
 			}
@@ -688,8 +664,6 @@ func HashWithModifications(
 	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
 ) (common.Hash, error) {
-	hr := newHasher(false)
-	defer returnHasherToPool(hr)
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
 		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength+1)+len(sKeys)*(4*common.HashLength+2)),
@@ -760,7 +734,7 @@ func HashWithModifications(
 	// Now we merge old and new streams, preferring the new
 	newStream.Reset()
 
-	oldIt := NewIterator(t, rs, hr, trace)
+	oldIt := NewIterator(t, rs, trace)
 
 	it := NewStreamMergeIterator(oldIt, &stream, trace)
 	return StreamHash(it, storagePrefixLen, hb, trace)
