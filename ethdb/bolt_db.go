@@ -601,6 +601,10 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	return nil
 }
 
+func (db *BoltDatabase) GetDb() *bolt.DB {
+	return db.db
+}
+
 func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
 	return RewindData(db, timestampSrc, timestampDst, df)
 }

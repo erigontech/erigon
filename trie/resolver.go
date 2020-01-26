@@ -141,7 +141,8 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 
 	sort.Stable(tr)
-	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	//resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
 	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 }
 
