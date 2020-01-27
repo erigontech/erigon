@@ -2,10 +2,12 @@ package trie
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -342,33 +344,61 @@ func TestTwoAccountsNegative(t *testing.T) {
 func TestTwoAccounts_IntermediateCache(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes("0000000000000000000000000000000000000000000000000000000000000000"), common.Hex2Bytes("020502540be400"))
-	require.Nil(t, err)
-	err = db.Put(dbutils.AccountsBucket, common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), common.Hex2Bytes("020502540be400"))
-	require.Nil(t, err)
-	err = db.Put(dbutils.AccountsBucket, common.Hex2Bytes("aabbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), common.Hex2Bytes("120164204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
-	require.Nil(t, err)
-	err = db.Put(dbutils.AccountsBucket, common.Hex2Bytes("aabbcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"), common.Hex2Bytes("120164204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
-	require.Nil(t, err)
-	err = db.Put(dbutils.AccountsBucket, common.Hex2Bytes("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), common.Hex2Bytes("120164204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
-	require.Nil(t, err)
 
-	expect := common.HexToHash("fbf273784067d17ba0e682653a14348bb66978345ff0fe2c75659dfdbdff5fc3")
-	req := &ResolveRequest{
-		t:           tr,
-		resolveHex:  []byte{},
-		resolvePos:  0,
-		resolveHash: hashNode(expect.Bytes()),
+	// Generate accounts with various prefixes
+	// Test will work with accounts: 01010000...
+
+	for i := 0; i < 128; i++ {
+		for j := 0; j < 3; j++ {
+			k := fmt.Sprintf("%02x%02x%060x", i, j, 0)
+
+			a := accounts.Account{
+				// Using Noncse field as an ID of account.
+				// Will check later if value which we .Get() from Trie has expected ID.
+				Nonce: uint64(i*10 + j),
+			}
+			v := make([]byte, a.EncodingLengthForStorage())
+			a.EncodeForStorage(v)
+
+			err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v)
+			require.Nil(t, err)
+		}
 	}
+
+	//err = db.Put(dbutils.IntermediateTrieHashesBucket, common.Hex2Bytes("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), common.Hex2Bytes("120164204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
+	//require.Nil(t, err)
+
+	expectRootHash := common.HexToHash("0dd6128a18d074ce71dbd4b435921e55f257fbfb4ce3491930add647839a4347")
+	req1 := &ResolveRequest{
+		t:           tr,
+		resolveHex:  common.Hex2Bytes(fmt.Sprintf("00010001%056x", 0)), // nibbles format
+		resolvePos:  0,
+		resolveHash: hashNode(expectRootHash.Bytes()),
+	}
+
 	resolver := NewResolver(0, true, 0)
-	resolver.AddRequest(req)
-	err = resolver.ResolveWithDb(db, 0)
+	resolver.AddRequest(req1)
+	err := resolver.ResolveWithDb(db, 0)
 	require.Nil(t, err, "resolve error")
 
-	assert.Equal(t, expect.String(), tr.Hash().String())
+	assert.Equal(t, expectRootHash.String(), tr.Hash().String())
 
-	expectPrinted := "f(0:s(00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010:v(f849808502540be400a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a0c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470))10:s(0a:h(61b4ae1d35aa975e1951b4c67340e7bcceec1a9057617105b4f791b5b80aec3f))15:s(0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f10:v(f8448064a056e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421a04f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc)))\n"
-	printed := bytes.Buffer{}
-	tr.Print(&printed)
-	assert.Equal(t, expectPrinted, printed.String())
+	// Can find resolved accounts. Can't find non-resolved
+
+	storage, found := tr.Get(common.Hex2Bytes(fmt.Sprintf("0101%060x", 0)))
+	assert.True(t, found)
+	assert.Nil(t, storage)
+
+	acc, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0101%060x", 0)))
+	assert.True(t, found)
+	require.NotNil(t, acc)
+	assert.Equal(t, int(acc.Nonce), 11) // i * 10 + j
+
+	_, found = tr.Get(common.Hex2Bytes(fmt.Sprintf("0201%060x", 0)))
+	assert.False(t, found)
+
+	_, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0201%060x", 0)))
+	assert.False(t, found)
+
+	// ToDo: Add storage bucket and resolve it
 }
