@@ -1596,12 +1596,6 @@ func TestGolangBindings(t *testing.T) {
 	if out, err := replacer.CombinedOutput(); err != nil {
 		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
 	}
-
-	replacer = exec.Command(gocmd, "mod", "edit", "-replace", "github.com/rjeczalik/notify=github.com/JekaMas/notify@v0.9.4")
-	replacer.Dir = pkg
-	if out, err := replacer.CombinedOutput(); err != nil {
-		t.Fatalf("failed to replace binding test dependency to current source tree: %v\n%s", err, out)
-	}
 	// Test the entire package and report any failures
 	cmd := exec.Command(gocmd, "test", "-v", "-count", "1")
 	cmd.Dir = pkg

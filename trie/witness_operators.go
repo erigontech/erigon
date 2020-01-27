@@ -34,6 +34,9 @@ const (
 	OpAccountLeaf
 	// OpEmptyRoot places nil onto the node stack, and empty root hash onto the hash stack.
 	OpEmptyRoot
+
+	// OpNewTrie stops the processing, because another trie is encoded into the witness.
+	OpNewTrie = OperatorKindCode(0xBB)
 )
 
 // WitnessOperator is a single operand in the block witness. It knows how to serialize/deserialize itself.

@@ -3,6 +3,7 @@ package stateless
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -152,7 +153,9 @@ func Stateless(
 	binary bool,
 	createDb CreateDbFunc,
 	starkBlocksFile string,
-	starkStatsBase string) {
+	starkStatsBase string,
+	useStatelessResolver bool,
+	witnessDatabasePath string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -229,6 +232,40 @@ func Stateless(
 
 	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
 
+	var witnessDBWriter *WitnessDBWriter
+	var witnessDBReader *WitnessDBReader
+
+	if useStatelessResolver && witnessDatabasePath == "" {
+		panic("to use stateless resolver, set the witness DB path")
+	}
+
+	if witnessDatabasePath != "" {
+		var db ethdb.Database
+		db, err = createDb(witnessDatabasePath)
+		check(err)
+		defer db.Close()
+
+		if useStatelessResolver {
+			witnessDBReader = NewWitnessDBReader(db)
+			fmt.Printf("Will use the stateless resolver with DB: %s\n", witnessDatabasePath)
+		} else {
+			statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
+
+			var file *os.File
+			file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+			check(err)
+			defer file.Close()
+
+			statsFileCsv := csv.NewWriter(file)
+			defer statsFileCsv.Flush()
+
+			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
+			check(err)
+			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s\n", witnessDatabasePath, statsFilePath)
+		}
+
+	}
+
 	for !interrupt {
 		trace := blockNum == 50111 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
@@ -269,10 +306,25 @@ func Stateless(
 			return
 		}
 
-		if err = tds.ResolveStateTrie(); err != nil {
-			fmt.Printf("Failed to resolve state trie: %v\n", err)
-			return
+		if witnessDBReader != nil {
+			tds.SetBlockNr(blockNum)
+			err = tds.ResolveStateTrieStateless(witnessDBReader)
+			if err != nil {
+				fmt.Printf("Failed to statelessly resolve state trie: %v\n", err)
+				return
+			}
+		} else {
+			var resolveWitnesses []*trie.Witness
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil); err != nil {
+				fmt.Printf("Failed to resolve state trie: %v\n", err)
+				return
+			}
+
+			if len(resolveWitnesses) > 0 {
+				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+			}
 		}
+
 		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
