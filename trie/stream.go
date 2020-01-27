@@ -140,156 +140,161 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		l := it.top - 1
 		nd := it.nodeStack[l]
 		hexLen := it.lenStack[l]
-		it.hex = it.hex[:hexLen]
-		index := it.iStack[l]
+		hex := it.hex[:hexLen]
 		goDeep := it.goDeepStack[l]
 		accounts := it.accountStack[l]
 		switch n := nd.(type) {
 		case nil:
 		case valueNode:
 			if it.trace {
-				fmt.Printf("valueNode %x\n", it.hex)
+				fmt.Printf("valueNode %x\n", hex)
 			}
 			it.top--
-			return StorageStreamItem, it.hex, nil, nil, []byte(n)
+			return StorageStreamItem, hex, nil, nil, []byte(n)
 		case *shortNode:
 			if it.trace {
-				fmt.Printf("shortNode %x\n", it.hex)
+				fmt.Printf("shortNode %x\n", hex)
 			}
-			it.hex = append(it.hex, n.Key...)
+			hex = append(hex, n.Key...)
 			switch v := n.Val.(type) {
 			case hashNode:
 				it.top--
 				if accounts {
-					return AHashStreamItem, it.hex, nil, []byte(v), nil
+					return AHashStreamItem, hex, nil, []byte(v), nil
 				}
-				return SHashStreamItem, it.hex, nil, []byte(v), nil
+				return SHashStreamItem, hex, nil, []byte(v), nil
 			case valueNode:
 				it.top--
-				return StorageStreamItem, it.hex, nil, nil, []byte(v)
+				return StorageStreamItem, hex, nil, nil, []byte(v)
 			case *accountNode:
-				if !it.rs.HashOnly(it.hex) && v.storage != nil {
+				if !it.rs.HashOnly(hex) && v.storage != nil {
+					it.hex = hex
 					it.nodeStack[l] = v.storage
 					it.iStack[l] = 0
 					it.goDeepStack[l] = true
-					it.lenStack[l] = len(it.hex)
+					it.lenStack[l] = len(hex)
 					it.accountStack[l] = false
 				} else {
 					it.top--
 				}
-				return AccountStreamItem, it.hex, &v.Account, nil, nil
+				return AccountStreamItem, hex, &v.Account, nil, nil
 			}
+			it.hex = hex
 			it.nodeStack[l] = n.Val
 			it.iStack[l] = 0
-			it.goDeepStack[l] = !it.rs.HashOnly(it.hex)
-			it.lenStack[l] = len(it.hex)
+			it.goDeepStack[l] = !it.rs.HashOnly(hex)
+			it.lenStack[l] = len(hex)
 			it.accountStack[l] = accounts
 		case *duoNode:
 			if it.trace {
-				fmt.Printf("duoNode %x\n", it.hex)
+				fmt.Printf("duoNode %x\n", hex)
 			}
 			if !goDeep {
 				it.top--
 				if accounts {
-					return AHashStreamItem, it.hex, nil, n.hash(), nil
+					return AHashStreamItem, hex, nil, n.hash(), nil
 				} else {
-					return SHashStreamItem, it.hex, nil, n.hash(), nil
+					return SHashStreamItem, hex, nil, n.hash(), nil
 				}
 			} else {
 				i1, i2 := n.childrenIdx()
+				index := it.iStack[l]
 				if index <= int(i1) {
 					it.iStack[l] = int(i2)
-					it.hex = append(it.hex, i1)
+					hex = append(hex, i1)
 					var childGoDeep bool
 					switch v := n.child1.(type) {
 					case hashNode:
 						if accounts {
-							return AHashStreamItem, it.hex, nil, []byte(v), nil
+							return AHashStreamItem, hex, nil, []byte(v), nil
 						}
-						return SHashStreamItem, it.hex, nil, []byte(v), nil
+						return SHashStreamItem, hex, nil, []byte(v), nil
 					case *duoNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					case *fullNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					}
+					it.hex = hex
 					l++
 					it.top++
 					if l >= len(it.nodeStack) {
 						it.nodeStack = append(it.nodeStack, n.child1)
 						it.iStack = append(it.iStack, 0)
 						it.goDeepStack = append(it.goDeepStack, childGoDeep)
-						it.lenStack = append(it.lenStack, len(it.hex))
+						it.lenStack = append(it.lenStack, len(hex))
 						it.accountStack = append(it.accountStack, accounts)
 					} else {
 						it.nodeStack[l] = n.child1
 						it.iStack[l] = 0
 						it.goDeepStack[l] = childGoDeep
-						it.lenStack[l] = len(it.hex)
+						it.lenStack[l] = len(hex)
 						it.accountStack[l] = accounts
 					}
 				} else {
-					it.hex = append(it.hex, i2)
+					hex = append(hex, i2)
 					var childGoDeep bool
 					switch v := n.child2.(type) {
 					case hashNode:
 						it.top--
 						if accounts {
-							return AHashStreamItem, it.hex, nil, []byte(v), nil
+							return AHashStreamItem, hex, nil, []byte(v), nil
 						}
-						return SHashStreamItem, it.hex, nil, []byte(v), nil
+						return SHashStreamItem, hex, nil, []byte(v), nil
 					case *duoNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							it.top--
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					case *fullNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							it.top--
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					}
+					it.hex = hex
 					it.nodeStack[l] = n.child2
 					it.iStack[l] = 0
 					it.goDeepStack[l] = childGoDeep
-					it.lenStack[l] = len(it.hex)
+					it.lenStack[l] = len(hex)
 					it.accountStack[l] = accounts
 				}
 			}
 		case *fullNode:
 			if it.trace {
-				fmt.Printf("fullNode %x[%d]\n", it.hex, index)
+				fmt.Printf("fullNode %x\n", hex)
 			}
 			if !goDeep {
 				it.top--
 				if accounts {
-					return AHashStreamItem, it.hex, nil, n.hash(), nil
+					return AHashStreamItem, hex, nil, n.hash(), nil
 				} else {
-					return SHashStreamItem, it.hex, nil, n.hash(), nil
+					return SHashStreamItem, hex, nil, n.hash(), nil
 				}
 			} else {
 				var i1, i2 int
 				i1Found := false
 				i2Found := false
+				index := it.iStack[l]
 				for i := index; i < len(n.Children); i++ {
 					if n.Children[i] != nil {
 						if i1Found {
@@ -304,105 +309,108 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				}
 				if i2Found {
 					it.iStack[l] = int(i2)
-					it.hex = append(it.hex, byte(i1))
+					hex = append(hex, byte(i1))
 					var childGoDeep bool
 					switch v := n.Children[i1].(type) {
 					case hashNode:
 						if accounts {
-							return AHashStreamItem, it.hex, nil, []byte(v), nil
+							return AHashStreamItem, hex, nil, []byte(v), nil
 						}
-						return SHashStreamItem, it.hex, nil, []byte(v), nil
+						return SHashStreamItem, hex, nil, []byte(v), nil
 					case *duoNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					case *fullNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					}
+					it.hex = hex
 					l++
 					it.top++
 					if l >= len(it.nodeStack) {
 						it.nodeStack = append(it.nodeStack, n.Children[i1])
 						it.iStack = append(it.iStack, 0)
 						it.goDeepStack = append(it.goDeepStack, childGoDeep)
-						it.lenStack = append(it.lenStack, len(it.hex))
+						it.lenStack = append(it.lenStack, len(hex))
 						it.accountStack = append(it.accountStack, accounts)
 					} else {
 						it.nodeStack[l] = n.Children[i1]
 						it.iStack[l] = 0
 						it.goDeepStack[l] = childGoDeep
-						it.lenStack[l] = len(it.hex)
+						it.lenStack[l] = len(hex)
 						it.accountStack[l] = accounts
 					}
 				} else {
-					it.hex = append(it.hex, byte(i1))
+					hex = append(hex, byte(i1))
 					var childGoDeep bool
 					switch v := n.Children[i1].(type) {
 					case hashNode:
 						it.top--
 						if accounts {
-							return AHashStreamItem, it.hex, nil, []byte(v), nil
+							return AHashStreamItem, hex, nil, []byte(v), nil
 						}
-						return SHashStreamItem, it.hex, nil, []byte(v), nil
+						return SHashStreamItem, hex, nil, []byte(v), nil
 					case *duoNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							it.top--
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					case *fullNode:
-						childGoDeep = !it.rs.HashOnly(it.hex)
+						childGoDeep = !it.rs.HashOnly(hex)
 						if !childGoDeep {
 							it.top--
 							if accounts {
-								return AHashStreamItem, it.hex, nil, v.hash(), nil
+								return AHashStreamItem, hex, nil, v.hash(), nil
 							}
-							return SHashStreamItem, it.hex, nil, v.hash(), nil
+							return SHashStreamItem, hex, nil, v.hash(), nil
 						}
 					}
+					it.hex = hex
 					it.nodeStack[l] = n.Children[i1]
 					it.iStack[l] = 0
 					it.goDeepStack[l] = childGoDeep
-					it.lenStack[l] = len(it.hex)
+					it.lenStack[l] = len(hex)
 					it.accountStack[l] = accounts
 				}
 			}
 		case *accountNode:
 			if it.trace {
-				fmt.Printf("accountNode %x\n", it.hex)
+				fmt.Printf("accountNode %x\n", hex)
 			}
-			if it.rs.HashOnly(it.hex) && n.storage != nil {
+			if it.rs.HashOnly(hex) && n.storage != nil {
+				it.hex = hex
 				it.nodeStack[l] = n.storage
 				it.iStack[l] = 0
 				it.goDeepStack[l] = true
-				it.lenStack[l] = len(it.hex)
+				it.lenStack[l] = len(hex)
 				it.accountStack[l] = false
 			} else {
 				it.top--
 			}
-			return AccountStreamItem, it.hex, &n.Account, nil, nil
+			return AccountStreamItem, hex, &n.Account, nil, nil
 		case hashNode:
 			if it.trace {
-				fmt.Printf("hashNode %x\n", it.hex)
+				fmt.Printf("hashNode %x\n", hex)
 			}
 			it.top--
 			if accounts {
-				return AHashStreamItem, it.hex, nil, []byte(n), nil
+				return AHashStreamItem, hex, nil, []byte(n), nil
 			}
-			return SHashStreamItem, it.hex, nil, []byte(n), nil
+			return SHashStreamItem, hex, nil, []byte(n), nil
 		default:
 			panic(fmt.Errorf("unexpected node: %T", nd))
 		}
