@@ -168,7 +168,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 			blocks, _ := core.GenerateChain(ctx, chainConfig, genesis, engine, dbCopy, n-1, func(i int, gen *core.BlockGen) {
 				gen.SetCoinbase(testCase.testBankAddress)
 			})
-			if _, err := chain.InsertChain(blocks); err != nil {
+			if _, err := chain.InsertChain(ctx, blocks); err != nil {
 				t.Fatalf("failed to insert origin chain: %v", err)
 			}
 		}
@@ -180,7 +180,7 @@ func newTestWorkerBackend(t *testing.T, testCase *testCase, chainConfig *params.
 		blocks, _ := core.GenerateChain(ctx, chainConfig, parentSide, engine, db, 1, func(i int, gen *core.BlockGen) {
 			gen.SetCoinbase(testCase.testBankAddress)
 		})
-		if _, err := chain.InsertChain(blocks); err != nil {
+		if _, err := chain.InsertChain(ctx, blocks); err != nil {
 			t.Fatalf("failed to insert origin chain: %v", err)
 		}
 	}
@@ -294,7 +294,7 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 
 		for item := range sub.Chan() {
 			block := item.Data.(core.NewMinedBlockEvent).Block
-			_, err := chain.InsertChain([]*types.Block{block})
+			_, err := chain.InsertChain(context.Background(), []*types.Block{block})
 			if err != nil {
 				loopErr <- fmt.Errorf("failed to insert new mined block:%d, error:%v", block.NumberU64(), err)
 			}

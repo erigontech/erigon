@@ -585,7 +585,6 @@ func (w *worker) taskLoop() {
 		select {
 		case task := <-w.taskCh:
 			if w.newTaskHook != nil {
-				//fixme datarace in the tests
 				w.newTaskHook(task)
 			}
 
@@ -594,6 +593,7 @@ func (w *worker) taskLoop() {
 			if sealHash == prev {
 				continue
 			}
+
 			// Interrupt previous sealing operation
 			interrupt()
 			stopCh, prev = make(chan struct{}), sealHash
@@ -659,6 +659,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext) {
 
 		receipts[i] = new(types.Receipt)
 		*receipts[i] = *receipt
+
 		// Update the block hash in all logs since it is now available and not when the
 		// receipt/log of individual transactions were created.
 		for _, log := range receipt.Logs {
@@ -668,24 +669,19 @@ func (w *worker) insertToChain(result consensus.ResultWithContext) {
 	}
 
 	// Commit block and state to database.
-	_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
-	if err != nil {
-		log.Error("Failed writing block to chain", "err", err)
-		fmt.Println("xxx 4")
-		return
-	}
+	//_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
 
 	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
 		"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
 
-	// Broadcast the block and announce chain insertion event
-	w.mux.Post(core.NewMinedBlockEvent{Block: block})
-
-	_, err = w.chain.InsertChain(types.Blocks{block})
+	_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
 	if err != nil {
 		log.Error("Failed writing block to chain", "err", err)
 		fmt.Println("xxx 5")
 	}
+
+	// Broadcast the block and announce chain insertion event
+	w.mux.Post(core.NewMinedBlockEvent{Block: block})
 }
 
 // makeCurrent creates a new environment for the current cycle.

@@ -933,7 +933,7 @@ func (bc *BlockChain) procFutureBlocks() {
 		})
 		// Insert one by one as chain insertion needs contiguous ancestry between blocks
 		for i := range blocks {
-			bc.InsertChain(blocks[i : i+1])
+			bc.InsertChain(context.Background(), blocks[i : i+1])
 		}
 	}
 }
@@ -1247,7 +1247,6 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 	defer fmt.Println("################ Writing END", block.Number().Uint64(), block.Hash().String(), block.Root().String())
 
 	// fixme
-	/*
 	if err = bc.addJob(); err != nil {
 		return NonStatTy, err
 	}
@@ -1255,7 +1254,6 @@ func (bc *BlockChain) WriteBlockWithState(ctx context.Context, block *types.Bloc
 
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
-	 */
 
 	return bc.writeBlockWithState(ctx, block, receipts, logs, state, tds, emitHeadEvent)
 }
@@ -1398,7 +1396,7 @@ func (bc *BlockChain) addFutureBlock(block *types.Block) error {
 // wrong.
 //
 // After insertion is done, all accumulated events will be fired.
-func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
+func (bc *BlockChain) InsertChain(ctx context.Context, chain types.Blocks) (int, error) {
 	// Sanity check that we have something meaningful to import
 	if len(chain) == 0 {
 		return 0, nil
@@ -1429,7 +1427,7 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 	if err := bc.addJob(); err != nil {
 		return 0, err
 	}
-	ctx := bc.WithContext(context.Background(), chain[0].Number())
+	ctx = bc.WithContext(ctx, chain[0].Number())
 	bc.chainmu.Lock()
 	defer func() {
 		bc.chainmu.Unlock()
@@ -1449,7 +1447,11 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // is imported, but then new canon-head is added before the actual sidechain
 // completes, then the historic state could be pruned again
 func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
-	log.Info("Inserting chain", "start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64())
+	log.Info("Inserting chain",
+		"start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64(),
+		"current", bc.CurrentBlock().Number().Uint64(), "currentHeader", bc.CurrentHeader().Number.Uint64(),
+		"callers", debug.Callers(20))
+
 	// If the chain is terminating, don't even bother starting u
 	if bc.getProcInterrupt() {
 		return 0, nil
@@ -1505,6 +1507,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			"external", externTd, "local", localTd,
 			"insertingNumber", chain[0].NumberU64(),
 			"currentNumber", bc.CurrentBlock().Number().Uint64(),
+			"callers", debug.Callers(20),
 		)
 		// But we still write the blocks to the database because others might build on top of them
 		td := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)

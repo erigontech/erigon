@@ -554,7 +554,7 @@ func (api *RetestethAPI) mineBlock() error {
 }
 
 func (api *RetestethAPI) importBlock(block *types.Block) error {
-	if _, err := api.blockchain.InsertChain([]*types.Block{block}); err != nil {
+	if _, err := api.blockchain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
 		return err
 	}
 	api.blockNumber = block.NumberU64()

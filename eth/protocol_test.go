@@ -207,8 +207,8 @@ func TestForkIDSplit(t *testing.T) {
 		p2pProFork.Close()
 	}
 	// Progress into Homestead. Fork's match, so we don't care what the future holds
-	chainNoFork.InsertChain(blocksNoFork[:1])
-	chainProFork.InsertChain(blocksProFork[:1])
+	chainNoFork.InsertChain(context.Background(), blocksNoFork[:1])
+	chainProFork.InsertChain(context.Background(), blocksProFork[:1])
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork)
@@ -226,8 +226,8 @@ func TestForkIDSplit(t *testing.T) {
 		p2pProFork.Close()
 	}
 	// Progress into Spurious. Forks mismatch, signalling differing chains, reject
-	chainNoFork.InsertChain(blocksNoFork[1:2])
-	chainProFork.InsertChain(blocksProFork[1:2])
+	chainNoFork.InsertChain(context.Background(), blocksNoFork[1:2])
+	chainProFork.InsertChain(context.Background(), blocksProFork[1:2])
 
 	p2pNoFork, p2pProFork = p2p.MsgPipe()
 	peerNoFork = newPeer(64, p2p.NewPeer(enode.ID{1}, "", nil), p2pNoFork)
