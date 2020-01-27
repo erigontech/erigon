@@ -20,8 +20,7 @@ import (
 	"errors"
 )
 
-// TODO [Andrew] Add some comments about historical buckets & ChangeSet.
-// https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
+// DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
 
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
