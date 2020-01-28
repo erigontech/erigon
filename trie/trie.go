@@ -53,7 +53,7 @@ type Trie struct {
 
 	binary bool
 
-	// TODO [Andrew] cache eviction on hash invalidation and node deletion/unloading
+	// TODO [Andrew] cache eviction on node deletion/unloading
 	hashMap map[common.Hash]node
 }
 
@@ -440,7 +440,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			branch.flags.dirty = true
+			t.markDirty(branch)
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -465,14 +465,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
 				n.child1 = nn
-				n.flags.dirty = true
+				t.markDirty(n)
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
 				n.child2 = nn
-				n.flags.dirty = true
+				t.markDirty(n)
 			}
 			newNode = n
 		default:
@@ -486,7 +486,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
-			newnode.flags.dirty = true
+			t.markDirty(newnode)
 			newnode.Children[key[pos]] = child
 			updated = true
 			// current node leaves the generation but newnode joins it
@@ -505,12 +505,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				n.Children[key[pos]] = short
 			}
 			updated = true
-			n.flags.dirty = true
+			t.markDirty(n)
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
 				n.Children[key[pos]] = nn
-				n.flags.dirty = true
+				t.markDirty(n)
 			}
 		}
 		newNode = n
@@ -739,7 +739,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					n.flags.dirty = true
+					t.markDirty(n)
 					newNode = n
 				}
 			}
@@ -755,7 +755,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					n.flags.dirty = true
+					t.markDirty(n)
 					newNode = n
 				}
 			}
@@ -815,13 +815,13 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				duo.flags.dirty = true
+				t.markDirty(duo)
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				n.flags.dirty = true
+				t.markDirty(n)
 				newNode = n
 			}
 		}
@@ -919,7 +919,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					n.child1 = nn
-					n.flags.dirty = true
+					t.markDirty(n)
 					newNode = n
 				}
 			}
@@ -933,7 +933,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 				} else {
 					n.child2 = nn
-					n.flags.dirty = true
+					t.markDirty(n)
 					newNode = n
 				}
 			}
@@ -994,13 +994,13 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				duo.flags.dirty = true
+				t.markDirty(duo)
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				n.flags.dirty = true
+				t.markDirty(n)
 				newNode = n
 			}
 		}
@@ -1276,4 +1276,14 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 		return nil
 	}
 	return rlp
+}
+
+func (t *Trie) markDirty(nd node) {
+	if !nd.dirty() && nd.hash() != nil {
+		var key common.Hash
+		copy(key[:], nd.hash())
+		delete(t.hashMap, key)
+	}
+
+	nd.markDirty()
 }

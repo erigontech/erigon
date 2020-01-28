@@ -32,6 +32,7 @@ type node interface {
 	print(io.Writer)
 	fstring(string) string
 	dirty() bool
+	markDirty()
 	hash() []byte
 }
 
@@ -277,6 +278,13 @@ func (n *fullNode) dirty() bool     { return n.flags.dirty }
 func (n *duoNode) dirty() bool      { return n.flags.dirty }
 func (n *shortNode) dirty() bool    { return true }
 func (an *accountNode) dirty() bool { return true }
+
+func (n hashNode) markDirty()      {}
+func (n valueNode) markDirty()     {}
+func (n *fullNode) markDirty()     { n.flags.dirty = true }
+func (n *duoNode) markDirty()      { n.flags.dirty = true }
+func (n *shortNode) markDirty()    {}
+func (an *accountNode) markDirty() {}
 
 func (n hashNode) hash() []byte      { return n }
 func (n valueNode) hash() []byte     { return nil }
