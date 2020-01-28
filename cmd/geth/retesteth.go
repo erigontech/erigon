@@ -597,6 +597,7 @@ func (api *RetestethAPI) GetLogHash(_ context.Context, txHash common.Hash) (comm
 		if logListRlp, err := rlp.EncodeToBytes(receipt.Logs); err != nil {
 			return common.Hash{}, err
 		} else {
+			fmt.Println("xxxxx 12", common.BytesToHash(crypto.Keccak256(logListRlp)).Hex())
 			return common.BytesToHash(crypto.Keccak256(logListRlp)), nil
 		}
 	}
@@ -608,6 +609,7 @@ func (api *RetestethAPI) BlockNumber(_ context.Context) (uint64, error) {
 }
 
 func (api *RetestethAPI) GetBlockByNumber(_ context.Context, blockNr math.HexOrDecimal64, fullTx bool) (map[string]interface{}, error) {
+	fmt.Println("xxxxx 10")
 	block := api.blockchain.GetBlockByNumber(uint64(blockNr))
 	if block != nil {
 		response, err := RPCMarshalBlock(block, true, fullTx)
@@ -625,6 +627,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 	blockHashOrNumber *math.HexOrDecimal256, txIndex uint64,
 	addressHash *math.HexOrDecimal256, maxResults uint64,
 ) (AccountRangeResult, error) {
+	fmt.Println("xxxxx 1")
 	var (
 		header *types.Header
 		block  *types.Block
@@ -733,6 +736,7 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 }
 
 func (api *RetestethAPI) GetBalance(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (*math.HexOrDecimal256, error) {
+	fmt.Println("xxxxx 2")
 	//fmt.Printf("GetBalance %x, block %d\n", address, blockNr)
 	header := api.blockchain.GetHeaderByNumber(uint64(blockNr))
 	statedb, _, err := api.blockchain.StateAt(header.Root, header.Number.Uint64())
@@ -748,7 +752,24 @@ func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, bloc
 	if err != nil {
 		return nil, err
 	}
-	return statedb.GetCode(address), nil
+	return getCode(statedb.GetCode(address)), nil
+}
+
+func getCode(c hexutil.Bytes) hexutil.Bytes {
+	isNil := true
+	for _, nibble := range c {
+		if nibble != 0 {
+			isNil = false
+			break
+		}
+	}
+
+	if isNil {
+		return hexutil.Bytes{}
+	}
+
+	//return append(c, []byte{0,0}...)
+	return c
 }
 
 func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {

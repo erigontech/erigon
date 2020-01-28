@@ -356,6 +356,7 @@ func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
 		if err != nil {
 			return nil, err
 		}
+		fmt.Println("### setTrieDbState 1")
 		bc.setTrieDbState(trieDbState)
 		log.Info("Creation complete.")
 	}
@@ -1275,7 +1276,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	// Irrelevant of the canonical status, write the block itself to the database
 	//fixme restore all common.IsCanceled handling
 	if common.IsCanceled(ctx) {
-		//return NonStatTy, ctx.Err()
+		return NonStatTy, ctx.Err()
 	}
 	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
 		return NonStatTy, err
@@ -1283,10 +1284,6 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	rawdb.WriteBlock(ctx, bc.db, block)
 
 	if tds != nil {
-		if common.IsCanceled(ctx) {
-			//fixme: restore
-			//return NonStatTy, ctx.Err()
-		}
 		tds.SetBlockNr(block.NumberU64())
 	}
 
@@ -1297,10 +1294,6 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
-		if common.IsCanceled(ctx) {
-			//fixme: restore
-			//return NonStatTy, ctx.Err()
-		}
 		rawdb.WriteReceipts(bc.db, block.Hash(), block.NumberU64(), receipts)
 	}
 
@@ -1326,24 +1319,15 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	// Reorganise the chain if the parent is not the head block
 
 	if block.ParentHash() != currentBlock.Hash() {
-		if common.IsCanceled(ctx) {
-			//return NonStatTy, ctx.Err()
-		}
 		if err := bc.reorg(currentBlock, block); err != nil {
 			return NonStatTy, err
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
-		if common.IsCanceled(ctx) {
-			//return NonStatTy, ctx.Err()
-		}
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
-		if common.IsCanceled(ctx) {
-			//return NonStatTy, ctx.Err()
-		}
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
 
@@ -1373,6 +1357,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 		}
 	} else {
+		fmt.Println("&&&&&&&&&&&&&&&&&&&&&&&&&&&&& Non-Canonical", status)
 		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
 	}
 	return status, nil
@@ -1488,20 +1473,31 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		d := bc.GetTd(chain[0].ParentHash(), chain[0].NumberU64()-1)
 		if d != nil {
 			externTd = externTd.Set(d)
+			fmt.Printf("^^^^^ Diff 1 chainNumber %d, extTD %d\n", chain[0].NumberU64(), externTd.Uint64())
 		}
 	}
 
 	localTd := bc.GetTd(bc.CurrentBlock().Hash(), bc.CurrentBlock().NumberU64())
+	fmt.Printf("^^^^^ Diff 0 bcHash %v, bcNumber %d, chainHash %v, chainNumber %d\n",
+		bc.CurrentBlock().Hash().String(), bc.CurrentBlock().NumberU64(),
+		chain[0].Hash().String(), chain[0].NumberU64())
+
 	var verifyFrom int
 	for verifyFrom = 0; verifyFrom < len(chain) && localTd.Cmp(externTd) >= 0; verifyFrom++ {
 		header := chain[verifyFrom].Header()
+		fmt.Printf("^^^^^ Diff 2 chainNumber %d, extTD %d, localTD %d, headerTD %d\n",
+			chain[0].NumberU64(), externTd.Uint64(), localTd.Uint64(), header.Difficulty.Uint64())
 		err := <-results
 		if err != nil {
 			bc.reportBlock(chain[verifyFrom], nil, err)
 			return 0, err
 		}
 		externTd = externTd.Add(externTd, header.Difficulty)
+		fmt.Printf("^^^^^ Diff 3 chainNumber %d, extTD %d, localTD %d, headerTD %d\n",
+			chain[0].NumberU64(), externTd.Uint64(), localTd.Uint64(), header.Difficulty.Uint64())
 	}
+	fmt.Printf("^^^^^ Diff 4 chainNumber %d, extTD %d, localTD %d, bcTD %d\n",
+		chain[0].NumberU64(), externTd.Uint64(), localTd.Uint64(), bc.CurrentBlock().Number().Uint64())
 	if localTd.Cmp(externTd) >= 0 {
 		log.Warn("Ignoring the chain segment because of insufficient difficulty",
 			"external", externTd, "local", localTd,
@@ -1635,10 +1631,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
-			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
+			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr,
+				"root", root.String(), "parentRoot", parentRoot.String())
+
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 2")
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
@@ -1646,6 +1645,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
 				log.Error("Could not rewind", "error", err)
+				fmt.Println("### setTrieDbState 3")
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
@@ -1654,12 +1654,14 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if root != parentRoot {
 				log.Error("Incorrect rewinding", "root", fmt.Sprintf("%x", root), "expected", fmt.Sprintf("%x", parentRoot))
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 4")
 				bc.setTrieDbState(nil)
 				return 0, fmt.Errorf("incorrect rewinding: wrong root %x, expected %x", root, parentRoot)
 			}
 			currentBlock := bc.CurrentBlock()
 			if err = bc.reorg(currentBlock, parent); err != nil {
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 5")
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
@@ -1667,6 +1669,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 6")
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
@@ -1683,6 +1686,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			//t1 := time.Now()
 			if err != nil {
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 7")
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
 				return k, err
@@ -1705,6 +1709,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
 			if err != nil {
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 8")
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
 				return k, err
@@ -1724,6 +1729,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
+			fmt.Println("### setTrieDbState 9")
 			bc.setTrieDbState(nil)
 			return k, err
 		}
@@ -1772,6 +1778,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
+				fmt.Println("### setTrieDbState 10")
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
@@ -2008,6 +2015,7 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	}
 	if len(oldChain) > 0 {
 		for i := len(oldChain) - 1; i >= 0; i-- {
+			fmt.Println("&&&&&&&&&&&&&&&&&&&&&&&&&&&&& REORG")
 			bc.chainSideFeed.Send(ChainSideEvent{Block: oldChain[i]})
 		}
 	}

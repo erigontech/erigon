@@ -428,7 +428,6 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case req := <-w.newWorkCh:
-			//fixme data race
 			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
 
 		case ev := <-w.txsCh:
@@ -485,21 +484,28 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 	defer w.chainHeadSub.Unsubscribe()
 	defer w.chainSideSub.Unsubscribe()
 
-	t := time.NewTicker(500 * time.Millisecond)
-	defer t.Stop()
-
 	for {
 		select {
-		case <-t.C:
-			fmt.Println("===", w.n, w.chain.CurrentBlock().Number().String(), w.chain.CurrentBlock().Hash().String(), w.chain.CurrentBlock().Root().String())
 		case <-w.startCh:
 			w.clearPending(w.chain.CurrentBlock().NumberU64())
 			atomic.StoreInt64(timestamp, time.Now().Unix())
 			commit(consensus.StabCancel(), false, commitInterruptNewHead)
 
-		//fixme do we need side chain events?
 		case head := <-w.chainHeadCh:
-			go func(ctx consensus.Cancel) {
+			if head.Block.Number().Cmp(w.current.header.Number) < 0 {
+				fmt.Printf("$$$$$$$$$$$$$$$$$$$$$$ 4\n%v %v\n%v %v\n%v %v\n\n",
+					head.Block.Number().Uint64(), head.Block.Hash().String(),
+					w.chain.CurrentBlock().Number().Uint64(), w.chain.CurrentBlock().Hash().String(),
+					w.current.header.Number.Uint64(), w.current.header.Hash().String(),
+				)
+				continue
+			}
+			fmt.Printf("$$$$$$$$$$$$$$$$$$$$$$ 5\n%v %v\n%v %v\n%v %v\n\n",
+				head.Block.Number().Uint64(), head.Block.Hash().String(),
+				w.chain.CurrentBlock().Number().Uint64(), w.chain.CurrentBlock().Hash().String(),
+				w.current.header.Number.Uint64(), w.current.header.Hash().String(),
+			)
+			go func(ctx consensus.Cancel, head core.ChainHeadEvent) {
 				w.clearPending(head.Block.NumberU64())
 				w.clearCanonicalChainContext()
 
@@ -508,15 +514,25 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 				commit(ctx, false, commitInterruptNewHead)
 
 				ctx.CancelFunc()
-			}(w.getCanonicalChainContext())
+			}(w.getCanonicalChainContext(), head)
 
 		case ev := <-w.chainSideCh:
-			go func(ctx consensus.Cancel) {
+			if ev.Block.Number().Cmp(w.current.header.Number) < 0 {
+				fmt.Printf("$$$$$$$$$$$$$$$$$$$$$$ 3\n%v %v\n%v %v\n%v %v\n\n",
+					ev.Block.Number().Uint64(), ev.Block.Hash().String(),
+					w.chain.CurrentBlock().Number().Uint64(), w.chain.CurrentBlock().Hash().String(),
+					w.current.header.Number.Uint64(), w.current.header.Hash().String(),
+					)
+				//continue
+			}
+			fmt.Println("$$$$$$$$$$$$$$$$$$$$$$ 1", ev.Block.Number().Uint64(), ev.Block.Hash().String())
+			go func(ctx consensus.Cancel, ev core.ChainSideEvent) {
 				defer ctx.CancelFunc()
 				// Short circuit for duplicate side blocks
 				if exist := w.uncles.has(ev.Block.Hash()); exist {
 					return
 				}
+
 				// Add side block to possible uncle block set depending on the author.
 				if w.isLocalBlock != nil && w.isLocalBlock(ev.Block) {
 					w.uncles.setLocal(ev.Block)
@@ -548,12 +564,13 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 						return false
 					})
 
+					fmt.Println("^^^^ Commit chainSideCh", w.current.header.Number.Uint64(), ev)
 					if err := w.commit(ctx, uncles, nil, true, start); err != nil {
 						ctx.CancelFunc()
 						log.Debug("cannot commit a block", "err", err)
 					}
 				}
-			}(w.getSideChainContext())
+			}(w.getSideChainContext(), ev)
 
 		// System stopped
 		case <-w.exitCh:
@@ -584,6 +601,7 @@ func (w *worker) taskLoop() {
 	for {
 		select {
 		case task := <-w.taskCh:
+			fmt.Println("##### TASK", task.block.NumberU64(), task.block.Hash().String())
 			if w.newTaskHook != nil {
 				w.newTaskHook(task)
 			}
@@ -672,11 +690,12 @@ func (w *worker) insertToChain(result consensus.ResultWithContext) {
 	//_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
 
 	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
-		"elapsed", common.PrettyDuration(time.Since(task.createdAt)))
+		"elapsed", common.PrettyDuration(time.Since(task.createdAt)), "difficulty", block.Difficulty())
 
 	_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
 	if err != nil {
 		log.Error("Failed writing block to chain", "err", err)
+		return
 		fmt.Println("xxx 5")
 	}
 
@@ -918,6 +937,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		Extra:      w.extra,
 		Time:       uint64(timestamp),
 	}
+
 	// Only set the coinbase if our consensus engine is running (avoid spurious block rewards)
 	if w.isRunning() {
 		if w.coinbase == (common.Address{}) {
@@ -927,6 +947,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		}
 		header.Coinbase = w.coinbase
 	}
+
 	if err := w.engine.Prepare(w.chain, header); err != nil {
 		log.Error("Failed to prepare header for mining",
 			"err", err,
@@ -939,6 +960,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		ctx.CancelFunc()
 		return
 	}
+
 	// If we are care about TheDAO hard-fork check whether to override the extra-data or not
 	if daoBlock := w.chainConfig.DAOForkBlock; daoBlock != nil {
 		// Check whether the block is among the fork extra-override range
@@ -959,6 +981,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		ctx.CancelFunc()
 		return
 	}
+
 	// Create the current work task and check any fork transitions needed
 	env := w.current
 	if w.chainConfig.DAOForkSupport && w.chainConfig.DAOForkBlock != nil && w.chainConfig.DAOForkBlock.Cmp(header.Number) == 0 {
@@ -997,6 +1020,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	if !noempty {
 		// Create an empty block based on temporary copied state for sealing in advance without waiting block
 		// execution finished.
+		fmt.Println("^^^^ Commit commitNewWork 1 - !noempty", header.Number.Uint64())
 		if err = w.commit(ctx, uncles, nil, false, tstart); err != nil {
 			log.Error("Failed to commit empty block", "err", err)
 			ctx.CancelFunc()
@@ -1036,6 +1060,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		}
 	}
 
+	fmt.Println("^^^^ Commit commitNewWork 2", header.Number.Uint64())
 	if err = w.commit(ctx, uncles, w.fullTaskHook, true, tstart); err != nil {
 		log.Error("Failed to commit block", "err", err)
 		ctx.CancelFunc()
@@ -1101,13 +1126,12 @@ func (w *worker) getSideChainContext() consensus.Cancel {
 //nolint: unused
 func (w *worker) clearSideChainContext() {
 	w.sideMiningMu.Lock()
-	sideMining := w.sideMining
-	w.sideMiningMu.Unlock()
-	w.sideMining = nil
-
-	for _, ctx := range sideMining {
+	defer w.sideMiningMu.Unlock()
+	for _, ctx := range w.sideMining {
 		ctx.CancelFunc()
 	}
+
+	w.sideMining = nil
 }
 
 func (w *worker) getCanonicalChainContext() consensus.Cancel {
@@ -1122,13 +1146,12 @@ func (w *worker) getCanonicalChainContext() consensus.Cancel {
 
 func (w *worker) clearCanonicalChainContext() {
 	w.canonicalMiningMu.Lock()
-	canonicalMining := w.canonicalMining
-	w.canonicalMiningMu.Unlock()
-	w.canonicalMining = nil
+	defer w.canonicalMiningMu.Unlock()
 
-	for _, ctx := range canonicalMining {
+	for _, ctx := range w.canonicalMining {
 		ctx.CancelFunc()
 	}
+	w.canonicalMining = nil
 }
 
 func NewBlock(engine consensus.Engine, s *state.IntraBlockState, tds *state.TrieDbState, chainConfig *params.ChainConfig, header *types.Header, txs []*types.Transaction, uncles []*types.Header, receipts []*types.Receipt) (*types.Block, error) {

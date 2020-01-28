@@ -30,6 +30,7 @@ import (
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
+	d "github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -406,6 +407,7 @@ func (hc *HeaderChain) GetTdByHash(hash common.Hash) *big.Int {
 // WriteTd stores a block's total difficulty into the database, also caching it
 // along the way.
 func (hc *HeaderChain) WriteTd(dbw ethdb.Putter, hash common.Hash, number uint64, td *big.Int) error {
+	fmt.Printf("^^^^^ WriteTd hash %s, number %d, td %d\n", hash.String(), number, td.Uint64())
 	rawdb.WriteTd(dbw, hash, number, td)
 	hc.tdCache.Add(hash, new(big.Int).Set(td))
 	return nil
@@ -420,7 +422,7 @@ func (hc *HeaderChain) GetHeader(hash common.Hash, number uint64) *types.Header 
 	}
 	header := rawdb.ReadHeader(hc.chainDb, hash, number)
 	if header == nil {
-		fmt.Println("GOTCHA!!!!", number, hash.String())
+		fmt.Println("ERROR: Got nil header by hash+number", number, hash.String(), d.Callers(20))
 		return nil
 	}
 	// Cache the found header for next time and return

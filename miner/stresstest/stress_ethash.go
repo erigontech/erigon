@@ -136,7 +136,7 @@ func main() {
 // faucet accounts.
 func makeGenesis(faucets []*ecdsa.PrivateKey) *core.Genesis {
 	genesis := core.DefaultTestnetGenesisBlock()
-	genesis.Difficulty = params.MinimumDifficulty
+	//genesis.Difficulty = params.MinimumDifficulty
 	genesis.GasLimit = 25000000
 
 	genesis.Config.ChainID = big.NewInt(18)
