@@ -53,13 +53,13 @@ Compress4(nibbles []byte, out *[]byte) {
 
 BenchmarkCompImplOnly/buf,_io.ByteWriter-12         	22350472	        54.0 ns/op	       0 B/op	       0 allocs/op
 BenchmarkCompImplOnly/[]byte-12                     	64453431	        18.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/*[]byte-12                    	59190687	        20.7 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/[]byte_+_append()-12          	74415922	        15.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/*[]byte-12                    	59190687	        18.1 ns/op	       0 B/op	       0 allocs/op
 BenchmarkCompImplOnly/*[]byte_+_append()-12         	65587525	        15.2 ns/op	       0 B/op	       0 allocs/op
 BenchmarkCompImplOnly/var_[64]byte-12               	65292729	        18.0 ns/op	       0 B/op	       0 allocs/op
 */
 func BenchmarkCompImplOnly(b *testing.B) {
 	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
+	pool.PutBuffer(pool.GetBuffer(64))
 
 	b.Run("buf, io.ByteWriter", func(b *testing.B) {
 		buf := pool.GetBuffer(64)
@@ -72,6 +72,7 @@ func BenchmarkCompImplOnly(b *testing.B) {
 			_ = buf.B
 		}
 	})
+
 	b.Run("[]byte", func(b *testing.B) {
 		buf := pool.GetBuffer(64)
 		defer pool.PutBuffer(buf)
@@ -90,15 +91,15 @@ func BenchmarkCompImplOnly(b *testing.B) {
 		}
 	})
 
-	b.Run("[]byte + append()", func(b *testing.B) {
-		buf := pool.GetBuffer(64)
-		defer pool.PutBuffer(buf)
-		for i := 0; i < b.N; i++ {
-			l := Compress4a(in, buf.B)
-			k := buf.B[:l]
-			_ = k
-		}
-	})
+	//b.Run("[]byte + append()", func(b *testing.B) {
+	//	buf := pool.GetBuffer(64)
+	//	defer pool.PutBuffer(buf)
+	//	for i := 0; i < b.N; i++ {
+	//		l := Compress4a(in, buf.B)
+	//		k := buf.B[:l]
+	//		_ = k
+	//	}
+	//})
 
 	b.Run("*[]byte + append()", func(b *testing.B) {
 		buf := pool.GetBuffer(64)
@@ -134,10 +135,12 @@ BenchmarkCompWithAlloc/make_inside_func-12          	33064528	        37.2 ns/op
 */
 func BenchmarkCompWithAlloc(b *testing.B) {
 	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
+	pool.PutBuffer(pool.GetBuffer(64))
 
 	b.Run("Buf Pool as bytes", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			buf := pool.GetBuffer(64)
+			buf.Reset()
 			Compress4(in, &buf.B)
 			pool.PutBuffer(buf)
 		}
@@ -184,10 +187,11 @@ func Compress3(nibbles []byte, out []byte) int {
 }
 
 func Compress3a(nibbles []byte, out *[]byte) {
-	*out = (*out)[:len(nibbles)/2]
+	k := (*out)[:len(nibbles)/2]
 	for i := 0; i < len(nibbles); i += 2 {
-		(*out)[i/2] = nibbles[i]<<4 | nibbles[i+1]
+		k[i/2] = nibbles[i]<<4 | nibbles[i+1]
 	}
+	*out = k
 }
 
 func Compress4(nibbles []byte, out *[]byte) {
@@ -198,13 +202,14 @@ func Compress4(nibbles []byte, out *[]byte) {
 	*out = k
 }
 
-func Compress4a(nibbles []byte, out []byte) int {
-	out = out[:0]
-	for i := 0; i < len(nibbles); i += 2 {
-		out = append(out, nibbles[i]<<4|nibbles[i+1])
-	}
-	return len(nibbles) / 2
-}
+// this version disqualified because linter doesn't like it
+//func Compress4a(nibbles []byte, out []byte) int {
+//	out = out[:0]
+//	for i := 0; i < len(nibbles); i += 2 {
+//		out = append(out, nibbles[i]<<4|nibbles[i+1])
+//	}
+//	return len(nibbles) / 2
+//}
 
 func Compress5(nibbles []byte, out *[64]byte) (outLength int) {
 	for i := 0; i < len(nibbles); i += 2 {
