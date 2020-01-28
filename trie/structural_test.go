@@ -22,12 +22,10 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math/big"
 	"sort"
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -169,140 +167,6 @@ func TestV2Resolution(t *testing.T) {
 		_, found := tr1.Get(key)
 		if !found {
 			t.Errorf("Key %x was not resolved", hex)
-		}
-	}
-}
-
-var streamTests = []struct {
-	aHexKeys          []string
-	aBalances         []int64
-	sHexKeys          []string
-	sHexValues        []string
-	rsHex             []string
-	hexesExpected     []string
-	aBalancesExpected []int64
-	sValuesExpected   []string
-	hashesExpected    []string
-}{
-	{
-		aHexKeys:          []string{"0x00000000"},
-		aBalances:         []int64{13},
-		sHexKeys:          []string{},
-		sHexValues:        []string{},
-		rsHex:             []string{},
-		hexesExpected:     []string{"0x000000000000000010"},
-		aBalancesExpected: []int64{13},
-		sValuesExpected:   []string{},
-		hashesExpected:    []string{},
-	},
-	{
-		aHexKeys:          []string{"0x0000000000000000"},
-		aBalances:         []int64{13},
-		sHexKeys:          []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
-		sHexValues:        []string{"0x01", "0x02"},
-		rsHex:             []string{},
-		hexesExpected:     []string{"0x0000000000000000000000000000000010"},
-		aBalancesExpected: []int64{13},
-		sValuesExpected:   []string{},
-		hashesExpected:    []string{},
-	},
-	{
-		aHexKeys:          []string{"0x0000000000000000", "0x000f000000000000"},
-		aBalances:         []int64{13, 567},
-		sHexKeys:          []string{"0x00000000000000000100000000000001", "0x00000000000000000020000000000002"},
-		sHexValues:        []string{"0x01", "0x02"},
-		rsHex:             []string{"0x0000000000000000", "0x000f000000000000"},
-		hexesExpected:     []string{"0x0000000000000000000000000000000010", "0000000f00000000000000000000000010"},
-		aBalancesExpected: []int64{13, 567},
-		sValuesExpected:   []string{},
-		hashesExpected:    []string{},
-	},
-}
-
-func TestToStream(t *testing.T) {
-	trace := true
-	for tn, streamTest := range streamTests {
-		if trace {
-			fmt.Printf("Test number %d\n", tn)
-		}
-		tr := New(common.Hash{})
-		for i, balance := range streamTest.aBalances {
-			account := &accounts.Account{Initialised: true, Balance: *big.NewInt(balance), CodeHash: emptyState}
-			tr.UpdateAccount(common.FromHex(streamTest.aHexKeys[i]), account)
-		}
-		for i, sHexKey := range streamTest.sHexKeys {
-			tr.Update(common.FromHex(sHexKey), common.FromHex(streamTest.sHexValues[i]), 0)
-		}
-		// Important to do the hash calculation here, so that the account nodes are updated
-		// with the correct storage root values
-		trieHash := tr.Hash()
-		rs := NewResolveSet(0)
-		for _, rsItem := range streamTest.rsHex {
-			rs.AddKey(common.FromHex(rsItem))
-		}
-		var s Stream
-		ToStream(tr, &s, rs, trace)
-		if len(s.keySizes) != len(streamTest.hexesExpected) {
-			t.Errorf("length of hexes is %d, expected %d", len(s.keySizes), len(streamTest.hexesExpected))
-		}
-		offset := 0
-		for i, size := range s.keySizes {
-			if i < len(streamTest.hexesExpected) {
-				hexExpected := common.FromHex(streamTest.hexesExpected[i])
-				hex := s.keyBytes[offset : offset+int(size)]
-				if !bytes.Equal(hex, hexExpected) {
-					t.Errorf("hex[%d] = %x, expected %x", i, hex, hexExpected)
-				}
-			}
-			offset += int(size)
-		}
-		if len(s.aValues) != len(streamTest.aBalancesExpected) {
-			t.Errorf("length of aValues is %d, expected %d", len(s.aValues), len(streamTest.aBalancesExpected))
-		}
-		for i, aValue := range s.aValues {
-			if i < len(streamTest.aBalancesExpected) {
-				balanceExpected := streamTest.aBalancesExpected[i]
-				if aValue.Balance.Int64() != balanceExpected {
-					t.Errorf("balance[%d] = %d, expected %d", i, aValue.Balance.Int64(), balanceExpected)
-				}
-			}
-		}
-		if len(s.sValues) != len(streamTest.sValuesExpected) {
-			t.Errorf("length of sValues is %d, expected %d", len(s.sValues), len(streamTest.sValuesExpected))
-		}
-		for i, sValue := range s.sValues {
-			if i < len(streamTest.sValuesExpected) {
-				sValueExpected := common.FromHex(streamTest.sValuesExpected[i])
-				if !bytes.Equal(sValue, sValueExpected) {
-					t.Errorf("sValue[%d] = %x, expected %x", i, sValue, sValueExpected)
-				}
-			}
-		}
-		if len(s.hashes) != len(streamTest.hashesExpected) {
-			t.Errorf("length of hashes is %d, expected %d", len(s.hashes), len(streamTest.hashesExpected))
-		}
-		for i, hi := 0, 0; hi < len(s.hashes); hi += common.HashLength {
-			var hash common.Hash
-			copy(hash[:], s.hashes[hi:hi+common.HashLength])
-			if i < len(streamTest.hashesExpected) {
-				hashExpected := common.HexToHash(streamTest.hashesExpected[i])
-				if hash != hashExpected {
-					t.Errorf("hash[%d] = %x, expected %x", i, hash, hashExpected)
-				}
-			}
-			i++
-		}
-		// Check that the hash of the stream is equal to the hash of the trie
-		hb := NewHashBuilder(trace)
-		streamHash, err := StreamHash(&s, 8, hb, trace)
-		if trace {
-			fmt.Printf("want:\n%s\n", tr.root.fstring(""))
-		}
-		if err != nil {
-			t.Errorf("unable to compute hash of the stream: %v", err)
-		}
-		if streamHash != trieHash {
-			t.Errorf("stream hash %x != trie hash %x", streamHash, trieHash)
 		}
 	}
 }
