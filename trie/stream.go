@@ -391,7 +391,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if it.trace {
 				fmt.Printf("accountNode %x\n", hex)
 			}
-			if it.rs.HashOnly(hex) && n.storage != nil {
+			if !it.rs.HashOnly(hex) && n.storage != nil {
 				it.hex = hex
 				it.nodeStack[l] = n.storage
 				it.iStack[l] = 0
