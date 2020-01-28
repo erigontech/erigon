@@ -483,7 +483,6 @@ func (hb *HashBuilder) branchHash(set uint16) error {
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		return err
 	}
-	//fmt.Printf("HH: %x, %x", hb.hashStack[len(hb.hashStack)-common.HashLength:], hb.keyPrefix)
 	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
 		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
 		if hb.trace {
