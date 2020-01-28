@@ -1096,6 +1096,9 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	} else {
 		h := t.newHasherFunc()
 		defer returnHasherToPool(h)
+		h.callback = func(key common.Hash, nd node) {
+			t.hashMap[key] = nd
+		}
 		h.hash(accNode.storage, true, accNode.Root[:])
 	}
 	return true, accNode.Root
@@ -1243,12 +1246,17 @@ func (t *Trie) hashRoot() (node, error) {
 	if t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
+
 	h := t.newHasherFunc()
 	defer returnHasherToPool(h)
+
+	h.callback = func(key common.Hash, nd node) {
+		t.hashMap[key] = nd
+	}
+
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])
-	// TODO [Andrew] non-root nodes (callback in hasher?)
-	t.hashMap[hn] = t.root
+
 	return hashNode(hn[:]), nil
 }
 

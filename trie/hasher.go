@@ -34,6 +34,7 @@ type hasher struct {
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
 	bw                   *ByteArrayWriter
+	callback             func(common.Hash, node)
 }
 
 const rlpPrefixLength = 4
@@ -64,6 +65,7 @@ func newHasher(valueNodesRlpEncoded bool) *hasher {
 }
 
 func returnHasherToPool(h *hasher) {
+	h.callback = nil
 	select {
 	case hasherPool <- h:
 	default:
@@ -113,6 +115,12 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		case *fullNode:
 			copy(n.flags.hash[:], storeTo)
 			n.flags.dirty = false
+		}
+
+		if h.callback != nil {
+			var hash common.Hash
+			copy(hash[:], storeTo)
+			h.callback(hash, n)
 		}
 	}
 	return refLen, nil
