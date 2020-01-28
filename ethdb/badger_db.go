@@ -18,6 +18,7 @@ package ethdb
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"runtime"
@@ -180,37 +181,19 @@ func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, cha
 			}
 		}
 
-		changeSetItem, err := tx.Get(changeSetKey)
-		if err != nil && err != badger.ErrKeyNotFound {
-			return err
-		}
+		var sh dbutils.ChangeSet
 
-		var sh *dbutils.ChangeSet
-		if err == nil {
-			err = changeSetItem.Value(func(val []byte) error {
-				var err2 error
-				sh, err2 = dbutils.DecodeChangeSet(val)
-				if err2 != nil {
-					log.Error("PutS Decode suffix err", "err", err2)
-					return err2
-				}
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-		}
-
-		err = sh.Add(key, value)
+		err := sh.Add(key, value)
 		if err != nil {
 			return err
 		}
 		dat, err := sh.Encode()
 		if err != nil {
+			fmt.Println(err)
 			log.Error("PutS Decode suffix err", "err", err)
 			return err
 		}
-
+		// sort.Sort(changeSetKey)
 		return tx.Set(changeSetKey, dat)
 	})
 }
@@ -227,18 +210,17 @@ func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
 			item := it.Item()
 			k := item.Key()
 
-			var changedAccounts *dbutils.ChangeSet
+			var changedAccounts []byte
 			err := item.Value(func(v []byte) error {
-				var err2 error
-				changedAccounts, err2 = dbutils.DecodeChangeSet(v)
-				return err2
+				changedAccounts = v
+				return nil
 			})
 			if err != nil {
 				return err
 			}
 
 			bucket := k[len(prefix):]
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
+			err = dbutils.Walk(changedAccounts, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
 				return tx.Delete(bucketKey(bucket, kk))
 			})

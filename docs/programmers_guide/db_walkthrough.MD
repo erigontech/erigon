@@ -47,7 +47,7 @@ The next bucket, "Receipts", records the list of transaction receipts for each b
 
 ![genesis_db_receipts](changes_0_r_10.dot.gd.png)
 
-The first 8 bytes of the key (or 16 nobbles, equaling to 0s here) encode the block number, which is 0 for the Genesis block.
+The first 8 bytes of the key (or 16 nibbles, equaling to 0s here) encode the block number, which is 0 for the Genesis block.
 The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there were
 no transactions in the Genesis block, therefore, we have RLP encoding of an empty list, `0xC0`.
 
@@ -78,7 +78,7 @@ which is ASCII code for `t`. The records of the first type store the actual head
 The records of the second type store total mining difficulty (TD) of  the chain ending in that specific header.
 In our case it is `0x80`, which is RLP encoding of 0.
 The records of the third type have their keys composed of 8-byte encoding of the block number (0 here), and
-suffix `0x6E`, which is ASCII code for `n`. These records allow lookuping up header/block hash given block
+suffix `0x6E`, which is ASCII code for `n`. These records allow for the lookup of a header/block hash, given its block
 number. They are also called "canonical header" records, because there might be multiple headers for given
 block number, and only one of them is deemed "canonical" at a time.
 
@@ -111,13 +111,13 @@ in 8 bytes):
 
 ![genesis_db_header_numbers](changes_0_H_2.dot.gd.png)
 
-Bucket "Change Sets" record the history of changes in accounts and contract storage. But, unlike in "History of Accounts"
+Bucket "Change Sets" records the history of changes in accounts and contract storage. But, unlike in "History of Accounts"
 and "History of Storage" (this bucket will appear later), where keys are derived from accounts' addresses
 (key = address hash + block number), in the "Change Sets" bucket, keys are derived from the block numbers:
 
 ![genesis_db_change_sets](changes_0_ChangeSet_1.dot.gd.png)
 
-In the cases of our genesis block, the keys is composed from the encoding of the block number (`0x20`), and the
+In the cases of our genesis block, the key is composed from the encoding of the block number (`0x20`), and the
 ASCII-code of `hAT` (meaning **h**istory of **A**counts **T**rie).
 The "Change Set" bucket records changes that happen to accounts and contract storage slots at every block.
 It is important to note that the values recorded in the "Changes Set" bucket are not the values the accounts
@@ -131,7 +131,7 @@ there are 3 key-value pairs
 access them without deserialisation. In this example, it is `0x00000020`, which 32, meaning that all keys are
 32 bytes long.
 3. Keys themselves. In our examples, these are the coloured boxes before the streak of white 0s. Keys are sorted
-lexicographically. This, together with the keys being the same size, allows binary search without desearialision,
+lexicographically. This, together with the keys being the same size, allows binary search without deserialisation,
 as well as linear-time merge of multiple changesets.
 4. Value offsets. These offsets mark the beginning of the next, 5th part as offset 0. First value has offset 0.
 In our example, all values are empty strings, therefore we see 3 zero offsets (24 white boxes with zeros in them).
@@ -164,7 +164,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 ````
 Which is 9 followed by 18 zeros, which is 9 ETH (1 ETH = 10^18 wei).
 
-the third bit of the field set repressent the Incarnation. The Incarnation is a turbo-geth specific attribute, which is
+the third bit of the field set represent the Incarnation. The Incarnation is a turbo-geth specific attribute, which is
 used to make removal and revival of contract accounts (now possible with `CREATE2` since Constantinopole) efficient
 with turbo-geth's database layout. For now it will suffice to say that all non-contract accounts will have 
 incarnation 0 (not set), and all contract accounts will start their existence with incarnation 1.
@@ -227,7 +227,7 @@ This is how the state trie after Block 1 is inserted looks like:
 
 First thing to note about the illustration of the state trie is that the nonce of the first account is now 1 since a transaction from that address has been executed and the amount of ETH of that account is now 8.999 since the transaction had a value of 0.001 ETH. Usually, the transaction fee would also
 be paid, but in our simplified example, we set gas price to 0, therefore no fees are deducted. A new account has been added to the state trie, the recipient of the transaction. In fact, it has 0.001 ETH (the value of the transaction) and its nonce is set to 0.
-What follows are excerpts from the turbo-geth's database after block 1 has been inserted. These excerpts only show the records that have changed, and
+What follows are excerpts from the turbo-geth database after block 1 has been inserted. These excerpts only show the records that have changed, and
 omit the records that are the same as before the insertion of the block.
 
 ![block1_db](changes_1.dot.gd.png)
@@ -244,7 +244,7 @@ Bucket "Receipts" now has some non-empty information for the block 1, because we
 ![block1_db_receipts](changes_1_r_10.dot.gd.png)
 
 The first 8 bytes of the key (or 16 nibbles, 15 zeroes followed by `1`) encode the block number, which is 1.
-The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, instead of having `0xC0` (that repressent an empty list) we have `0xc6c501825208c0` that his the receipt for the 0.001 ETH transaction.
+The remaining 32 bytes of the key encode the block hash. The value is the RLP-encoded list of receipts. In our case, there a transaction was sent and as a matter of fact, instead of having `0xC0` (that represent an empty list) we have `0xc6c501825208c0` that his the receipt for the 0.001 ETH transaction.
 First prefix, `c6` means that the following 6 bytes is a sequence of RLP-encoded sub-structures. In our case, there is only one sub-structure, and its
 prefix `c5` means that the following 5 bytes is a sequence of RLP-encoded sub-structures. There are 3 of them: `01`, `825208`, and `c0`. The first encodes
 number 1, which means the "Success" status of the transaction (0 would mean failure). Next, we have a byte array of length 2 (prefix `82`), `5208`, which is
@@ -265,16 +265,16 @@ Next bucket is "Headers"
 
 ![block1_db_headers](changes_1_h_7.dot.gd.png)
 
-A new headers has been generated since a new block has been mined.
-As a matter of fact, In the keys for the first two records start with a block number of 1 followed by
-the block hash (or header hash, which is the same thing) that is different than the Genesis Block. Additionally, these two records for the new block that respectively repressent the values in the headers and the mining difficulty differs from the Genesis Block.
+A new header has been generated since a new block has been mined.
+As a matter of fact, the keys for the first two records start with a block number of 1 followed by
+the block hash (or header hash, which is the same thing) that is different than the Genesis Block. Additionally, these two records for the new block that respectively represent the values in the headers and the mining difficulty differs from the Genesis Block.
 
 Next bucket is "Block Bodies":
 
 ![block1_db_block_bodies](changes_1_b_6.dot.gd.png)
 
 The keys in this bucket are concatenations of 8-byte encoding of the block number and 32-byte block hash.
-The new record is the repressentation of block 1.
+The new record is the representation of block 1.
 
 ![block1_db_change_sets](changes_1_ChangeSet_1.dot.gd.png)
 
@@ -309,7 +309,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x1bc16d674ec80000
 2000000000000000000
 ````
-Which is 2 ETH that probably repressent the mining reward.
+Which is 2 ETH that probably represent the mining reward.
 
 * in the third value we have prefix `0x06` (`110`), meaning that only balance and incarnation are set. the balance is now `0x038d7ea4c68000` .Start python and do this:
 ````
@@ -319,7 +319,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>> 0x038d7ea4c68000
 1000000000000000
 ````
-Which is 0.001 ETH that is exactly how much has been sent to the recipient address, meaning that this account repressent the recipient of the transaction.
+Which is 0.001 ETH that is exactly how much has been sent to the recipient address, meaning that this account represent the recipient of the transaction.
 
 Block 1 in go-ethereum
 ------------------------------
@@ -335,8 +335,8 @@ In the bucket "Block Bodies", the value is slightly different:
 
 ![geth_block1_block_bodies](geth_changes_1_b_4.dot.gd.png)
 
-The difference is that the block body miss the sender address since the send in go-ethereum is computed and in turbo-geth is stored. for the rest in this case the same changes occurs in terms of block number and block hash.
+The difference is that the block body is missing the sender address since the send in go-ethereum is computed and in turbo-geth is stored. For the rest in this case the same changes occurs in terms of block number and block hash.
 
 ![geth_block1_hashes](geth_changes_1_hashes_5.dot.gd.png)
 
-First of all a new branch node has been generated for the block. that's the first record because it contains in its value the key of the other key records. The three leaf nodes contains the `Keccak256` of the change in states of the account of the recipient, sender and miner of the block.
+First of all a new branch node has been generated for the block. That's the first record because it contains in its value the key of the other key records. The three leaf nodes contains the `Keccak256` of the change in states of the account of the recipient, sender and miner of the block.

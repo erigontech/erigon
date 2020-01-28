@@ -2,13 +2,14 @@ package ethdb
 
 import (
 	"fmt"
+	"reflect"
+	"strconv"
+	"testing"
+
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"reflect"
-	"strconv"
-	"testing"
 )
 
 func TestBoltDB_WalkAsOf1(t *testing.T) {
@@ -167,15 +168,50 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 	db := NewMemDatabase()
 
 	block2Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+		Changes: []dbutils.Change{
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
+				Value: []byte("block 3 " + strconv.Itoa(1)),
+			},
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
+				Value: []byte("block 3 " + strconv.Itoa(3)),
+			},
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
+				Value: []byte("block 3 " + strconv.Itoa(7)),
+			},
+		},
 	}
 
 	block4Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+		Changes: []dbutils.Change{
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
+				Value: []byte("state   " + strconv.Itoa(1)),
+			},
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
+				Value: []byte("block 5 " + strconv.Itoa(3)),
+			},
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
+				Value: []byte("block 5 " + strconv.Itoa(7)),
+			},
+		},
 	}
 
 	block6Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+		Changes: []dbutils.Change{
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
+				Value: []byte("state   " + strconv.Itoa(1)),
+			},
+			{
+				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
+				Value: []byte("state   " + strconv.Itoa(3)),
+			},
+		},
 	}
 
 	//create state and history
@@ -229,52 +265,14 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 		60,
 	}
 
-	err = block2Expected.MultiAdd([]dbutils.Change{
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-			Value: []byte("block 3 " + strconv.Itoa(1)),
-		},
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-			Value: []byte("block 3 " + strconv.Itoa(3)),
-		},
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
-			Value: []byte("block 3 " + strconv.Itoa(7)),
-		},
-	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = block4Expected.MultiAdd([]dbutils.Change{
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-			Value: []byte("state   " + strconv.Itoa(1)),
-		},
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-			Value: []byte("block 5 " + strconv.Itoa(3)),
-		},
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
-			Value: []byte("block 5 " + strconv.Itoa(7)),
-		},
-	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	err = block6Expected.MultiAdd([]dbutils.Change{
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-			Value: []byte("state   " + strconv.Itoa(1)),
-		},
-		{
-			Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-			Value: []byte("state   " + strconv.Itoa(3)),
-		},
-	})
 	if err != nil {
 		t.Fatal(err)
 	}

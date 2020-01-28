@@ -6,6 +6,11 @@ import (
 	"io"
 )
 
+// WitnessStorage is an interface representing a single
+type WitnessStorage interface {
+	GetWitnessesForBlock(uint64, uint32) ([]byte, error)
+}
+
 // WitnessVersion represents the current version of the block witness
 // in case of incompatible changes it should be updated and the code to migrate the
 // old witness format should be present
@@ -101,8 +106,15 @@ func NewWitnessFromReader(input io.Reader, trace bool) (*Witness, error) {
 			op = &OperatorEmptyRoot{}
 		case OpExtension:
 			op = &OperatorExtension{}
+		case OpNewTrie:
+			/* end of the current trie, end the function */
+			break
 		default:
 			return nil, fmt.Errorf("unexpected opcode while reading witness: %x", opcode[0])
+		}
+
+		if op == nil {
+			break
 		}
 
 		err = op.LoadFrom(operatorLoader)

@@ -145,12 +145,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 
 		keysToRemove.ChangeSet = append(keysToRemove.ChangeSet, key)
 
-		changedKeys, err := dbutils.DecodeChangeSet(v)
-		if err != nil {
-			return false, err
-		}
-
-		err = changedKeys.Walk(func(cKey, _ []byte) error {
+		err := dbutils.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
 			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
 				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)

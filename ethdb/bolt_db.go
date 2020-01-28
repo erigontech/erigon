@@ -131,21 +131,12 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 		}
 
 		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.DecodeChangeSet(dat)
+		dat, err = addToChangeSet(dat, key, value)
 		if err != nil {
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
-		err = sh.Add(key, value)
-		if err != nil {
-			return err
-		}
-		dat, err = sh.Encode()
-		if err != nil {
-			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
-			return err
-		}
-
+		// s.Sort(dat) not sorting it here. seems that this Puts is only for testing.
 		return sb.Put(changeSetKey, dat)
 	})
 	return err
@@ -223,7 +214,7 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 // getChangeSetByBlockNoLock returns changeset by block and bucket
-func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
 	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -242,7 +233,7 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 	if err != nil {
 		return nil, err
 	}
-	return dbutils.DecodeChangeSet(dat)
+	return dat, nil
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
@@ -644,11 +635,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts, err := dbutils.DecodeChangeSet(v)
-			if err != nil {
-				return err
-			}
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
+			err := dbutils.Walk(v, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
 				return hb.Delete(kk)
 			})

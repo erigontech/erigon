@@ -8,31 +8,38 @@ import (
 )
 
 type HashNodeFunc func(node, bool, []byte) (int, error)
+type HashOnly interface {
+	HashOnly([]byte) bool
+	Current() []byte
+}
+
+type MerklePathLimiter struct {
+	HashOnly HashOnly
+	HashFunc HashNodeFunc
+}
 
 type CodeMap map[common.Hash][]byte
 
 type WitnessBuilder struct {
-	t        *Trie
+	root     node
 	blockNr  uint64
 	trace    bool
-	rs       *ResolveSet
 	codeMap  CodeMap
 	operands []WitnessOperator
 }
 
-func NewWitnessBuilder(t *Trie, blockNr uint64, trace bool, rs *ResolveSet, codeMap CodeMap) *WitnessBuilder {
+func NewWitnessBuilder(root node, blockNr uint64, trace bool, codeMap CodeMap) *WitnessBuilder {
 	return &WitnessBuilder{
-		t:        t,
+		root:     root,
 		blockNr:  blockNr,
 		trace:    trace,
-		rs:       rs,
 		codeMap:  codeMap,
 		operands: make([]WitnessOperator, 0),
 	}
 }
 
-func (b *WitnessBuilder) Build(hashNodeFunc HashNodeFunc) (*Witness, error) {
-	err := b.makeBlockWitness(b.t.root, []byte{}, hashNodeFunc, true)
+func (b *WitnessBuilder) Build(limiter *MerklePathLimiter) (*Witness, error) {
+	err := b.makeBlockWitness(b.root, []byte{}, limiter, true)
 	witness := NewWitness(b.operands)
 	b.operands = nil
 	return witness, err
@@ -92,23 +99,26 @@ func (b *WitnessBuilder) addExtensionOp(key []byte) error {
 	return nil
 }
 
-func (b *WitnessBuilder) addHashOp(n node, force bool, hashNodeFunc HashNodeFunc) error {
-	var hash common.Hash
+func (b *WitnessBuilder) makeHashNode(n node, force bool, hashNodeFunc HashNodeFunc) (hashNode, error) {
 	switch n := n.(type) {
 	case hashNode:
-		copy(hash[:], n[:])
+		return n, nil
 	default:
+		var hash common.Hash
 		if _, err := hashNodeFunc(n, force, hash[:]); err != nil {
-			return err
+			return nil, err
 		}
+		return hashNode(hash[:]), nil
 	}
+}
 
+func (b *WitnessBuilder) addHashOp(n hashNode) error {
 	if b.trace {
-		fmt.Printf("HASH: type: %T v %x\n", n, hash)
+		fmt.Printf("HASH: type: %T v %x\n", n, n)
 	}
 
 	var op OperatorHash
-	op.Hash = hash
+	op.Hash = common.BytesToHash(n)
 
 	b.operands = append(b.operands, &op)
 	return nil
@@ -155,14 +165,13 @@ func (b *WitnessBuilder) processAccountCode(n *accountNode) error {
 
 	code, ok := b.codeMap[n.CodeHash]
 	if !ok {
-		// FIXME: these parameters aren't harmful, but probably addHashOp does too much
-		return b.addHashOp(hashNode(n.CodeHash[:]), false, nil)
+		return b.addHashOp(hashNode(n.CodeHash[:]))
 	}
 
 	return b.addCodeOp(code)
 }
 
-func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, hashNodeFunc HashNodeFunc) error {
+func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, limiter *MerklePathLimiter) error {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
 		return nil
 	}
@@ -172,17 +181,17 @@ func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, hashN
 	}
 
 	// Here we substitute rs parameter for storageRs, because it needs to become the default
-	return b.makeBlockWitness(n.storage, hex, hashNodeFunc, true)
+	return b.makeBlockWitness(n.storage, hex, limiter, true)
 }
 
 func (b *WitnessBuilder) makeBlockWitness(
-	nd node, hex []byte, hashNodeFunc HashNodeFunc, force bool) error {
+	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
 	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
 		if err := b.processAccountCode(n); err != nil {
 			return err
 		}
-		if err := b.processAccountStorage(n, storageKey, hashNodeFunc); err != nil {
+		if err := b.processAccountStorage(n, storageKey, limiter); err != nil {
 			return err
 		}
 		return b.addAccountLeafOp(key, n)
@@ -208,41 +217,49 @@ func (b *WitnessBuilder) makeBlockWitness(
 		case *accountNode:
 			return processAccountNode(n.Key, hexVal, v)
 		default:
-			if err := b.makeBlockWitness(n.Val, hexVal, hashNodeFunc, false); err != nil {
+			if err := b.makeBlockWitness(n.Val, hexVal, limiter, false); err != nil {
 				return err
 			}
 
 			return b.addExtensionOp(n.Key)
 		}
 	case *duoNode:
-		hashOnly := b.rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := limiter != nil && limiter.HashOnly.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if b.trace {
-			fmt.Printf("b.rs.HashOnly(%x) -> %v\n", hex, hashOnly)
+			fmt.Printf("b.hashOnly.HashOnly(%x) -> %v\n", hex, hashOnly)
 		}
 		if hashOnly {
-			return b.addHashOp(n, force, hashNodeFunc)
+			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
+			if err != nil {
+				return err
+			}
+			return b.addHashOp(hn)
 		}
 
 		i1, i2 := n.childrenIdx()
 
-		if err := b.makeBlockWitness(n.child1, expandKeyHex(hex, i1), hashNodeFunc, false); err != nil {
+		if err := b.makeBlockWitness(n.child1, expandKeyHex(hex, i1), limiter, false); err != nil {
 			return err
 		}
-		if err := b.makeBlockWitness(n.child2, expandKeyHex(hex, i2), hashNodeFunc, false); err != nil {
+		if err := b.makeBlockWitness(n.child2, expandKeyHex(hex, i2), limiter, false); err != nil {
 			return err
 		}
 		return b.addBranchOp(n.mask)
 
 	case *fullNode:
-		hashOnly := b.rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
+		hashOnly := limiter != nil && limiter.HashOnly.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
 		if hashOnly {
-			return b.addHashOp(n, force, hashNodeFunc)
+			hn, err := b.makeHashNode(n, force, limiter.HashFunc)
+			if err != nil {
+				return err
+			}
+			return b.addHashOp(hn)
 		}
 
 		var mask uint32
 		for i, child := range n.Children {
 			if child != nil {
-				if err := b.makeBlockWitness(child, expandKeyHex(hex, byte(i)), hashNodeFunc, false); err != nil {
+				if err := b.makeBlockWitness(child, expandKeyHex(hex, byte(i)), limiter, false); err != nil {
 					return err
 				}
 				mask |= (uint32(1) << uint(i))
@@ -251,16 +268,16 @@ func (b *WitnessBuilder) makeBlockWitness(
 		return b.addBranchOp(mask)
 
 	case hashNode:
-		hashOnly := b.rs.HashOnly(hex)
+		hashOnly := limiter == nil || limiter.HashOnly.HashOnly(hex)
 		if !hashOnly {
-			if c := b.rs.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
+			if c := limiter.HashOnly.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
 				hashOnly = true
 			}
 		}
 		if hashOnly {
-			return b.addHashOp(n, force, hashNodeFunc)
+			return b.addHashOp(n)
 		}
-		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, rs.Current: %x (%d)", n, hex, b.rs.Current(), len(hex))
+		return fmt.Errorf("unexpected hashNode: %s, at hex: %x, rs.Current: %x (%d)", n, hex, limiter.HashOnly.Current(), len(hex))
 	default:
 		return fmt.Errorf("unexpected node type: %T", nd)
 	}
