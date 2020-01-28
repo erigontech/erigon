@@ -61,6 +61,9 @@ HASHCONST(keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, h1, ..., h15)))
 
 ## Helper functions
 
+### variadic arguments
+`func(value...)` is a variadic function
+
 ### `MAKE_VALUES_ARRAY`
 
 returns an array of 16 elements, where values from `values` are set to the indices where `mask` has bits set to 1. Every other place has `nil` value there.
