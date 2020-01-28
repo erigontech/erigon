@@ -1,12 +1,24 @@
 # Block Witness Formal Specification
 
 Block witness uses 2 stacks:
-- node stack
-- hashes stack
+- node stack: `NODES`
+- hashes stack: `HASHES`
 
 That allows to calculate trie hashes w/o building the tries themselves.
 
 ## Instructions
+
+### Substitution rules
+
+a typical substitution rule shows what values on stacks are replaced (before an INSTRUCTION), to by which values (after an INSTRUCTION)
+
+```
+NODECONST(nodeValue), NODECONST(nodeValue2)   // pop nodes on the NODES stack
+HASHCONST(hashValue),HASHCONST(hashValue2)    // pop nodes on the HASHES stack
+INSTRUCTION(params) |=>                       // the current instruction with params
+NODECONST(helperFunc(nodeValue, nodeValue2, params))    // push node(s) to the NODES stack
+HASHCONST(heperFunc2(hashValue, hashValue2, params))    // push hash(es) to the HASHES stack
+```
 
 ### `BRANCH mask`
 
