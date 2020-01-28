@@ -375,7 +375,6 @@ func TestApiDetails(t *testing.T) {
 	resolver.AddRequest(req2)
 	err := resolver.ResolveWithDb(db, 0)
 	require.Nil(t, err, "resolve error")
-
 	assert.Equal(t, expectRootHash.String(), tr.Hash().String())
 
 	// Can find resolved accounts. Can't find non-resolved
