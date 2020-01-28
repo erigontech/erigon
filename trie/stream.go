@@ -144,6 +144,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 		accounts := it.accountStack[l]
 		switch n := nd.(type) {
 		case nil:
+			return NoItem, nil, nil, nil, nil
 		case valueNode:
 			if it.trace {
 				fmt.Printf("valueNode %x\n", hex)
@@ -723,7 +724,10 @@ func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, 
 			hb.root().print(f)
 		}
 	}
-	return hb.rootHash(), nil
+	if hb.hasRoot() {
+		return hb.rootHash(), nil
+	}
+	return EmptyRoot, nil
 }
 
 // HashWithModifications computes the hash of the would-be modified trie, but without any modifications
@@ -732,7 +736,7 @@ func HashWithModifications(
 	aKeys common.Hashes, aValues []*accounts.Account,
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
-	oldStream, newStream *Stream, // Streams that will be reused for old and new stream
+	newStream *Stream, // Streams that will be reused for old and new stream
 	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
 ) (common.Hash, error) {
