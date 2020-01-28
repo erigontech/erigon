@@ -36,7 +36,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 		common.StorageKeys{}, [][]byte{},
 		8,
 		&stream, // Streams that will be reused for old and new stream
-		&hb, // HashBuilder will be reused
+		&hb,     // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
