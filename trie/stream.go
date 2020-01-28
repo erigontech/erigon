@@ -81,7 +81,6 @@ func (s *Stream) Reset() {
 // Iterator helps iterate over a trie according to a given resolve set
 type Iterator struct {
 	rs           *ResolveSet
-	hn           common.Hash
 	hex          []byte
 	nodeStack    []node
 	iStack       []int
