@@ -304,7 +304,7 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 				}
 			}
 			if i2Found {
-				it.iStack[l] = int(i2)
+				it.iStack[l] = i2
 				hex = append(hex, byte(i1))
 				var childGoDeep bool
 				switch v := n.Children[i1].(type) {
