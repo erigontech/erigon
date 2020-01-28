@@ -127,7 +127,7 @@ func TestSetupGenesis(t *testing.T) {
 				ctx := bc.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
 
 				blocks, _ := GenerateChain(ctx, oldcustomg.Config, genesis, ethash.NewFaker(), db.MemCopy(), 4, nil)
-				bc.InsertChain(context.Background(), blocks)
+				_, _ = bc.InsertChain(context.Background(), blocks)
 				bc.CurrentBlock()
 				// This should return a compatibility error.
 				return SetupGenesisBlock(db, &customg)

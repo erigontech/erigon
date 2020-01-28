@@ -20,13 +20,6 @@ func newUncles() *miningUncles {
 	}
 }
 
-func (u *miningUncles) hasLocal(hash common.Hash) bool {
-	u.RLock()
-	defer u.RUnlock()
-	_, ok := u.localUncles[hash]
-	return ok
-}
-
 func (u *miningUncles) getLocal(hash common.Hash) (*types.Block, bool) {
 	u.RLock()
 	defer u.RUnlock()
@@ -38,13 +31,6 @@ func (u *miningUncles) setLocal(b *types.Block) {
 	u.Lock()
 	defer u.Unlock()
 	u.localUncles[b.Hash()] = b
-}
-
-func (u *miningUncles) hasRemote(hash common.Hash) bool {
-	u.RLock()
-	defer u.RUnlock()
-	_, ok := u.remoteUncles[hash]
-	return ok
 }
 
 func (u *miningUncles) getRemote(hash common.Hash) (*types.Block, bool) {
@@ -85,8 +71,7 @@ func (u *miningUncles) has(hash common.Hash) bool {
 
 	_, ok = u.remoteUncles[hash]
 	if ok {
-		return true
+		return ok
 	}
-	return false
+	return ok
 }
-

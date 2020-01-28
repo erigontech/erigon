@@ -95,8 +95,8 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 		pend.Add(1)
 		// fixme: refactor as a constantly running workers
 		go func(id int, nonce uint64) {
+			defer pend.Done()
 			ethash.mine(ctx, block, id, nonce, locals)
-			pend.Done()
 		}(i, uint64(ethash.rand.Int63()))
 	}
 	// Wait until sealing is terminated or a nonce is found
@@ -113,7 +113,6 @@ func (ethash *Ethash) Seal(ctx consensus.Cancel, chain consensus.ChainReader, bl
 			default:
 				ethash.config.Log.Warn("Sealing result is not read by miner", "mode", "local", "sealhash", ethash.SealHash(block.Header()))
 			}
-			// fixme restore context
 			//ctx.CancelFunc()
 		case <-ethash.update:
 			// Thread count was changed on user request, restart

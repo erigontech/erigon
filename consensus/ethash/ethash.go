@@ -267,7 +267,6 @@ func (c *cache) generate(dir string, limit int, test bool) {
 }
 
 // finalizer unmaps the memory and closes the file.
-// remove it
 func (c *cache) finalizer() {
 	if c.mmap != nil {
 		c.mmap.Unmap()
@@ -364,7 +363,6 @@ func (d *dataset) generated() bool {
 }
 
 // finalizer closes any file handlers and memory maps open.
-// fixme remove it
 func (d *dataset) finalizer() {
 	if d.mmap != nil {
 		d.mmap.Unmap()

@@ -460,8 +460,9 @@ func TestClique(t *testing.T) {
 		}
 		// Pass all the headers through clique and ensure tallying succeeds
 		failed := false
+		var k int
 		for j := 0; j < len(batches)-1; j++ {
-			if k, err := chain.InsertChain(context.Background(), batches[j]); err != nil {
+			if k, err = chain.InsertChain(context.Background(), batches[j]); err != nil {
 				t.Errorf("test %d: failed to import batch %d, block %d: %v", i, j, k, err)
 				failed = true
 				break
