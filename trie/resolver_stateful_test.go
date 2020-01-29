@@ -285,7 +285,9 @@ func TestTwoAccounts(t *testing.T) {
 	expect := common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7")
 
 	buf := pool.GetBuffer(64)
-	err = DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), buf)
+	defer pool.PutBuffer(buf)
+
+	err = DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), &buf.B)
 	require.Nil(t, err)
 
 	req := &ResolveRequest{

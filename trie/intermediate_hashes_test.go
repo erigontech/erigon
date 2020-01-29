@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -24,38 +23,35 @@ func TestCompressNibbles(t *testing.T) {
 		{in: "", expect: ""},
 	}
 
-	compressBuf := &bytes.Buffer{}
-	decompressBuf := &bytes.Buffer{}
+	compressBuf := pool.GetBuffer(64)
+	defer pool.PutBuffer(compressBuf)
+
+	decompressBuf := pool.GetBuffer(64)
+	defer pool.PutBuffer(decompressBuf)
+
 	for _, tc := range cases {
+		compressBuf.Reset()
+		decompressBuf.Reset()
+
 		in := common.Hex2Bytes(tc.in)
-		err := CompressNibbles(in, compressBuf)
+		err := CompressNibbles(in, &compressBuf.B)
 		compressed := compressBuf.Bytes()
 		assert.Nil(t, err)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
-		compressBuf.Reset()
-
-		err = DecompressNibbles(compressed, decompressBuf)
+		err = DecompressNibbles(compressed, &decompressBuf.B)
 		assert.Nil(t, err)
 		decompressed := decompressBuf.Bytes()
 		assert.Equal(t, tc.in, fmt.Sprintf("%x", decompressed), msg)
-		decompressBuf.Reset()
 	}
 }
 
 /*
-- Fastest version: 18ns
-
-Compress4(nibbles []byte, out *[]byte) {
-	*out = (*out)[:0]
-	...
-	*out = append(*out, b)
-
-BenchmarkCompImplOnly/buf,_io.ByteWriter-12         	22350472	        54.0 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/[]byte-12                     	64453431	        18.3 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/*[]byte-12                    	59190687	        18.1 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/*[]byte_+_append()-12         	65587525	        15.2 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompImplOnly/var_[64]byte-12               	65292729	        18.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/buf,_io.ByteWriter-12         	22753586	        55.5 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/[]byte-12                     	82462410	        17.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/*[]byte-12                    	64536444	        16.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/*[]byte_+_append()-12         	76377957	        15.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompImplOnly/var_[64]byte-12               	72647452	        15.9 ns/op	       0 B/op	       0 allocs/op
 */
 func BenchmarkCompImplOnly(b *testing.B) {
 	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
@@ -77,6 +73,7 @@ func BenchmarkCompImplOnly(b *testing.B) {
 		buf := pool.GetBuffer(64)
 		defer pool.PutBuffer(buf)
 		for i := 0; i < b.N; i++ {
+			buf.B = buf.B[:0]
 			l := Compress3(in, buf.B)
 			k := buf.B[:l]
 			_ = k
@@ -87,6 +84,7 @@ func BenchmarkCompImplOnly(b *testing.B) {
 		buf := pool.GetBuffer(64)
 		defer pool.PutBuffer(buf)
 		for i := 0; i < b.N; i++ {
+			buf.B = buf.B[:0]
 			Compress3a(in, &buf.B)
 		}
 	})
@@ -105,9 +103,11 @@ func BenchmarkCompImplOnly(b *testing.B) {
 		buf := pool.GetBuffer(64)
 		defer pool.PutBuffer(buf)
 		for i := 0; i < b.N; i++ {
+			buf.B = buf.B[:0]
 			Compress4(in, &buf.B)
 		}
 	})
+
 	b.Run("var [64]byte", func(b *testing.B) {
 		var out [64]byte
 		for i := 0; i < b.N; i++ {
@@ -119,23 +119,26 @@ func BenchmarkCompImplOnly(b *testing.B) {
 }
 
 /*
-- Fastest version: 25ns, doesn’t produce garbage
-Only this version and versions with Pool - don't produce garbage
-
-var out [64]byte
-l := CompressNibbles5(in, &out)
-k := out[:l]
-
-func CompressNibbles5(nibbles []byte, out *[64]byte) (outLength int)
-
-BenchmarkCompWithAlloc/Buf_Pool_as_bytes-12         	30272492	        37.8 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompWithAlloc/make_outside-12              	33918350	        32.6 ns/op	      16 B/op	       1 allocs/op
-BenchmarkCompWithAlloc/var_[64]byte-12              	65102901	        19.5 ns/op	       0 B/op	       0 allocs/op
-BenchmarkCompWithAlloc/make_inside_func-12          	33064528	        37.2 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCompWithAlloc/Buf_Pool_as_io.ByteWriter-12 	12046102	       105 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompWithAlloc/Buf_Pool_as_bytes-12         	30445060	        38.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompWithAlloc/make_outside-12              	35515688	        33.0 ns/op	      16 B/op	       1 allocs/op
+BenchmarkCompWithAlloc/var_[64]byte-12              	77704927	        17.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompWithAlloc/make_inside_func-12          	35306130	        32.6 ns/op	      16 B/op	       1 allocs/op
 */
 func BenchmarkCompWithAlloc(b *testing.B) {
 	in := common.Hex2Bytes("0102030405060708090f0102030405060708090f0102030405060708090f")
 	pool.PutBuffer(pool.GetBuffer(64))
+
+	b.Run("Buf Pool as io.ByteWriter", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			buf := pool.GetBuffer(64)
+			buf.Reset()
+			if err := Compress2(in, buf); err != nil {
+				panic(err)
+			}
+			pool.PutBuffer(buf)
+		}
+	})
 
 	b.Run("Buf Pool as bytes", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -180,24 +183,27 @@ func Compress2(nibbles []byte, out io.ByteWriter) error {
 }
 
 func Compress3(nibbles []byte, out []byte) int {
-	for i := 0; i < len(nibbles); i += 2 {
-		out[i/2] = nibbles[i]<<4 | nibbles[i+1]
+	var bi int
+	out = out[:len(nibbles)/2]
+	for i := 0; i < len(nibbles); bi, i = bi+1, i+2 {
+		out[bi] = nibbles[i]<<4 | nibbles[i+1]
 	}
-	return len(nibbles) / 2
+	return bi
 }
 
 func Compress3a(nibbles []byte, out *[]byte) {
 	k := (*out)[:len(nibbles)/2]
-	for i := 0; i < len(nibbles); i += 2 {
-		k[i/2] = nibbles[i]<<4 | nibbles[i+1]
+	var bi int
+	for i := 0; i < len(nibbles); bi, i = bi+1, i+2 {
+		k[bi] = nibbles[i]<<4 | nibbles[i+1]
 	}
 	*out = k
 }
 
 func Compress4(nibbles []byte, out *[]byte) {
 	k := (*out)[:0]
-	for i := 0; i < len(nibbles); i += 2 {
-		k = append(k, nibbles[i]<<4|nibbles[i+1])
+	for j, i := 0, 0; i < len(nibbles); j, i = i+1, i+2 {
+		k = append(k, nibbles[i]<<4|nibbles[j])
 	}
 	*out = k
 }
@@ -212,16 +218,17 @@ func Compress4(nibbles []byte, out *[]byte) {
 //}
 
 func Compress5(nibbles []byte, out *[64]byte) (outLength int) {
-	for i := 0; i < len(nibbles); i += 2 {
-		out[i/2] = (nibbles[i] << 4) | nibbles[i+1]
+	var bi int
+	for i := 0; i < len(nibbles); bi, i = bi+1, i+2 {
+		out[bi] = (nibbles[i] << 4) | nibbles[i+1]
 	}
-	return len(nibbles) / 2
+	return bi
 }
 
 func Compress6(nibbles []byte) []byte {
 	out := make([]byte, len(nibbles)/2)
-	for i := 0; i < len(nibbles); i += 2 {
-		out[i/2] = nibbles[i]<<4 | nibbles[i+1]
+	for bi, i := 0, 0; i < len(nibbles); bi, i = bi+1, i+2 {
+		out[bi] = nibbles[i]<<4 | nibbles[i+1]
 	}
 	return out
 }
