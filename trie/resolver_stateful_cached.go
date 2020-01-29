@@ -40,7 +40,6 @@ func hexIncrement(in []byte) []byte {
 
 // keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
 func keyIsBefore(k1, k2 []byte) (bool, []byte) {
-
 	if k1 == nil {
 		return false, k2
 	}
@@ -79,7 +78,7 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	boltDb := typed.GetDb()
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashesBucket, false)
+		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieCacheBucket, false)
 		if err != nil {
 			return err
 		}
@@ -210,6 +209,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, useCache bool, keyIdx i
 	return nil
 }
 
+// MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
 func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, useCache bool) error) error {
 	if len(startkeys) == 0 {
 		return nil
@@ -218,7 +218,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.View(func(tx *bolt.Tx) error {
-		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashesBucket)
+		cacheBucket := tx.Bucket(dbutils.IntermediateTrieCacheBucket)
 		if cacheBucket == nil {
 			return nil
 		}

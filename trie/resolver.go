@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -142,6 +143,12 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 
 	sort.Stable(tr)
+
+	if debug.IsIntermediateTrieCache() {
+		resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
+		return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	}
+
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
 	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 }
@@ -152,20 +159,6 @@ func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimi
 	sort.Stable(tr)
 	resolver := NewResolverStateless(tr.requests, hookSubtrie)
 	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos)
-}
-
-// ResolveStateless resolves and hooks subtries using a state DB with intermediate trie cache bucket.
-func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) error {
-	var hf hookFunction
-	if tr.collectWitnesses {
-		hf = tr.extractWitnessAndHookSubtrie
-	} else {
-		hf = hookSubtrie
-	}
-
-	sort.Stable(tr)
-	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
-	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 }
 
 func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) error {

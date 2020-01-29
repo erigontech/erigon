@@ -24,8 +24,8 @@ func putIntermediateCache(db ethdb.Putter, prefix []byte, subtrieHash []byte) er
 	k := make([]byte, buf.Len())
 	copy(k, buf.Bytes())
 
-	if err := db.Put(dbutils.IntermediateTrieHashesBucket, k, v); err != nil {
-		return fmt.Errorf("could not put IntermediateTrieHashesBucket, %w", err)
+	if err := db.Put(dbutils.IntermediateTrieCacheBucket, k, v); err != nil {
+		return fmt.Errorf("could not put IntermediateTrieCacheBucket, %w", err)
 	}
 	return nil
 }
@@ -39,8 +39,8 @@ func delIntermediateCache(db ethdb.Deleter, prefix []byte) error {
 		return err
 	}
 
-	if err := db.Delete(dbutils.IntermediateTrieHashesBucket, buf.Bytes()); err != nil {
-		return fmt.Errorf("could not put IntermediateTrieHashesBucket, %w", err)
+	if err := db.Delete(dbutils.IntermediateTrieCacheBucket, buf.Bytes()); err != nil {
+		return fmt.Errorf("could not put IntermediateTrieCacheBucket, %w", err)
 	}
 
 	return nil
