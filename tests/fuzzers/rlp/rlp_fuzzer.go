@@ -20,8 +20,8 @@ import (
 	"bytes"
 	"fmt"
 
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/rlp"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 func decodeEncode(input []byte, val interface{}, i int) {
@@ -40,19 +40,25 @@ func Fuzz(input []byte) int {
 	var i int
 	{
 		if len(input) > 0 {
-			rlp.Split(input)
+			if _, _, _, err := rlp.Split(input); err != nil {
+				panic(err)
+			}
 		}
 	}
 	{
 		if len(input) > 0 {
 			if elems, _, err := rlp.SplitList(input); err == nil {
-				rlp.CountValues(elems)
+				if _, err = rlp.CountValues(elems); err != nil {
+					panic(err)
+				}
 			}
 		}
 	}
 
 	{
-		rlp.NewStream(bytes.NewReader(input), 0).Decode(new(interface{}))
+		if err := rlp.NewStream(bytes.NewReader(input), 0).Decode(new(interface{})); err != nil {
+			panic(err)
+		}
 	}
 
 	{
