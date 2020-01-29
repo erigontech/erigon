@@ -90,7 +90,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 
 			tr.reqIndices = append(tr.reqIndices, i)
 			pLen := len(req.contract)
-			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
+			key := make([]byte, pLen+32)
 			copy(key[:], req.contract)
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
@@ -192,7 +192,7 @@ func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error 
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
+	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err

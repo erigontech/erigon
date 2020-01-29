@@ -144,7 +144,7 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 	sort.Stable(tr)
 
-	if debug.IsIntermediateTrieCache() {
+	if debug.IsIntermediateTrieCache() && !tr.historical {
 		resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
 		return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 	}
