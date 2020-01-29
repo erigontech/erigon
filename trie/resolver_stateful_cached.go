@@ -249,8 +249,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				_, minKey = keyIsBefore(cacheK, k)
 
 				cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
-				switch cmp {
-				case 0:
+				if cmp == 0 {
 					k1 := minKey[fixedbytes-1] & mask
 					k2 := startkey[fixedbytes-1] & mask
 					if k1 < k2 {
@@ -258,10 +257,14 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 					} else if k1 > k2 {
 						cmp = 1
 					}
-				case -1:
+				}
+				if cmp < 0 {
 					k, v = c.SeekTo(startkey)
 					cacheK, cacheV = cache.SeekTo(startkey)
-				default:
+					if k == nil && cacheK == nil {
+						return nil
+					}
+				} else if cmp > 0 {
 					rangeIdx++
 					if rangeIdx == len(startkeys) {
 						return nil
