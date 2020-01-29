@@ -99,15 +99,13 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	if accounts {
 		if historical {
 			return errors.New("historical resolver not supported yet")
-		} else {
-			err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
+		err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 	} else {
 		if historical {
 			return errors.New("historical resolver not supported yet")
-		} else {
-			err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
+		err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 	}
 	if err != nil {
 		return fmt.Errorf("failed RebuildTrie: %w", err)
