@@ -246,7 +246,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 			// Adjust rangeIdx if needed
 			cmp := int(-1)
 			for fixedbytes > 0 && cmp != 0 {
-				useCache, minKey = keyIsBefore(cacheK, k)
+				_, minKey = keyIsBefore(cacheK, k)
 
 				cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
 				switch cmp {
@@ -319,7 +319,7 @@ func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
 
 			tr.reqIndices = append(tr.reqIndices, i)
 			pLen := len(req.contract)
-			key := make([]byte, 0, pLen+32)
+			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
 			copy(key[:], req.contract)
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)
