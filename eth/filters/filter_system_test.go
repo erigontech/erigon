@@ -39,7 +39,6 @@ import (
 )
 
 type testBackend struct {
-	mux             *event.TypeMux
 	db              ethdb.Database
 	sections        uint64
 	txFeed          event.Feed
@@ -602,6 +601,7 @@ func TestPendingLogsSubscription(t *testing.T) {
 }
 
 func flattenLogs(pl [][]*types.Log) []*types.Log {
+	//nolint: prealloc
 	var logs []*types.Log
 	for _, l := range pl {
 		logs = append(logs, l...)

@@ -27,9 +27,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/route53"
-	"github.com/ethereum/go-ethereum/log"
-	"github.com/ethereum/go-ethereum/p2p/dnsdisc"
-	"gopkg.in/urfave/cli.v1"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/p2p/dnsdisc"
+
+	cli "github.com/urfave/cli"
 )
 
 // The Route53 limits change sets to this size. DNS changes need to be split
@@ -163,6 +164,7 @@ func (c *route53Client) computeChanges(name string, records map[string]string, e
 	}
 	records = lrecords
 
+	//nolint:prealloc
 	var changes []*route53.Change
 	for path, val := range records {
 		ttl := int64(rootTTL)
@@ -266,11 +268,11 @@ func (c *route53Client) collectRecords(name string) (map[string]recordSet, error
 func newTXTChange(action, name string, ttl int64, values []string) *route53.Change {
 	var c route53.Change
 	var r route53.ResourceRecordSet
-	var rrs []*route53.ResourceRecord
-	for _, val := range values {
+	rrs := make([]*route53.ResourceRecord, len(values))
+	for i := range values {
 		rr := new(route53.ResourceRecord)
-		rr.SetValue(val)
-		rrs = append(rrs, rr)
+		rr.SetValue(values[i])
+		rrs[i] = rr
 	}
 	r.SetType("TXT")
 	r.SetName(name)
