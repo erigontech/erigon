@@ -54,6 +54,8 @@ require (
 	github.com/pkg/errors v0.8.1
 	github.com/prometheus/tsdb v0.10.0
 	github.com/robertkrimen/otto v0.0.0-20170205013659-6a77b7cbc37d
+	github.com/prometheus/tsdb v0.6.2-0.20190402121629-4f204dcbc150
+	github.com/rjeczalik/notify v0.9.1
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
 	github.com/rs/xhandler v0.0.0-20170707052532-1eb70cf1520d // indirect
 	github.com/spf13/cobra v0.0.5
