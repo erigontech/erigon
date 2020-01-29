@@ -2,6 +2,7 @@ package trie
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"runtime/debug"
 	"strings"
@@ -71,11 +72,18 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
 
-	typed, ok := db.(*ethdb.BoltDatabase)
-	if !ok {
-		panic("only Bolt supported yet")
+	var boltDb *bolt.DB
+	if hasBolt, ok := db.(ethdb.HasBolt); ok {
+		boltDb = hasBolt.DB()
+	} else if hasDb, ok := db.(ethdb.HasDb); ok {
+		if hasBolt, ok := hasDb.DB().(ethdb.HasBolt); ok {
+			boltDb = hasBolt.DB()
+		}
 	}
-	boltDb := typed.GetDb()
+
+	if boltDb == nil {
+		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+	}
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieCacheBucket, false)
@@ -90,18 +98,14 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	var err error
 	if accounts {
 		if historical {
-			panic("historical not supported yet")
-			//err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerAccounts)
+			return errors.New("historical resolver not supported yet")
 		} else {
-			//err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 			err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
 	} else {
 		if historical {
-			panic("historical not supported yet")
-			//err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerStorage)
+			return errors.New("historical resolver not supported yet")
 		} else {
-			//err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 			err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
 	}
@@ -241,11 +245,11 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				cacheK, cacheV = cache.SeekTo(append(minKey, 0)) // seek only cache cursor, because it's minimal move
 				continue
 			}
-
 			// Adjust rangeIdx if needed
 			cmp := int(-1)
 			for fixedbytes > 0 && cmp != 0 {
 				useCache, minKey = keyIsBefore(cacheK, k)
+
 				cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
 				switch cmp {
 				case 0:
@@ -259,7 +263,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				case -1:
 					k, v = c.SeekTo(startkey)
 					cacheK, cacheV = cache.SeekTo(startkey)
-					useCache, minKey = keyIsBefore(cacheK, k)
 				default:
 					rangeIdx++
 					if rangeIdx == len(startkeys) {
@@ -270,6 +273,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				}
 			}
 
+			useCache, _ = keyIsBefore(cacheK, k)
 			if !useCache {
 				if len(v) > 0 {
 					if err := walker(rangeIdx, k, v, useCache); err != nil {
