@@ -24,8 +24,8 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func TestHashWithModificationsEmpty(t *testing.T) {
@@ -40,7 +40,7 @@ func TestHashWithModificationsEmpty(t *testing.T) {
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
-		hb,     // HashBuilder will be reused
+		hb,      // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
@@ -84,7 +84,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 			tr.UpdateAccount([]byte(key), &a1)
 			// Add storage items too
 			for _, storageKey := range keys {
-				tr.Update([]byte(key + storageKey), v, 0)
+				tr.Update([]byte(key+storageKey), v, 0)
 			}
 		}
 	}
@@ -98,7 +98,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
-		hb,     // HashBuilder will be reused
+		hb,      // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
@@ -142,7 +142,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 			tr.UpdateAccount([]byte(key), &a1)
 			// Add storage items too
 			for _, storageKey := range keys {
-				tr.Update([]byte(key + storageKey), v, 0)
+				tr.Update([]byte(key+storageKey), v, 0)
 			}
 		}
 	}
@@ -166,7 +166,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 		common.StorageKeys{}, [][]byte{},
 		32,
 		&stream, // Streams that will be reused for old and new stream
-		hb,     // HashBuilder will be reused
+		hb,      // HashBuilder will be reused
 		false,
 	)
 	if err != nil {
