@@ -173,6 +173,7 @@ func BenchmarkCompWithAlloc(b *testing.B) {
 }
 
 func Compress2(nibbles []byte, out io.ByteWriter) error {
+
 	for i := 0; i < len(nibbles); i += 2 {
 		if err := out.WriteByte(nibbles[i]<<4 | nibbles[i+1]); err != nil {
 			return err
