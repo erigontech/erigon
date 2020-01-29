@@ -188,6 +188,10 @@ func decodeNibbles(nibbles []byte, bytes []byte) {
 	if hasTerm(nibbles) {
 		nibbles = nibbles[:len(nibbles)-1]
 	}
+	if len(nibbles) == 0 {
+		return
+	}
+
 	nl := len(nibbles)
 	for bi, ni := 0, 0; ni < nl; bi, ni = bi+1, ni+2 {
 		if ni == nl-1 {
