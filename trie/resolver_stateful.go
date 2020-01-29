@@ -90,7 +90,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 
 			tr.reqIndices = append(tr.reqIndices, i)
 			pLen := len(req.contract)
-			key := make([]byte, pLen+32)
+			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
 			copy(key[:], req.contract)
 			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
 			startkeys = append(startkeys, key)

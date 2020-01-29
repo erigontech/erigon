@@ -300,51 +300,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 	return err
 }
 
-// PrepareResolveParams prepares information for the MultiWalk
-// Changes compare to ResolverStateful:
-//   - key can have 0 length - to be able walk by cache bucket
-func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
-	// Remove requests strictly contained in the preceding ones
-	startkeys := [][]byte{}
-	fixedbits := []uint{}
-	tr.rss = nil
-	if len(tr.requests) == 0 {
-		return startkeys, fixedbits
-	}
-	var prevReq *ResolveRequest
-	for i, req := range tr.requests {
-		if prevReq == nil ||
-			!bytes.Equal(req.contract, prevReq.contract) ||
-			!bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
-
-			tr.reqIndices = append(tr.reqIndices, i)
-			pLen := len(req.contract)
-			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
-			copy(key[:], req.contract)
-			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-			startkeys = append(startkeys, key)
-			req.extResolvePos = req.resolvePos + 2*pLen
-			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
-			prevReq = req
-			var minLength int
-			if req.resolvePos >= tr.topLevels {
-				minLength = 0
-			} else {
-				minLength = tr.topLevels - req.resolvePos
-			}
-			rs := NewResolveSet(minLength)
-			tr.rss = append(tr.rss, rs)
-			rs.AddHex(req.resolveHex[req.resolvePos:])
-		} else {
-			rs := tr.rss[len(tr.rss)-1]
-			rs.AddHex(req.resolveHex[req.resolvePos:])
-		}
-	}
-	tr.currentReq = tr.requests[tr.reqIndices[0]]
-	tr.currentRs = tr.rss[0]
-	return startkeys, fixedbits
-}
-
 func (tr *ResolverStatefulCached) finaliseRoot() error {
 	tr.curr.Reset()
 	tr.curr.Write(tr.succ.Bytes())
