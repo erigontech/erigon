@@ -345,7 +345,7 @@ func TestApiDetails(t *testing.T) {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
 	}
 	putCache := func(k string, v string) {
-		require.Nil(t, db.Put(dbutils.IntermediateTrieHashesBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+		require.Nil(t, db.Put(dbutils.IntermediateTrieCacheBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 
 	// Test works with keys like: 0{i}0{j}{zeroes}
