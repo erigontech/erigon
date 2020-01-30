@@ -17,12 +17,12 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
 	Initialised    bool
+	HasStorageSize bool
 	Nonce          uint64
 	Balance        big.Int
 	Root           common.Hash // merkle root of the storage trie
 	CodeHash       common.Hash // hash of the bytecode
 	Incarnation    uint64
-	HasStorageSize bool
 	StorageSize    uint64
 }
 

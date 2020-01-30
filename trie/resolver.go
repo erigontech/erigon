@@ -33,12 +33,12 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 // See also ResolveRequest in trie.go
 type Resolver struct {
 	accounts         bool // Is this a resolver for accounts or for storage
-	requests         []*ResolveRequest
 	historical       bool
+	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
-	collectWitnesses bool       // if true, stores witnesses for all the subtries that are being resolved
+	topLevels        int // How many top levels of the trie to keep (not roll into hashes)
+	requests         []*ResolveRequest
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
-	topLevels        int        // How many top levels of the trie to keep (not roll into hashes)
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
