@@ -337,6 +337,12 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 
 func TestApiDetails(t *testing.T) {
 	db := ethdb.NewMemDatabase()
+	storageKey := func(k string) []byte {
+		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
+	}
+	putCache := func(k string, v string) {
+		require.Nil(t, db.Put(dbutils.IntermediateTrieHashesBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+	}
 
 	// Test works with keys like: 0{i}0{j}{zeroes}
 	// i=0 - data exists in cache
@@ -355,14 +361,12 @@ func TestApiDetails(t *testing.T) {
 			err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v)
 			require.Nil(t, err)
 
-			storageK := dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
-			err = db.Put(dbutils.StorageBucket, storageK, v)
+			err = db.Put(dbutils.StorageBucket, storageKey(k), v)
 			require.Nil(t, err)
 		}
 	}
 
-	err := db.Put(dbutils.IntermediateTrieHashesBucket, common.Hex2Bytes("00"), common.Hex2Bytes("c505b15def1161a1a2604c3ae9bc75424a828ff3b6ee5ab391a7af75654372f6"))
-	require.Nil(t, err)
+	putCache("00", "c505b15def1161a1a2604c3ae9bc75424a828ff3b6ee5ab391a7af75654372f6")
 
 	t.Run("account resolver", func(t *testing.T) {
 		tr := New(common.Hash{})
@@ -384,7 +388,7 @@ func TestApiDetails(t *testing.T) {
 		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0000%060x", 0)))
 		assert.False(t, found) // because not resolved but exists in DB, there is hashNode
 
-		storage, found := tr.Get(common.Hex2Bytes(fmt.Sprintf("0101%060x", 0)))
+		storage, found := tr.Get(storageKey(fmt.Sprintf("0101%060x", 0)))
 		assert.True(t, found)
 		assert.Nil(t, storage)
 
@@ -395,7 +399,7 @@ func TestApiDetails(t *testing.T) {
 
 		// must return "found=true" for data which not exists in DB
 
-		storage, found = tr.Get(common.Hex2Bytes(fmt.Sprintf("0501%060x", 0)))
+		storage, found = tr.Get(storageKey(fmt.Sprintf("0501%060x", 0)))
 		assert.True(t, found)
 		assert.Nil(t, storage)
 
@@ -407,7 +411,7 @@ func TestApiDetails(t *testing.T) {
 	t.Run("storage resolver", func(t *testing.T) {
 		tr := New(common.Hash{})
 
-		expectRootHash := common.HexToHash("d495c1e356daa73665c20236d7cb80d59cf4d33e07e5b44f37dfd8c9d9c91b79")
+		expectRootHash := common.HexToHash("46dc0895424632580a0e9c2daa5fface392119c9ab63f3228d90a99837b37b71")
 		req := &ResolveRequest{ // resolve accounts without storage
 			t:           tr,
 			resolveHex:  common.Hex2Bytes("00020001"), // nibbles format
@@ -416,7 +420,7 @@ func TestApiDetails(t *testing.T) {
 		}
 		resolver := NewResolver(0, false, 0)
 		resolver.AddRequest(req)
-		err = resolver.ResolveWithDb(db, 0)
+		err := resolver.ResolveWithDb(db, 0)
 		require.Nil(t, err, "resolve storage error")
 		assert.Equal(t, expectRootHash.String(), tr.Hash().String())
 
@@ -425,17 +429,17 @@ func TestApiDetails(t *testing.T) {
 		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0000%060x", 0)))
 		assert.False(t, found) // because not resolved but exists in DB, there is hashNode
 
-		storage, found := tr.Get(common.Hex2Bytes(fmt.Sprintf("0201%060x", 0)))
+		storage, found := tr.Get(storageKey(fmt.Sprintf("0201%060x", 0)))
 		assert.True(t, found)
 		assert.NotNil(t, storage)
 
 		assert.Panics(t, func() {
-			tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0201%060x", 0)))
+			tr.GetAccount(storageKey(fmt.Sprintf("0201%060x", 0)))
 		})
 
 		// must return "found=true" for data which not exists in DB
 
-		storage, found = tr.Get(common.Hex2Bytes(fmt.Sprintf("0501%060x", 0)))
+		storage, found = tr.Get(storageKey(fmt.Sprintf("0501%060x", 0)))
 		assert.True(t, found)
 		assert.Nil(t, storage)
 	})
