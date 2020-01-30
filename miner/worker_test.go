@@ -402,6 +402,7 @@ func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *par
 }
 
 func TestEmptyWorkEthash(t *testing.T) {
+	t.Skip("should be restored. Unstable. tag: Mining")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
