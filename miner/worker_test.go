@@ -402,7 +402,6 @@ func testPendingStateAndBlock(t *testing.T, testCase *testCase, chainConfig *par
 }
 
 func TestEmptyWorkEthash(t *testing.T) {
-	t.Skip("should be restored. tag: Mining")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -457,10 +456,13 @@ func checkEmptyMining(t *testing.T, testCase *testCase, gotBalance uint64, gotBa
 	}
 
 	if gotBalance != balance {
-		t.Errorf("account balance mismatch: have %d, want %d. index %d. %v %v",
-			gotBalance,
-			balance, index,
-			testCase.testBankFunds.Uint64(), gotBankBalance)
+		//fixme a hack to recheck if state has been changed
+		if gotBalance != balance {
+			t.Errorf("account balance mismatch: have %d, want %d. index %d. %v %v",
+				gotBalance,
+				balance, index,
+				testCase.testBankFunds.Uint64(), gotBankBalance)
+		}
 	}
 }
 
@@ -588,7 +590,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 		select {
 		case <-taskCh:
 		case <-time.NewTimer(time.Second).C:
-			t.Error("new task timeout")
+			t.Error("new task timeout on first 2 works")
 		}
 	}
 	b.txPool.AddLocals(testCase.newTxs)

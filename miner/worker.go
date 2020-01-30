@@ -161,9 +161,6 @@ type worker struct {
 	coinbase common.Address
 	extra    []byte
 
-	pendingMu    sync.RWMutex
-	pendingTasks map[common.Hash]*task
-
 	snapshotMu    sync.RWMutex // The lock used to protect the block snapshot and state snapshot
 	snapshotBlock *types.Block
 	snapshotState *state.IntraBlockState
@@ -204,7 +201,6 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 		chain:              eth.BlockChain(),
 		hooks:              h,
 		uncles:             newUncles(),
-		pendingTasks:       make(map[common.Hash]*task),
 		newWorkCh:          make(chan *newWorkReq, 1),
 		taskCh:             make(chan *task, 1),
 		exitCh:             make(chan struct{}),
@@ -392,17 +388,6 @@ func (w *worker) getCommit() (func(ctx consensus.Cancel, noempty bool, s int32),
 	}, timestamp
 }
 
-// clearPending cleans the stale pending tasks.
-func (w *worker) clearPending(number uint64) {
-	w.pendingMu.Lock()
-	for h, t := range w.pendingTasks {
-		if t.block.NumberU64()+staleThreshold <= number {
-			delete(w.pendingTasks, h)
-		}
-	}
-	w.pendingMu.Unlock()
-}
-
 // mainLoop is a standalone goroutine to regenerate the sealing task based on the received event.
 func (w *worker) mainLoop() {
 	defer w.txsSub.Unsubscribe()
@@ -413,6 +398,8 @@ func (w *worker) mainLoop() {
 			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
 
 		case ev := <-w.txsCh:
+			//fixme can be removed?
+
 			// Apply transactions to the pending state if we're not mining.
 			//
 			// Note all transactions received may not be continuous with transactions
@@ -469,7 +456,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 	for {
 		select {
 		case <-w.startCh:
-			w.clearPending(w.chain.CurrentBlock().NumberU64())
+			w.clearCanonicalChainContext()
 			atomic.StoreInt64(timestamp, time.Now().Unix())
 			commit(consensus.NewCancel(), false, commitInterruptNewHead)
 
@@ -486,19 +473,19 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 				continue
 			}
 
-			go func(ctx consensus.Cancel, head core.ChainHeadEvent) {
+			go func(ctx consensus.Cancel) {
 				defer ctx.CancelFunc()
-				w.clearPending(head.Block.NumberU64())
 				w.clearCanonicalChainContext()
 
 				atomic.StoreInt64(timestamp, time.Now().Unix())
 
 				commit(ctx, false, commitInterruptNewHead)
-			}(w.getCanonicalChainContext(), head)
+			}(w.getCanonicalChainContext())
 
 		case ev := <-w.chainSideCh:
 			go func(ctx consensus.Cancel, ev core.ChainSideEvent) {
 				defer ctx.CancelFunc()
+
 				// Short circuit for duplicate side blocks
 				if exist := w.uncles.has(ev.Block.Hash()); exist {
 					return
@@ -511,6 +498,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 					w.uncles.setRemote(ev.Block)
 				}
 
+				// fixme can be removed
 				// If our mining block contains less than 2 uncle blocks,
 				// add the new uncle block if valid and regenerate a mining block.
 				if w.isRunning() && w.current != nil && w.current.uncles.Cardinality() < 2 {
@@ -568,6 +556,7 @@ func (w *worker) taskLoop() {
 			stopCh = nil
 		}
 	}
+
 	for {
 		select {
 		case task := <-w.taskCh:
@@ -590,16 +579,13 @@ func (w *worker) taskLoop() {
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
-			w.pendingMu.Lock()
-			w.pendingTasks[w.engine.SealHash(task.block.Header())] = task
-			w.pendingMu.Unlock()
 
 			resultCh := make(chan consensus.ResultWithContext, 1)
 			if err := w.engine.Seal(task.ctx, w.chain, task.block, resultCh, stopCh); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
-			w.insertToChain(<-resultCh)
+			w.insertToChain(<-resultCh, task.createdAt)
 		case <-w.exitCh:
 			interrupt()
 			return
@@ -607,29 +593,20 @@ func (w *worker) taskLoop() {
 	}
 }
 
-func (w *worker) insertToChain(result consensus.ResultWithContext) {
+func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time) {
 	// Short circuit when receiving empty result.
-	block := result.Block
-	if block == nil {
+	if result.Block == nil {
 		return
 	}
+	block := result.Block
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
 		return
 	}
 
-	var (
-		sealhash = w.engine.SealHash(block.Header())
-		hash     = block.Hash()
-	)
-	w.pendingMu.RLock()
-	task, exist := w.pendingTasks[sealhash]
-	w.pendingMu.RUnlock()
-	if !exist {
-		log.Error("Block found but no relative pending task", "number", block.Number(), "sealhash", sealhash, "hash", hash)
-		return
-	}
+	sealhash := w.engine.SealHash(block.Header())
+	hash := block.Hash()
 
 	// Different block could share same sealhash, deep copy here to prevent write-write conflict.
 	/*
@@ -660,7 +637,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext) {
 	*/
 
 	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
-		"elapsed", common.PrettyDuration(time.Since(task.createdAt)), "difficulty", block.Difficulty())
+		"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
 
 	_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
 	if err != nil {
