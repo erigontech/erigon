@@ -572,14 +572,14 @@ func (w *worker) taskLoop() {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
-			w.insertToChain(<-resultCh, task.createdAt)
+			w.insertToChain(<-resultCh, task.createdAt, sealHash)
 		case <-w.exitCh:
 			return
 		}
 	}
 }
 
-func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time) {
+func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time, sealHash common.Hash) {
 	// Short circuit when receiving empty result.
 	if result.Block == nil {
 		return
@@ -588,11 +588,9 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
 	if w.chain.HasBlock(block.Hash(), block.NumberU64()) {
+		log.Warn("Duplicate result caused by resubmitting", "number", block.NumberU64(), "hash", block.Hash().String())
 		return
 	}
-
-	sealhash := w.engine.SealHash(block.Header())
-	hash := block.Hash()
 
 	// Different block could share same sealhash, deep copy here to prevent write-write conflict.
 	/*
@@ -622,7 +620,7 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 		_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
 	*/
 
-	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealhash, "hash", hash,
+	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
 		"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
 
 	_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
