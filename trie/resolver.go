@@ -50,6 +50,16 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	return &tr
 }
 
+func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
+	tr.topLevels = topLevels
+	tr.accounts = forAccounts
+	tr.blockNr = blockNr
+	tr.requests = tr.requests[:0]
+	tr.witnesses = nil
+	tr.collectWitnesses = false
+	tr.historical = false
+}
+
 func (tr *Resolver) CollectWitnesses(c bool) {
 	tr.collectWitnesses = c
 }
