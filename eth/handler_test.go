@@ -321,6 +321,7 @@ func testGetNodeData(t *testing.T, protocol int) {
 	defer peer.close()
 
 	// Fetch for now the root node
+	// TODO [Andrew] test account nodes and storage roots
 	hashes := []common.Hash{pm.blockchain.CurrentBlock().Root()}
 
 	err := p2p.Send(peer.app, GetNodeDataMsg, hashes)

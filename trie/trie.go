@@ -373,6 +373,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated = !bytes.Equal(origN, vn)
 			if updated {
 				newNode = value
+				t.evictNodeFromHashMap(origNode)
 			} else {
 				newNode = vn
 			}
@@ -383,6 +384,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if origNok && vnok {
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
+				t.evictNodeFromHashMap(origNode)
 				origAccN.Account.Copy(&vAccN.Account)
 			}
 			return updated, origAccN
@@ -390,6 +392,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 		// replacing nodes except accounts
 		if !origNok {
+			t.evictNodeFromHashMap(origNode)
 			return true, value
 		}
 	}
@@ -399,6 +402,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
 		return true, s
 	case *accountNode:
+		t.evictNodeFromHashMap(n)
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
 			n.storage = nn
@@ -406,6 +410,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		}
 		return updated, n
 	case *shortNode:
+		t.evictNodeFromHashMap(n)
 		matchlen := prefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
@@ -440,7 +445,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			t.markDirty(branch)
+			branch.markDirty()
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -465,17 +470,18 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
 				n.child1 = nn
-				t.markDirty(n)
+				t.invalidateHash(n)
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
 				n.child2 = nn
-				t.markDirty(n)
+				t.invalidateHash(n)
 			}
 			newNode = n
 		default:
+			t.evictNodeFromHashMap(n)
 			var child node
 			if len(key) == pos+1 {
 				child = value
@@ -486,7 +492,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
-			t.markDirty(newnode)
+			newnode.markDirty()
 			newnode.Children[key[pos]] = child
 			updated = true
 			// current node leaves the generation but newnode joins it
@@ -505,12 +511,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				n.Children[key[pos]] = short
 			}
 			updated = true
-			t.markDirty(n)
+			t.invalidateHash(n)
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
 				n.Children[key[pos]] = nn
-				t.markDirty(n)
+				t.invalidateHash(n)
 			}
 		}
 		newNode = n
@@ -739,7 +745,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					t.markDirty(n)
+					t.invalidateHash(n)
 					newNode = n
 				}
 			}
@@ -755,7 +761,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					t.markDirty(n)
+					t.invalidateHash(n)
 					newNode = n
 				}
 			}
@@ -815,13 +821,13 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				t.markDirty(duo)
+				duo.markDirty()
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				t.markDirty(n)
+				t.invalidateHash(n)
 				newNode = n
 			}
 		}
@@ -919,7 +925,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					n.child1 = nn
-					t.markDirty(n)
+					t.invalidateHash(n)
 					newNode = n
 				}
 			}
@@ -933,7 +939,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 				} else {
 					n.child2 = nn
-					t.markDirty(n)
+					t.invalidateHash(n)
 					newNode = n
 				}
 			}
@@ -994,13 +1000,13 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				t.markDirty(duo)
+				duo.markDirty()
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				t.markDirty(n)
+				t.invalidateHash(n)
 				newNode = n
 			}
 		}
@@ -1022,7 +1028,8 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				t.touchAll(n.storage, h, true)
 			}
 			n.storage = nil
-			n.hashCorrect = false
+			n.Root = EmptyRoot
+			n.hashCorrect = true
 			return true, n
 		}
 
@@ -1263,7 +1270,7 @@ func (t *Trie) hashRoot() (node, error) {
 // GetNodeByHash gets node's RLP by hash.
 func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 	nd := t.hashMap[hash]
-	if nd == nil || nd.dirty() || !bytes.Equal(nd.hash(), hash.Bytes()) {
+	if nd == nil {
 		return nil
 	}
 
@@ -1278,12 +1285,20 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 	return rlp
 }
 
-func (t *Trie) markDirty(nd node) {
-	if !nd.dirty() && nd.hash() != nil {
-		var key common.Hash
-		copy(key[:], nd.hash())
-		delete(t.hashMap, key)
+func (t *Trie) invalidateHash(nd node) {
+	t.evictNodeFromHashMap(nd)
+	nd.markDirty()
+}
+
+func (t *Trie) evictNodeFromHashMap(nd node) {
+	h := t.newHasherFunc()
+	defer returnHasherToPool(h)
+
+	var key common.Hash
+	refLen, err := h.hash(nd, false, key[:])
+	if err != nil || refLen != common.HashLength {
+		return
 	}
 
-	nd.markDirty()
+	delete(t.hashMap, key)
 }

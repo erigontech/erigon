@@ -18,6 +18,7 @@ func TestGetAccount(t *testing.T) {
 		Nonce:       1,
 		Incarnation: 1,
 		Balance:     *big.NewInt(100),
+		Root:        EmptyRoot,
 	}
 	acc2 := &accounts.Account{
 		Nonce:       2,
