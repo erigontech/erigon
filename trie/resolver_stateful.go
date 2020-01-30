@@ -153,7 +153,6 @@ func (tr *ResolverStateful) RebuildTrie(
 	accounts bool,
 	historical bool) error {
 	startkeys, fixedbits := tr.PrepareResolveParams()
-
 	if db == nil {
 		var b strings.Builder
 		fmt.Fprintf(&b, "ResolveWithDb(db=nil), accounts: %t\n", accounts)
