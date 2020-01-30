@@ -317,11 +317,15 @@ func TestTwoAccounts(t *testing.T) {
 func TestReturnErrOnWrongRootHash(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
-	putAccount := func(k string, v string) {
-		err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
+	putAccount := func(k string) {
+		a := accounts.Account{}
+		v := make([]byte, a.EncodingLengthForStorage())
+		a.EncodeForStorage(v)
+		err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v)
 		require.Nil(t, err)
 	}
-	putAccount("0000000000000000000000000000000000000000000000000000000000000000", "")
+
+	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
 
 	req := &ResolveRequest{
 		t:           tr,
@@ -370,7 +374,7 @@ func TestApiDetails(t *testing.T) {
 
 	t.Run("account resolver", func(t *testing.T) {
 		tr := New(common.Hash{})
-		expectRootHash := common.HexToHash("46dc0895424632580a0e9c2daa5fface392119c9ab63f3228d90a99837b37b71")
+		expectRootHash := common.HexToHash("ea6ea05b1e4e43e3402b73a4a2b0a9ccee69585de3d8d22598e46366a14ddc82")
 		req := &ResolveRequest{ // resolve accounts without storage
 			t:           tr,
 			resolveHex:  common.Hex2Bytes("00010001"), // nibbles format
