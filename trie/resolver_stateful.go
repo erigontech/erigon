@@ -29,8 +29,9 @@ type ResolverStateful struct {
 	keyIdx     int
 	fieldSet   uint32 // fieldSet for the next invocation of genStructStep
 	a          accounts.Account
-
-	requests []*ResolveRequest
+	leafData   GenStructStepLeafData
+	accData    GenStructStepAccountData
+	requests   []*ResolveRequest
 
 	roots        []node // roots of the tries that are being built
 	hookFunction hookFunction
@@ -46,6 +47,26 @@ func NewResolverStateful(topLevels int, requests []*ResolveRequest, hookFunction
 	}
 }
 
+// Reset prepares the Resolver for reuse
+func (tr *ResolverStateful) Reset(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) {
+	tr.topLevels = topLevels
+	tr.requests = tr.requests[:0]
+	tr.reqIndices = tr.reqIndices[:0]
+	tr.keyIdx = 0
+	tr.currentReq = nil
+	tr.currentRs = nil
+	tr.fieldSet = 0
+	tr.rss = tr.rss[:0]
+	tr.requests = requests
+	tr.hookFunction = hookFunction
+	tr.curr.Reset()
+	tr.succ.Reset()
+	tr.value.Reset()
+	tr.groups = tr.groups[:0]
+	tr.a.Reset()
+	tr.hb.Reset()
+}
+
 func (tr *ResolverStateful) PopRoots() []node {
 	roots := tr.roots
 	tr.roots = nil
@@ -57,7 +78,7 @@ func (tr *ResolverStateful) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	tr.rss = nil
+	tr.rss = tr.rss[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
@@ -103,17 +124,17 @@ func (tr *ResolverStateful) finaliseRoot() error {
 		var err error
 		var data GenStructStepData
 		if tr.fieldSet == 0 {
-			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
+			data = &tr.leafData
 		} else {
-			data = GenStructStepAccountData{
-				FieldSet:    tr.fieldSet,
-				StorageSize: tr.a.StorageSize,
-				Balance:     &tr.a.Balance,
-				Nonce:       tr.a.Nonce,
-				Incarnation: tr.a.Incarnation,
-			}
+			tr.accData.FieldSet = tr.fieldSet
+			tr.accData.StorageSize = tr.a.StorageSize
+			tr.accData.Balance.Set(&tr.a.Balance)
+			tr.accData.Nonce = tr.a.Nonce
+			tr.accData.Incarnation = tr.a.Incarnation
+			data = &tr.accData
 		}
-		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 		if err != nil {
 			return err
 		}
@@ -204,17 +225,17 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 			var err error
 			var data GenStructStepData
 			if tr.fieldSet == 0 {
-				data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
+				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
+				data = &tr.leafData
 			} else {
-				data = GenStructStepAccountData{
-					FieldSet:    tr.fieldSet,
-					StorageSize: tr.a.StorageSize,
-					Balance:     &tr.a.Balance,
-					Nonce:       tr.a.Nonce,
-					Incarnation: tr.a.Incarnation,
-				}
+				tr.accData.FieldSet = tr.fieldSet
+				tr.accData.StorageSize = tr.a.StorageSize
+				tr.accData.Balance.Set(&tr.a.Balance)
+				tr.accData.Nonce = tr.a.Nonce
+				tr.accData.Incarnation = tr.a.Incarnation
+				data = &tr.accData
 			}
-			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return err
 			}
@@ -233,10 +254,10 @@ func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byt
 					tr.fieldSet = AccountFieldSetContract
 				}
 				// the first item ends up deepest on the stack, the seccond item - on the top
-				if err := tr.hb.hash(tr.a.CodeHash); err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
-				if err := tr.hb.hash(tr.a.Root); err != nil {
+				if err := tr.hb.hash(tr.a.Root[:]); err != nil {
 					return err
 				}
 			}

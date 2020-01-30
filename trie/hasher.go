@@ -33,6 +33,7 @@ type hasher struct {
 	sha                  keccakState
 	valueNodesRlpEncoded bool
 	buffers              [1024 * 1024]byte
+	prefixBuf            [8]byte
 	bw                   *ByteArrayWriter
 	callback             func(common.Hash, node)
 }
@@ -164,7 +165,7 @@ func (h *hasher) hashChildren(original node, bufOffset int) ([]byte, error) {
 		// Encode key
 		compactKey := hexToCompact(n.Key)
 		h.bw.Setup(buffer, pos)
-		written, err := rlphacks.EncodeByteArrayAsRlp(compactKey, h.bw)
+		written, err := rlphacks.EncodeByteArrayAsRlp(compactKey, h.bw, h.prefixBuf[:])
 		if err != nil {
 			return nil, err
 		}
@@ -297,7 +298,7 @@ func (h *hasher) valueNodeToBuffer(vn valueNode, buffer []byte, pos int) (int, e
 		val = rlphacks.RlpSerializableBytes(vn)
 	}
 
-	if err := val.ToDoubleRLP(h.bw); err != nil {
+	if err := val.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
 		return 0, err
 	}
 	return val.DoubleRLPLen(), nil
@@ -311,7 +312,7 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 	enc := rlphacks.RlpEncodedBytes(encodedAccount.Bytes())
 	h.bw.Setup(buffer, pos)
 
-	if err := enc.ToDoubleRLP(h.bw); err != nil {
+	if err := enc.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
 		return 0, err
 	}
 

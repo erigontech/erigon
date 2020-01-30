@@ -175,6 +175,9 @@ type TrieDbState struct {
 	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
 	tp                *trie.TriePruning
+	newStream         trie.Stream
+	hashBuilder       *trie.HashBuilder
+	resolver          *trie.Resolver
 }
 
 var (
@@ -242,6 +245,7 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
 		savePreimages:     true,
+		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -285,11 +289,12 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
-		t:       &tcopy,
-		tMu:     new(sync.Mutex),
-		db:      tds.db,
-		blockNr: n,
-		tp:      tp,
+		t:           &tcopy,
+		tMu:         new(sync.Mutex),
+		db:          tds.db,
+		blockNr:     n,
+		tp:          tp,
+		hashBuilder: trie.NewHashBuilder(false),
 	}
 	return &cpy
 }
@@ -341,6 +346,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
+		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	tds.tMu.Unlock()
 
@@ -433,17 +439,23 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
 func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, resolveFunc func(*trie.Resolver) error) error {
-	var resolver *trie.Resolver
+	var firstRequest = true
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, false, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, false, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, false, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	return resolveFunc(resolver)
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
 }
 
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
@@ -501,17 +513,23 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
 func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc func(*trie.Resolver) error) error {
-	var resolver *trie.Resolver
+	var firstRequest = true
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, true, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	return resolveFunc(resolver)
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
 }
 
 func (tds *TrieDbState) populateAccountBlockProof(accountTouches common.Hashes) {
@@ -644,7 +662,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.newStream, tds.hashBuilder, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
