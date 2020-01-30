@@ -544,18 +544,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 // taskLoop is a standalone goroutine to fetch sealing task from the generator and
 // push them to consensus engine.
 func (w *worker) taskLoop() {
-	var (
-		stopCh chan struct{}
-		prev   common.Hash
-	)
-
-	// interrupt aborts the in-flight sealing task.
-	interrupt := func() {
-		if stopCh != nil {
-			close(stopCh)
-			stopCh = nil
-		}
-	}
+	var prev common.Hash
 
 	for {
 		select {
@@ -567,27 +556,24 @@ func (w *worker) taskLoop() {
 			}
 
 			// Reject duplicate sealing work due to resubmitting.
+			//fixme check if it can be removed
 			sealHash := w.engine.SealHash(task.block.Header())
 			if sealHash == prev {
 				continue
 			}
-
-			// Interrupt previous sealing operation
-			interrupt()
-			stopCh, prev = make(chan struct{}), sealHash
+			prev = sealHash
 
 			if w.skipSealHook != nil && w.skipSealHook(task) {
 				continue
 			}
 
 			resultCh := make(chan consensus.ResultWithContext, 1)
-			if err := w.engine.Seal(task.ctx, w.chain, task.block, resultCh, stopCh); err != nil {
+			if err := w.engine.Seal(task.ctx, w.chain, task.block, resultCh, task.ctx.Done()); err != nil {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
 			w.insertToChain(<-resultCh, task.createdAt)
 		case <-w.exitCh:
-			interrupt()
 			return
 		}
 	}
