@@ -53,7 +53,7 @@ type Trie struct {
 
 	binary bool
 
-	// TODO [Andrew] cache eviction on node deletion/unloading
+	// TODO [Andrew] cache eviction on node deletion
 	hashMap map[common.Hash]node
 }
 
@@ -611,6 +611,10 @@ func (t *Trie) hook(hex []byte, n node) {
 }
 
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
+	if del {
+		t.evictNodeFromHashMap(n)
+	}
+
 	switch n := n.(type) {
 	case *shortNode:
 		if _, ok := n.Val.(valueNode); !ok {
@@ -1169,6 +1173,9 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 	if _, ok := nd.(hashNode); ok {
 		return
 	}
+
+	t.evictSubtreeFromHashMap(nd)
+
 	var hn common.Hash
 	if nd == nil {
 		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
@@ -1301,4 +1308,28 @@ func (t *Trie) evictNodeFromHashMap(nd node) {
 	}
 
 	delete(t.hashMap, key)
+}
+
+func (t *Trie) evictSubtreeFromHashMap(n node) {
+	t.evictNodeFromHashMap(n)
+
+	switch n := n.(type) {
+	case *shortNode:
+		if _, ok := n.Val.(valueNode); !ok {
+			t.evictSubtreeFromHashMap(n.Val)
+		}
+	case *duoNode:
+		t.evictSubtreeFromHashMap(n.child1)
+		t.evictSubtreeFromHashMap(n.child2)
+	case *fullNode:
+		for _, child := range n.Children {
+			if child != nil {
+				t.evictSubtreeFromHashMap(child)
+			}
+		}
+	case *accountNode:
+		if n.storage != nil {
+			t.evictSubtreeFromHashMap(n.storage)
+		}
+	}
 }
