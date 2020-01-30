@@ -109,7 +109,7 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 	if refLen == common.HashLength {
 		switch n := n.(type) {
 		case *accountNode:
-			n.hashCorrect = true
+			n.rootCorrect = true
 		case *duoNode:
 			copy(n.flags.hash[:], storeTo)
 			n.flags.dirty = false

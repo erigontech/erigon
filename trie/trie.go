@@ -406,7 +406,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
 			n.storage = nn
-			n.hashCorrect = false
+			n.rootCorrect = false
 		}
 		return updated, n
 	case *shortNode:
@@ -854,7 +854,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 		updated, nn = t.delete(n.storage, key, keyStart)
 		if updated {
 			n.storage = nn
-			n.hashCorrect = false
+			n.rootCorrect = false
 		}
 		updated = true
 		newNode = n
@@ -1033,14 +1033,14 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			}
 			n.storage = nil
 			n.Root = EmptyRoot
-			n.hashCorrect = true
+			n.rootCorrect = true
 			return true, n
 		}
 
 		updated, nn = t.deleteSubtree(n.storage, key, keyStart, 0)
 		if updated {
 			n.storage = nn
-			n.hashCorrect = false
+			n.rootCorrect = false
 		}
 		updated = true
 		newNode = n
@@ -1098,12 +1098,12 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	if !gotValue {
 		return false, common.Hash{}
 	}
-	if accNode.hashCorrect {
+	if accNode.rootCorrect {
 		return true, accNode.Root
 	}
 	if accNode.storage == nil {
 		accNode.Root = EmptyRoot
-		accNode.hashCorrect = true
+		accNode.rootCorrect = true
 	} else {
 		h := t.newHasherFunc()
 		defer returnHasherToPool(h)

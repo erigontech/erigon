@@ -60,7 +60,7 @@ type (
 	accountNode struct {
 		accounts.Account
 		storage     node
-		hashCorrect bool
+		rootCorrect bool
 	}
 )
 
