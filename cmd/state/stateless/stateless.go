@@ -173,6 +173,7 @@ func Stateless(
 		panic(err)
 	}
 	defer timeF.Close()
+	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
 	ethDb, err := createDb(chaindata)
 	check(err)
@@ -354,6 +355,7 @@ func Stateless(
 			check(err)
 		}
 		finalRootFail := false
+		execStart = time.Now()
 		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
 			var w *trie.Witness
@@ -387,6 +389,7 @@ func Stateless(
 				finalRootFail = true
 			}
 		}
+		execTime3 := time.Since(execStart)
 		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
@@ -396,14 +399,14 @@ func Stateless(
 				return
 			}
 		}
-		execTime3 := time.Since(execStart)
+		execTime4 := time.Since(execStart)
 		execStart = time.Now()
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
-		execTime4 := time.Since(execStart)
+		execTime5 := time.Since(execStart)
 		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -476,7 +479,12 @@ func Stateless(
 
 			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
-		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d\n", blockNum, execTime1.Nanoseconds(), execTime2.Nanoseconds(), execTime3.Nanoseconds(), execTime4.Nanoseconds())
+		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d,%d\n", blockNum,
+			execTime1.Nanoseconds(),
+			execTime2.Nanoseconds(),
+			execTime3.Nanoseconds(),
+			execTime4.Nanoseconds(),
+			execTime5.Nanoseconds())
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
