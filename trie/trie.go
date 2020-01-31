@@ -53,7 +53,6 @@ type Trie struct {
 
 	binary bool
 
-	// TODO [Andrew] cache eviction on node deletion
 	hashMap map[common.Hash]node
 }
 
@@ -377,7 +376,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			} else {
 				newNode = vn
 			}
-			return updated, newNode
+			return
 		}
 		origAccN, origNok := origNode.(*accountNode)
 		vAccN, vnok := value.(*accountNode)
@@ -387,7 +386,8 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				t.evictNodeFromHashMap(origNode)
 				origAccN.Account.Copy(&vAccN.Account)
 			}
-			return updated, origAccN
+			newNode = origAccN
+			return
 		}
 
 		// replacing nodes except accounts
@@ -402,25 +402,26 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
 		return true, s
 	case *accountNode:
-		t.evictNodeFromHashMap(n)
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
+			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
 		return updated, n
 	case *shortNode:
-		t.evictNodeFromHashMap(n)
 		matchlen := prefixLen(key[pos:], n.Key)
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.Val = nn
 			}
 			newNode = n
 		} else {
+			t.evictNodeFromHashMap(n)
 			// Otherwise branch out at the index where they differ.
 			var c1 node
 			if len(n.Key) == matchlen+1 {
@@ -445,7 +446,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			branch.markDirty()
+			branch.flags.dirty = true
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -469,15 +470,17 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		case i1:
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.child1 = nn
-				t.invalidateHash(n)
+				n.flags.dirty = true
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.child2 = nn
-				t.invalidateHash(n)
+				n.flags.dirty = true
 			}
 			newNode = n
 		default:
@@ -492,7 +495,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
-			newnode.markDirty()
+			newnode.flags.dirty = true
 			newnode.Children[key[pos]] = child
 			updated = true
 			// current node leaves the generation but newnode joins it
@@ -504,6 +507,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
 		if child == nil {
+			t.evictNodeFromHashMap(n)
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
@@ -511,12 +515,13 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				n.Children[key[pos]] = short
 			}
 			updated = true
-			t.invalidateHash(n)
+			n.flags.dirty = true
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
-				t.invalidateHash(n)
+				n.flags.dirty = true
 			}
 		}
 		newNode = n
@@ -695,6 +700,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			if matchlen == len(key)-keyStart {
 				updated = true
+				t.evictNodeFromHashMap(n)
 				touchKey := key[:keyStart+matchlen]
 				if touchKey[len(touchKey)-1] == 16 {
 					touchKey = touchKey[:len(touchKey)-1]
@@ -710,6 +716,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				if !updated {
 					newNode = n
 				} else {
+					t.evictNodeFromHashMap(n)
 					if nn == nil {
 						newNode = nil
 					} else {
@@ -743,13 +750,14 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					t.invalidateHash(n)
+					n.flags.dirty = true
 					newNode = n
 				}
 			}
@@ -759,13 +767,14 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child1, uint(i1))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					t.invalidateHash(n)
+					n.flags.dirty = true
 					newNode = n
 				}
 			}
@@ -783,6 +792,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
+			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
@@ -825,25 +835,27 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				duo.markDirty()
+				duo.flags.dirty = true
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				t.invalidateHash(n)
+				n.flags.dirty = true
 				newNode = n
 			}
 		}
 		return
 
 	case valueNode:
+		t.evictNodeFromHashMap(n)
 		updated = true
 		newNode = nil
 		return
 
 	case *accountNode:
 		if key[keyStart] == 16 {
+			t.evictNodeFromHashMap(n)
 			// Key terminates here
 			if n.storage != nil {
 				// Mark all the storage nodes as deleted
@@ -853,10 +865,10 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 		}
 		updated, nn = t.delete(n.storage, key, keyStart)
 		if updated {
+			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
-		updated = true
 		newNode = n
 		return
 
@@ -880,23 +892,24 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
 		switch {
-		case len(key) == keyStart:
+		case len(key) == keyStart || matchlen == len(key[keyStart:])-1:
+			t.evictSubtreeFromHashMap(n)
 			updated = true
 			newNode = nil
-		case matchlen == len(key[keyStart:])-1:
-			return true, nil
 		case matchlen < len(n.Key) && matchlen != len(key[keyStart:]):
 			updated = false
 			newNode = n
 		default:
 
 			if keyStart+1 == len(key) {
+				t.evictSubtreeFromHashMap(n)
 				return true, nil
 			}
 			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(n.Key), blockNr)
 			if !updated {
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					newNode = nil
 				} else {
@@ -915,7 +928,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				}
 			}
 		}
-		return updated, newNode
+		return
 
 	case *duoNode:
 		i1, i2 := n.childrenIdx()
@@ -925,11 +938,12 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			if !updated {
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					n.child1 = nn
-					t.invalidateHash(n)
+					n.flags.dirty = true
 					newNode = n
 				}
 			}
@@ -938,12 +952,12 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			if !updated {
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					newNode = t.convertToShortNode(n.child1, uint(i1))
-
 				} else {
 					n.child2 = nn
-					t.invalidateHash(n)
+					n.flags.dirty = true
 					newNode = n
 				}
 			}
@@ -953,7 +967,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			newNode = n
 		}
 
-		return updated, newNode
+		return
 
 	case *fullNode:
 		child := n.Children[key[keyStart]]
@@ -962,6 +976,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
+			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
@@ -1004,24 +1019,26 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				duo.markDirty()
+				duo.flags.dirty = true
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				t.invalidateHash(n)
+				n.flags.dirty = true
 				newNode = n
 			}
 		}
 		return
 	case valueNode:
+		t.evictNodeFromHashMap(n)
 		updated = true
 		newNode = nil
 		return
 
 	case *accountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
+			t.evictNodeFromHashMap(n)
 			// Key terminates here
 			if n.storage != nil {
 				h := key[:keyStart]
@@ -1039,10 +1056,10 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 
 		updated, nn = t.deleteSubtree(n.storage, key, keyStart, 0)
 		if updated {
+			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
-		updated = true
 		newNode = n
 
 		return
@@ -1290,11 +1307,6 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 		return nil
 	}
 	return rlp
-}
-
-func (t *Trie) invalidateHash(nd node) {
-	t.evictNodeFromHashMap(nd)
-	nd.markDirty()
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {
