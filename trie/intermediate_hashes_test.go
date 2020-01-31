@@ -24,7 +24,6 @@ func TestCompressNibbles(t *testing.T) {
 
 	compressBuf := pool.GetBuffer(64)
 	defer pool.PutBuffer(compressBuf)
-
 	decompressBuf := pool.GetBuffer(64)
 	defer pool.PutBuffer(decompressBuf)
 
