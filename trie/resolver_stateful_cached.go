@@ -16,6 +16,8 @@ import (
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
+	fromCache bool
+	hashData  GenStructStepHashData
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
@@ -35,6 +37,85 @@ func hexIncrement(in []byte) []byte {
 		}
 
 		r[i] = 0
+	}
+	return nil
+}
+
+// PrepareResolveParams prepares information for the MultiWalk
+// Changes compare to ResolverStateful:
+//   - key can have 0 length - to be able walk by cache bucket
+func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
+	// Remove requests strictly contained in the preceding ones
+	startkeys := [][]byte{}
+	fixedbits := []uint{}
+	tr.rss = nil
+	if len(tr.requests) == 0 {
+		return startkeys, fixedbits
+	}
+	var prevReq *ResolveRequest
+	for i, req := range tr.requests {
+		if prevReq == nil ||
+			!bytes.Equal(req.contract, prevReq.contract) ||
+			!bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
+
+			tr.reqIndices = append(tr.reqIndices, i)
+			pLen := len(req.contract)
+			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
+			copy(key[:], req.contract)
+			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
+			startkeys = append(startkeys, key)
+			req.extResolvePos = req.resolvePos + 2*pLen
+			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
+			prevReq = req
+			var minLength int
+			if req.resolvePos >= tr.topLevels {
+				minLength = 0
+			} else {
+				minLength = tr.topLevels - req.resolvePos
+			}
+			rs := NewResolveSet(minLength)
+			tr.rss = append(tr.rss, rs)
+			rs.AddHex(req.resolveHex[req.resolvePos:])
+		} else {
+			rs := tr.rss[len(tr.rss)-1]
+			rs.AddHex(req.resolveHex[req.resolvePos:])
+		}
+	}
+	tr.currentReq = tr.requests[tr.reqIndices[0]]
+	tr.currentRs = tr.rss[0]
+	return startkeys, fixedbits
+}
+
+func (tr *ResolverStatefulCached) finaliseRoot() error {
+	tr.curr.Reset()
+	tr.curr.Write(tr.succ.Bytes())
+	tr.succ.Reset()
+	if tr.curr.Len() > 0 {
+		var err error
+		var data GenStructStepData
+		if tr.fromCache {
+			tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
+			data = &tr.hashData
+		} else if tr.fieldSet == 0 {
+			tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
+			data = &tr.leafData
+		} else {
+			tr.accData.FieldSet = tr.fieldSet
+			tr.accData.StorageSize = tr.a.StorageSize
+			tr.accData.Balance.Set(&tr.a.Balance)
+			tr.accData.Nonce = tr.a.Nonce
+			tr.accData.Incarnation = tr.a.Incarnation
+			data = &tr.accData
+		}
+		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
+		if err != nil {
+			return err
+		}
+	}
+	if tr.hb.hasRoot() {
+		hbRoot := tr.hb.root()
+		hbHash := tr.hb.rootHash()
+		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 	}
 	return nil
 }
@@ -113,17 +194,17 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	return tr.finaliseRoot()
 }
 
-func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, k []byte, v []byte, useCache bool) error {
-	return tr.Walker(true, useCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, k []byte, v []byte, fromCache bool) error {
+	return tr.Walker(true, fromCache, keyIdx, k, v)
 }
 
-func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, useCache bool) error {
-	return tr.Walker(false, useCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, fromCache bool) error {
+	return tr.Walker(false, fromCache, keyIdx, k, v)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStatefulCached) Walker(isAccount bool, useCache bool, keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, useCache: %v\n", keyIdx, k, v, useCache)
+func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
+	//fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -155,30 +236,30 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, useCache bool, keyIdx i
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
-			if tr.fieldSet == 0 {
-				data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
-			} else if tr.fieldSet == AccountFieldSetHashOfAccount {
+			if tr.fromCache {
 				data = GenStructStepHashData{Hash: common.BytesToHash(tr.value.Bytes())}
+			} else if tr.fieldSet == 0 {
+				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
+				data = &tr.leafData
 			} else {
-				data = GenStructStepAccountData{
-					FieldSet:    tr.fieldSet,
-					StorageSize: tr.a.StorageSize,
-					Balance:     &tr.a.Balance,
-					Nonce:       tr.a.Nonce,
-					Incarnation: tr.a.Incarnation,
-				}
+				tr.accData.FieldSet = tr.fieldSet
+				tr.accData.StorageSize = tr.a.StorageSize
+				tr.accData.Balance.Set(&tr.a.Balance)
+				tr.accData.Nonce = tr.a.Nonce
+				tr.accData.Incarnation = tr.a.Incarnation
+				data = &tr.accData
 			}
 
-			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
+			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return fmt.Errorf("fail GenStructStep: %w", err)
 			}
 		}
 		// Remember the current key and value
-		if useCache {
+		if fromCache {
 			tr.value.Reset()
 			tr.value.Write(v)
-			tr.fieldSet = AccountFieldSetHashOfAccount
+			tr.fromCache = true
 			return nil
 		}
 
@@ -195,10 +276,10 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, useCache bool, keyIdx i
 					tr.fieldSet = AccountFieldSetContract
 				}
 				// the first item ends up deepest on the stack, the seccond item - on the top
-				if err := tr.hb.hash(tr.a.CodeHash); err != nil {
+				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
-				if err := tr.hb.hash(tr.a.Root); err != nil {
+				if err := tr.hb.hash(tr.a.Root[:]); err != nil {
 					return err
 				}
 			}
@@ -212,7 +293,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, useCache bool, keyIdx i
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, useCache bool) error) error {
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -236,10 +317,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 		cacheK, cacheV := cache.Seek(startkey)
 
 		var minKey []byte
-		var useCache bool
+		var fromCache bool
 		for k != nil || cacheK != nil {
-			useCache, minKey = keyIsBefore(cacheK, k)
-			if useCache && !tr.currentRs.HashOnly(minKey) { // can't use cache as is, need go to children
+			fromCache, minKey = keyIsBefore(cacheK, k)
+			if fromCache && !tr.currentRs.HashOnly(minKey) { // can't use cache as is, need go to children
 				cacheK, cacheV = cache.SeekTo(append(minKey, 0)) // seek only cache cursor, because it's minimal move
 				continue
 			}
@@ -276,10 +357,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				}
 			}
 
-			useCache, _ = keyIsBefore(cacheK, k)
-			if !useCache {
+			fromCache, _ = keyIsBefore(cacheK, k)
+			if !fromCache {
 				if len(v) > 0 {
-					if err := walker(rangeIdx, k, v, useCache); err != nil {
+					if err := walker(rangeIdx, k, v, fromCache); err != nil {
 						return fmt.Errorf("waker err: %w", err)
 					}
 				}
@@ -288,7 +369,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 			}
 
 			if len(cacheV) > 0 {
-				if err := walker(rangeIdx, cacheK, cacheV, useCache); err != nil {
+				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
@@ -303,82 +384,4 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 		return nil
 	})
 	return err
-}
-
-func (tr *ResolverStatefulCached) finaliseRoot() error {
-	tr.curr.Reset()
-	tr.curr.Write(tr.succ.Bytes())
-	tr.succ.Reset()
-	if tr.curr.Len() > 0 {
-		var err error
-		var data GenStructStepData
-		if tr.fieldSet == 0 {
-			data = GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(tr.value.Bytes())}
-		} else if tr.fieldSet == AccountFieldSetHashOfAccount {
-			data = GenStructStepHashData{Hash: common.BytesToHash(tr.value.Bytes())}
-		} else {
-			data = GenStructStepAccountData{
-				FieldSet:    tr.fieldSet,
-				StorageSize: tr.a.StorageSize,
-				Balance:     &tr.a.Balance,
-				Nonce:       tr.a.Nonce,
-				Incarnation: tr.a.Incarnation,
-			}
-		}
-		tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups)
-		if err != nil {
-			return err
-		}
-	}
-	if tr.hb.hasRoot() {
-		hbRoot := tr.hb.root()
-		hbHash := tr.hb.rootHash()
-		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
-	}
-	return nil
-}
-
-// PrepareResolveParams prepares information for the MultiWalk
-// Changes compare to ResolverStateful:
-//   - key can have 0 length - to be able walk by cache bucket
-func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
-	// Remove requests strictly contained in the preceding ones
-	startkeys := [][]byte{}
-	fixedbits := []uint{}
-	tr.rss = nil
-	if len(tr.requests) == 0 {
-		return startkeys, fixedbits
-	}
-	var prevReq *ResolveRequest
-	for i, req := range tr.requests {
-		if prevReq == nil ||
-			!bytes.Equal(req.contract, prevReq.contract) ||
-			!bytes.Equal(req.resolveHex[:req.resolvePos], prevReq.resolveHex[:prevReq.resolvePos]) {
-
-			tr.reqIndices = append(tr.reqIndices, i)
-			pLen := len(req.contract)
-			key := make([]byte, pLen+len(req.resolveHex[:req.resolvePos]))
-			copy(key[:], req.contract)
-			decodeNibbles(req.resolveHex[:req.resolvePos], key[pLen:])
-			startkeys = append(startkeys, key)
-			req.extResolvePos = req.resolvePos + 2*pLen
-			fixedbits = append(fixedbits, uint(4*req.extResolvePos))
-			prevReq = req
-			var minLength int
-			if req.resolvePos >= tr.topLevels {
-				minLength = 0
-			} else {
-				minLength = tr.topLevels - req.resolvePos
-			}
-			rs := NewResolveSet(minLength)
-			tr.rss = append(tr.rss, rs)
-			rs.AddHex(req.resolveHex[req.resolvePos:])
-		} else {
-			rs := tr.rss[len(tr.rss)-1]
-			rs.AddHex(req.resolveHex[req.resolvePos:])
-		}
-	}
-	tr.currentReq = tr.requests[tr.reqIndices[0]]
-	tr.currentRs = tr.rss[0]
-	return startkeys, fixedbits
 }
