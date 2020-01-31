@@ -423,6 +423,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
+
 	return nil
 }
 
