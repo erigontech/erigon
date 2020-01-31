@@ -55,7 +55,7 @@ func TestRebuild(t *testing.T) {
 			t.Errorf("Could not encode value: %v", err)
 		}
 		err = db.Put(bucket, key, v1)
-		require.Nil(t, err)
+		require.NoError(t, err)
 		t1 := New(common.BytesToHash(root1))
 		_ = t1.Rebuild(db, 0)
 	}
@@ -63,11 +63,13 @@ func TestRebuild(t *testing.T) {
 
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {
+	assert := assert.New(t)
+
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 
@@ -80,18 +82,20 @@ func TestResolve1(t *testing.T) {
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	err := r.ResolveWithDb(db, 0)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestResolve2(t *testing.T) {
+	assert := assert.New(t)
+
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
@@ -105,18 +109,20 @@ func TestResolve2(t *testing.T) {
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	err := r.ResolveWithDb(db, 0)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestResolve2Keep(t *testing.T) {
+	assert := assert.New(t)
+
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
@@ -130,18 +136,20 @@ func TestResolve2Keep(t *testing.T) {
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	err := r.ResolveWithDb(db, 0)
-	require.Nil(t, err)
+	require.NoError(t, err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestResolve3Keep(t *testing.T) {
+	assert := assert.New(t)
+
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaabbbbbbbbbbbbbbbbbbbbbbbbbbb", "")
@@ -156,18 +164,19 @@ func TestResolve3Keep(t *testing.T) {
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
 	err := r.ResolveWithDb(db, 0)
-	require.Nil(t, err, "resolve error")
+	require.NoError(t, err, "resolve error")
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestTrieResolver(t *testing.T) {
+	assert := assert.New(t)
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	putStorage := func(k string, v string) {
 		err := db.Put(dbutils.StorageBucket, common.Hex2Bytes(k), common.Hex2Bytes(v))
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 	putStorage("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "")
 	putStorage("aaaaaccccccccccccccccccccccccccc", "")
@@ -201,13 +210,15 @@ func TestTrieResolver(t *testing.T) {
 	resolver.AddRequest(req1)
 
 	err := resolver.ResolveWithDb(db, 0)
-	require.Nil(t, err, "resolve error")
+	require.NoError(t, err, "resolve error")
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestTwoStorageItems(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 
@@ -216,10 +227,8 @@ func TestTwoStorageItems(t *testing.T) {
 	val1 := common.Hex2Bytes("02")
 	val2 := common.Hex2Bytes("03")
 
-	err := db.Put(dbutils.StorageBucket, key1, val1)
-	require.Nil(t, err)
-	err = db.Put(dbutils.StorageBucket, key2, val2)
-	require.Nil(t, err)
+	require.NoError(db.Put(dbutils.StorageBucket, key1, val1))
+	require.NoError(db.Put(dbutils.StorageBucket, key2, val2))
 
 	leaf1 := shortNode{Key: keybytesToHex(key1[1:]), Val: valueNode(val1)}
 	leaf2 := shortNode{Key: keybytesToHex(key2[1:]), Val: valueNode(val2)}
@@ -232,12 +241,12 @@ func TestTwoStorageItems(t *testing.T) {
 	hasher := newHasher(false)
 	defer returnHasherToPool(hasher)
 	rootRlp, err := hasher.hashChildren(&root, 0)
-	require.Nil(t, err, "failed ot hash children")
+	require.NoError(err, "failed ot hash children")
 
 	// Resolve the root node
 
 	rootHash := common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8")
-	assert.Equal(t, rootHash, crypto.Keccak256Hash(rootRlp))
+	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
 	req := &ResolveRequest{
 		t:           tr,
@@ -249,9 +258,9 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver.AddRequest(req)
 
 	err = resolver.ResolveWithDb(db, 0)
-	require.Nil(t, err, "resolve error")
+	require.NoError(err, "resolve error")
 
-	assert.Equal(t, rootHash.String(), tr.Hash().String())
+	assert.Equal(rootHash.String(), tr.Hash().String())
 
 	// Resolve the branch node
 
@@ -270,22 +279,23 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver2.AddRequest(req2)
 
 	err = resolver2.ResolveWithDb(db, 0)
-	require.Nil(t, err, "resolve error")
+	require.NoError(err, "resolve error")
 
-	assert.Equal(t, rootHash.String(), tr.Hash().String())
+	assert.Equal(rootHash.String(), tr.Hash().String())
 
 	_, ok := tr.Get(key1)
-	assert.True(t, ok)
+	assert.True(ok)
 }
 
 func TestTwoAccounts(t *testing.T) {
+	require := require.New(t)
 	db := ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 	key1 := common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b")
 	err := db.Put(dbutils.AccountsBucket, key1, common.Hex2Bytes("020502540be400"))
-	require.Nil(t, err)
+	require.NoError(err)
 	err = db.Put(dbutils.AccountsBucket, common.Hex2Bytes("0fbc62ba90dec43ec1d6016f9dd39dc324e967f2a3459a78281d1f4b2ba962a6"), common.Hex2Bytes("120164204f1593970e8f030c0a2c39758181a447774eae7c65653c4e6440e8c18dad69bc"))
-	require.Nil(t, err)
+	require.NoError(err)
 
 	expect := common.HexToHash("925002c3260b44e44c3edebad1cc442142b03020209df1ab8bb86752edbd2cd7")
 
@@ -294,7 +304,7 @@ func TestTwoAccounts(t *testing.T) {
 	defer pool.PutBuffer(buf)
 
 	err = DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), &buf.B)
-	require.Nil(t, err)
+	require.NoError(err)
 
 	req := &ResolveRequest{
 		t:           tr,
@@ -306,7 +316,7 @@ func TestTwoAccounts(t *testing.T) {
 	resolver := NewResolver(0, true, 0)
 	resolver.AddRequest(req)
 	err = resolver.ResolveWithDb(db, 0)
-	require.Nil(t, err, "resolve error")
+	require.NoError(err, "resolve error")
 
 	assert.Equal(t, expect.String(), tr.Hash().String())
 
@@ -322,7 +332,7 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 		v := make([]byte, a.EncodingLengthForStorage())
 		a.EncodeForStorage(v)
 		err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v)
-		require.Nil(t, err)
+		require.NoError(t, err)
 	}
 
 	putAccount("0000000000000000000000000000000000000000000000000000000000000000")
@@ -340,12 +350,15 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 }
 
 func TestApiDetails(t *testing.T) {
+	require := require.New(t)
+	assert := assert.New(t)
+
 	db := ethdb.NewMemDatabase()
 	storageKey := func(k string) []byte {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
 	}
 	putCache := func(k string, v string) {
-		require.Nil(t, db.Put(dbutils.IntermediateTrieHashesBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+		require.NoError(db.Put(dbutils.IntermediateTrieCacheBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 
 	// Test works with keys like: 0{i}0{j}{zeroes}
@@ -362,11 +375,8 @@ func TestApiDetails(t *testing.T) {
 			v := make([]byte, a.EncodingLengthForStorage())
 			a.EncodeForStorage(v)
 
-			err := db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v)
-			require.Nil(t, err)
-
-			err = db.Put(dbutils.StorageBucket, storageKey(k), v)
-			require.Nil(t, err)
+			require.NoError(db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v))
+			require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), v))
 		}
 	}
 
@@ -383,33 +393,33 @@ func TestApiDetails(t *testing.T) {
 		}
 		resolver := NewResolver(0, true, 0)
 		resolver.AddRequest(req)
-		err := resolver.ResolveWithDb(db, 0)
-		require.Nil(t, err, "resolve error")
-		assert.Equal(t, expectRootHash.String(), tr.Hash().String())
+
+		require.NoError(resolver.ResolveWithDb(db, 0))
+		assert.Equal(expectRootHash.String(), tr.Hash().String())
 
 		// Can find resolved accounts. Can't find non-resolved
 
 		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0000%060x", 0)))
-		assert.False(t, found) // because not resolved but exists in DB, there is hashNode
+		assert.False(found) // because not resolved but exists in DB, there is hashNode
 
 		storage, found := tr.Get(storageKey(fmt.Sprintf("0101%060x", 0)))
-		assert.True(t, found)
-		assert.Nil(t, storage)
+		assert.True(found)
+		assert.Nil(storage)
 
 		acc, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0101%060x", 0)))
-		assert.True(t, found)
-		require.NotNil(t, acc)
-		assert.Equal(t, int(acc.Nonce), 11) // i * 10 + j
+		assert.True(found)
+		require.NotNil(acc)
+		assert.Equal(int(acc.Nonce), 11) // i * 10 + j
 
 		// must return "found=true" for data which not exists in DB
 
 		storage, found = tr.Get(storageKey(fmt.Sprintf("0501%060x", 0)))
-		assert.True(t, found)
-		assert.Nil(t, storage)
+		assert.True(found)
+		assert.Nil(storage)
 
 		acc, found = tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0501%060x", 0)))
-		assert.True(t, found)
-		assert.Nil(t, acc)
+		assert.True(found)
+		assert.Nil(acc)
 	})
 
 	t.Run("storage resolver", func(t *testing.T) {
@@ -425,26 +435,71 @@ func TestApiDetails(t *testing.T) {
 		resolver := NewResolver(0, false, 0)
 		resolver.AddRequest(req)
 		err := resolver.ResolveWithDb(db, 0)
-		require.Nil(t, err, "resolve storage error")
-		assert.Equal(t, expectRootHash.String(), tr.Hash().String())
+		require.NoError(err, "resolve storage error")
+		assert.Equal(expectRootHash.String(), tr.Hash().String())
 
 		// Can find resolved accounts. Can't find non-resolved
 
 		_, found := tr.GetAccount(common.Hex2Bytes(fmt.Sprintf("0000%060x", 0)))
-		assert.False(t, found) // because not resolved but exists in DB, there is hashNode
+		assert.False(found) // because not resolved but exists in DB, there is hashNode
 
 		storage, found := tr.Get(storageKey(fmt.Sprintf("0201%060x", 0)))
-		assert.True(t, found)
-		assert.NotNil(t, storage)
+		assert.True(found)
+		assert.NotNil(storage)
 
-		assert.Panics(t, func() {
+		assert.Panics(func() {
 			tr.GetAccount(storageKey(fmt.Sprintf("0201%060x", 0)))
 		})
 
 		// must return "found=true" for data which not exists in DB
 
 		storage, found = tr.Get(storageKey(fmt.Sprintf("0501%060x", 0)))
-		assert.True(t, found)
-		assert.Nil(t, storage)
+		assert.True(found)
+		assert.Nil(storage)
 	})
+}
+
+func TestKeyIsBefore(t *testing.T) {
+	assert := assert.New(t)
+
+	is, minKey := keyIsBefore([]byte("a"), []byte("b"))
+	assert.Equal(true, is)
+	assert.Equal("a", string(minKey))
+
+	is, minKey = keyIsBefore([]byte("b"), []byte("a"))
+	assert.Equal(false, is)
+	assert.Equal("a", string(minKey))
+
+	is, minKey = keyIsBefore([]byte("b"), []byte(""))
+	assert.Equal(false, is)
+	assert.Equal("", string(minKey))
+
+	is, minKey = keyIsBefore(nil, []byte("b"))
+	assert.Equal(false, is)
+	assert.Equal("b", string(minKey))
+
+	is, minKey = keyIsBefore([]byte("b"), nil)
+	assert.Equal(true, is)
+	assert.Equal("b", string(minKey))
+}
+
+func TestHexIncrement(t *testing.T) {
+	assert := assert.New(t)
+	k := common.Hex2Bytes("f2fd")
+
+	k = hexIncrement(k)
+	assert.Equal("f2fe", common.Bytes2Hex(k))
+	k = hexIncrement(k)
+	assert.Equal("f2ff", common.Bytes2Hex(k))
+	k = hexIncrement(k)
+	assert.Equal("f300", common.Bytes2Hex(k))
+
+	k = common.Hex2Bytes("ffffff")
+	assert.Nil(hexIncrement(k))
+	k = common.Hex2Bytes("ffff")
+	assert.Nil(hexIncrement(k))
+	k = common.Hex2Bytes("ff")
+	assert.Nil(hexIncrement(k))
+	k = common.Hex2Bytes("")
+	assert.Nil(hexIncrement(k))
 }

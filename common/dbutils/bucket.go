@@ -41,8 +41,7 @@ var (
 	ChangeSetBucket = []byte("ChangeSet")
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
-	// hash_of_address_of_account|incarnation|some_prefix_of(hash_of_storage_position) => hash_of_subtrie
-	IntermediateTrieHashesBucket = []byte("IntermediateTrieCache")
+	IntermediateTrieCacheBucket = []byte("IntermediateTrieCache")
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = []byte("DatabaseVersion")

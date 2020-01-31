@@ -97,6 +97,10 @@ type mutation struct {
 	db               Database
 }
 
+func (m *mutation) DB() Database {
+	return m.db
+}
+
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
