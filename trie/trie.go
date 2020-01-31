@@ -45,7 +45,8 @@ var (
 type Trie struct {
 	root node
 
-	touchFunc func(hex []byte, del bool)
+	touchFunc  func(hex []byte, del bool)
+	unloadFunc func(prefix []byte, nodeHash []byte)
 
 	newHasherFunc func() *hasher
 
@@ -65,6 +66,7 @@ type Trie struct {
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		touchFunc:     func([]byte, bool) {},
+		unloadFunc:    func(prefix []byte, nodeHash []byte) {},
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 		hashMap:       make(map[common.Hash]node),
 	}
@@ -96,6 +98,10 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 
 func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
+}
+
+func (t *Trie) SetUnloadFunc(unloadFunc func(prefix []byte, nodeHash []byte)) {
+	t.unloadFunc = unloadFunc
 }
 
 // Get returns the value for key stored in the trie.
@@ -1208,12 +1214,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
+			t.unloadFunc(hex, p.child1.hash())
 			p.child1 = hnode
 		case i2:
+			t.unloadFunc(hex, p.child2.hash())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
+		t.unloadFunc(hex, p.Children[idx].hash())
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode

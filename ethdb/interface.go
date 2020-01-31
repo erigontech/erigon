@@ -18,6 +18,8 @@ package ethdb
 
 import (
 	"errors"
+
+	"github.com/ledgerwatch/bolt"
 )
 
 // DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
@@ -119,6 +121,14 @@ type DbWithPendingMutations interface {
 	Commit() (uint64, error)
 	Rollback()
 	BatchSize() int
+}
+
+type HasDb interface {
+	DB() Database
+}
+
+type HasBolt interface {
+	DB() *bolt.DB
 }
 
 var errNotSupported = errors.New("not supported")

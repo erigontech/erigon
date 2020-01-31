@@ -19,9 +19,10 @@ package ethdb
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"os"
 	"path"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 
