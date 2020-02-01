@@ -699,7 +699,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	batch := bc.db.NewBatch()
 	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
 	if bc.enableTxLookupIndex {
-		rawdb.WriteTxLookupEntries(batch, block)
+		rawdb.WriteTxLookupEntriesInMemory(block)
 	}
 	rawdb.WriteHeadBlockHash(batch, block.Hash())
 
@@ -709,6 +709,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	}
 
 	// Flush the whole batch into the disk, exit the node if failed
+	rawdb.WriteTxLookupEntries(batch)
 	if _, err := batch.Commit(); err != nil {
 		log.Crit("Failed to update chain indexes and markers", "err", err)
 	}
