@@ -46,7 +46,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				t = make(map[string][]byte)
 				m[bucketStr] = t
 			}
-			v := common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
 			err := dbutils.Walk(v, func(k, vv []byte) error {
 				if _, ok = t[string(k)]; !ok {
 					t[string(k)] = vv
