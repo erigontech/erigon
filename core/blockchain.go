@@ -1107,11 +1107,12 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			// Flush data into ancient database.
 			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
 			if bc.enableTxLookupIndex {
-				rawdb.WriteTxLookupEntries(batch, block)
+				rawdb.WriteTxLookupEntriesInMemory(block)
 			}
 
 			stats.processed++
 		}
+		rawdb.WriteTxLookupEntries(batch)
 		// Flush all tx-lookup index data.
 		size += batch.BatchSize()
 		if _, err := batch.Commit(); err != nil {
@@ -1180,11 +1181,12 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			rawdb.WriteBody(batch, block.Hash(), block.NumberU64(), block.Body())
 			rawdb.WriteReceipts(batch, block.Hash(), block.NumberU64(), receiptChain[i])
 			if bc.enableTxLookupIndex {
-				rawdb.WriteTxLookupEntries(batch, block)
+				rawdb.WriteTxLookupEntriesInMemory(block)
 			}
 
 			stats.processed++
 			if batch.BatchSize() >= batch.IdealBatchSize() {
+				rawdb.WriteTxLookupEntries(batch)
 				if _, err := batch.Commit(); err != nil {
 					return 0, err
 				}
@@ -1194,6 +1196,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 		}
 		if batch.BatchSize() > 0 {
 			size += batch.BatchSize()
+			rawdb.WriteTxLookupEntries(batch)
 			if _, err := batch.Commit(); err != nil {
 				return 0, err
 			}
@@ -1308,7 +1311,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
 	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
-		rawdb.WriteTxLookupEntries(bc.db, block)
+		rawdb.WriteTxLookupEntriesInMemory(block)
 	}
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
@@ -1594,6 +1597,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
+			rawdb.WriteTxLookupEntries(bc.db)
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
@@ -1622,6 +1626,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				return 0, err
 			}
 
+			rawdb.WriteTxLookupEntries(bc.db)
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
@@ -1727,6 +1732,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		stats.report(chain, i, bc.db)
 		if stats.needToCommit(chain, bc.db, i) {
 			var written uint64
+			rawdb.WriteTxLookupEntries(bc.db)
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
@@ -1932,12 +1938,13 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 
 		// Write lookup entries for hash based transaction/receipt searches
 		if bc.enableTxLookupIndex {
-			rawdb.WriteTxLookupEntries(bc.db, newChain[i])
+			rawdb.WriteTxLookupEntriesInMemory(newChain[i])
 		}
 		addedTxs = append(addedTxs, newChain[i].Transactions()...)
 	}
 	// When transactions get deleted from the database, the receipts that were
 	// created in the fork must also be deleted
+	rawdb.WriteTxLookupEntries(bc.db)
 	for _, tx := range types.TxDifference(deletedTxs, addedTxs) {
 		rawdb.DeleteTxLookupEntry(bc.db, tx.Hash())
 	}

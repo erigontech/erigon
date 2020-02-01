@@ -17,11 +17,15 @@
 package rawdb
 
 import (
+	"bytes"
 	"math/big"
+	"math/bits"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
@@ -33,6 +37,8 @@ type TxLookupEntry struct {
 	BlockIndex uint64
 	Index      uint64
 }
+
+var memTxLookupEntries []uint64
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
@@ -47,11 +53,70 @@ func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) *uint64 {
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
-func WriteTxLookupEntries(db DatabaseWriter, block *types.Block) {
-	for _, tx := range block.Transactions() {
-		data := block.Number().Bytes()
-		if err := db.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
-			log.Crit("Failed to store transaction lookup entry", "err", err)
+func WriteTxLookupEntriesInMemory(block *types.Block) {
+	blockNumber := block.Number().Bytes()
+	for txIndex, tx := range block.Transactions() {
+		entry := make([]byte, 8)
+		copy(entry, tx.Hash().Bytes()[:2])
+		copy(entry[(7-len(blockNumber)):], blockNumber)
+		entry[7] = byte(txIndex)
+		memTxLookupEntries = append(memTxLookupEntries, bytesToUint64(entry))
+	}
+	// sort the array
+	sort.Slice(memTxLookupEntries, func(i, j int) bool {
+		return memTxLookupEntries[i] < memTxLookupEntries[j]
+	})
+}
+
+func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
+	var sets []uint64
+	var prev []byte
+	var blockNumbers []uint64
+	for i, lookup := range memTxLookupEntries {
+		entry := uintToBytes(lookup)
+		posBlockNumber := len(entry) - 6
+		posTdx := len(entry) - 1
+		blockNumber := bytesToUint64(entry[posBlockNumber:posTdx])
+		tdx := int(entry[posTdx])
+		blockHash := ReadCanonicalHash(db, blockNumber)
+		body := ReadBody(db, blockHash, blockNumber)
+		var txHash []byte
+		// Get Transaction hash from index and block number
+		for txIndex, tx := range body.Transactions {
+			if txIndex == tdx {
+				txHash = tx.Hash().Bytes()
+				break
+			}
+		}
+		set := make([]byte, 8)
+		copy(set[(7-len(uintToBytes(blockNumber))):], uintToBytes(blockNumber))
+		set[7] = byte(tdx)
+		if prev == nil && i != len(memTxLookupEntries)-1 {
+			prev = entry[:posBlockNumber]
+			copy(set[:2], txHash[2:4])
+			sets = []uint64{bytesToUint64(set)}
+			blockNumbers = []uint64{blockNumber}
+		} else if bytes.Equal(entry[:2], prev) && i != len(memTxLookupEntries)-1 {
+			copy(set[:2], txHash[2:4])
+			sets = append(sets, bytesToUint64(set))
+			blockNumbers = append(blockNumbers, blockNumber)
+		} else if i == len(memTxLookupEntries)-1 {
+			if bytes.Equal(entry[:posBlockNumber], prev) {
+				copy(set[:2], txHash[2:4])
+				sets = append(sets, bytesToUint64(set))
+				blockNumbers = append(blockNumbers, blockNumber)
+				insertLookupSet(db, sets, blockNumbers)
+			}
+			insertLookupSet(db, sets, blockNumbers)
+			insertLookupSet(db, []uint64{bytesToUint64(set)}, []uint64{blockNumber})
+			memTxLookupEntries = []uint64{}
+			return
+		} else {
+			insertLookupSet(db, sets, blockNumbers)
+			prev = entry[:posBlockNumber]
+			copy(set[:2], txHash[2:4])
+			sets = []uint64{bytesToUint64(set)}
+			blockNumbers = []uint64{blockNumber}
 		}
 	}
 }
@@ -121,4 +186,79 @@ func WriteBloomBits(db DatabaseWriter, bit uint, section uint64, head common.Has
 	if err := db.Put(dbutils.BloomBitsPrefix, dbutils.BloomBitsKey(bit, section, head), bits); err != nil {
 		log.Crit("Failed to store bloom bits", "err", err)
 	}
+}
+
+func insertLookupSet(db ethdb.DbWithPendingMutations, sets []uint64, blockNumbers []uint64) {
+	//Perform quicksort of sets and block numbers
+	sortSet(0, len(sets)-1, sets, blockNumbers)
+	// Commit Lookups
+	for i, set := range sets {
+		entry := uintToBytes(set)
+		tdx := int(entry[len(entry)-1])
+		blockHash := ReadCanonicalHash(db, blockNumbers[i])
+		body := ReadBody(db, blockHash, blockNumbers[i])
+		var txHash []byte
+		for txIndex, tx := range body.Transactions {
+			if txIndex == tdx {
+				txHash = tx.Hash().Bytes()
+				break
+			}
+		}
+		if err := db.Put(dbutils.TxLookupPrefix, txHash, uintToBytes(blockNumbers[i])); err != nil {
+			log.Crit("Failed to store transaction lookup entry", "err", err)
+		}
+	}
+}
+
+func uintToBytes(x uint64) []byte {
+	nBytes := (bits.Len64(x) + 7) / 8
+	res := make([]byte, nBytes)
+	for i := nBytes; i > 0; i-- {
+		res[i-1] = byte(x)
+		x >>= 8
+	}
+	return res
+}
+
+func bytesToUint64(buf []byte) (x uint64) {
+	for i, b := range buf {
+		x = x<<8 + uint64(b)
+		if i == 7 {
+			return
+		}
+	}
+	return
+}
+
+func sortSet(start int, end int, sets []uint64, blockNumbers []uint64) {
+	if (end - start) < 1 {
+		return
+	}
+
+	pivot := sets[end]
+	lastBlock := blockNumbers[end]
+	splitIndex := start
+
+	for i := start; i < end; i++ {
+		if sets[i] < pivot {
+			temp := sets[splitIndex]
+			sets[splitIndex] = sets[i]
+			sets[i] = temp
+
+			temp = blockNumbers[splitIndex]
+			blockNumbers[splitIndex] = blockNumbers[i]
+			blockNumbers[i] = temp
+
+			splitIndex++
+		}
+	}
+
+	sets[end] = sets[splitIndex]
+	sets[splitIndex] = pivot
+
+	blockNumbers[end] = blockNumbers[splitIndex]
+	blockNumbers[splitIndex] = lastBlock
+
+	sortSet(start, splitIndex-1, sets, blockNumbers)
+	sortSet(splitIndex+1, end, sets, blockNumbers)
 }

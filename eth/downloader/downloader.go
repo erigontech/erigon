@@ -552,6 +552,7 @@ func (d *Downloader) cancel() {
 			close(d.cancelCh)
 		}
 	}
+	// TODO End Sync
 	d.cancelLock.Unlock()
 }
 

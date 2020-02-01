@@ -29,18 +29,20 @@ import (
 func TestLookupStorage(t *testing.T) {
 	tests := []struct {
 		name                 string
-		writeTxLookupEntries func(DatabaseWriter, *types.Block)
+		writeTxLookupEntries func(ethdb.DbWithPendingMutations, *types.Block)
 	}{
 		{
 			"DatabaseV6",
-			func(db DatabaseWriter, block *types.Block) {
-				WriteTxLookupEntries(db, block)
+			func(db ethdb.DbWithPendingMutations, block *types.Block) {
+				WriteTxLookupEntriesInMemory(block)
+				WriteTxLookupEntries(db)
 			},
 		},
 		// Turbo-Geth: older databases are removed, no backward compatibility
 	}
 
 	for _, tc := range tests {
+		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
 
@@ -60,8 +62,9 @@ func TestLookupStorage(t *testing.T) {
 			// Insert all the transactions into the database, and verify contents
 			WriteCanonicalHash(db, block.Hash(), block.NumberU64())
 			WriteBlock(db, block)
-			tc.writeTxLookupEntries(db, block)
-
+			batch := db.NewBatch()
+			tc.writeTxLookupEntries(batch, block)
+			_, _ = batch.Commit()
 			for i, tx := range txs {
 				if txn, hash, number, index := ReadTransaction(db, tx.Hash()); txn == nil {
 					t.Fatalf("tx #%d [%x]: transaction not found", i, tx.Hash())
