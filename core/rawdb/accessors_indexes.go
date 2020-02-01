@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"encoding/binary"
 	"math/big"
 	"math/bits"
 	"sort"
@@ -60,24 +61,24 @@ func WriteTxLookupEntriesInMemory(block *types.Block) {
 		copy(entry, tx.Hash().Bytes()[:2])
 		copy(entry[(7-len(blockNumber)):], blockNumber)
 		entry[7] = byte(txIndex)
-		memTxLookupEntries = append(memTxLookupEntries, bytesToUint64(entry))
+		memTxLookupEntries = append(memTxLookupEntries, binary.LittleEndian.Uint64(entry))
 	}
-	// sort the array
-	sort.Slice(memTxLookupEntries, func(i, j int) bool {
-		return memTxLookupEntries[i] < memTxLookupEntries[j]
-	})
 }
 
 func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 	var sets []uint64
 	var prev []byte
 	var blockNumbers []uint64
+	// sort the array
+	sort.Slice(memTxLookupEntries, func(i, j int) bool {
+		return memTxLookupEntries[i] < memTxLookupEntries[j]
+	})
 	for i, lookup := range memTxLookupEntries {
-		entry := uintToBytes(lookup)
-		posBlockNumber := len(entry) - 6
-		posTdx := len(entry) - 1
-		blockNumber := bytesToUint64(entry[posBlockNumber:posTdx])
-		tdx := int(entry[posTdx])
+		entry := make([]byte, 8)
+		binary.LittleEndian.PutUint64(entry, lookup)
+		log.Info("Debug", "entry", lookup)
+		blockNumber := bytesToUint64(entry[2:7])
+		tdx := int(entry[7])
 		blockHash := ReadCanonicalHash(db, blockNumber)
 		body := ReadBody(db, blockHash, blockNumber)
 		var txHash []byte
@@ -88,34 +89,31 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 				break
 			}
 		}
-		set := make([]byte, 8)
-		copy(set[(7-len(uintToBytes(blockNumber))):], uintToBytes(blockNumber))
-		set[7] = byte(tdx)
 		if prev == nil && i != len(memTxLookupEntries)-1 {
-			prev = entry[:posBlockNumber]
-			copy(set[:2], txHash[2:4])
-			sets = []uint64{bytesToUint64(set)}
+			prev = entry[:2]
+			copy(entry[:2], txHash[2:4])
+			sets = []uint64{bytesToUint64(entry)}
 			blockNumbers = []uint64{blockNumber}
 		} else if bytes.Equal(entry[:2], prev) && i != len(memTxLookupEntries)-1 {
-			copy(set[:2], txHash[2:4])
-			sets = append(sets, bytesToUint64(set))
+			copy(entry[:2], txHash[2:4])
+			sets = append(sets, bytesToUint64(entry))
 			blockNumbers = append(blockNumbers, blockNumber)
 		} else if i == len(memTxLookupEntries)-1 {
-			if bytes.Equal(entry[:posBlockNumber], prev) {
-				copy(set[:2], txHash[2:4])
-				sets = append(sets, bytesToUint64(set))
+			if bytes.Equal(entry[:2], prev) {
+				copy(entry[:2], txHash[2:4])
+				sets = append(sets, bytesToUint64(entry))
 				blockNumbers = append(blockNumbers, blockNumber)
 				insertLookupSet(db, sets, blockNumbers)
 			}
 			insertLookupSet(db, sets, blockNumbers)
-			insertLookupSet(db, []uint64{bytesToUint64(set)}, []uint64{blockNumber})
+			insertLookupSet(db, []uint64{bytesToUint64(entry)}, []uint64{blockNumber})
 			memTxLookupEntries = []uint64{}
 			return
 		} else {
 			insertLookupSet(db, sets, blockNumbers)
-			prev = entry[:posBlockNumber]
-			copy(set[:2], txHash[2:4])
-			sets = []uint64{bytesToUint64(set)}
+			prev = entry[:2]
+			copy(entry[:2], txHash[2:4])
+			sets = []uint64{bytesToUint64(entry)}
 			blockNumbers = []uint64{blockNumber}
 		}
 	}
