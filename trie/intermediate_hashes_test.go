@@ -11,6 +11,8 @@ import (
 )
 
 func TestCompressNibbles(t *testing.T) {
+	var err error
+
 	cases := []struct {
 		in     string
 		expect string
@@ -26,7 +28,6 @@ func TestCompressNibbles(t *testing.T) {
 	defer pool.PutBuffer(compressBuf)
 	decompressBuf := pool.GetBuffer(64)
 	defer pool.PutBuffer(decompressBuf)
-
 	for _, tc := range cases {
 		compressBuf.Reset()
 		decompressBuf.Reset()

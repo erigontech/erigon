@@ -17,7 +17,7 @@ require (
 	github.com/cloudflare/cloudflare-go v0.10.6
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dgraph-io/badger v1.6.0
+	github.com/dgraph-io/badger/v2 v2.0.1
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200106141417-aaec0e7bde29
@@ -71,7 +71,7 @@ require (
 	golang.org/x/sys v0.0.0-20191105231009-c1f44814a5cd
 	golang.org/x/text v0.3.2
 	golang.org/x/time v0.0.0-20190921001708-c4c64cad1fd0
-	gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127
+	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20190213234257-ec84240a7772
 	gopkg.in/yaml.v2 v2.2.4 // indirect

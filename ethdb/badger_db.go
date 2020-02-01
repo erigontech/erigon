@@ -25,7 +25,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/dgraph-io/badger"
+	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -56,7 +56,6 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		runtime.GOMAXPROCS(minGoMaxProcs)
 		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
 	}
-
 	options := badger.DefaultOptions(dir).WithMaxTableSize(512 << 20)
 
 	db, err := badger.Open(options)
@@ -74,6 +73,22 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 			}
 		}
 	}()
+
+	//if err := db.View(func(txn *badger.Txn) error {
+	//	opts := badger.DefaultIteratorOptions
+	//	opts.Prefix = bucketKey(dbutils.ChangeSetBucket, nil)
+	//	opts.PrefetchValues = false
+	//	it := txn.NewIterator(opts)
+	//	for it.Rewind(); it.Valid(); it.Next() {
+	//		item := it.Item()
+	//		k := item.Value()
+	//		k := item.ValueCopy()
+	//		fmt.Printf("key=%s\n", k)
+	//	}
+	//	return nil
+	//}); err != nil {
+	//	panic(err)
+	//}
 
 	return &BadgerDatabase{
 		db:       db,
