@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 func NewChangeSet() *ChangeSet {
@@ -57,6 +58,7 @@ uint32 integers are serialized as big-endian.
 
 // Encode sorts a ChangeSet by key and then serializes it.
 func (s *ChangeSet) Encode() ([]byte, error) {
+	sort.Sort(s)
 	buf := new(bytes.Buffer)
 	intArr := make([]byte, 4)
 	n := s.Len()
