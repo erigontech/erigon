@@ -6,6 +6,7 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -32,12 +33,12 @@ func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 // See also ResolveRequest in trie.go
 type Resolver struct {
 	accounts         bool // Is this a resolver for accounts or for storage
-	requests         []*ResolveRequest
 	historical       bool
+	collectWitnesses bool // if true, stores witnesses for all the subtries that are being resolved
 	blockNr          uint64
-	collectWitnesses bool       // if true, stores witnesses for all the subtries that are being resolved
+	topLevels        int // How many top levels of the trie to keep (not roll into hashes)
+	requests         []*ResolveRequest
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
-	topLevels        int        // How many top levels of the trie to keep (not roll into hashes)
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
@@ -48,6 +49,16 @@ func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 		topLevels: topLevels,
 	}
 	return &tr
+}
+
+func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
+	tr.topLevels = topLevels
+	tr.accounts = forAccounts
+	tr.blockNr = blockNr
+	tr.requests = tr.requests[:0]
+	tr.witnesses = nil
+	tr.collectWitnesses = false
+	tr.historical = false
 }
 
 func (tr *Resolver) CollectWitnesses(c bool) {
@@ -116,6 +127,7 @@ const (
 	AccountFieldCodeHashOnly        uint32 = 0x08
 	AccountFieldSSizeOnly           uint32 = 0x10
 	AccountFieldSetNotAccount       uint32 = 0x00
+	AccountFieldSetHashOfAccount    uint32 = 0x80 // For review: add this value? Of add another field resolver.isCache ?
 	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
 	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
 	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
@@ -131,6 +143,12 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 	}
 
 	sort.Stable(tr)
+
+	if debug.IsIntermediateTrieCache() && !tr.historical {
+		resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
+		return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	}
+
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
 	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 }

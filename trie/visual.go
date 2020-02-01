@@ -33,13 +33,13 @@ type VisualOpts struct {
 	Highlights     [][]byte               // Collection of keys, in the HEX encoding, that need to be highlighted with digits
 	IndexColors    []string               // Array of colors for representing digits as colored boxes
 	FontColors     []string               // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
-	Values         bool                   // Whether to display value nodes (as box with rounded corners)
 	CutTerminals   int                    // Specifies how many digits to cut from the terminal short node keys for a more convinient display
-	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
+	Values         bool                   // Whether to display value nodes (as box with rounded corners)
 	CodeCompressed bool                   // Whether to turn the code from a large rectange to a small square for a more convinient display
 	ValCompressed  bool                   // Whether long values (over 10 characters) are shortened using ... in the middle
 	ValHex         bool                   // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
 	SameLevel      bool                   // Whether the leaves (and hashes) need to be on the same horizontal level
+	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
 }
 
 // Visual creates visualisation of trie with highlighting
@@ -83,15 +83,15 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 			if leaves != nil {
 				leaves[string(hex)] = struct{}{}
 				/*
-				var valStr string
-				if opts.ValHex {
-					valStr = fmt.Sprintf("%x", []byte(v))
-				} else {
-					valStr = string(v)
-				}
-				if opts.ValCompressed && len(valStr) > 10 {
-					valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
-				}
+					var valStr string
+					if opts.ValHex {
+						valStr = fmt.Sprintf("%x", []byte(v))
+					} else {
+						valStr = string(v)
+					}
+					if opts.ValCompressed && len(valStr) > 10 {
+						valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
+					}
 				*/
 				valHex := keybytesToHex(v)
 				valHex = valHex[:len(valHex)-1]

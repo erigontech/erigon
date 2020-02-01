@@ -18,6 +18,8 @@ package ethdb
 
 import (
 	"errors"
+
+	"github.com/ledgerwatch/bolt"
 )
 
 // TODO [Andrew] Add some comments about historical buckets & ChangeSet.
@@ -120,6 +122,14 @@ type DbWithPendingMutations interface {
 	Commit() (uint64, error)
 	Rollback()
 	BatchSize() int
+}
+
+type HasDb interface {
+	DB() Database
+}
+
+type HasBolt interface {
+	DB() *bolt.DB
 }
 
 var errNotSupported = errors.New("not supported")

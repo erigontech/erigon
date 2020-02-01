@@ -168,7 +168,12 @@ func Stateless(
 		interruptCh <- true
 	}()
 
-	witnessThreshold = 0
+	timeF, err := os.Create("timings.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer timeF.Close()
+	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
 	ethDb, err := createDb(chaindata)
 	check(err)
@@ -267,12 +272,13 @@ func Stateless(
 	}
 
 	for !interrupt {
-		trace := blockNum == 50111 // false // blockNum == 545080
+		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
+		execStart := time.Now()
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -300,6 +306,9 @@ func Stateless(
 			return
 		}
 
+		execTime1 := time.Since(execStart)
+		execStart = time.Now()
+
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
@@ -324,7 +333,7 @@ func Stateless(
 				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
 			}
 		}
-
+		execTime2 := time.Since(execStart)
 		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
@@ -346,6 +355,7 @@ func Stateless(
 			check(err)
 		}
 		finalRootFail := false
+		execStart = time.Now()
 		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
 			var w *trie.Witness
@@ -379,20 +389,24 @@ func Stateless(
 				finalRootFail = true
 			}
 		}
-
+		execTime3 := time.Since(execStart)
+		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 1)
 			if err != nil {
 				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
 				return
 			}
 		}
+		execTime4 := time.Since(execStart)
+		execStart = time.Now()
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
+		execTime5 := time.Since(execStart)
 		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -465,6 +479,12 @@ func Stateless(
 
 			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
+		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d,%d\n", blockNum,
+			execTime1.Nanoseconds(),
+			execTime2.Nanoseconds(),
+			execTime3.Nanoseconds(),
+			execTime4.Nanoseconds(),
+			execTime5.Nanoseconds())
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:

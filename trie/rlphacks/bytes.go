@@ -6,8 +6,8 @@ import (
 
 type RlpSerializableBytes []byte
 
-func (b RlpSerializableBytes) ToDoubleRLP(w io.Writer) error {
-	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLenDouble, 8)
+func (b RlpSerializableBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
+	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLenDouble, prefixBuf)
 }
 
 func (b RlpSerializableBytes) RawBytes() []byte {
@@ -23,8 +23,8 @@ func (b RlpSerializableBytes) DoubleRLPLen() int {
 
 type RlpEncodedBytes []byte
 
-func (b RlpEncodedBytes) ToDoubleRLP(w io.Writer) error {
-	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLen, 4)
+func (b RlpEncodedBytes) ToDoubleRLP(w io.Writer, prefixBuf []byte) error {
+	return encodeBytesAsRlpToWriter(b, w, generateByteArrayLen, prefixBuf)
 }
 
 func (b RlpEncodedBytes) RawBytes() []byte {
@@ -35,13 +35,12 @@ func (b RlpEncodedBytes) DoubleRLPLen() int {
 	return generateRlpPrefixLen(len(b)) + len(b)
 }
 
-func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBufferSize uint) error {
+func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]byte, int, int) int, prefixBuf []byte) error {
 	// > 1 byte, write a prefix or prefixes first
 	if len(source) > 1 || (len(source) == 1 && source[0] >= 0x80) {
-		prefix := make([]byte, prefixBufferSize)
-		prefixLen := prefixGenFunc(prefix, 0, len(source))
+		prefixLen := prefixGenFunc(prefixBuf, 0, len(source))
 
-		if _, err := w.Write(prefix[:prefixLen]); err != nil {
+		if _, err := w.Write(prefixBuf[:prefixLen]); err != nil {
 			return err
 		}
 	}
@@ -50,8 +49,8 @@ func encodeBytesAsRlpToWriter(source []byte, w io.Writer, prefixGenFunc func([]b
 	return err
 }
 
-func EncodeByteArrayAsRlp(raw []byte, w io.Writer) (int, error) {
-	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, 4)
+func EncodeByteArrayAsRlp(raw []byte, w io.Writer, prefixBuf []byte) (int, error) {
+	err := encodeBytesAsRlpToWriter(raw, w, generateByteArrayLen, prefixBuf)
 	if err != nil {
 		return 0, err
 	}

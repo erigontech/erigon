@@ -7,10 +7,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -96,6 +95,10 @@ type mutation struct {
 	changeSetByBlock map[uint64]map[string]*dbutils.ChangeSet
 	mu               sync.RWMutex
 	db               Database
+}
+
+func (m *mutation) DB() Database {
+	return m.db
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
@@ -377,7 +380,7 @@ func (m *mutation) Commit() (uint64, error) {
 							if m.db != nil {
 								value, err = m.db.Get(hBucket, key)
 								if err != nil && err != ErrKeyNotFound {
-									return 0, err
+									return 0, fmt.Errorf("db.Get failed: %w", err)
 								}
 							}
 						}
@@ -421,7 +424,7 @@ func (m *mutation) Commit() (uint64, error) {
 		for key := range bt {
 			value, _ := bt.GetStr(key)
 			if err := tuples.Append(bucketB, []byte(key), value); err != nil {
-				return 0, err
+				return 0, fmt.Errorf("tuples.Append failed: %w", err)
 			}
 		}
 	}
@@ -429,7 +432,7 @@ func (m *mutation) Commit() (uint64, error) {
 
 	written, err := m.db.MultiPut(tuples.Values...)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
 	m.puts = make(puts)
 	return written, nil

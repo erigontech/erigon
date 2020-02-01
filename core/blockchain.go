@@ -120,12 +120,13 @@ type CacheConfig struct {
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 
-	BlocksBeforePruning uint64
-	BlocksToPrune       uint64
-	PruneTimeout        time.Duration
-	ArchiveSyncInterval uint64
-	DownloadOnly        bool
-	NoHistory           bool
+	BlocksBeforePruning     uint64
+	BlocksToPrune           uint64
+	PruneTimeout            time.Duration
+	ArchiveSyncInterval     uint64
+	DownloadOnly            bool
+	NoHistory               bool
+	NoIntermediateTrieCache bool
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -372,6 +373,7 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 			return nil, err
 		}
 		tds.SetNoHistory(bc.NoHistory())
+		tds.NoIntermediateCache(bc.NoIntermediateTrieCache())
 		tds.SetResolveReads(bc.resolveReads)
 		tds.EnablePreimages(bc.enablePreimages)
 		if err := tds.Rebuild(); err != nil {
@@ -480,6 +482,11 @@ func (bc *BlockChain) SetHead(head uint64) error {
 				newHeadBlock = bc.genesisBlock
 			}
 			rawdb.WriteHeadBlockHash(db, newHeadBlock.Hash())
+
+			// Degrade the chain markers if they are explicitly reverted.
+			// In theory we should update all in-memory markers in the
+			// last step, however the direction of SetHead is from high
+			// to low, so it's safe the update in-memory markers directly.
 			bc.currentBlock.Store(newHeadBlock)
 			headBlockGauge.Update(int64(newHeadBlock.NumberU64()))
 		}
@@ -492,6 +499,11 @@ func (bc *BlockChain) SetHead(head uint64) error {
 				newHeadFastBlock = bc.genesisBlock
 			}
 			rawdb.WriteHeadFastBlockHash(db, newHeadFastBlock.Hash())
+
+			// Degrade the chain markers if they are explicitly reverted.
+			// In theory we should update all in-memory markers in the
+			// last step, however the direction of SetHead is from high
+			// to low, so it's safe the update in-memory markers directly.
 			bc.currentFastBlock.Store(newHeadFastBlock)
 			headFastBlockGauge.Update(int64(newHeadFastBlock.NumberU64()))
 		}
@@ -621,22 +633,23 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	// Prepare the genesis block and reinitialise the chain
-	if err := bc.hc.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty()); err != nil {
-		log.Crit("Failed to write genesis block TD", "err", err)
-	}
-	rawdb.WriteBlock(bc.db, genesis)
+	batch := bc.db.NewBatch()
 
+	rawdb.WriteTd(batch, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
+	rawdb.WriteBlock(batch, genesis)
+	if _, err := batch.Commit(); err != nil {
+		log.Crit("Failed to write genesis block", "err", err)
+	}
+	bc.writeHeadBlock(genesis)
+
+	// Last update all in-memory chain markers
 	bc.genesisBlock = genesis
-	bc.insert(bc.genesisBlock)
 	bc.currentBlock.Store(bc.genesisBlock)
 	headBlockGauge.Update(int64(bc.genesisBlock.NumberU64()))
-
 	bc.hc.SetGenesis(bc.genesisBlock.Header())
 	bc.hc.SetCurrentHeader(bc.db, bc.genesisBlock.Header())
 	bc.currentFastBlock.Store(bc.genesisBlock)
 	headFastBlockGauge.Update(int64(bc.genesisBlock.NumberU64()))
-
 	return nil
 }
 
@@ -672,31 +685,40 @@ func (bc *BlockChain) ExportN(w io.Writer, first uint64, last uint64) error {
 	return nil
 }
 
-// insert injects a new head block into the current block chain. This method
+// writeHeadBlock injects a new head block into the current block chain. This method
 // assumes that the block is indeed a true head. It will also reset the head
 // header and the head fast sync block to this very same block if they are older
 // or if they are on a different side chain.
 //
 // Note, this function assumes that the `mu` mutex is held!
-func (bc *BlockChain) insert(block *types.Block) {
+func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	// If the block is on a side chain or an unknown one, force other heads onto it too
 	updateHeads := rawdb.ReadCanonicalHash(bc.db, block.NumberU64()) != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
-	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
-	rawdb.WriteHeadBlockHash(bc.db, block.Hash())
+	batch := bc.db.NewBatch()
+	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
+	if bc.enableTxLookupIndex {
+		rawdb.WriteTxLookupEntries(batch, block)
+	}
+	rawdb.WriteHeadBlockHash(batch, block.Hash())
 
-	bc.currentBlock.Store(block)
-	headBlockGauge.Update(int64(block.NumberU64()))
-
-	// If the block is better than our head or is on a different chain, force update heads
 	if updateHeads {
 		bc.hc.SetCurrentHeader(bc.db, block.Header())
 		rawdb.WriteHeadFastBlockHash(bc.db, block.Hash())
+	}
 
+	// Flush the whole batch into the disk, exit the node if failed
+	if _, err := batch.Commit(); err != nil {
+		log.Crit("Failed to update chain indexes and markers", "err", err)
+	}
+
+	if updateHeads {
 		bc.currentFastBlock.Store(block)
 		headFastBlockGauge.Update(int64(block.NumberU64()))
 	}
+	bc.currentBlock.Store(block)
+	headBlockGauge.Update(int64(block.NumberU64()))
 }
 
 // Genesis retrieves the chain's genesis block.
@@ -946,25 +968,33 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
+	batch := bc.db.NewBatch()
 	for i := len(chain) - 1; i >= 0; i-- {
 		hash := chain[i]
 
+		// Degrade the chain markers if they are explicitly reverted.
+		// In theory we should update all in-memory markers in the
+		// last step, however the direction of rollback is from high
+		// to low, so it's safe the update in-memory markers directly.
 		currentHeader := bc.hc.CurrentHeader()
 		if currentHeader.Hash() == hash {
 			bc.hc.SetCurrentHeader(bc.db, bc.GetHeader(currentHeader.ParentHash, currentHeader.Number.Uint64()-1))
 		}
 		if currentFastBlock := bc.CurrentFastBlock(); currentFastBlock.Hash() == hash {
 			newFastBlock := bc.GetBlock(currentFastBlock.ParentHash(), currentFastBlock.NumberU64()-1)
-			rawdb.WriteHeadFastBlockHash(bc.db, newFastBlock.Hash())
+			rawdb.WriteHeadFastBlockHash(batch, currentFastBlock.ParentHash())
 			bc.currentFastBlock.Store(newFastBlock)
 			headFastBlockGauge.Update(int64(newFastBlock.NumberU64()))
 		}
 		if currentBlock := bc.CurrentBlock(); currentBlock.Hash() == hash {
 			newBlock := bc.GetBlock(currentBlock.ParentHash(), currentBlock.NumberU64()-1)
-			rawdb.WriteHeadBlockHash(bc.db, newBlock.Hash())
+			rawdb.WriteHeadBlockHash(batch, currentBlock.ParentHash())
 			bc.currentBlock.Store(newBlock)
 			headBlockGauge.Update(int64(newBlock.NumberU64()))
 		}
+	}
+	if _, err := batch.Commit(); err != nil {
+		log.Crit("Failed to rollback chain markers", "err", err)
 	}
 	// Truncate ancient data which exceeds the current header.
 	//
@@ -1193,6 +1223,7 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 				size += batch.BatchSize()
 				batch = bc.db.NewBatch()
 			}
+			stats.processed++
 		}
 		if batch.BatchSize() > 0 {
 			size += batch.BatchSize()
@@ -1261,14 +1292,16 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 	if ptd == nil {
 		return NonStatTy, consensus.ErrUnknownAncestor
 	}
-	//localTd := bc.GetTd(currentBlock.Hash(), currentBlock.NumberU64())
 	externTd := new(big.Int).Add(block.Difficulty(), ptd)
 
 	// Irrelevant of the canonical status, write the block itself to the database
-	if err := bc.hc.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd); err != nil {
-		return NonStatTy, err
+	blockBatch := bc.db.NewBatch()
+	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
+	rawdb.WriteBlock(blockBatch, block)
+	if _, err := blockBatch.Commit(); err != nil {
+		log.Crit("Failed to write block into disk", "err", err)
 	}
-	rawdb.WriteBlock(bc.db, block)
+	// Commit all cached state changes into underlying memory database.
 
 	if tds != nil {
 		tds.SetBlockNr(block.NumberU64())
@@ -1325,7 +1358,7 @@ func (bc *BlockChain) writeBlockWithState(block *types.Block, receipts []*types.
 
 	// Set new head.
 	if status == CanonStatTy {
-		bc.insert(block)
+		bc.writeHeadBlock(block)
 	}
 	bc.futureBlocks.Remove(block.Hash())
 
@@ -1927,11 +1960,11 @@ func (bc *BlockChain) reorg(oldBlock, newBlock *types.Block) error {
 	for _, oldBlock := range oldChain {
 		rawdb.DeleteCanonicalHash(bc.db, oldBlock.NumberU64())
 	}
-	bc.insert(commonBlock)
+	bc.writeHeadBlock(commonBlock)
 	// Insert the new chain, taking care of the proper incremental order
 	for i := len(newChain) - 1; i >= 0; i-- {
 		// insert the block in the canonical way, re-writing history
-		bc.insert(newChain[i])
+		bc.writeHeadBlock(newChain[i])
 
 		// Collect reborn logs due to chain reorg
 		collectLogs(newChain[i].Hash(), false)
@@ -2219,6 +2252,22 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	return bc.cacheConfig.NoHistory || isArchiveInterval
 }
 
+func (bc *BlockChain) NoIntermediateTrieCache() bool {
+	return bc.cacheConfig.NoIntermediateTrieCache
+}
+
+func (bc *BlockChain) IsNoIntermediateTrieCache(currentBlock *big.Int) bool {
+	if currentBlock == nil {
+		return bc.cacheConfig.NoHistory
+	}
+
+	if !bc.cacheConfig.NoHistory {
+		return false
+	}
+
+	return true
+}
+
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
 	bc.highestKnownBlockMu.Lock()
 	if bc.highestKnownBlock < h {
@@ -2236,6 +2285,7 @@ func (bc *BlockChain) GetHeightKnownBlock() uint64 {
 func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
 	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
+	ctx = params.WithNoIntermediateTrieCache(ctx, bc.NoIntermediateTrieCache(), bc.IsNoIntermediateTrieCache)
 	return ctx
 }
 
