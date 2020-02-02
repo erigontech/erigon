@@ -1452,7 +1452,6 @@ func (bc *BlockChain) InsertChain(chain types.Blocks) (int, error) {
 // completes, then the historic state could be pruned again
 func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verifySeals bool) (int, error) {
 	log.Info("Inserting chain", "start", chain[0].NumberU64(), "end", chain[len(chain)-1].NumberU64())
-	fmt.Println("end")
 	// If the chain is terminating, don't even bother starting u
 	if bc.getProcInterrupt() {
 		return 0, nil
@@ -1633,7 +1632,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if parent != nil && root != parentRoot && !bc.cacheConfig.DownloadOnly {
 			log.Info("Rewinding from", "block", bc.CurrentBlock().NumberU64(), "to block", readBlockNr)
 			rawdb.WriteTxLookupEntries(bc.db)
-			fmt.Println("Here")
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
 				bc.db.Rollback()
