@@ -59,8 +59,9 @@ func WriteTxLookupEntriesInMemory(block *types.Block) {
 	for txIndex, tx := range block.Transactions() {
 		entry := make([]byte, 8)
 		copy(entry, tx.Hash().Bytes()[:2])
-		copy(entry[(7-len(blockNumber)):], blockNumber)
-		entry[7] = byte(txIndex)
+		copy(entry[(6-len(blockNumber)):], blockNumber)
+		tdxBytes := uintToBytes(uint64(txIndex))
+		copy(entry[8-len(tdxBytes):], tdxBytes)
 		memTxLookupEntries = append(memTxLookupEntries, binary.LittleEndian.Uint64(entry))
 	}
 }
@@ -76,9 +77,8 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 	for i, lookup := range memTxLookupEntries {
 		entry := make([]byte, 8)
 		binary.LittleEndian.PutUint64(entry, lookup)
-		log.Info("Debug", "entry", lookup)
-		blockNumber := bytesToUint64(entry[2:7])
-		tdx := int(entry[7])
+		blockNumber := bytesToUint64(entry[2:6])
+		tdx := int(bytesToUint64(entry[6:]))
 		blockHash := ReadCanonicalHash(db, blockNumber)
 		body := ReadBody(db, blockHash, blockNumber)
 		var txHash []byte

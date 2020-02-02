@@ -21,27 +21,42 @@ import (
 	"testing"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
+var DBVersions []struct {
+	name                 string
+	writeTxLookupEntries func(ethdb.DbWithPendingMutations, *types.Block)
+} = []struct {
+	name                 string
+	writeTxLookupEntries func(ethdb.DbWithPendingMutations, *types.Block)
+}{
+	{
+		"DatabaseV6Sort",
+		func(db ethdb.DbWithPendingMutations, block *types.Block) {
+			WriteTxLookupEntriesInMemory(block)
+			WriteTxLookupEntries(db)
+		},
+	},
+	{
+		"DatabaseV6",
+		func(db ethdb.DbWithPendingMutations, block *types.Block) {
+			for _, tx := range block.Transactions() {
+				data := block.Number().Bytes()
+				if err := db.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), data); err != nil {
+					panic(err)
+				}
+			}
+		},
+	},
+	// Turbo-Geth: older databases are removed, no backward compatibility
+}
+
 // Tests that positional lookup metadata can be stored and retrieved.
 func TestLookupStorage(t *testing.T) {
-	tests := []struct {
-		name                 string
-		writeTxLookupEntries func(ethdb.DbWithPendingMutations, *types.Block)
-	}{
-		{
-			"DatabaseV6",
-			func(db ethdb.DbWithPendingMutations, block *types.Block) {
-				WriteTxLookupEntriesInMemory(block)
-				WriteTxLookupEntries(db)
-			},
-		},
-		// Turbo-Geth: older databases are removed, no backward compatibility
-	}
-
-	for _, tc := range tests {
+	for _, tc := range DBVersions {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
