@@ -19,7 +19,6 @@ package rawdb
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"math/big"
 	"math/bits"
 	"sort"
@@ -41,8 +40,6 @@ type TxLookupEntry struct {
 }
 
 var memTxLookupEntries []uint64
-var start uint64 = 0
-var end uint64 = 0
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
@@ -58,9 +55,6 @@ func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) *uint64 {
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
 func WriteTxLookupEntriesInMemory(block *types.Block) {
-	if start == 0 {
-		start = block.NumberU64()
-	}
 	blockNumber := block.Number().Bytes()
 	for txIndex, tx := range block.Transactions() {
 		entry := make([]byte, 8)
@@ -122,8 +116,6 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 			sets = []uint64{bytesToUint64(entry)}
 			blockNumbers = []uint64{blockNumber}
 		}
-		fmt.Println(blockNumber)
-		fmt.Println(start)
 	}
 }
 
