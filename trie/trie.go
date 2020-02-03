@@ -380,7 +380,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				newNode = value
 				t.evictNodeFromHashMap(origNode)
 			} else {
-				newNode = vn
+				newNode = origN
 			}
 			return
 		}
@@ -670,7 +670,7 @@ func (t *Trie) Delete(key []byte, blockNr uint64) {
 	if t.binary {
 		hex = keyHexToBin(hex)
 	}
-	_, t.root = t.delete(t.root, hex, 0)
+	_, t.root = t.delete(t.root, hex, 0, false)
 }
 
 func (t *Trie) convertToShortNode(child node, pos uint) node {
@@ -698,13 +698,22 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
-func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, newNode node) {
+func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode node) {
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
-		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-			if matchlen == len(key)-keyStart {
+		mismatch := matchlen != len(n.Key) && n.Key[matchlen] != 16
+		if preserveAccountNode {
+			mismatch = len(key) != keyStart && matchlen != len(key[keyStart:])-1 && matchlen != len(n.Key) && matchlen != len(key[keyStart:])
+		}
+		if !mismatch {
+			wholeMatch := matchlen == len(key)-keyStart
+			if preserveAccountNode {
+				wholeMatch = len(key) == keyStart || matchlen == len(key[keyStart:])-1
+			}
+
+			if wholeMatch {
 				updated = true
 				t.evictNodeFromHashMap(n)
 				touchKey := key[:keyStart+matchlen]
@@ -718,7 +727,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				// from the subtrie. Child can never be nil here since the
 				// subtrie must contain at least two other values with keys
 				// longer than n.Key.
-				updated, nn = t.delete(n.Val, key, keyStart+matchlen)
+				updated, nn = t.delete(n.Val, key, keyStart+matchlen, preserveAccountNode)
 				if !updated {
 					newNode = n
 				} else {
@@ -751,7 +760,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.delete(n.child1, key, keyStart+1)
+			updated, nn = t.delete(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
@@ -768,7 +777,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 				}
 			}
 		case i2:
-			updated, nn = t.delete(n.child2, key, keyStart+1)
+			updated, nn = t.delete(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
@@ -793,7 +802,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 
 	case *fullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.delete(child, key, keyStart+1)
+		updated, nn = t.delete(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
@@ -853,189 +862,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int) (updated bool, ne
 		}
 		return
 
-	case valueNode:
-		t.evictNodeFromHashMap(n)
-		updated = true
-		newNode = nil
-		return
-
-	case *accountNode:
-		if key[keyStart] == 16 {
-			t.evictNodeFromHashMap(n)
-			// Key terminates here
-			if n.storage != nil {
-				// Mark all the storage nodes as deleted
-				t.touchAll(n.storage, key[:keyStart], true)
-			}
-			return true, nil
-		}
-		updated, nn = t.delete(n.storage, key, keyStart)
-		if updated {
-			t.evictNodeFromHashMap(n)
-			n.storage = nn
-			n.rootCorrect = false
-		}
-		newNode = n
-		return
-
-	case nil:
-		updated = false
-		newNode = nil
-		return
-
-	default:
-		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
-	}
-}
-
-func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr uint64) (updated bool, newNode node) {
-	if keyStart+1 == len(key) {
-		return true, nil
-	}
-
-	var nn node
-	switch n := origNode.(type) {
-	case *shortNode:
-		matchlen := prefixLen(key[keyStart:], n.Key)
-		switch {
-		case len(key) == keyStart || matchlen == len(key[keyStart:])-1:
-			t.evictSubtreeFromHashMap(n)
-			updated = true
-			newNode = nil
-		case matchlen < len(n.Key) && matchlen != len(key[keyStart:]):
-			updated = false
-			newNode = n
-		default:
-
-			if keyStart+1 == len(key) {
-				t.evictSubtreeFromHashMap(n)
-				return true, nil
-			}
-			updated, nn = t.deleteSubtree(n.Val, key, keyStart+len(n.Key), blockNr)
-			if !updated {
-				newNode = n
-			} else {
-				t.evictNodeFromHashMap(n)
-				if nn == nil {
-					newNode = nil
-				} else {
-					if shortChild, ok := nn.(*shortNode); ok {
-						// Deleting from the subtrie reduced it to another
-						// short node. Merge the nodes to avoid creating a
-						// shortNode{..., shortNode{...}}. Use concat (which
-						// always creates a new slice) instead of append to
-						// avoid modifying n.Key since it might be shared with
-						// other nodes.
-						newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
-					} else {
-						n.Val = nn
-						newNode = n
-					}
-				}
-			}
-		}
-		return
-
-	case *duoNode:
-		i1, i2 := n.childrenIdx()
-		switch key[keyStart] {
-		case i1:
-			updated, nn = t.deleteSubtree(n.child1, key, keyStart+1, blockNr)
-			if !updated {
-				newNode = n
-			} else {
-				t.evictNodeFromHashMap(n)
-				if nn == nil {
-					newNode = t.convertToShortNode(n.child2, uint(i2))
-				} else {
-					n.child1 = nn
-					n.flags.dirty = true
-					newNode = n
-				}
-			}
-		case i2:
-			updated, nn = t.deleteSubtree(n.child2, key, keyStart+1, blockNr)
-			if !updated {
-				newNode = n
-			} else {
-				t.evictNodeFromHashMap(n)
-				if nn == nil {
-					newNode = t.convertToShortNode(n.child1, uint(i1))
-				} else {
-					n.child2 = nn
-					n.flags.dirty = true
-					newNode = n
-				}
-			}
-
-		default:
-			updated = false
-			newNode = n
-		}
-
-		return
-
-	case *fullNode:
-		child := n.Children[key[keyStart]]
-		updated, nn = t.deleteSubtree(child, key, keyStart+1, blockNr)
-		if !updated {
-			t.touchFunc(key[:keyStart], false)
-			newNode = n
-		} else {
-			t.evictNodeFromHashMap(n)
-			n.Children[key[keyStart]] = nn
-			// Check how many non-nil entries are left after deleting and
-			// reduce the full node to a short node if only one entry is
-			// left. Since n must've contained at least two children
-			// before deletion (otherwise it would not be a full node) n
-			// can never be reduced to nil.
-			//
-			// When the loop is done, pos contains the index of the single
-			// value that is left in n or -2 if n contains at least two
-			// values.
-			var pos1, pos2 int
-			count := 0
-			for i, cld := range n.Children {
-				if cld != nil {
-					if count == 0 {
-						pos1 = i
-					}
-					if count == 1 {
-						pos2 = i
-					}
-					count++
-					if count > 2 {
-						break
-					}
-				}
-			}
-			if count == 1 {
-				t.touchFunc(key[:keyStart], true)
-				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
-			} else if count == 2 {
-				t.touchFunc(key[:keyStart], false)
-				duo := &duoNode{}
-				if pos1 == int(key[keyStart]) {
-					duo.child1 = nn
-				} else {
-					duo.child1 = n.Children[pos1]
-				}
-				if pos2 == int(key[keyStart]) {
-					duo.child2 = nn
-				} else {
-					duo.child2 = n.Children[pos2]
-				}
-				duo.flags.dirty = true
-				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
-				newNode = duo
-			} else if count > 2 {
-				t.touchFunc(key[:keyStart], false)
-				// n still contains at least three values and cannot be reduced.
-				n.flags.dirty = true
-				newNode = n
-			}
-		}
-		return
 	case valueNode:
 		t.evictNodeFromHashMap(n)
 		updated = true
@@ -1054,20 +880,21 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 				// Mark all the storage nodes as deleted
 				t.touchAll(n.storage, h, true)
 			}
-			n.storage = nil
-			n.Root = EmptyRoot
-			n.rootCorrect = true
-			return true, n
+			if preserveAccountNode {
+				n.storage = nil
+				n.Root = EmptyRoot
+				n.rootCorrect = true
+				return true, n
+			}
+			return true, nil
 		}
-
-		updated, nn = t.deleteSubtree(n.storage, key, keyStart, 0)
+		updated, nn = t.delete(n.storage, key, keyStart, preserveAccountNode)
 		if updated {
 			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
 		newNode = n
-
 		return
 
 	case nil:
@@ -1076,7 +903,7 @@ func (t *Trie) deleteSubtree(origNode node, key []byte, keyStart int, blockNr ui
 		return
 
 	default:
-		panic(fmt.Sprintf("[block %d] %T: invalid node: %v (%v)", blockNr, n, n, key[:keyStart]))
+		panic(fmt.Sprintf("%T: invalid node: %v (%v)", n, n, key[:keyStart]))
 	}
 }
 
@@ -1085,7 +912,7 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
 	if t.binary {
 		hexPrefix = keyHexToBin(hexPrefix)
 	}
-	_, t.root = t.deleteSubtree(t.root, hexPrefix, 0, blockNr)
+	_, t.root = t.delete(t.root, hexPrefix, 0, true)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
