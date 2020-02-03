@@ -270,6 +270,9 @@ func (an accountNode) print(w io.Writer) {
 	defer pool.PutBuffer(encodedAccount)
 
 	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
+	if an.storage != nil {
+		fmt.Printf("\n\n%s\n\n", an.storage.fstring(("")))
+	}
 }
 
 func printDiffSide(n node, w io.Writer, ind string, key string) {

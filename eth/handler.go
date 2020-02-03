@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -178,7 +179,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
 			return 0, nil
 		}
-		n, err := manager.blockchain.InsertChain(blocks)
+		n, err := manager.blockchain.InsertChain(context.Background(), blocks)
 		if err == nil {
 			atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		}

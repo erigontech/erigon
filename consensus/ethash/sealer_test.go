@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/internal/testlog"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -56,7 +57,8 @@ func TestRemoteNotify(t *testing.T) {
 	header := &types.Header{Number: big.NewInt(1), Difficulty: big.NewInt(100)}
 	block := types.NewBlockWithHeader(header)
 
-	ethash.Seal(nil, block, nil, nil)
+	_ = ethash.Seal(consensus.NewCancel(), nil, block, nil, nil)
+
 	select {
 	case work := <-sink:
 		if want := ethash.SealHash(header).Hex(); work[0] != want {
@@ -101,7 +103,7 @@ func TestRemoteMultiNotify(t *testing.T) {
 	for i := 0; i < cap(sink); i++ {
 		header := &types.Header{Number: big.NewInt(int64(i)), Difficulty: big.NewInt(100)}
 		block := types.NewBlockWithHeader(header)
-		ethash.Seal(nil, block, nil, nil)
+		_ = ethash.Seal(consensus.NewCancel(), nil, block, nil, nil)
 	}
 
 	for i := 0; i < cap(sink); i++ {
@@ -162,11 +164,11 @@ func TestStaleSubmission(t *testing.T) {
 			false,
 		},
 	}
-	results := make(chan *types.Block, 16)
+	results := make(chan consensus.ResultWithContext, 16)
 
 	for id, c := range testcases {
 		for _, h := range c.headers {
-			ethash.Seal(nil, types.NewBlockWithHeader(h), results, nil)
+			_ = ethash.Seal(consensus.NewCancel(), nil, types.NewBlockWithHeader(h), results, nil)
 		}
 		if res := api.SubmitWork(fakeNonce, ethash.SealHash(c.headers[c.submitIndex]), fakeDigest); res != c.submitRes {
 			t.Errorf("case %d submit result mismatch, want %t, get %t", id+1, c.submitRes, res)
