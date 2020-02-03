@@ -224,7 +224,7 @@ func (config *TxPoolConfig) sanitize() TxPoolConfig {
 type TxPool struct {
 	config       TxPoolConfig
 	chainconfig  *params.ChainConfig
-	chain        blockChain
+	chain        *BlockChain
 	gasPrice     *big.Int
 	txFeed       event.Feed
 	scope        event.SubscriptionScope
@@ -238,7 +238,7 @@ type TxPool struct {
 	pendingNonces *txNoncer // Pending state tracking virtual nonces
 
 	currentState  *state.IntraBlockState // Current state in the blockchain head
-	currentTds    *state.DbState
+	currentTds    *state.TrieDbState
 	currentMaxGas uint64 // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
@@ -264,7 +264,7 @@ type txpoolResetRequest struct {
 
 // NewTxPool creates a new transaction pool to gather, sort and filter inbound
 // transactions from the network.
-func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain blockChain) *TxPool {
+func NewTxPool(config TxPoolConfig, chainconfig *params.ChainConfig, chain *BlockChain) *TxPool {
 	// Sanitize the input to ensure no vulnerable gas prices are set
 	config = (&config).sanitize()
 
@@ -458,11 +458,13 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	if newHead == nil {
 		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
 	}
-	statedb, tds, err := pool.chain.StateAt(newHead.Root, newHead.Number.Uint64())
+	tds, err := pool.chain.GetTrieDbState()
+	tds = tds.WithNewBuffer()
 	if err != nil {
 		log.Error("Failed to reset txpool state", "err", err)
 		return
 	}
+	statedb := state.New(tds)
 	pool.currentState = statedb
 	pool.currentTds = tds
 	pool.pendingNonces = newTxNoncer(statedb)
