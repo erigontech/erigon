@@ -17,6 +17,7 @@ package rawdb
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -31,6 +32,7 @@ func BenchmarkLookupStorage(b *testing.B) {
 		b.Run(tc.name, func(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				db := ethdb.NewMemDatabase()
+				ctx := context.Background()
 
 				tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), big.NewInt(111), 1111, big.NewInt(11111), []byte{0x11, 0x11, 0x11})
 				tx2 := types.NewTransaction(2, common.BytesToAddress([]byte{0x22}), big.NewInt(222), 2222, big.NewInt(22222), []byte{0x22, 0x22, 0x22})
@@ -40,7 +42,7 @@ func BenchmarkLookupStorage(b *testing.B) {
 				block := types.NewBlock(&types.Header{Number: big.NewInt(314)}, txs, nil, nil)
 				// Insert all the transactions into the database, and verify contents
 				WriteCanonicalHash(db, block.Hash(), block.NumberU64())
-				WriteBlock(db, block)
+				WriteBlock(ctx, db, block)
 				batch := db.NewBatch()
 				b.StartTimer()
 				tc.writeTxLookupEntries(batch, block)

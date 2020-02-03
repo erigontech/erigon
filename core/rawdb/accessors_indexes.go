@@ -81,6 +81,10 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 		blockHash := ReadCanonicalHash(db, blockNumber)
 		body := ReadBody(db, blockHash, blockNumber)
 		var txHash []byte
+		if body.Transactions == nil {
+			log.Warn("Lookup: Block not found, Skipping.")
+			continue
+		}
 		// Get Transaction hash from index and block number
 		for txIndex, tx := range body.Transactions {
 			if txIndex == tdx {
