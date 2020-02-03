@@ -69,6 +69,9 @@ func WriteTxLookupEntriesInMemory(block *types.Block) {
 func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 	var sets []uint64
 	var prev []byte
+	if len(memTxLookupEntries) == 0 {
+		return
+	}
 	// sort the array
 	sort.Slice(memTxLookupEntries, func(i, j int) bool {
 		return memTxLookupEntries[i] < memTxLookupEntries[j]
