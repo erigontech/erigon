@@ -703,11 +703,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
-		mismatch := matchlen != len(n.Key) && n.Key[matchlen] != 16
-		if preserveAccountNode {
-			mismatch = len(key) != keyStart && matchlen != len(key[keyStart:])-1 && matchlen != len(n.Key) && matchlen != len(key[keyStart:])
-		}
-		if !mismatch {
+		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
 			wholeMatch := matchlen == len(key)-keyStart
 			if preserveAccountNode {
 				wholeMatch = len(key) == keyStart || matchlen == len(key[keyStart:])-1
