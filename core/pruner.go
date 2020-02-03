@@ -3,7 +3,7 @@ package core
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -22,7 +22,7 @@ type BlockChainer interface {
 
 func NewBasicPruner(database ethdb.Database, chainer BlockChainer, config *CacheConfig) (*BasicPruner, error) {
 	if config.BlocksToPrune == 0 || config.PruneTimeout.Seconds() < 1 {
-		return nil, errors.New("incorrect config")
+		return nil, fmt.Errorf("incorrect config BlocksToPrune - %v, PruneTimeout - %v", config.BlocksToPrune, config.PruneTimeout.Seconds())
 	}
 
 	return &BasicPruner{

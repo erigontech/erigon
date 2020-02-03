@@ -26,7 +26,6 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -179,50 +178,7 @@ type TrieDbState struct {
 	resolver            *trie.Resolver
 }
 
-var (
-	trieObj   = make(map[uint64]uintptr)
-	trieObjMu sync.RWMutex
-)
-
-func getTrieDBState(db ethdb.Database) *TrieDbState {
-	if db == nil {
-		return nil
-	}
-	trieObjMu.RLock()
-	tr, ok := trieObj[db.ID()]
-	trieObjMu.RUnlock()
-
-	if !ok {
-		return nil
-	}
-
-	return (*TrieDbState)(unsafe.Pointer(tr))
-}
-
-func setTrieDBState(tds *TrieDbState, id uint64) {
-	if tds == nil {
-		return
-	}
-
-	ptr := unsafe.Pointer(tds)
-
-	trieObjMu.Lock()
-	trieObj[id] = uintptr(ptr)
-	trieObjMu.Unlock()
-}
-
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	tds, err := newTrieDbState(root, db, blockNr)
-	if err != nil {
-		return nil, err
-	}
-
-	setTrieDBState(tds, db.ID())
-
-	return tds, nil
-}
-
-func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -256,16 +212,6 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	}
 
 	return tds, nil
-}
-
-func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	if tr := getTrieDBState(db); tr != nil {
-		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
-			return tr, nil
-		}
-	}
-
-	return newTrieDbState(root, db, blockNr)
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
@@ -392,6 +338,9 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
+	if tds == nil || tds.tMu == nil {
+		return common.Hash{}
+	}
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.Hash()

@@ -1106,7 +1106,7 @@ func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
 }
 
 func (t *Trie) hashRoot() (node, error) {
-	if t.root == nil {
+	if t == nil || t.root == nil {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
 

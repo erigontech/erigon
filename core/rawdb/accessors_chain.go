@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"math/big"
 
@@ -192,12 +193,15 @@ func ReadHeader(db DatabaseReader, hash common.Hash, number uint64) *types.Heade
 
 // WriteHeader stores a block header into the database and also stores the hash-
 // to-number mapping.
-func WriteHeader(db DatabaseWriter, header *types.Header) {
+func WriteHeader(ctx context.Context, db DatabaseWriter, header *types.Header) {
 	var (
 		hash    = header.Hash()
 		number  = header.Number.Uint64()
 		encoded = dbutils.EncodeBlockNumber(number)
 	)
+	if common.IsCanceled(ctx) {
+		return
+	}
 	if err := db.Put(dbutils.HeaderNumberPrefix, hash[:], encoded); err != nil {
 		log.Crit("Failed to store hash to number mapping", "err", err)
 	}
@@ -205,6 +209,9 @@ func WriteHeader(db DatabaseWriter, header *types.Header) {
 	data, err := rlp.EncodeToBytes(header)
 	if err != nil {
 		log.Crit("Failed to RLP encode header", "err", err)
+	}
+	if common.IsCanceled(ctx) {
+		return
 	}
 	if err := db.Put(dbutils.HeaderPrefix, dbutils.HeaderKey(number, hash), data); err != nil {
 		log.Crit("Failed to store header", "err", err)
@@ -236,7 +243,10 @@ func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValu
 }
 
 // WriteBodyRLP stores an RLP encoded block body into the database.
-func WriteBodyRLP(db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
+func WriteBodyRLP(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
+	if common.IsCanceled(ctx) {
+		return
+	}
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
 	}
@@ -267,14 +277,17 @@ func ReadBody(db DatabaseReader, hash common.Hash, number uint64) *types.Body {
 }
 
 // WriteBody storea a block body into the database.
-func WriteBody(db DatabaseWriter, hash common.Hash, number uint64, body *types.Body) {
+func WriteBody(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, body *types.Body) {
+	if common.IsCanceled(ctx) {
+		return
+	}
 	// Pre-processing
 	body.SendersFromTxs()
 	data, err := rlp.EncodeToBytes(body)
 	if err != nil {
 		log.Crit("Failed to RLP encode body", "err", err)
 	}
-	WriteBodyRLP(db, hash, number, data)
+	WriteBodyRLP(ctx, db, hash, number, data)
 }
 
 // DeleteBody removes all block body data associated with a hash.
@@ -449,9 +462,9 @@ func ReadBlock(db DatabaseReader, hash common.Hash, number uint64) *types.Block 
 }
 
 // WriteBlock serializes a block into the database, header and body separately.
-func WriteBlock(db DatabaseWriter, block *types.Block) {
-	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
-	WriteHeader(db, block.Header())
+func WriteBlock(ctx context.Context, db DatabaseWriter, block *types.Block) {
+	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
+	WriteHeader(ctx, db, block.Header())
 }
 
 // WriteAncientBlock writes entire block data into ancient store and returns the total written size.

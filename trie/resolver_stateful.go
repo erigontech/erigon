@@ -179,7 +179,11 @@ func (tr *ResolverStateful) RebuildTrie(
 	if err != nil {
 		return err
 	}
-	return tr.finaliseRoot()
+
+	if err = tr.finaliseRoot(); err != nil {
+		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
+	}
+	return nil
 }
 
 func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte) error {

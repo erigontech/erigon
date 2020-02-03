@@ -17,6 +17,7 @@
 package rawdb
 
 import (
+	"context"
 	"math/big"
 	"testing"
 
@@ -43,6 +44,7 @@ func TestLookupStorage(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			db := ethdb.NewMemDatabase()
+			ctx := context.Background()
 
 			tx1 := types.NewTransaction(1, common.BytesToAddress([]byte{0x11}), big.NewInt(111), 1111, big.NewInt(11111), []byte{0x11, 0x11, 0x11})
 			tx2 := types.NewTransaction(2, common.BytesToAddress([]byte{0x22}), big.NewInt(222), 2222, big.NewInt(22222), []byte{0x22, 0x22, 0x22})
@@ -59,7 +61,7 @@ func TestLookupStorage(t *testing.T) {
 			}
 			// Insert all the transactions into the database, and verify contents
 			WriteCanonicalHash(db, block.Hash(), block.NumberU64())
-			WriteBlock(db, block)
+			WriteBlock(ctx, db, block)
 			tc.writeTxLookupEntries(db, block)
 
 			for i, tx := range txs {
