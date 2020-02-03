@@ -158,7 +158,7 @@ func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (s
 
 	// Irrelevant of the canonical status, write the td and header to the database
 	headerBatch := hc.chainDb.NewBatch()
-	rawdb.WriteTd(ctx, headerBatch, hash, number, externTd)
+	rawdb.WriteTd(headerBatch, hash, number, externTd)
 	rawdb.WriteHeader(ctx, headerBatch, header)
 	if _, err := headerBatch.Commit(); err != nil {
 		log.Crit("Failed to write header into disk", "err", err)

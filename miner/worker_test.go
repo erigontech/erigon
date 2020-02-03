@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,6 +36,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/event"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
@@ -422,13 +422,19 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 	defer engine.Close()
 
 	taskCh := make(chan struct{})
-	m := new(sync.Map)
-	index := new(uint64)
 	h := hooks{
 		newTaskHook: func(task *task) {
 			gotBalance := task.state.GetBalance(testCase.testUserAddress).Uint64()
 			gotBankBalance := task.state.GetBalance(testCase.testBankAddress).Uint64()
-			emptyMiningNewTaskHook(t, testCase, task.block, taskCh, gotBalance, gotBankBalance, m, index)
+
+			log.Warn("mining: newTaskHook",
+				"balance", gotBalance,
+				"number", task.block.NumberU64(),
+				"hash", task.block.Hash().String(),
+				"parentHash", task.block.ParentHash().String(),
+			)
+
+			emptyMiningNewTaskHook(t, testCase, task.block, taskCh, gotBalance, gotBankBalance)
 		},
 		fullTaskHook: func() {
 			time.Sleep(100 * time.Millisecond)
@@ -440,7 +446,7 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 	defer w.close()
 
 	w.start()
-	for i := 0; i < 2; i++ {
+	for i := 0; i < 3; i++ {
 		select {
 		case <-taskCh:
 			// nothing to do
@@ -452,27 +458,20 @@ func testEmptyWork(t *testing.T, testCase *testCase, chainConfig *params.ChainCo
 
 func checkEmptyMining(t *testing.T, testCase *testCase, gotBalance uint64, gotBankBalance uint64, index int) {
 	var balance uint64
-	if index == 1 {
+	if index > 0 {
 		balance = 1000
 	}
 
 	if gotBalance != balance {
-		//fixme a hack to recheck if state has been changed
-		if gotBalance != balance {
-			t.Errorf("account balance mismatch: have %d, want %d. index %d. %v %v",
-				gotBalance,
-				balance, index,
-				testCase.testBankFunds.Uint64(), gotBankBalance)
-		}
+		t.Errorf("account balance mismatch: have %d, want %d. index %d. %v %v",
+			gotBalance,
+			balance, index,
+			testCase.testBankFunds.Uint64(), gotBankBalance)
 	}
 }
 
-func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, block *types.Block, taskCh chan<- struct{}, gotBalance uint64, gotBankBalance uint64, m *sync.Map, index *uint64) {
-	_, ok := m.LoadOrStore(fmt.Sprintf("%d%s", block.NumberU64(), block.Hash().String()), struct{}{})
-	if ok {
-		return
-	}
-	checkEmptyMining(t, testCase, gotBalance, gotBankBalance, int(atomic.AddUint64(index, 1)-1))
+func emptyMiningNewTaskHook(t *testing.T, testCase *testCase, block *types.Block, taskCh chan<- struct{}, gotBalance uint64, gotBankBalance uint64) {
+	checkEmptyMining(t, testCase, gotBalance, gotBankBalance, int(block.NumberU64()))
 	taskCh <- struct{}{}
 }
 
@@ -536,7 +535,6 @@ func TestStreamUncleBlock(t *testing.T) {
 }
 
 func TestRegenerateMiningBlockEthash(t *testing.T) {
-	t.Skip("should be restored. tag: Mining")
 	testCase, err := getTestCase()
 	if err != nil {
 		t.Error(err)
@@ -559,6 +557,7 @@ func testRegenerateMiningBlock(t *testing.T, testCase *testCase, chainConfig *pa
 	taskIndex := 0
 	h := hooks{
 		newTaskHook: func(task *task) {
+			fmt.Println("!!!!!", task.block.NumberU64(), taskIndex)
 			if task.block.NumberU64() == 1 {
 				if taskIndex == 2 {
 					receiptLen, balance := 2, big.NewInt(2000)

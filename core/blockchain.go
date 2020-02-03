@@ -638,11 +638,11 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	batch := bc.db.NewBatch()
 
 	rawdb.WriteTd(batch, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
-	rawdb.WriteBlock(batch, genesis)
+	rawdb.WriteBlock(context.Background(), batch, genesis)
 	if _, err := batch.Commit(); err != nil {
 		log.Crit("Failed to write genesis block", "err", err)
 	}
-	bc.writeHeadBlock(context.Background(), genesis)
+	bc.writeHeadBlock(genesis)
 
 	// Last update all in-memory chain markers
 	bc.genesisBlock = genesis

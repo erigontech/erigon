@@ -178,8 +178,6 @@ type worker struct {
 	initOnce          sync.Once
 	canonicalMining   []consensus.Cancel
 	canonicalMiningMu sync.Mutex
-	sideMining        []consensus.Cancel
-	sideMiningMu      sync.Mutex
 	n                 int
 }
 
@@ -215,8 +213,11 @@ func newWorker(config *Config, chainConfig *params.ChainConfig, engine consensus
 
 	// Submit first work to initialize pending state.
 	if init {
-		log.Info("The mining is started", "threads", worker.n)
-		worker.startCh <- struct{}{}
+		if atomic.CompareAndSwapInt32(&worker.running, 0, 1) {
+			log.Warn("Worker constructor. init stage")
+			log.Info("The mining is started", "threads", worker.n)
+			worker.startCh <- struct{}{}
+		}
 	}
 	return worker
 }
@@ -262,7 +263,7 @@ func (w *worker) pendingBlock() *types.Block {
 
 func (w *worker) init() {
 	w.initOnce.Do(func() {
-		time.Sleep(5 * time.Second)
+		//time.Sleep(5 * time.Second)
 		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
 		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
 		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
@@ -292,9 +293,11 @@ func (w *worker) init() {
 
 // start sets the running status as 1 and triggers new work submitting.
 func (w *worker) start() {
-	atomic.StoreInt32(&w.running, 1)
-	w.init()
-	w.startCh <- struct{}{}
+	if atomic.CompareAndSwapInt32(&w.running, 0, 1) {
+		log.Warn("worker start")
+		w.init()
+		w.startCh <- struct{}{}
+	}
 }
 
 // stop sets the running status as 0.
@@ -398,6 +401,7 @@ func (w *worker) mainLoop() {
 	for {
 		select {
 		case req := <-w.newWorkCh:
+			log.Warn("mining: a new work")
 			w.commitNewWork(req.cancel, req.interrupt, req.noempty, req.timestamp)
 
 		case ev := <-w.txsCh:
@@ -459,11 +463,18 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 	for {
 		select {
 		case <-w.startCh:
+			log.Warn("mining: worker start event")
 			w.clearCanonicalChainContext()
 			atomic.StoreInt64(timestamp, time.Now().Unix())
 			commit(consensus.NewCancel(), false, commitInterruptNewHead)
 
 		case head := <-w.chainHeadCh:
+			log.Warn("mining: worker chain event",
+				"number", head.Block.NumberU64(),
+				"hash", head.Block.Hash().String(),
+				"parentHash", head.Block.ParentHash().String(),
+			)
+
 			if head.Block.Number().Cmp(w.current.header.Number) < 0 {
 				log.Warn("mining event for an ancestor block",
 					"eventBlockNumber", head.Block.Number().Uint64(),
@@ -488,6 +499,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 		case ev := <-w.chainSideCh:
 			go func(ctx consensus.Cancel, ev core.ChainSideEvent) {
 				defer ctx.CancelFunc()
+				w.clearCanonicalChainContext()
 
 				// Short circuit for duplicate side blocks
 				if exist := w.uncles.has(ev.Block.Hash()); exist {
@@ -531,7 +543,7 @@ func (w *worker) chainEvents(timestamp *int64, commit func(ctx consensus.Cancel,
 						log.Debug("cannot commit a block", "err", err)
 					}
 				}
-			}(w.getSideChainContext(), ev)
+			}(w.getCanonicalChainContext(), ev)
 
 		// System stopped
 		case <-w.exitCh:
@@ -559,7 +571,6 @@ func (w *worker) taskLoop() {
 			}
 
 			// Reject duplicate sealing work due to resubmitting.
-			//fixme check if it can be removed
 			sealHash := w.engine.SealHash(task.block.Header())
 			if sealHash == prev {
 				continue
@@ -575,14 +586,14 @@ func (w *worker) taskLoop() {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
-			w.insertToChain(<-resultCh, task.createdAt, sealHash)
+			w.insertToChain(<-resultCh, task.createdAt, sealHash, task, true)
 		case <-w.exitCh:
 			return
 		}
 	}
 }
 
-func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time, sealHash common.Hash) {
+func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt time.Time, sealHash common.Hash, task *task, directInsert bool) {
 	// Short circuit when receiving empty result.
 	if result.Block == nil {
 		return
@@ -596,11 +607,12 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 	}
 
 	// Different block could share same sealhash, deep copy here to prevent write-write conflict.
-	/*
+	if directInsert {
 		var (
 			receipts = make([]*types.Receipt, len(task.receipts))
 			logs     = make([]*types.Log, len(task.receipts))
 		)
+		hash := block.Hash()
 
 		for i, receipt := range task.receipts {
 			// add block location fields
@@ -621,15 +633,19 @@ func (w *worker) insertToChain(result consensus.ResultWithContext, createdAt tim
 
 		// Commit block and state to database.
 		_, err := w.chain.WriteBlockWithState(result.Cancel, block, receipts, logs, task.state, task.tds, true)
-	*/
+		if err != nil {
+			log.Error("Failed writing block with state", "err", err)
+			return
+		}
 
-	log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
-		"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
-
-	_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
-	if err != nil {
-		log.Error("Failed writing block to chain", "err", err)
-		return
+		log.Info("Successfully sealed new block", "number", block.Number(), "sealhash", sealHash, "hash", block.Hash(),
+			"elapsed", common.PrettyDuration(time.Since(createdAt)), "difficulty", block.Difficulty())
+	} else {
+		_, err := w.chain.InsertChain(result.Cancel, types.Blocks{block})
+		if err != nil {
+			log.Error("Failed writing block to chain", "err", err)
+			return
+		}
 	}
 
 	// Broadcast the block and announce chain insertion event
@@ -707,6 +723,7 @@ func (w *worker) updateSnapshot() {
 		return false
 	})
 
+	fmt.Println("!!!", w.current.header.Number.Uint64(), debug.Callers(10))
 	w.snapshotBlock = types.NewBlock(
 		w.current.header,
 		w.current.txs,
@@ -953,10 +970,12 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 	if !noempty {
 		// Create an empty block based on temporary copied state for sealing in advance without waiting block
 		// execution finished.
+		now := time.Now()
 		if err = w.commit(ctx, uncles, nil, false, tstart); err != nil {
 			log.Error("Failed to commit empty block", "err", err)
 			ctx.CancelFunc()
 		}
+		fmt.Println("=== COMMIT empty took", time.Since(now))
 	}
 
 	// Fill the block with all available pending transactions.
@@ -971,6 +990,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		w.updateSnapshot()
 		return
 	}
+
 	// Split the pending transactions into locals and remotes
 	localTxs, remoteTxs := make(map[common.Address]types.Transactions), pending
 	for _, account := range w.eth.TxPool().Locals() {
@@ -992,11 +1012,12 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		}
 	}
 
-	// fixme: at the moment m.commit is called twice. We want to call it only once.
+	now := time.Now()
 	if err = w.commit(ctx, uncles, w.fullTaskHook, true, tstart); err != nil {
 		log.Error("Failed to commit block", "err", err)
 		ctx.CancelFunc()
 	}
+	fmt.Println("=== COMMIT block with transactions took", time.Since(now))
 }
 
 // commit runs any post-transaction state modifications, assembles the final block
@@ -1025,6 +1046,12 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 
 		select {
 		case w.taskCh <- &task{receipts: receipts, state: s, tds: w.current.tds, block: block, createdAt: time.Now(), ctx: ctx}:
+			log.Warn("mining: worker task event",
+				"number", block.NumberU64(),
+				"hash", block.Hash().String(),
+				"parentHash", block.ParentHash().String(),
+			)
+
 			feesWei := new(big.Int)
 			for i, tx := range block.Transactions() {
 				feesWei.Add(feesWei, new(big.Int).Mul(new(big.Int).SetUint64(receipts[i].GasUsed), tx.GasPrice()))
@@ -1042,28 +1069,6 @@ func (w *worker) commit(ctx consensus.Cancel, uncles []*types.Header, interval f
 		w.updateSnapshot()
 	}
 	return nil
-}
-
-//nolint: unused
-func (w *worker) getSideChainContext() consensus.Cancel {
-	ctx := consensus.NewCancel()
-
-	w.sideMiningMu.Lock()
-	w.sideMining = append(w.sideMining, ctx)
-	w.sideMiningMu.Unlock()
-
-	return ctx
-}
-
-//nolint: unused
-func (w *worker) clearSideChainContext() {
-	w.sideMiningMu.Lock()
-	defer w.sideMiningMu.Unlock()
-	for _, ctx := range w.sideMining {
-		ctx.CancelFunc()
-	}
-
-	w.sideMining = nil
 }
 
 func (w *worker) getCanonicalChainContext() consensus.Cancel {
