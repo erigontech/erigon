@@ -8,7 +8,7 @@
 //
 // The go-ethereum library is distributed in the hope that it will be useful,
 // but WITHOUT ANY WARRANTY; without even the implied warranty of
-// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// MERCHANTABILITY or FITNESS fFOR A PARTICULAR PURPOSE. See the
 // GNU Lesser General Public License for more details.
 //
 // You should have received a copy of the GNU Lesser General Public License
@@ -58,10 +58,10 @@ func WriteTxLookupEntriesInMemory(block *types.Block) {
 	blockNumber := block.Number().Bytes()
 	for txIndex, tx := range block.Transactions() {
 		entry := make([]byte, 8)
-		copy(entry, tx.Hash().Bytes()[:2])
+		copy(entry[6:], tx.Hash().Bytes())
 		copy(entry[(6-len(blockNumber)):], blockNumber)
 		tdxBytes := uintToBytes(uint64(txIndex))
-		copy(entry[8-len(tdxBytes):], tdxBytes)
+		copy(entry[2-len(tdxBytes):], tdxBytes)
 		memTxLookupEntries = append(memTxLookupEntries, binary.LittleEndian.Uint64(entry))
 	}
 }
@@ -69,7 +69,6 @@ func WriteTxLookupEntriesInMemory(block *types.Block) {
 func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 	var sets []uint64
 	var prev []byte
-	var blockNumbers []uint64
 	// sort the array
 	sort.Slice(memTxLookupEntries, func(i, j int) bool {
 		return memTxLookupEntries[i] < memTxLookupEntries[j]
@@ -78,7 +77,7 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 		entry := make([]byte, 8)
 		binary.LittleEndian.PutUint64(entry, lookup)
 		blockNumber := bytesToUint64(entry[2:6])
-		tdx := int(bytesToUint64(entry[6:]))
+		tdx := int(bytesToUint64(entry[:2]))
 		blockHash := ReadCanonicalHash(db, blockNumber)
 		body := ReadBody(db, blockHash, blockNumber)
 		var txHash []byte
@@ -89,34 +88,34 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 				break
 			}
 		}
+		if txHash == nil {
+			log.Warn("Lookup: Hash not found, Skipping.")
+			continue
+		}
 		if prev == nil && i != len(memTxLookupEntries)-1 {
-			prev = entry[:2]
-			copy(entry[:2], txHash[2:4])
-			sets = []uint64{bytesToUint64(entry)}
-			blockNumbers = []uint64{blockNumber}
-		} else if bytes.Equal(entry[:2], prev) && i != len(memTxLookupEntries)-1 {
-			copy(entry[:2], txHash[2:4])
-			sets = append(sets, bytesToUint64(entry))
-			blockNumbers = append(blockNumbers, blockNumber)
+			prev = entry[6:]
+			copy(entry[6:], txHash[2:])
+			sets = []uint64{binary.LittleEndian.Uint64(entry)}
+		} else if bytes.Equal(entry[6:], prev) && i != len(memTxLookupEntries)-1 {
+			copy(entry[6:], txHash[2:])
+			sets = append(sets, binary.LittleEndian.Uint64(entry))
 		} else if i == len(memTxLookupEntries)-1 {
-			if bytes.Equal(entry[:2], prev) {
-				copy(entry[:2], txHash[2:4])
-				sets = append(sets, bytesToUint64(entry))
-				blockNumbers = append(blockNumbers, blockNumber)
-				insertLookupSet(db, sets, blockNumbers)
+			if bytes.Equal(entry[6:], prev) {
+				copy(entry[6:], txHash[2:])
+				sets = append(sets, binary.LittleEndian.Uint64(entry))
+				insertLookupSet(db, sets)
 			}
-			insertLookupSet(db, sets, blockNumbers)
-			insertLookupSet(db, []uint64{bytesToUint64(entry)}, []uint64{blockNumber})
-			memTxLookupEntries = []uint64{}
+			insertLookupSet(db, sets)
+			insertLookupSet(db, []uint64{binary.LittleEndian.Uint64(entry)})
 			break
 		} else {
-			insertLookupSet(db, sets, blockNumbers)
-			prev = entry[:2]
-			copy(entry[:2], txHash[2:4])
-			sets = []uint64{bytesToUint64(entry)}
-			blockNumbers = []uint64{blockNumber}
+			prev = entry[6:]
+			copy(entry[6:], txHash[2:])
+			insertLookupSet(db, sets)
+			sets = []uint64{binary.LittleEndian.Uint64(entry)}
 		}
 	}
+	memTxLookupEntries = []uint64{}
 }
 
 func ResetLookupEntries() {
@@ -190,23 +189,27 @@ func WriteBloomBits(db DatabaseWriter, bit uint, section uint64, head common.Has
 	}
 }
 
-func insertLookupSet(db ethdb.DbWithPendingMutations, sets []uint64, blockNumbers []uint64) {
+func insertLookupSet(db ethdb.DbWithPendingMutations, sets []uint64) {
 	//Perform quicksort of sets and block numbers
-	sortSet(0, len(sets)-1, sets, blockNumbers)
+	sort.Slice(sets, func(i, j int) bool {
+		return sets[i] < sets[j]
+	})
 	// Commit Lookups
-	for i, set := range sets {
-		entry := uintToBytes(set)
-		tdx := int(entry[len(entry)-1])
-		blockHash := ReadCanonicalHash(db, blockNumbers[i])
-		body := ReadBody(db, blockHash, blockNumbers[i])
+	for _, set := range sets {
+		entry := make([]byte, 8)
+		binary.LittleEndian.PutUint64(entry, set)
+		tdx := bytesToUint64(entry[:2])
+		blockNumber := bytesToUint64(entry[2:6])
+		blockHash := ReadCanonicalHash(db, blockNumber)
+		body := ReadBody(db, blockHash, blockNumber)
 		var txHash []byte
 		for txIndex, tx := range body.Transactions {
-			if txIndex == tdx {
+			if txIndex == int(tdx) {
 				txHash = tx.Hash().Bytes()
 				break
 			}
 		}
-		if err := db.Put(dbutils.TxLookupPrefix, txHash, uintToBytes(blockNumbers[i])); err != nil {
+		if err := db.Put(dbutils.TxLookupPrefix, txHash, uintToBytes(blockNumber)); err != nil {
 			log.Crit("Failed to store transaction lookup entry", "err", err)
 		}
 	}
@@ -230,37 +233,4 @@ func bytesToUint64(buf []byte) (x uint64) {
 		}
 	}
 	return
-}
-
-func sortSet(start int, end int, sets []uint64, blockNumbers []uint64) {
-	if (end - start) < 1 {
-		return
-	}
-
-	pivot := sets[end]
-	lastBlock := blockNumbers[end]
-	splitIndex := start
-
-	for i := start; i < end; i++ {
-		if sets[i] < pivot {
-			temp := sets[splitIndex]
-			sets[splitIndex] = sets[i]
-			sets[i] = temp
-
-			temp = blockNumbers[splitIndex]
-			blockNumbers[splitIndex] = blockNumbers[i]
-			blockNumbers[i] = temp
-
-			splitIndex++
-		}
-	}
-
-	sets[end] = sets[splitIndex]
-	sets[splitIndex] = pivot
-
-	blockNumbers[end] = blockNumbers[splitIndex]
-	blockNumbers[splitIndex] = lastBlock
-
-	sortSet(start, splitIndex-1, sets, blockNumbers)
-	sortSet(splitIndex+1, end, sets, blockNumbers)
 }
