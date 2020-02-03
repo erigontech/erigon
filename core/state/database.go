@@ -27,12 +27,10 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
 	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -159,24 +157,25 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                 *trie.Trie
-	tMu               *sync.Mutex
-	db                ethdb.Database
-	blockNr           uint64
-	buffers           []*Buffer
-	aggregateBuffer   *Buffer // Merge of all buffers
-	currentBuffer     *Buffer
-	codeCache         *lru.Cache
-	codeSizeCache     *lru.Cache
-	historical        bool
-	noHistory         bool
-	resolveReads      bool
-	savePreimages     bool
-	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TriePruning
-	newStream         trie.Stream
-	hashBuilder       *trie.HashBuilder
-	resolver          *trie.Resolver
+	t                   *trie.Trie
+	tMu                 *sync.Mutex
+	db                  ethdb.Database
+	blockNr             uint64
+	buffers             []*Buffer
+	aggregateBuffer     *Buffer // Merge of all buffers
+	currentBuffer       *Buffer
+	codeCache           *lru.Cache
+	codeSizeCache       *lru.Cache
+	historical          bool
+	noHistory           bool
+	resolveReads        bool
+	savePreimages       bool
+	noIntermediateCache bool
+	resolveSetBuilder   *trie.ResolveSetBuilder
+	tp                  *trie.TriePruning
+	newStream           trie.Stream
+	hashBuilder         *trie.HashBuilder
+	resolver            *trie.Resolver
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -207,6 +206,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp.Touch(hex, del)
 	})
 
+	if !tds.noIntermediateCache {
+		t.SetUnloadFunc(tds.putIntermediateCache)
+		tp.SetCreateNodeFunc(tds.delIntermediateCache)
+	}
+
 	return tds, nil
 }
 
@@ -225,6 +229,9 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
+func (tds *TrieDbState) NoIntermediateCache(v bool) {
+	tds.noIntermediateCache = v
+}
 
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Lock()
@@ -242,7 +249,38 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		tp:          tp,
 		hashBuilder: trie.NewHashBuilder(false),
 	}
+
+	if !tds.noIntermediateCache {
+		cpy.t.SetUnloadFunc(cpy.putIntermediateCache)
+		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
+	}
+
 	return &cpy
+}
+
+func (tds *TrieDbState) putIntermediateCache(prefix []byte, nodeHash []byte) {
+	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+	if len(prefix) == 0 {
+		return
+	}
+	if err := putIntermediateCache(tds.db, prefix, nodeHash); err != nil {
+		log.Warn("could not put intermediate trie cache", "err", err)
+	}
+
+}
+
+func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
+	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+	if len(prefix) == 0 {
+		return
+	}
+	if err := delIntermediateCache(tds.db, prefix); err != nil {
+		log.Warn("could not delete intermediate trie cache", "err", err)
+	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
