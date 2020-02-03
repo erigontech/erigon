@@ -196,6 +196,10 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, err = eth.blockchain.GetTrieDbState()
+	if err != nil {
+		return nil, err
+	}
 
 	eth.blockchain.EnableReceipts(config.StorageMode.Receipts)
 	eth.blockchain.EnableTxLookupIndex(config.StorageMode.TxIndex)
