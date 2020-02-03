@@ -81,12 +81,12 @@ func TestAddSomeValuesToAccountAndCheckDeepHashForThem(t *testing.T) {
 	fullStorageKey1 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey1)
 	fullStorageKey2 := dbutils.GenerateCompositeTrieKey(addrHash, storageKey2)
 
-	trie.Update(fullStorageKey1, value1, 0)
-	trie.Update(fullStorageKey2, value2, 0)
+	trie.Update(fullStorageKey1, value1)
+	trie.Update(fullStorageKey2, value2)
 
 	expectedTrie := newEmpty()
-	expectedTrie.Update(storageKey1.Bytes(), value1, 0)
-	expectedTrie.Update(storageKey2.Bytes(), value2, 0)
+	expectedTrie.Update(storageKey1.Bytes(), value1)
+	expectedTrie.Update(storageKey2.Bytes(), value2)
 
 	_, h1 := trie.DeepHash(addrHash.Bytes())
 	h2 := expectedTrie.Hash()
@@ -133,14 +133,13 @@ func TestHash(t *testing.T) {
 	acc1.EncodeForHashing(b1)
 	acc2.EncodeForHashing(b2)
 	acc3.EncodeForHashing(b3)
-	trie2.Update(addr1.Bytes(), b1, 0)
-	trie2.Update(addr2.Bytes(), b2, 0)
-	trie2.Update(addr3.Bytes(), b3, 0)
+	trie2.Update(addr1.Bytes(), b1)
+	trie2.Update(addr2.Bytes(), b2)
+	trie2.Update(addr3.Bytes(), b3)
 
 	if trie.Hash().String() != trie2.Hash().String() {
 		t.FailNow()
 	}
-
 }
 
 func generateAcc() (*ecdsa.PrivateKey, common.Address, common.Hash, error) {

@@ -38,13 +38,13 @@ func TestOnePerTimestamp(t *testing.T) {
 	for n := uint32(0); n < uint32(100); n++ {
 		tp.SetBlockNr(timestamp)
 		binary.BigEndian.PutUint32(key[:], n)
-		tr.Update(key[:], value, timestamp) // Each key is added within a new generation
+		tr.Update(key[:], value) // Each key is added within a new generation
 		timestamp++
 	}
 	for n := uint32(50); n < uint32(60); n++ {
 		tp.SetBlockNr(timestamp)
 		binary.BigEndian.PutUint32(key[:], n)
-		tr.Delete(key[:], timestamp) // Each key is added within a new generation
+		tr.Delete(key[:]) // Each key is added within a new generation
 		timestamp++
 	}
 	for n := uint32(30); n < uint32(59); n++ {

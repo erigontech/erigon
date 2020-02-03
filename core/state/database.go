@@ -678,7 +678,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+			tds.t.DeleteSubtree(addrHash[:])
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -686,7 +686,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
-				tds.t.Delete(addrHash[:], tds.blockNr)
+				tds.t.Delete(addrHash[:])
 			}
 		}
 		for addrHash, m := range b.storageUpdates {
@@ -695,7 +695,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-						tds.t.Update(cKey, v, tds.blockNr)
+						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
 						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
@@ -703,13 +703,13 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						// will not bring back the full storage trie. Instead there will be one hashNode.
 						// So we probe for this situation first
 						if _, ok := tds.t.Get(cKey); ok {
-							tds.t.Update(cKey, v, tds.blockNr)
+							tds.t.Update(cKey, v)
 						}
 					}
 				} else {
 					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					if forward {
-						tds.t.Delete(cKey, tds.blockNr)
+						tds.t.Delete(cKey)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
 						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
@@ -717,7 +717,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						// will not bring back the full storage trie. Instead there will be one hashNode.
 						// So we probe for this situation first
 						if _, ok := tds.t.Get(cKey); ok {
-							tds.t.Delete(cKey, tds.blockNr)
+							tds.t.Delete(cKey)
 						}
 					}
 				}
@@ -790,7 +790,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+			tds.t.DeleteSubtree(addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}

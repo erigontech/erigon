@@ -241,13 +241,13 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		}
 		// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 		// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-		s.t.DeleteSubtree(addrHash[:], s.blockNr)
+		s.t.DeleteSubtree(addrHash[:])
 	}
 	for addrHash, account := range s.accountUpdates {
 		if account != nil {
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
-			s.t.Delete(addrHash[:], s.blockNr)
+			s.t.Delete(addrHash[:])
 		}
 	}
 	for addrHash, m := range s.storageUpdates {
@@ -259,9 +259,9 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		for keyHash, v := range m {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			if len(v) > 0 {
-				s.t.Update(cKey, v, s.blockNr)
+				s.t.Update(cKey, v)
 			} else {
-				s.t.Delete(cKey, s.blockNr)
+				s.t.Delete(cKey)
 			}
 		}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
@@ -289,7 +289,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		s.t.DeleteSubtree(addrHash[:], s.blockNr)
+		s.t.DeleteSubtree(addrHash[:])
 	}
 	myRoot := s.t.Hash()
 	if myRoot != expected {

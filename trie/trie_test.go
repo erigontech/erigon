@@ -60,7 +60,7 @@ func TestNull(t *testing.T) {
 	var trie Trie
 	key := make([]byte, 32)
 	value := []byte("test")
-	trie.Update(key, value, 0)
+	trie.Update(key, value)
 	v, _ := trie.Get(key)
 	if !bytes.Equal(v, value) {
 		t.Fatal("wrong value")
@@ -223,8 +223,8 @@ func TestReplication(t *testing.T) {
 
 func TestLargeValue(t *testing.T) {
 	trie := newEmpty()
-	trie.Update([]byte("key1"), []byte{99, 99, 99, 99}, 0)
-	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32), 0)
+	trie.Update([]byte("key1"), []byte{99, 99, 99, 99})
+	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32))
 	trie.Hash()
 }
 
@@ -335,10 +335,10 @@ func runRandTest(rt randTest) bool {
 			step.op, step.key, step.value, i)
 		switch step.op {
 		case opUpdate:
-			tr.Update(step.key, step.value, 0)
+			tr.Update(step.key, step.value)
 			values[string(step.key)] = string(step.value)
 		case opDelete:
-			tr.Delete(step.key, 0)
+			tr.Delete(step.key)
 			delete(values, string(step.key))
 		case opGet:
 			v, _ := tr.Get(step.key)
@@ -404,7 +404,7 @@ func benchGet(b *testing.B, commit bool) {
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {
 		binary.LittleEndian.PutUint64(k, uint64(i))
-		trie.Update(k, k, 0)
+		trie.Update(k, k)
 	}
 	binary.LittleEndian.PutUint64(k, benchElemCount/2)
 
@@ -426,7 +426,7 @@ func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		e.PutUint64(k, uint64(i))
-		trie.Update(k, k, 0)
+		trie.Update(k, k)
 	}
 	return trie
 }
@@ -459,7 +459,7 @@ func BenchmarkHash(b *testing.B) {
 	// Insert the accounts into the trie and hash it
 	trie := newEmpty()
 	for i := 0; i < len(addresses); i++ {
-		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i], 0)
+		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -484,11 +484,11 @@ func getString(trie *Trie, k string) []byte {
 }
 
 func updateString(trie *Trie, k, v string) {
-	trie.Update([]byte(k), []byte(v), 0)
+	trie.Update([]byte(k), []byte(v))
 }
 
 func deleteString(trie *Trie, k string) {
-	trie.Delete([]byte(k), 0)
+	trie.Delete([]byte(k))
 }
 
 func TestDeepHash(t *testing.T) {
@@ -507,7 +507,7 @@ func TestDeepHash(t *testing.T) {
 		fmt.Println("Test", i)
 		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
-			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)
+			trie.Update([]byte(keyVal.key), []byte(keyVal.value))
 		}
 		trie.PrintTrie()
 		hash1 := trie.Hash()
@@ -516,7 +516,7 @@ func TestDeepHash(t *testing.T) {
 		prefixTrie.UpdateAccount([]byte(prefix), &acc)
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
-			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
+			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value))
 		}
 
 		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))

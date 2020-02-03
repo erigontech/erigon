@@ -226,7 +226,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 // The value bytes must not be modified by the caller while they are
 // stored in the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
-func (t *Trie) Update(key, value []byte, blockNr uint64) {
+func (t *Trie) Update(key, value []byte) {
 	hex := keybytesToHex(key)
 	if t.binary {
 		hex = keyHexToBin(hex)
@@ -368,8 +368,6 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
-	//fmt.Printf("insert %T key %x %d\n", origNode, key, pos)
-
 	var nn node
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
@@ -665,7 +663,7 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 
 // Delete removes any existing value for key from the trie.
 // DESCRIBED: docs/programmers_guide/guide.md#root
-func (t *Trie) Delete(key []byte, blockNr uint64) {
+func (t *Trie) Delete(key []byte) {
 	hex := keybytesToHex(key)
 	if t.binary {
 		hex = keyHexToBin(hex)
@@ -907,7 +905,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 // DeleteSubtree removes any existing value for key from the trie.
 // The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 // wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
+func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	hexPrefix := keybytesToHex(keyPrefix)
 	if t.binary {
 		hexPrefix = keyHexToBin(hexPrefix)
