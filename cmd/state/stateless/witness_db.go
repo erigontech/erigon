@@ -15,18 +15,19 @@ var (
 )
 
 type WitnessDBWriter struct {
-	putter      ethdb.Putter
+	storage     ethdb.Database
 	statsWriter *csv.Writer
+	batch       ethdb.DbWithPendingMutations
 }
 
-func NewWitnessDBWriter(putter ethdb.Putter, statsWriter *csv.Writer) (*WitnessDBWriter, error) {
+func NewWitnessDBWriter(storage ethdb.Database, statsWriter *csv.Writer) (*WitnessDBWriter, error) {
 	err := statsWriter.Write([]string{
 		"blockNum", "maxTrieSize", "witnessesSize",
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &WitnessDBWriter{putter, statsWriter}, nil
+	return &WitnessDBWriter{storage, statsWriter, nil}, nil
 }
 
 func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, resolveWitnesses []*trie.Witness) {
@@ -44,11 +45,22 @@ func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, re
 	}
 
 	bytes := buf.Bytes()
-	err := db.putter.Put(witnessesBucket, key, bytes)
+
+	if db.batch == nil {
+		db.batch = db.storage.NewBatch()
+	}
+
+	err := db.batch.Put(witnessesBucket, key, bytes)
 
 	if err != nil {
 		panic(fmt.Errorf("error while upserting witness: %w", err))
 	}
+
+	_, err = db.batch.Commit()
+	if err != nil {
+		panic(err)
+	}
+	db.batch = nil
 
 	err = db.statsWriter.Write([]string{
 		fmt.Sprintf("%v", blockNumber),
@@ -59,6 +71,18 @@ func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, re
 	if err != nil {
 		panic(fmt.Errorf("error while writing stats: %w", err))
 	}
+
+	db.statsWriter.Flush()
+}
+
+func (db *WitnessDBWriter) Flush() error {
+	if db.batch == nil {
+		return nil
+	}
+
+	_, err := db.batch.Commit()
+	db.batch = nil
+	return err
 }
 
 type WitnessDBReader struct {
