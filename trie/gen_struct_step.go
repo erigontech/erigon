@@ -36,7 +36,7 @@ type structInfoReceiver interface {
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(common.Hash) error
+	hash([]byte) error
 }
 
 func calcPrecLen(groups []uint16) int {
@@ -53,7 +53,7 @@ type GenStructStepData interface {
 type GenStructStepAccountData struct {
 	FieldSet    uint32
 	StorageSize uint64
-	Balance     *big.Int // nil-able
+	Balance     big.Int
 	Nonce       uint64
 	Incarnation uint64
 }
@@ -129,32 +129,23 @@ func GenStructStep(
 			emitHash := hashOnly(curr[:maxLen])
 
 			switch v := data.(type) {
-			case GenStructStepHashData:
-				if trace {
-					fmt.Printf("GenStructStepHashData\n")
-				}
+			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
 				buildExtensions = true
-			case GenStructStepAccountData:
-				if trace {
-					fmt.Printf("GenStructStepAccountData %x[%x] %d %d %d %b\n", curr, curr[:remainderStart], v.Balance, v.Nonce, v.Incarnation, v.FieldSet)
-				}
+			case *GenStructStepAccountData:
 				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}
-			case GenStructStepLeafData:
-				if trace {
-					fmt.Printf("GenStructStepLeafData %x[%x] %x\n", curr, curr[:remainderStart], v.Value)
-				}
+			case *GenStructStepLeafData:
 				/* building leafs */
 				if emitHash {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {

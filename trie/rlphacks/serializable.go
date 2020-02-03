@@ -12,7 +12,7 @@ type RlpSerializableTape interface {
 
 // RlpSerializable is a value that can be double-RLP coded.
 type RlpSerializable interface {
-	ToDoubleRLP(io.Writer) error
+	ToDoubleRLP(io.Writer, []byte) error
 	DoubleRLPLen() int
 	RawBytes() []byte
 }

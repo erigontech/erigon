@@ -1,3 +1,12 @@
+# 2019-01-29 merge
+
+commit ba49ad79065d6037d78fe66e508b67cac5ff7b59
+Author: Péter Szilágyi <peterke@gmail.com>
+Date:   Mon Jan 20 12:27:51 2020 +0200
+
+    params: release Geth v1.9.10
+
+
 # 2019-12-03 merge
 
 ## geth
