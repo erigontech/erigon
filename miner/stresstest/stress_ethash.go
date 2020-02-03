@@ -190,6 +190,7 @@ func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 			GasPrice: big.NewInt(1),
 			Recommit: time.Second,
 		},
+		BlocksBeforePruning: 100,
 		BlocksToPrune:  10,
 		PruningTimeout: time.Second,
 	}

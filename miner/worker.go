@@ -263,7 +263,7 @@ func (w *worker) pendingBlock() *types.Block {
 
 func (w *worker) init() {
 	w.initOnce.Do(func() {
-		//time.Sleep(5 * time.Second)
+		time.Sleep(5 * time.Second)
 		w.txsCh = make(chan core.NewTxsEvent, txChanSize)
 		w.chainHeadCh = make(chan core.ChainHeadEvent, chainHeadChanSize)
 		w.chainSideCh = make(chan core.ChainSideEvent, chainSideChanSize)
@@ -586,7 +586,7 @@ func (w *worker) taskLoop() {
 				log.Warn("Block sealing failed", "err", err)
 			}
 
-			w.insertToChain(<-resultCh, task.createdAt, sealHash, task, true)
+			w.insertToChain(<-resultCh, task.createdAt, sealHash, task, false)
 		case <-w.exitCh:
 			return
 		}
@@ -723,7 +723,6 @@ func (w *worker) updateSnapshot() {
 		return false
 	})
 
-	fmt.Println("!!!", w.current.header.Number.Uint64(), debug.Callers(10))
 	w.snapshotBlock = types.NewBlock(
 		w.current.header,
 		w.current.txs,
@@ -975,7 +974,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 			log.Error("Failed to commit empty block", "err", err)
 			ctx.CancelFunc()
 		}
-		fmt.Println("=== COMMIT empty took", time.Since(now))
+		log.Info("Commit an empty block", "number", header.Number, "duration", time.Since(now))
 	}
 
 	// Fill the block with all available pending transactions.
@@ -1017,7 +1016,7 @@ func (w *worker) commitNewWork(ctx consensus.Cancel, interrupt *int32, noempty b
 		log.Error("Failed to commit block", "err", err)
 		ctx.CancelFunc()
 	}
-	fmt.Println("=== COMMIT block with transactions took", time.Since(now))
+	log.Info("Commit a block with transactions", "number", header.Number, "duration", time.Since(now))
 }
 
 // commit runs any post-transaction state modifications, assembles the final block
