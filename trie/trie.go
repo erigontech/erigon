@@ -704,12 +704,13 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
 		if matchlen == min(len(n.Key), len(key[keyStart:])) || n.Key[matchlen] == 16 || key[keyStart+matchlen] == 16 {
-			wholeMatch := matchlen == len(key)-keyStart
+			fullMatch := matchlen == len(key)-keyStart
+			removeNodeEntirely := fullMatch
 			if preserveAccountNode {
-				wholeMatch = len(key) == keyStart || matchlen == len(key[keyStart:])-1
+				removeNodeEntirely = len(key) == keyStart || matchlen == len(key[keyStart:])-1
 			}
 
-			if wholeMatch {
+			if removeNodeEntirely {
 				updated = true
 				t.evictNodeFromHashMap(n)
 				touchKey := key[:keyStart+matchlen]
@@ -717,7 +718,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 					touchKey = touchKey[:len(touchKey)-1]
 				}
 				t.touchAll(n.Val, touchKey, true)
-				newNode = nil // remove n entirely for whole matches
+				newNode = nil
 			} else {
 				// The key is longer than n.Key. Remove the remaining suffix
 				// from the subtrie. Child can never be nil here since the
@@ -903,6 +904,9 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 	}
 }
 
+// DeleteSubtree removes any existing value for key from the trie.
+// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
+// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 func (t *Trie) DeleteSubtree(keyPrefix []byte, blockNr uint64) {
 	hexPrefix := keybytesToHex(keyPrefix)
 	if t.binary {
