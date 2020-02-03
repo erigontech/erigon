@@ -146,7 +146,7 @@ func (b *SimulatedBackend) Commit() {
 	//fmt.Printf("---- Start committing block %d\n", b.pendingBlock.NumberU64())
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if _, err := b.blockchain.InsertChain([]*types.Block{b.pendingBlock}); err != nil {
+	if _, err := b.blockchain.InsertChain(context.Background(), []*types.Block{b.pendingBlock}); err != nil {
 		panic(err)
 	}
 	//fmt.Printf("---- End committing block %d\n", b.pendingBlock.NumberU64())

@@ -127,7 +127,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -146,7 +146,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +165,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -176,7 +176,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -191,7 +191,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -205,7 +205,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 6
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -219,7 +219,7 @@ func TestEIP2027AccountStorageSize(t *testing.T) {
 	}
 
 	// BLOCK 7
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -320,7 +320,7 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -339,7 +339,7 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -358,7 +358,7 @@ func TestEIP2027AccountStorageSizeOnDeploy(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -465,7 +465,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -484,7 +484,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -503,7 +503,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +514,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -525,7 +525,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -536,7 +536,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 6
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -547,7 +547,7 @@ func TestEIP2027AccountStorageSizeWithoutEIP(t *testing.T) {
 	}
 
 	// BLOCK 7
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -658,7 +658,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -677,7 +677,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -696,7 +696,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -708,7 +708,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -722,7 +722,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -736,7 +736,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 6
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -750,7 +750,7 @@ func TestEIP2027AccountStorageSizeRevertRemove(t *testing.T) {
 	}
 
 	// BLOCK 7
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -864,7 +864,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 
 	// BLOCK 1
 	// account must exist pre eip 161
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -883,7 +883,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -902,7 +902,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -913,7 +913,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -928,7 +928,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -942,7 +942,7 @@ func TestEIP2027AccountStorageSizeRevertUpdate(t *testing.T) {
 	}
 
 	// BLOCK 6
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1050,7 +1050,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	})
 
 	// BLOCK 1
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1069,7 +1069,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1088,7 +1088,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1099,7 +1099,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1114,7 +1114,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	}
 
 	// BLOCK 5
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1128,7 +1128,7 @@ func TestEIP2027AccountStorageSizeExceptionUpdate(t *testing.T) {
 	}
 
 	// BLOCK 6
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1218,7 +1218,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1231,7 +1231,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	blockchain.EnableReceipts(true)
 
 	// BLOCK 2
-	if _, err := blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err := blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	// If we got this far, the newly created blockchain (with empty trie cache) loaded trie from the database

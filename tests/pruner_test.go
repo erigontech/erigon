@@ -96,7 +96,7 @@ func TestBasisAccountPruning(t *testing.T) {
 	})
 
 	// Insert blocks
-	_, err = blockchain.InsertChain(blocks)
+	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestBasisAccountPruningNoHistory(t *testing.T) {
 		block.AddTx(tx)
 	})
 
-	_, err = blockchain.InsertChain(blocks)
+	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -469,7 +469,7 @@ func TestStoragePruning(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	_, err = blockchain.InsertChain(blocks)
+	_, err = blockchain.InsertChain(context.Background(), blocks)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,7 +603,7 @@ func TestBasisAccountPruningStrategy(t *testing.T) {
 	assertNil(t, err)
 
 	for i := range blocks {
-		_, err = blockchain.InsertChain(types.Blocks{blocks[i]})
+		_, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[i]})
 		if err != nil {
 			t.Fatal(err)
 		}

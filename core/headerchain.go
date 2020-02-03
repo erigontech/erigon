@@ -17,6 +17,7 @@
 package core
 
 import (
+	"context"
 	crand "crypto/rand"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"time"
 
 	lru "github.com/hashicorp/golang-lru"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -139,7 +141,7 @@ func (hc *HeaderChain) GetBlockNumber(dbr rawdb.DatabaseReader, hash common.Hash
 // without the real blocks. Hence, writing headers directly should only be done
 // in two scenarios: pure-header mode of operation (light clients), or properly
 // separated header/block phases (non-archive clients).
-func (hc *HeaderChain) WriteHeader(header *types.Header) (status WriteStatus, err error) {
+func (hc *HeaderChain) WriteHeader(ctx context.Context, header *types.Header) (status WriteStatus, err error) {
 	// Cache some values to prevent constant recalculation
 	var (
 		hash   = header.Hash()
@@ -157,7 +159,7 @@ func (hc *HeaderChain) WriteHeader(header *types.Header) (status WriteStatus, er
 	// Irrelevant of the canonical status, write the td and header to the database
 	headerBatch := hc.chainDb.NewBatch()
 	rawdb.WriteTd(headerBatch, hash, number, externTd)
-	rawdb.WriteHeader(headerBatch, header)
+	rawdb.WriteHeader(ctx, headerBatch, header)
 	if _, err := headerBatch.Commit(); err != nil {
 		log.Crit("Failed to write header into disk", "err", err)
 	}

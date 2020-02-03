@@ -182,7 +182,7 @@ func benchInsertChain(b *testing.B, disk bool, gen func(int, *BlockGen)) {
 	// State and blocks are stored in the same DB.
 	b.ReportAllocs()
 	b.ResetTimer()
-	if i, err := chainman.InsertChain(chain); err != nil {
+	if i, err := chainman.InsertChain(context.Background(), chain); err != nil {
 		b.Fatalf("insert error (block %d): %v\n", i, err)
 	}
 }
@@ -240,13 +240,15 @@ func makeChainForBench(db ethdb.Database, full bool, count uint64) {
 		}
 		hash = header.Hash()
 
-		rawdb.WriteHeader(db, header)
+		ctx := context.Background()
+
+		rawdb.WriteHeader(ctx, db, header)
 		rawdb.WriteCanonicalHash(db, hash, n)
 		rawdb.WriteTd(db, hash, n, big.NewInt(int64(n+1)))
 
 		if full || n == 0 {
 			block := types.NewBlockWithHeader(header)
-			rawdb.WriteBody(db, hash, n, block.Body())
+			rawdb.WriteBody(ctx, db, hash, n, block.Body())
 			rawdb.WriteReceipts(db, hash, n, nil)
 		}
 	}

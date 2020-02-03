@@ -456,7 +456,7 @@ func initialState1() error {
 	// BLOCK 1
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -472,7 +472,7 @@ func initialState1() error {
 	// BLOCK 2
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -488,7 +488,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -510,7 +510,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 4); err != nil {
@@ -526,7 +526,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
@@ -542,7 +542,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
@@ -561,7 +561,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 7); err != nil {
@@ -579,7 +579,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[7]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[7]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 8); err != nil {

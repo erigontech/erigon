@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -625,7 +626,7 @@ func execToBlock(block int) {
 		lastBlock = bcb.GetBlockByNumber(uint64(i))
 		blocks = append(blocks, lastBlock)
 		if len(blocks) >= 100 || i == block {
-			_, err = bc.InsertChain(blocks)
+			_, err = bc.InsertChain(context.Background(), blocks)
 			check(err)
 			fmt.Printf("Inserted %d blocks\n", i)
 			blocks = types.Blocks{}
