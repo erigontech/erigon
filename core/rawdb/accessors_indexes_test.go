@@ -37,8 +37,7 @@ var DBVersions []struct {
 	{
 		"DatabaseV6Sort",
 		func(db ethdb.DbWithPendingMutations, block *types.Block) {
-			WriteTxLookupEntriesInMemory(block)
-			WriteTxLookupEntries(db)
+			WriteTxLookupEntries(db, types.Blocks{block})
 		},
 	},
 	{

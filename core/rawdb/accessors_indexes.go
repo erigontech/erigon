@@ -39,8 +39,6 @@ type TxLookupEntry struct {
 	Index      uint64
 }
 
-var memTxLookupEntries []uint64
-
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
 func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) *uint64 {
@@ -54,29 +52,30 @@ func ReadTxLookupEntry(db DatabaseReader, hash common.Hash) *uint64 {
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from
 // a block, enabling hash based transaction and receipt lookups.
-func WriteTxLookupEntriesInMemory(block *types.Block) {
-	blockNumber := block.Number().Bytes()
-	for txIndex, tx := range block.Transactions() {
-		entry := make([]byte, 8)
-		copy(entry[6:], tx.Hash().Bytes())
-		copy(entry[(6-len(blockNumber)):], blockNumber)
-		tdxBytes := uintToBytes(uint64(txIndex))
-		copy(entry[2-len(tdxBytes):], tdxBytes)
-		memTxLookupEntries = append(memTxLookupEntries, binary.LittleEndian.Uint64(entry))
-	}
-}
-
-func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
+func WriteTxLookupEntries(db ethdb.DbWithPendingMutations, blocks types.Blocks) {
+	var lookups []uint64
 	var sets []uint64
 	var prev []byte
-	if len(memTxLookupEntries) == 0 {
+	for _, block := range blocks {
+		blockNumber := block.Number().Bytes()
+		for txIndex, tx := range block.Transactions() {
+			entry := make([]byte, 8)
+			copy(entry[6:], tx.Hash().Bytes())
+			copy(entry[(6-len(blockNumber)):], blockNumber)
+			tdxBytes := uintToBytes(uint64(txIndex))
+			copy(entry[2-len(tdxBytes):], tdxBytes)
+			lookups = append(lookups, binary.LittleEndian.Uint64(entry))
+		}
+	}
+
+	if len(lookups) == 0 {
 		return
 	}
 	// sort the array
-	sort.Slice(memTxLookupEntries, func(i, j int) bool {
-		return memTxLookupEntries[i] < memTxLookupEntries[j]
+	sort.Slice(lookups, func(i, j int) bool {
+		return lookups[i] < lookups[j]
 	})
-	for i, lookup := range memTxLookupEntries {
+	for i, lookup := range lookups {
 		entry := make([]byte, 8)
 		binary.LittleEndian.PutUint64(entry, lookup)
 		blockNumber := bytesToUint64(entry[2:6])
@@ -99,14 +98,14 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 			log.Warn("Lookup: Hash not found, Skipping.")
 			continue
 		}
-		if prev == nil && i != len(memTxLookupEntries)-1 {
+		if prev == nil && i != len(lookups)-1 {
 			prev = entry[6:]
 			copy(entry[6:], txHash[2:])
 			sets = []uint64{binary.LittleEndian.Uint64(entry)}
-		} else if bytes.Equal(entry[6:], prev) && i != len(memTxLookupEntries)-1 {
+		} else if bytes.Equal(entry[6:], prev) && i != len(lookups)-1 {
 			copy(entry[6:], txHash[2:])
 			sets = append(sets, binary.LittleEndian.Uint64(entry))
-		} else if i == len(memTxLookupEntries)-1 {
+		} else if i == len(lookups)-1 {
 			if bytes.Equal(entry[6:], prev) {
 				copy(entry[6:], txHash[2:])
 				sets = append(sets, binary.LittleEndian.Uint64(entry))
@@ -122,11 +121,6 @@ func WriteTxLookupEntries(db ethdb.DbWithPendingMutations) {
 			sets = []uint64{binary.LittleEndian.Uint64(entry)}
 		}
 	}
-	memTxLookupEntries = []uint64{}
-}
-
-func ResetLookupEntries() {
-	memTxLookupEntries = nil
 }
 
 // DeleteTxLookupEntry removes all transaction data associated with a hash.
