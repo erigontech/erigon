@@ -47,6 +47,7 @@ var account = flag.String("account", "0x", "specifies account to investigate")
 var name = flag.String("name", "", "name to add to the file names")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
+var preImage = flag.String("preimage", "0x00", "preimage")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -1010,6 +1011,14 @@ func preimage(chaindata string, image common.Hash) {
 	fmt.Printf("%x\n", p)
 }
 
+func addPreimage(chaindata string, image common.Hash, preimage []byte) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	err = ethDb.Put(dbutils.PreimagePrefix, image[:], preimage)
+	check(err)
+}
+
 func loadAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
@@ -1255,6 +1264,9 @@ func main() {
 	//loadAccount()
 	if *action == "preimage" {
 		preimage(*chaindata, common.HexToHash(*hash))
+	}
+	if *action == "addPreimage" {
+		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
 	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
