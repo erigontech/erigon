@@ -653,7 +653,6 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			bytes += len(node)
 
 			// TODO [Andrew] serve byte codes
-			// TODO [Andrew] storage nodes
 		}
 		return p.SendNodeData(data)
 

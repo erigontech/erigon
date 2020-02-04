@@ -932,6 +932,14 @@ func (t *Trie) Hash() common.Hash {
 	return common.BytesToHash(hash.(hashNode))
 }
 
+func (t *Trie) getHasher() *hasher {
+	h := t.newHasherFunc()
+	h.callback = func(key common.Hash, nd node) {
+		t.hashMap[key] = nd
+	}
+	return h
+}
+
 // DeepHash returns internal hash of a node reachable by the specified key prefix.
 // Note that if the prefix points into the middle of a key for a leaf node or of an extention
 // node, it will return the hash of a modified leaf node or extension node, where the
@@ -953,11 +961,8 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 		accNode.Root = EmptyRoot
 		accNode.rootCorrect = true
 	} else {
-		h := t.newHasherFunc()
+		h := t.getHasher()
 		defer returnHasherToPool(h)
-		h.callback = func(key common.Hash, nd node) {
-			t.hashMap[key] = nd
-		}
 		h.hash(accNode.storage, true, accNode.Root[:])
 	}
 	return true, accNode.Root
@@ -1112,12 +1117,8 @@ func (t *Trie) hashRoot() (node, error) {
 		return hashNode(EmptyRoot.Bytes()), nil
 	}
 
-	h := t.newHasherFunc()
+	h := t.getHasher()
 	defer returnHasherToPool(h)
-
-	h.callback = func(key common.Hash, nd node) {
-		t.hashMap[key] = nd
-	}
 
 	var hn common.Hash
 	h.hash(t.root, true, hn[:])
@@ -1132,7 +1133,7 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 		return nil
 	}
 
-	h := t.newHasherFunc()
+	h := t.getHasher()
 	defer returnHasherToPool(h)
 
 	rlp, err := h.hashChildren(nd, 0)
@@ -1140,11 +1141,12 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 		log.Warn("GetNodeByHash error while producing node RLP", "err", err)
 		return nil
 	}
-	return rlp
+
+	return common.CopyBytes(rlp)
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {
-	h := t.newHasherFunc()
+	h := t.getHasher()
 	defer returnHasherToPool(h)
 
 	var key common.Hash
