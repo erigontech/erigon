@@ -283,6 +283,20 @@ func fixState(chaindata string, url string) {
 						fmt.Printf("Key: %x, value: %x, dbValue: %x\n", key, value, dbValue)
 					}
 				}
+				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
+				copy(cKey[:], addrHash[:])
+				binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation^^uint64(account.Incarnation))
+				err = stateDb.Walk(dbutils.StorageBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
+					var kh common.Hash
+					copy(kh[:], k)
+					if entry, ok := sm[kh]; !ok {
+						fmt.Printf("Key: %x, dbValue: %x\n", kh, entry.Value)
+					}
+					return true, nil
+				})
+				if err != nil {
+					panic(err)
+				}
 			}
 		}
 	}
