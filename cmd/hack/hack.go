@@ -1114,7 +1114,7 @@ func readAccount(chaindata string, account common.Address) {
 	if err = a.DecodeForStorage(v); err != nil {
 		panic(err)
 	}
-	fmt.Printf("%x:%x\n%x\n", secKey, v, a.Root)
+	fmt.Printf("%x:%x\n%x\n%x\n", secKey, v, a.Root, a.CodeHash)
 }
 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
