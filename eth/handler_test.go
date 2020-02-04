@@ -281,22 +281,31 @@ func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 
 func testGetNodeData(t *testing.T, protocol int) {
 	// Assemble the test environment
-	pm, _ := setUpStorageContractA(t)
+	pm, addr := setUpStorageContractA(t)
 	peer, _ := newTestPeer("peer", protocol, pm, true)
 	defer peer.close()
 
+	state, err := pm.blockchain.GetTrieDbState()
+	assert.NoError(t, err)
+	account, err := state.ReadAccountData(addr)
+	assert.NoError(t, err)
+	accountRlp, err := rlp.EncodeToBytes(account)
+	assert.NoError(t, err)
+
 	node0Rlp, node1Rlp, branchRlp := storageNodesOfContractA(t, 2)
 
+	assert.Equal(t, account.Root, crypto.Keccak256Hash(branchRlp))
+
 	// Fetch some nodes
-	// TODO [Andrew] test account nodes
 	hashes := []common.Hash{
-		pm.blockchain.CurrentBlock().Root(),
-		crypto.Keccak256Hash(node0Rlp),
-		crypto.Keccak256Hash(branchRlp),
 		crypto.Keccak256Hash(node1Rlp),
+		pm.blockchain.CurrentBlock().Root(),
+		crypto.Keccak256Hash(branchRlp),
+		crypto.Keccak256Hash(accountRlp),
+		crypto.Keccak256Hash(node0Rlp),
 	}
 
-	err := p2p.Send(peer.app, GetNodeDataMsg, hashes)
+	err = p2p.Send(peer.app, GetNodeDataMsg, hashes)
 	assert.NoError(t, err)
 
 	msg, err := peer.app.ReadMsg()

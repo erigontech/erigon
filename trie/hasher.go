@@ -309,7 +309,20 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 	defer pool.PutBuffer(encodedAccount)
 
 	ac.EncodeForHashing(encodedAccount.B)
-	enc := rlphacks.RlpEncodedBytes(encodedAccount.Bytes())
+	acRlp := encodedAccount.Bytes()
+
+	if h.callback != nil {
+		var hash common.Hash
+		refLen, err := h.nodeRef(acRlp, false, hash[:])
+		if err != nil {
+			return 0, err
+		}
+		if refLen == common.HashLength {
+			h.callback(hash, ac)
+		}
+	}
+
+	enc := rlphacks.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
 
 	if err := enc.ToDoubleRLP(h.bw, h.prefixBuf[:]); err != nil {
