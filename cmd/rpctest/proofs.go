@@ -281,6 +281,7 @@ func fixState(chaindata string, url string) {
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
 					if !bytes.Equal(dbValue, value) {
 						fmt.Printf("Key: %x, value: %x, dbValue: %x\n", key, value, dbValue)
+						stateDb.Put(dbutils.StorageBucket, cKey[:], value)
 					}
 				}
 				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
@@ -289,8 +290,9 @@ func fixState(chaindata string, url string) {
 				err = stateDb.Walk(dbutils.StorageBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
 					copy(kh[:], k)
-					if entry, ok := sm[kh]; !ok {
-						fmt.Printf("Key: %x, dbValue: %x\n", kh, entry.Value)
+					if _, ok := sm[kh]; !ok {
+						fmt.Printf("Key: %x, dbValue: %x\n", kh, v)
+						stateDb.Delete(dbutils.StorageBucket, k)
 					}
 					return true, nil
 				})
