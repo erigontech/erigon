@@ -289,7 +289,7 @@ func fixState(chaindata string, url string) {
 				binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation^^uint64(account.Incarnation))
 				err = stateDb.Walk(dbutils.StorageBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
-					copy(kh[:], k)
+					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
 					if _, ok := sm[kh]; !ok {
 						fmt.Printf("Key: %x, dbValue: %x\n", kh, v)
 						stateDb.Delete(dbutils.StorageBucket, k)
