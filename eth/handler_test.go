@@ -902,7 +902,7 @@ func storageNodesOfContractA(t *testing.T, blockNbr uint64) (node0Rlp, node1Rlp,
 	branchRlp, err = rlp.EncodeToBytes(branchNode)
 	assert.NoError(t, err)
 
-	return
+	return node0Rlp, node1Rlp, branchRlp
 }
 
 // 2 storage items starting with the same nibble
