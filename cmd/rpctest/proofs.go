@@ -271,10 +271,11 @@ func fixState(chaindata string, url string) {
 						}
 					}
 				}
+				fmt.Printf("Retrived %d storage items from geth archive node\n", len(sm))
 				for key, entry := range sm {
 					var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 					copy(cKey[:], addrHash[:])
-					binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation^^uint64(0))
+					binary.BigEndian.PutUint64(cKey[common.HashLength:], account.Incarnation^^uint64(account.Incarnation))
 					copy(cKey[common.HashLength+common.IncarnationLength:], key[:])
 					dbValue, _ := stateDb.Get(dbutils.StorageBucket, cKey[:])
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
