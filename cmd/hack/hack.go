@@ -1117,6 +1117,21 @@ func readAccount(chaindata string, account common.Address) {
 	fmt.Printf("%x:%x\n%x\n", secKey, v, a.Root)
 }
 
+func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	v, _ := ethDb.Get(dbutils.AccountsBucket, addrHash[:])
+	var a accounts.Account
+	if err = a.DecodeForStorage(v); err != nil {
+		panic(err)
+	}
+	a.Root = storageRoot
+	v = make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(v)
+	err = ethDb.Put(dbutils.AccountsBucket, addrHash[:], v)
+	check(err)
+}
+
 func repairCurrent() {
 	historyDb, err := bolt.Open("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata", 0600, &bolt.Options{})
 	check(err)
@@ -1274,6 +1289,9 @@ func main() {
 	//repair()
 	if *action == "readAccount" {
 		readAccount(*chaindata, common.HexToAddress(*account))
+	}
+	if *action == "fixAccount" {
+		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
 	}
 	//repairCurrent()
 	//testMemBolt()
