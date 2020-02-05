@@ -69,6 +69,10 @@ They also can have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
 
 The helper functions can be recursive but MUST be pure.
 
+## Data types
+
+In this document we treat numeric types (INT, FLOAT) as infinite and will not describe the overflow handling.
+
 ## Execution flow 
 
 Let's look at the example.
@@ -163,7 +167,7 @@ MAKE_VALUES_ARRAY(mask uint16, values...) {
 }
 
 MAKE_VALUES_ARRAY(mask uint16, idx uint, values...) {
-    guard idx <= 16 else {
+    if idx > 16 {
         return []
     }
 
@@ -189,4 +193,4 @@ returns a new array with the `value` at index 0 and `array` values starting from
 
 ### `INC(value uint)`
 
-increments `value` by 1, undefined behaviour on overflows
+increments `value` by 1
