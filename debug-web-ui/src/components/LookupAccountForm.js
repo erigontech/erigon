@@ -2,6 +2,9 @@ import React, { useState } from 'react'
 
 import Form from 'react-bootstrap/Form'
 import Button from 'react-bootstrap/Button'
+import Row from 'react-bootstrap/Row';
+import Col from 'react-bootstrap/Col';
+import { Table } from 'react-bootstrap';
 
 const LookupAccountForm = () => {
     const [accountID, setAccountID] = useState(123);
@@ -9,6 +12,7 @@ const LookupAccountForm = () => {
     return (
         <div>
             <TextField accountID={accountID} onClick={setAccountID} />
+            <hr />
             { accountID && <DetailsForm accountID={accountID} /> }
         </div>
     );
@@ -49,10 +53,41 @@ class TextField extends React.Component {
     }
 }
 
-const DetailsForm = ({accountID}) => (
-    <div>
-        ID = {accountID}
-    </div>
-)
+class DetailsForm extends React.Component {
+    constructor(props) {
+        super(props)
+        this.state = {account: undefined}
+    }
+
+    componentDidMount() {
+        // TODO: make an API call
+    }
+
+    render () { 
+        return (
+            <div>
+                <Row>
+                    <Col>
+                        <h1>Search Result</h1>
+                    </Col>
+                </Row>
+                <Row>
+                    <Col>
+                        <Table>
+                            <Table.Row>
+                                <Table.Col>
+                                    ID
+                                </Table.Col>
+                                <Table.Col>
+                                    <code>{this.props.accountID}</code>
+                                </Table.Col>
+                            </Table.Row>
+                        </Table>
+                    </Col>
+                </Row>
+            </div>
+        );
+    }
+}
 
 export default LookupAccountForm;
