@@ -77,7 +77,7 @@ class DetailsForm extends React.Component {
             );
         }
 
-        const rows = Object.entries(this.state.account).map(([key, value]) => <TableRow name={key} value={value} />)
+        const rows = Object.entries(this.state.account).map(([key, value]) => <TableRow key={key} name={key} value={value} />)
 
         return (
             <div>
