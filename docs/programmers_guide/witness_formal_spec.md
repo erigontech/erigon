@@ -9,9 +9,10 @@ Witnesses are executed on a stack machine that builds tries/calculates hashes.
 The stack consists of pairs `(node, hash)`.
 
 Each witness is a queue of instructions.
-In every execution cycle one instruction gets dequeued and a matching substitution rule gets applied to the stack.
 
-In the end, when there are no more instructions left, there should be only one item on the stack.  
+In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
+
+In the end, when there are no more instructions left, there MUST be only one item left on the stack.  
 
 ## Substitution rules
 
@@ -37,41 +38,45 @@ helper2 (hash1, hash2) {
 }
 ```
 
-## Guards & Traps
+## Guards
 
-Each instruction and each helper function can have zero, one or multiple `guard` statements.
+Each substitution rule can have zero, one or multiple `guard` statements.
 Each `guard` statement looks like this:
 
 ```
-guard <CONDITION> else {
-    TRAP
-}
+guard <CONDITION>
 ```
 
-That means that for this instruction to be valid the `<CONDITION>` in the guard statement must be true.
+That means that for the substitution rule to be applicable the `<CONDITION>` in the guard statement must be true.
 
-If the condition is falsey, then the execution should stop (`TRAP` instruction). Implementation of the `TRAP` instruction is undefined, but it should stop the execution flow. (e.g. in Golang it might be a function returning an error or a panic).
+If a substitution rule has multiple guard statements, all of the conditions specified there should be satisfied.
 
-If an instruction has multiple guard statements, all of the conditions specified there should be satisfied.
+## `TRAP` statements
+
+If no substitution rules are applicable for an instruction, then the execution MUST stop (`TRAP` instruction) and the partial results MUST NOT be used.
+
+Implementation of the `TRAP` instruction is undefined, but it should stop the execution flow. (e.g. in Golang it might be a function returning an error or a panic).
 
 ## Instructions & Parameters
 
-Each instruction can have zero, one or multiple parameters. The values of these parameters are stored in the witness itself and decoded together with the instruction. They aren't taken from the stack.
+Each instruction MAY have one or more parameters.
+The parameters values MUST be situated in the witness.
+The parameter values MUST NOT be taken from the stack.
 
-That makes it different from the helper function parameters that can come from either stack or the witness itself.
+That makes it different from the helper function parameters that MAY come from the stack or MAY come from the witness.
 
 ## Helper functions
 
-Helper functions are pure functions that are used in the substitution rules.
-They can have zero, one or multiple arguments.
+Helper functions are functions that are used in guards or substitution rules.
 
-They also can have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
-
-The helper functions can be recursive but MUST be pure.
+Helper functions MUST be pure.
+Helper functions MUST have at least one argument.
+Helper functions MAY have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
+Helper functions MAY contain recursion.
 
 ## Data types
 
-In this document we treat numeric types (INT, FLOAT) as infinite and will not describe the overflow handling.
+INTEGER - we treat integers as infinite, the overflow behaviour or mapping to the actual data types is undefined in this spec and should be dependent on implementation.
 
 ## Execution flow 
 
@@ -117,7 +122,7 @@ There are two modes of execution for this stack machine:
 
 (2) **hash only execution** -- the mode that calculates the root hashe of a trie without constructing the tries itself;
 
-In the mode (2), the first part of the pair `(node, hash)` is not used and always `nil`: `(nil, hash)`.
+In the mode (2), the first part of the pair `(node, hash)` MUST NOT be used: `(nil, hash)`.
 
 ## Instructions
 
@@ -125,20 +130,17 @@ In the mode (2), the first part of the pair `(node, hash)` is not used and alway
 
 This instruction pops `NBITSET(mask)` items from both node stack and hash stack (up to 16 for each one). Then it pushes a new branch node on the node stack that has children according to the stack; it also pushes a new hash to the hash stack.
 
-**Guards**
-
-```
-guard NBITSET(mask) == LEN(values) else {
-    TRAP
-}
-```
-
 **Substitution rules**
 ```
+
+guard NBITSET(mask) == 2 
 
 STACK(n0, h0) STACK(n1, h1) BRANCH(mask) |=> 
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
 ---
+
+
+guard NBITSET(mask) == 3
 
 STACK(n0, h0) STACK(n1, h1) STACK(n2, h2) BRANCH(mask) |=> 
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, n2))))
@@ -148,6 +150,8 @@ STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES
 ...
 
 ---
+
+guard NBITSET(mask) == 16
 
 STACK(n0, h0) STACK(n1, h1) ... STACK(n15, h15) BRANCH(mask) |=>
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, ..., n15))))
@@ -162,11 +166,11 @@ returns an array of 16 elements, where values from `values` are set to the indic
 **Example**: `MAKE_VALUES_ARRAY(5, [a, b])` returns `[a, nil, b, nil, nil, ..., nil]` (binary representation of 5 is `0000000000000101`)
 
 ```
-MAKE_VALUES_ARRAY(mask uint16, values...) {
+MAKE_VALUES_ARRAY(mask, values...) {
     return MAKE_VALUES_ARRAY(mask, 0, values)
 }
 
-MAKE_VALUES_ARRAY(mask uint16, idx uint, values...) {
+MAKE_VALUES_ARRAY(mask, idx, values...) {
     if idx > 16 {
         return []
     }
@@ -179,11 +183,13 @@ MAKE_VALUES_ARRAY(mask uint16, idx uint, values...) {
 }
 ```
 
-### `NBITSET(number uint32)`
+### `NBITSET(number)`
 
 returns number of bits set in the binary representation of `number`.
 
-### `BIT_TEST(number uint32, n uint)`
+### `BIT_TEST(number, n)`
+
+`n` MUST NOT be negative.
 
 returns `true` if bit `n` in `number` is set, `false` otherwise.
 
@@ -191,6 +197,6 @@ returns `true` if bit `n` in `number` is set, `false` otherwise.
 
 returns a new array with the `value` at index 0 and `array` values starting from index 1
 
-### `INC(value uint)`
+### `INC(value)`
 
 increments `value` by 1
