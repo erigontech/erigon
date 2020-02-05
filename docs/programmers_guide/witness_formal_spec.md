@@ -1,50 +1,143 @@
 # Block Witness Formal Specification
 
-Block witness uses 2 stacks:
-- node stack: `NODES`
-- hashes stack: `HASHES`
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://tools.ietf.org/html/rfc2119).
 
-That allows to calculate trie hashes w/o building the tries themselves.
+## The Stack
+
+Witnesses are executed on a stack machine that builds tries/calculates hashes.
+
+The stack consists of pairs `(node, hash)`.
+
+Each witness is a queue of instructions.
+In every execution cycle one instruction gets dequeued and a matching substitution rule gets applied to the stack.
+
+In the end, when there are no more instructions left, there should be only one item on the stack.  
+
+## Substitution rules
+
+Here is an example substitution rule. The current instruction is named `INSTR1`.
+
+```
+STACK(node1, hash1) STACK(node2, hash2) INSTR1(params) |=> 
+STACK(helper1(node1, node2), helper2(hash1, hash2))
+```
+
+This substitution rule replaces 2 stack items `(node1, hash1)` and `(node2, hash2)`
+with a single stack item `(helper1(node1, node2), helper2(hash1, hash2))`.
+
+Where `helper1` and `helper2` are pure functions defined in pseudocode (see the example below).
+
+```
+helper1 (value1, value2) {
+    return value1 + value2
+}
+
+helper2 (hash1, hash2) {
+    return KECCAK(hash1 + hash2)
+}
+```
+
+## Guards & Traps
+
+Each instruction and each helper function can have zero, one or multiple `guard` statements.
+Each `guard` statement looks like this:
+
+```
+guard <CONDITION> else {
+    TRAP
+}
+```
+
+That means that for this instruction to be valid the `<CONDITION>` in the guard statement must be true.
+
+If the condition is falsey, then the execution should stop (`TRAP` instruction). Implementation of the `TRAP` instruction is undefined, but it should stop the execution flow. (e.g. in Golang it might be a function returning an error or a panic).
+
+If an instruction has multiple guard statements, all of the conditions specified there should be satisfied.
+
+## Instructions & Parameters
+
+Each instruction can have zero, one or multiple parameters. The values of these parameters are stored in the witness itself and decoded together with the instruction. They aren't taken from the stack.
+
+That makes it different from the helper function parameters that can come from either stack or the witness itself.
+
+## Helper functions
+
+Helper functions are pure functions that are used in the substitution rules.
+They can have zero, one or multiple arguments.
+
+They also can have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
+
+The helper functions can be recursive but MUST be pure.
+
+## Execution flow 
+
+Let's look at the example.
+
+Our example witness would be `HASH h1; HASH h2; BRANCH 0b11`.
+
+Initial state of the stack is ` <empty> `;
+
+---
+
+**1. Executing `HASH h1`**: push a `hashNode` to the stack.
+
+Witness: `HASH h2; BRANCH 0b11`
+
+Stack: `(hashNode(h1), h1)`
+
+---
+
+**2. Executing `HASH h2`**: push one more `hashNode` to the stack.
+
+Witness `BRANCH 0b11`
+
+Stack: `(hashNode(h2), h2); (hashNode(h1), h1)`
+
+---
+
+**3. Executing `BRANCH 0b11`**: replace 2 items on the stack with a single `fullNode`.
+
+Witness: ` <empty> `
+
+Stack: `(fullNode{0: hashNode(h2), 1: hashNode(h1)}, KECCAK(h2+h1))`
+
+---
+
+So our stack has exactly a single item and there are no more instructions in the witness, the execution is completed.
+
+## Modes
+
+There are two modes of execution for this stack machine:
+
+(1) **normal execution** -- the mode that constructs a trie;
+
+(2) **hash only execution** -- the mode that calculates the root hashe of a trie without constructing the tries itself;
+
+In the mode (2), the first part of the pair `(node, hash)` is not used and always `nil`: `(nil, hash)`.
 
 ## Instructions
-
-### Substitution rules
-
-a typical substitution rule shows what values on stacks are replaced (before an INSTRUCTION), to by which values (after an INSTRUCTION)
-
-```
-NODECONST(nodeValue), NODECONST(nodeValue2)   // pop nodes on the NODES stack
-HASHCONST(hashValue),HASHCONST(hashValue2)    // pop nodes on the HASHES stack
-INSTRUCTION(params) |=>                       // the current instruction with params
-NODECONST(helperFunc(nodeValue, nodeValue2, params))    // push node(s) to the NODES stack
-HASHCONST(heperFunc2(hashValue, hashValue2, params))    // push hash(es) to the HASHES stack
-```
 
 ### `BRANCH mask`
 
 This instruction pops `NBITSET(mask)` items from both node stack and hash stack (up to 16 for each one). Then it pushes a new branch node on the node stack that has children according to the stack; it also pushes a new hash to the hash stack.
 
+**Guards**
+
+```
+guard NBITSET(mask) == LEN(values) else {
+    TRAP
+}
+```
+
 **Substitution rules**
 ```
-BRANCH(mask) |=>
-NODECONST(branchNode())
-HASHCONST(KECCAK())
 
+STACK(n0, h0) STACK(n1, h1) BRANCH(mask) |=> 
+STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
 ---
 
-NODECONST(n0)
-HASHCONST(h0)
-BRANCH(mask) |=>
-NODECONST(branchNode(MAKE_VALUES_ARRAY(mask, n0))
-HASHCONST(keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0)))
-
----
-
-NODECONST(n0) NODECONST(n1)
-HASHCONST(h0) HASHCONST(h1)
-BRANCH(mask) |=>
-NODECONST(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1))
-HASHCONST(keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1)))
+STACK(n0, h0) STACK(n1, h1) STACK(n2, h2) BRANCH(mask) |=> 
+STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, n2))))
 
 ---
 
@@ -52,17 +145,11 @@ HASHCONST(keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1)))
 
 ---
 
-NODECONST(n0) NODECONST(n1) ... NODECONST(n15)
-HASHCONST(h0) HASHCONST(h1) ... HASHCONST(h15)
-BRANCH(mask) |=>
-NODECONST(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15))
-HASHCONST(keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, h1, ..., h15)))
+STACK(n0, h0) STACK(n1, h1) ... STACK(n15, h15) BRANCH(mask) |=>
+STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, ..., n15))))
 ```
 
 ## Helper functions
-
-### variadic arguments
-`func(value...)` is a variadic function
 
 ### `MAKE_VALUES_ARRAY`
 
@@ -72,9 +159,6 @@ returns an array of 16 elements, where values from `values` are set to the indic
 
 ```
 MAKE_VALUES_ARRAY(mask uint16, values...) {
-    guard NBITSET(mask) == LEN(values) else {
-        TRAP
-    }
     return MAKE_VALUES_ARRAY(mask, 0, values)
 }
 
