@@ -38,6 +38,23 @@ helper2 (hash1, hash2) {
 }
 ```
 
+The specification for a substitution rule
+
+```
+[ STACK(<node-var-name>, <hash-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
+STACK(node-value, hash-value), ...
+```
+
+The substitution rule MAY have one or more STACK statements before the instruction.
+The substitution rule MUST have exactly one instruction.
+The substitution rule MAY have parameters for the instruction.
+The substitution rule MUST have at least one STACK statement after the arrow.
+
+So, the minimal substitution rule is for the `HASH` instruction that pushes one hash to the stack:
+```
+HASH(hashValue) |=> STACK(hashNode(hashValue), hashValue)
+```
+
 ## Guards
 
 Each substitution rule can have zero, one or multiple `guard` statements.
