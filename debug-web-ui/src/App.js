@@ -1,14 +1,15 @@
 import React from 'react';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import './App.css';
 
 import Container from 'react-bootstrap/Container'
 import Row from 'react-bootstrap/Row'
 import Col from 'react-bootstrap/Col'
 
 import LookupAccountForm from './components/LookupAccountForm.js'
+import API from './utils/API.js'
 
 function App() {
+  const api = new API('localhost:8080')
   return (
     <div className="App">
       <Container>
@@ -24,7 +25,7 @@ function App() {
         </Row>
         <Row>
           <Col>
-            <LookupAccountForm />
+            <LookupAccountForm api={api}/>
           </Col>
         </Row>
       </Container>

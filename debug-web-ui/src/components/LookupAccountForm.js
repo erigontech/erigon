@@ -6,14 +6,14 @@ import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
 import { Table } from 'react-bootstrap';
 
-const LookupAccountForm = () => {
-    const [accountID, setAccountID] = useState(123);
+const LookupAccountForm = ({api}) => {
+    const [accountID, setAccountID] = useState(undefined);
 
     return (
         <div>
             <TextField accountID={accountID} onClick={setAccountID} />
             <hr />
-            { accountID && <DetailsForm accountID={accountID} /> }
+            { accountID && <DetailsForm accountID={accountID} api={api} /> }
         </div>
     );
 }
@@ -40,14 +40,17 @@ class TextField extends React.Component {
     render() {
         return (
             <Form>
-                <Form.Group controlId="formBasicEmail">
-                    <Form.Label>Account ID</Form.Label>
-                    <Form.Control type="text"
-                                  placeholder="Account ID"
-                                  value={this.state.value}
-                                  onChange={this.handleChange} />
-                </Form.Group>
-                <Button variant="primary" type="submit" onClick={this.handleSubmit}>Find</Button>
+                <Form.Row>
+                    <Col>
+                        <Form.Control type="text"
+                                    placeholder="Account ID"
+                                    value={this.state.value || ''}
+                                    onChange={this.handleChange} />
+                    </Col>
+                    <Col>
+                        <Button variant="primary" type="submit" onClick={this.handleSubmit}>Find</Button>
+                    </Col>
+                </Form.Row>
             </Form>
         );
     }
@@ -60,28 +63,33 @@ class DetailsForm extends React.Component {
     }
 
     componentDidMount() {
-        // TODO: make an API call
+        this.props.api
+            .lookupAccount(this.props.accountID)
+            .then((account) => this.setState({account: account}))
+            // TODO: implement a catcher
     }
 
     render () { 
+
+        if (!this.state.account) {
+            return (
+                <div>loading...</div>
+            );
+        }
+
+        const rows = Object.entries(this.state.account).map(([key, value]) => <TableRow name={key} value={value} />)
+
         return (
             <div>
                 <Row>
                     <Col>
-                        <h1>Search Result</h1>
+                        <h1>Account</h1>
                     </Col>
                 </Row>
                 <Row>
                     <Col>
                         <Table>
-                            <Table.Row>
-                                <Table.Col>
-                                    ID
-                                </Table.Col>
-                                <Table.Col>
-                                    <code>{this.props.accountID}</code>
-                                </Table.Col>
-                            </Table.Row>
+                            <tbody>{rows}</tbody>
                         </Table>
                     </Col>
                 </Row>
@@ -89,5 +97,12 @@ class DetailsForm extends React.Component {
         );
     }
 }
+
+const TableRow = ({name, value}) => (
+    <tr>
+        <td>{name}</td>
+        <td><code>{value}</code></td>
+    </tr>
+);
 
 export default LookupAccountForm;
