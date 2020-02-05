@@ -1121,8 +1121,8 @@ func readAccount(chaindata string, account common.Address) {
 	check(err)
 	fmt.Printf("codeHash: %x\n", codeHash)
 	var storageKey [common.HashLength + common.IncarnationLength]byte
-	copy(storageKey[:], addrHash[:])
-	err = ethDb.Walk(dbutils.StorageHistoryBucket, storageKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
+	//copy(storageKey[:], addrHash[:])
+	err = ethDb.Walk(dbutils.StorageHistoryBucket, storageKey[:], 0, func(k, v []byte) (bool, error) {
 		fmt.Printf("%x\n", k)
 		return true, nil
 	})
