@@ -293,7 +293,6 @@ func testGetNodeData(t *testing.T, protocol int) {
 	assert.NoError(t, err)
 
 	node0Rlp, node1Rlp, branchRlp := storageNodesOfContractA(t, 2)
-
 	assert.Equal(t, account.Root, crypto.Keccak256Hash(branchRlp))
 
 	// Fetch some nodes
@@ -302,6 +301,7 @@ func testGetNodeData(t *testing.T, protocol int) {
 		pm.blockchain.CurrentBlock().Root(),
 		crypto.Keccak256Hash(branchRlp),
 		crypto.Keccak256Hash(accountRlp),
+		account.CodeHash,
 		crypto.Keccak256Hash(node0Rlp),
 	}
 

@@ -648,11 +648,23 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 				return errResp(ErrDecode, "msg %v: %v", msg, err)
 			}
 
+			// First try to get the trie node
 			node := tds.GetNodeByHash(hash)
-			data = append(data, node)
-			bytes += len(node)
+			if len(node) != 0 {
+				data = append(data, node)
+				bytes += len(node)
+				continue
+			}
 
-			// TODO [Andrew] serve byte codes
+			// Now attempt to get the byte code
+			var zeroAddress common.Address
+			code, err := tds.ReadAccountCode(zeroAddress, hash)
+			if err == nil {
+				data = append(data, code)
+				bytes += len(code)
+			} else {
+				data = append(data, nil)
+			}
 		}
 		return p.SendNodeData(data)
 
