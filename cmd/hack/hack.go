@@ -1137,6 +1137,29 @@ func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash)
 	check(err)
 }
 
+func nextIncarnation(chaindata string, addrHash common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	var found bool
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	if err := ethDb.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	}); err != nil {
+		fmt.Printf("Incarnation(z): %d\n", 0)
+		return
+	}
+	if found {
+		fmt.Printf("Incarnation: %d\n", (^uint64(0)^binary.BigEndian.Uint64(incarnationBytes[:]))+1)
+		return
+	}
+	fmt.Printf("Incarnation(f): %d\n", state.FirstContractIncarnation)
+}
+
 func repairCurrent() {
 	historyDb, err := bolt.Open("/Volumes/tb4/turbo-geth/ropsten/geth/chaindata", 0600, &bolt.Options{})
 	check(err)
@@ -1297,6 +1320,9 @@ func main() {
 	}
 	if *action == "fixAccount" {
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
+	}
+	if *action == "nextIncarnation" {
+		nextIncarnation(*chaindata, common.HexToHash(*account))
 	}
 	//repairCurrent()
 	//testMemBolt()
