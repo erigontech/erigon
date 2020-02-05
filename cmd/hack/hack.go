@@ -1120,6 +1120,13 @@ func readAccount(chaindata string, account common.Address) {
 	codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 	check(err)
 	fmt.Printf("CodeHash: %x\n", codeHash)
+	var storageKey [common.HashLength + common.IncarnationLength]byte
+	copy(storageKey[:], addrHash[:])
+	err = ethDb.Walk(dbutils.StorageHistoryBucket, storageKey[:], 8*common.HashLength, func(k, v []byte) (bool, error) {
+		fmt.Printf("%x\n", k)
+		return true, nil
+	})
+	check(err)
 }
 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
