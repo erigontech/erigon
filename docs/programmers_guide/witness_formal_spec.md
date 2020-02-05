@@ -41,10 +41,13 @@ helper2 (hash1, hash2) {
 The specification for a substitution rule
 
 ```
+[GUARD <CONDITION> ...]
+
 [ STACK(<node-var-name>, <hash-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
 STACK(node-value, hash-value), ...
 ```
 
+The substitution rule MAY have one or more GUARD statements.
 The substitution rule MAY have one or more STACK statements before the instruction.
 The substitution rule MUST have exactly one instruction.
 The substitution rule MAY have parameters for the instruction.
@@ -55,13 +58,13 @@ So, the minimal substitution rule is for the `HASH` instruction that pushes one 
 HASH(hashValue) |=> STACK(hashNode(hashValue), hashValue)
 ```
 
-## Guards
+## GUARDs
 
-Each substitution rule can have zero, one or multiple `guard` statements.
-Each `guard` statement looks like this:
+Each substitution rule can have zero, one or multiple `GUARD` statements.
+Each `GUARD` statement looks like this:
 
 ```
-guard <CONDITION>
+GUARD <CONDITION>
 ```
 
 That means that for the substitution rule to be applicable the `<CONDITION>` in the guard statement must be true.
@@ -84,7 +87,7 @@ That makes it different from the helper function parameters that MAY come from t
 
 ## Helper functions
 
-Helper functions are functions that are used in guards or substitution rules.
+Helper functions are functions that are used in GUARDs or substitution rules.
 
 Helper functions MUST be pure.
 Helper functions MUST have at least one argument.
@@ -150,14 +153,14 @@ This instruction pops `NBITSET(mask)` items from both node stack and hash stack 
 **Substitution rules**
 ```
 
-guard NBITSET(mask) == 2 
+GUARD NBITSET(mask) == 2 
 
 STACK(n0, h0) STACK(n1, h1) BRANCH(mask) |=> 
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
 ---
 
 
-guard NBITSET(mask) == 3
+GUARD NBITSET(mask) == 3
 
 STACK(n0, h0) STACK(n1, h1) STACK(n2, h2) BRANCH(mask) |=> 
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, n2))))
@@ -168,7 +171,7 @@ STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES
 
 ---
 
-guard NBITSET(mask) == 16
+GUARD NBITSET(mask) == 16
 
 STACK(n0, h0) STACK(n1, h1) ... STACK(n15, h15) BRANCH(mask) |=>
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, ..., n15))))
