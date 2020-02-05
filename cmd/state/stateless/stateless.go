@@ -267,11 +267,6 @@ func Stateless(
 			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
 			check(err)
 			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s\n", witnessDatabasePath, statsFilePath)
-			defer func() {
-				if flushErr := witnessDBWriter.Flush(); flushErr != nil {
-					fmt.Printf("error while flushing the witness db: %v", flushErr)
-				}
-			}()
 		}
 
 	}
