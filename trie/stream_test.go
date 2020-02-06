@@ -84,7 +84,7 @@ func TestHashWithModificationsNoChanges(t *testing.T) {
 			tr.UpdateAccount([]byte(key), &a1)
 			// Add storage items too
 			for _, storageKey := range keys {
-				tr.Update([]byte(key+storageKey), v, 0)
+				tr.Update([]byte(key+storageKey), v)
 			}
 		}
 	}
@@ -142,7 +142,7 @@ func TestHashWithModificationsChanges(t *testing.T) {
 			tr.UpdateAccount([]byte(key), &a1)
 			// Add storage items too
 			for _, storageKey := range keys {
-				tr.Update([]byte(key+storageKey), v, 0)
+				tr.Update([]byte(key+storageKey), v)
 			}
 		}
 	}

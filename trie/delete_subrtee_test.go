@@ -16,20 +16,20 @@ func TestTrieDeleteSubtree_ShortNode(t *testing.T) {
 	key := []byte{uint8(1)}
 	val := []byte("1")
 
-	trie.Update(key, val, 0)
+	trie.Update(key, val)
 	v, ok := trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
 	//remove unknown
-	trie.DeleteSubtree([]byte{uint8(2)}, 0)
+	trie.DeleteSubtree([]byte{uint8(2)})
 	v, ok = trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
 
 	//remove by key
-	trie.DeleteSubtree(key, 0)
+	trie.DeleteSubtree(key)
 
 	v, _ = trie.Get(key)
 	if v != nil {
@@ -62,11 +62,11 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 
 	key1 := GenerateCompositeTrieKey(addrHash1, keyHash)
 	key2 := GenerateCompositeTrieKey(addrHash2, keyHash)
-	trie.Update(key1, val, 0)
-	trie.Update(key2, val, 0)
+	trie.Update(key1, val)
+	trie.Update(key2, val)
 
 	trie.PrintTrie()
-	trie.DeleteSubtree(addrHash1.Bytes(), 0)
+	trie.DeleteSubtree(addrHash1.Bytes())
 	trie.PrintTrie()
 
 	v, ok := trie.Get(key2)
@@ -78,21 +78,6 @@ func TestTrieDeleteSubtree_ShortNode_Debug(t *testing.T) {
 	if v != nil {
 		t.Fatal("must be nil")
 	}
-	////remove unknown
-	//trie.DeleteSubtree([]byte{uint8(2)}, 0)
-	//v, ok = trie.Get(key)
-	//if ok == false || bytes.Equal(v, val) == false {
-	//	t.Fatal("incorrect")
-	//}
-	//
-	////remove by key
-	//trie.DeleteSubtree(key, 0)
-	//
-	//v, _ = trie.Get(key)
-	//t.Log(v)
-	//if v != nil {
-	//	t.Fatal("must be false")
-	//}
 }
 
 func GenerateCompositeTrieKey(addressHash common.Hash, seckey common.Hash) []byte {
@@ -108,20 +93,20 @@ func TestTrieDeleteSubtree_ShortNode_LongPrefix(t *testing.T) {
 	prefix := []byte{uint8(1)}
 	val := []byte("1")
 
-	trie.Update(key, val, 0)
+	trie.Update(key, val)
 	v, ok := trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
 	//remove unknown
-	trie.Delete([]byte{uint8(2)}, 0)
+	trie.Delete([]byte{uint8(2)})
 	v, ok = trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
 
 	//remove by key
-	trie.DeleteSubtree(prefix, 0)
+	trie.DeleteSubtree(prefix)
 	v, _ = trie.Get(key)
 	t.Log(v)
 	if v != nil {
@@ -136,14 +121,14 @@ func TestTrieDeleteSubtree_DuoNode(t *testing.T) {
 	keyExist := []byte{uint8(2)}
 	valExist := []byte{uint8(2)}
 
-	trie.Update(key, val, 0)
-	trie.Update(keyExist, valExist, 0)
+	trie.Update(key, val)
+	trie.Update(keyExist, valExist)
 	v, ok := trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
 
-	trie.DeleteSubtree(key, 0)
+	trie.DeleteSubtree(key)
 
 	v, _ = trie.Get(key)
 	if v != nil {
@@ -165,12 +150,12 @@ func TestTrieDeleteSubtree_TwoDuoNode_FullMatch(t *testing.T) {
 	val2 := []byte{uint8(2)}
 	val3 := []byte{uint8(3)}
 
-	trie.Update(key1, val1, 0)
-	trie.Update(key2, val2, 0)
-	trie.Update(key3, val3, 0)
+	trie.Update(key1, val1)
+	trie.Update(key2, val2)
+	trie.Update(key3, val3)
 
-	trie.DeleteSubtree(key1, 0)
-	trie.DeleteSubtree(key2, 0)
+	trie.DeleteSubtree(key1)
+	trie.DeleteSubtree(key2)
 
 	v, _ := trie.Get(key1)
 	if v != nil {
@@ -200,11 +185,11 @@ func TestTrieDeleteSubtree_DuoNode_PartialMatch(t *testing.T) {
 	val2 := []byte{uint8(2)}
 	val3 := []byte{uint8(3)}
 
-	trie.Update(key1, val1, 0)
-	trie.Update(key2, val2, 0)
-	trie.Update(key3, val3, 0)
+	trie.Update(key1, val1)
+	trie.Update(key2, val2)
+	trie.Update(key3, val3)
 
-	trie.DeleteSubtree(partialKey, 0)
+	trie.DeleteSubtree(partialKey)
 	v, _ := trie.Get(key1)
 	if v != nil {
 		t.Fatal("must be nil", v)
@@ -234,12 +219,12 @@ func TestTrieDeleteSubtree_FromFullNode_PartialMatch(t *testing.T) {
 	val3 := []byte{uint8(3)}
 	val4 := []byte{uint8(4)}
 
-	trie.Update(key1, val1, 0)
-	trie.Update(key2, val2, 0)
-	trie.Update(key3, val3, 0)
-	trie.Update(key4, val4, 0)
+	trie.Update(key1, val1)
+	trie.Update(key2, val2)
+	trie.Update(key3, val3)
+	trie.Update(key4, val4)
 
-	trie.DeleteSubtree(partialKey, 0)
+	trie.DeleteSubtree(partialKey)
 
 	v, _ := trie.Get(key1)
 	if v != nil {
@@ -275,12 +260,12 @@ func TestTrieDeleteSubtree_RemoveFullNode_PartialMatch(t *testing.T) {
 	val3 := []byte{uint8(3)}
 	val4 := []byte{uint8(4)}
 
-	trie.Update(key1, val1, 0)
-	trie.Update(key2, val2, 0)
-	trie.Update(key3, val3, 0)
-	trie.Update(key4, val4, 0)
+	trie.Update(key1, val1)
+	trie.Update(key2, val2)
+	trie.Update(key3, val3)
+	trie.Update(key4, val4)
 
-	trie.DeleteSubtree(partialKey, 0)
+	trie.DeleteSubtree(partialKey)
 
 	v, _ := trie.Get(key1)
 	if v != nil {
@@ -315,13 +300,13 @@ func TestTrieDeleteSubtree_FullNode_FullMatch(t *testing.T) {
 	val3 := []byte{uint8(3)}
 	val4 := []byte{uint8(4)}
 
-	trie.Update(key1, val1, 0)
-	trie.Update(key2, val2, 0)
-	trie.Update(key3, val3, 0)
-	trie.Update(key4, val4, 0)
+	trie.Update(key1, val1)
+	trie.Update(key2, val2)
+	trie.Update(key3, val3)
+	trie.Update(key4, val4)
 
-	trie.DeleteSubtree(key1, 0)
-	trie.DeleteSubtree(key2, 0)
+	trie.DeleteSubtree(key1)
+	trie.DeleteSubtree(key2)
 
 	v, _ := trie.Get(key1)
 	if v != nil {
@@ -345,13 +330,13 @@ func TestTrieDeleteSubtree_ValueNode_PartialMatch(t *testing.T) {
 	val := []byte{uint8(1)}
 	keyExist := []byte{uint8(2)}
 	valExist := []byte{uint8(2)}
-	trie.Update(key, val, 0)
-	trie.Update(keyExist, valExist, 0)
+	trie.Update(key, val)
+	trie.Update(keyExist, valExist)
 	v, ok := trie.Get(key)
 	if ok == false || bytes.Equal(v, val) == false {
 		t.Fatal("incorrect")
 	}
-	trie.DeleteSubtree(key, 0)
+	trie.DeleteSubtree(key)
 	v, _ = trie.Get(key)
 	if v != nil {
 		t.Fatal("must be empty")
@@ -404,10 +389,10 @@ func TestAccountNotRemovedAfterRemovingSubtrieAfterAccount(t *testing.T) {
 	fmt.Println("=============================")
 	ck1 := GenerateCompositeTrieKey(addrHash, dataKey1)
 	ck2 := GenerateCompositeTrieKey(addrHash, dataKey2)
-	trie.Update(ck1, val1, 0)
-	trie.Update(ck2, val2, 0)
+	trie.Update(ck1, val1)
+	trie.Update(ck2, val2)
 
-	trie.DeleteSubtree(addrHash.Bytes(), 0)
+	trie.DeleteSubtree(addrHash.Bytes())
 
 	accRes2, _ := trie.GetAccount(addrHash.Bytes())
 	if reflect.DeepEqual(acc, accRes2) == false {

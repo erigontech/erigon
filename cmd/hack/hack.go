@@ -792,7 +792,7 @@ func testResolve() {
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
 	t.Update(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52757c17435002e70fd7d982a101b0549945244f496bf4bb5503d5de3aa770842bce"),
-		common.FromHex("0xa06fe9c682fbb890c09eec59047f97d165875d4f3c86bc65c2870d577b8245f111"), 0)
+		common.FromHex("0xa06fe9c682fbb890c09eec59047f97d165875d4f3c86bc65c2870d577b8245f111"))
 	_, h := t.DeepHash(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd5275"))
 	fmt.Printf("deep hash: %x\n", h)
 	//t.Print(os.Stdout)
@@ -1030,7 +1030,7 @@ func loadAccount() {
 	if err := ethDb.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, uint(len(accountBytes)*8), blockNr, func(k, v []byte) (bool, error) {
 		key := k[len(accountBytes):]
 		//fmt.Printf("%x: %x\n", key, v)
-		t.Update(key, v, blockNr)
+		t.Update(key, v)
 		count++
 		return true, nil
 	}); err != nil {
@@ -1061,11 +1061,11 @@ func loadAccount() {
 		key := ([]byte(k))[len(accountBytes):]
 		if len(v) > 0 {
 			fmt.Printf("Updated %x: %x from %x\n", key, v, vOrig)
-			t.Update(key, v, blockNr)
+			t.Update(key, v)
 			check(err)
 		} else {
 			fmt.Printf("Deleted %x from %x\n", key, vOrig)
-			t.Delete(key, blockNr)
+			t.Delete(key)
 		}
 	}
 	fmt.Printf("Updated storage root: %x\n", t.Hash())

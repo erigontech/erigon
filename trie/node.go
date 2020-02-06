@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"bytes"
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -58,13 +59,21 @@ type (
 	accountNode struct {
 		accounts.Account
 		storage     node
-		hashCorrect bool
+		rootCorrect bool
 	}
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
 // unset children need to serialize correctly.
 var nilValueNode = valueNode(nil)
+
+func EncodeAsValue(data []byte) ([]byte, error) {
+	tmp := new(bytes.Buffer)
+	if err := rlp.Encode(tmp, valueNode(data)); err != nil {
+		return nil, err
+	}
+	return tmp.Bytes(), nil
+}
 
 // EncodeRLP encodes a full node into the consensus RLP format.
 func (n *fullNode) EncodeRLP(w io.Writer) error {

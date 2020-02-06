@@ -46,7 +46,7 @@ func TestRebuild(t *testing.T) {
 		if err != nil {
 			t.Errorf("Could not encode value: %v", err)
 		}
-		tr.Update(key, v1, 0)
+		tr.Update(key, v1)
 		tr.PrintTrie()
 		root1 := tr.Root()
 		//fmt.Printf("Root1: %x\n", tr.Root())

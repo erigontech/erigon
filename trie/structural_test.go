@@ -49,9 +49,9 @@ func TestV2HashBuilding(t *testing.T) {
 	valueShort := []byte("VAL")
 	for i, key := range keys {
 		if i%2 == 0 {
-			tr.Update([]byte(key), valueNode(valueLong), 0)
+			tr.Update([]byte(key), valueNode(valueLong))
 		} else {
-			tr.Update([]byte(key), valueNode(valueShort), 0)
+			tr.Update([]byte(key), valueNode(valueShort))
 		}
 	}
 	trieHash := tr.Hash()
@@ -109,7 +109,7 @@ func TestV2Resolution(t *testing.T) {
 	tr := New(common.Hash{})
 	value := []byte("VALUE123985903485903489043859043859043859048590485904385903485940385439058934058439058439058439058940385904358904385438809348908345")
 	for _, key := range keys {
-		tr.Update([]byte(key), valueNode(value), 0)
+		tr.Update([]byte(key), valueNode(value))
 	}
 	trieHash := tr.Hash()
 

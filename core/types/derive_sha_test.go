@@ -79,7 +79,7 @@ func legacyDeriveSha(list DerivableList) common.Hash {
 	for i := 0; i < list.Len(); i++ {
 		keybuf.Reset()
 		_ = rlp.Encode(keybuf, uint(i))
-		trie.Update(keybuf.Bytes(), list.GetRlp(i), 0)
+		trie.Update(keybuf.Bytes(), list.GetRlp(i))
 	}
 	return trie.Hash()
 }

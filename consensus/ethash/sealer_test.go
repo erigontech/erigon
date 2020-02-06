@@ -28,8 +28,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/internal/testlog"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // Tests whether remote HTTP servers are correctly notified of new work.
@@ -96,7 +94,6 @@ func TestRemoteMultiNotify(t *testing.T) {
 
 	// Create the custom ethash engine.
 	ethash := NewTester([]string{server.URL}, false)
-	ethash.config.Log = testlog.Logger(t, log.LvlWarn)
 	defer ethash.Close()
 
 	// Stream a lot of work task and ensure all the notifications bubble out.

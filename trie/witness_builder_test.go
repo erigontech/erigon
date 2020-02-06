@@ -10,8 +10,8 @@ import (
 
 func TestBlockWitnessBinary(t *testing.T) {
 	tr := New(common.Hash{})
-	tr.Update([]byte("ABCD0001"), []byte("val1"), 0)
-	tr.Update([]byte("ABCE0002"), []byte("val2"), 0)
+	tr.Update([]byte("ABCD0001"), []byte("val1"))
+	tr.Update([]byte("ABCE0002"), []byte("val2"))
 
 	trBin := HexToBin(tr)
 
