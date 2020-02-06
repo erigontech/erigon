@@ -6,13 +6,24 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 Witnesses are executed on a stack machine that builds tries/calculates hashes.
 
-The stack consists of pairs `(node, hash)`.
+The stack consists of stack items.
+Each item is a pair: `(node, hash)`, where `node` is an object representing the Merkle trie node, and `hash` is 32 byte node hash value. The exact implementation details of `node`s and `hash`es are not the part of the spec.
 
 Each witness is a queue of instructions.
 
 In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
 
 In the end, when there are no more instructions left, there MUST be only one item left on the stack.  
+
+### Nodes
+
+There are multiple types of nodes that can be present on the stack.
+
+- `hashNode`
+- `branchNode`
+- `accountNode`
+- `valueNode`
+- `extensionNode`
 
 ## Substitution rules
 
@@ -47,6 +58,7 @@ The specification for a substitution rule
 STACK(node-value, hash-value), ...
 ```
 
+There MUST be one and only one substitution rule applicable to the execution state. If an instruction has multiple substitution rules, the applicability is defined by the `GUARD` statements.
 The substitution rule MAY have one or more GUARD statements.
 The substitution rule MAY have one or more STACK statements before the instruction.
 The substitution rule MUST have exactly one instruction.
@@ -96,7 +108,7 @@ Helper functions MAY contain recursion.
 
 ## Data types
 
-INTEGER - we treat integers as infinite, the overflow behaviour or mapping to the actual data types is undefined in this spec and should be dependent on implementation.
+INTEGER - we treat the domain of integers as infinite, the overflow behaviour or mapping to the actual data types is undefined in this spec and should be dependent on implementation.
 
 ## Execution flow 
 
@@ -140,9 +152,15 @@ There are two modes of execution for this stack machine:
 
 (1) **normal execution** -- the mode that constructs a trie;
 
-(2) **hash only execution** -- the mode that calculates the root hashe of a trie without constructing the tries itself;
+(2) **hash only execution** -- the mode that calculates the root hashes of a trie without constructing the trie itself;
 
-In the mode (2), the first part of the pair `(node, hash)` MUST NOT be used: `(nil, hash)`.
+In the mode (2), a stack item  MUST only contain the node hash.
+
+Stack item, mode (1): `(node, hash)`.
+
+Stack item, mode (2): `(hash)`.
+
+The exact implementation details are undefined in this spec.
 
 ## Instructions
 
