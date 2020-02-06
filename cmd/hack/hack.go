@@ -1140,7 +1140,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 			})
 			check(err)
 		}
-		timestamp++
+		timestamp--
 	}
 }
 
