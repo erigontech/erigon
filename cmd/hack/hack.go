@@ -1122,12 +1122,16 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 	fmt.Printf("codeHash: %x\n", codeHash)
 	timestamp := block
 	for i := uint64(0); i < rewind; i++ {
+		fmt.Printf("Changes for block %d\n", timestamp)
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
 		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
 		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
 		if v != nil {
 			err = dbutils.Walk(v, func(key, value []byte) error {
-				fmt.Printf("%x\n", key)
+				if bytes.HasPrefix(key, secKey) {
+					incarnation := (^uint64(0) ^ binary.BigEndian.Uint64(key[common.HashLength:common.HashLength+common.IncarnationLength]))
+					fmt.Printf("%d %x %x\n", incarnation, key[common.HashLength+common.IncarnationLength:], value)
+				}
 				return nil
 			})
 			check(err)
