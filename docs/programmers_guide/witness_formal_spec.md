@@ -238,3 +238,11 @@ returns a new array with the `value` at index 0 and `array` values starting from
 ### `INC(value)`
 
 increments `value` by 1
+
+### `FIRST(array)`
+
+returns the first value in the specified array
+
+### `REST(array)`
+
+returns the array w/o the first item
