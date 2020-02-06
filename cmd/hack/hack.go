@@ -1105,7 +1105,7 @@ func printBranches(block uint64) {
 	}
 }
 
-func readAccount(chaindata string, account common.Address) {
+func readAccount(chaindata string, account common.Address, block uint64, rewind uint64) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	secKey := crypto.Keccak256(account[:])
@@ -1120,13 +1120,20 @@ func readAccount(chaindata string, account common.Address) {
 	codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 	check(err)
 	fmt.Printf("codeHash: %x\n", codeHash)
-	var storageKey [common.HashLength + common.IncarnationLength]byte
-	//copy(storageKey[:], addrHash[:])
-	err = ethDb.Walk(dbutils.StorageHistoryBucket, storageKey[:], 0 /*8*common.HashLength*/, func(k, v []byte) (bool, error) {
-		fmt.Printf("%x\n", k)
-		return true, nil
-	})
-	check(err)
+	timestamp := block
+	for i := uint64(0); i < rewind; i++ {
+		encodedTS := dbutils.EncodeTimestamp(timestamp)
+		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
+		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
+		if v != nil {
+			err = dbutils.Walk(v, func(key, value []byte) error {
+				fmt.Printf("%x\n", key)
+				return nil
+			})
+			check(err)
+		}
+		timestamp++
+	}
 }
 
 func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
@@ -1323,7 +1330,7 @@ func main() {
 	//extractTrie(*block)
 	//repair()
 	if *action == "readAccount" {
-		readAccount(*chaindata, common.HexToAddress(*account))
+		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
 	}
 	if *action == "fixAccount" {
 		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
