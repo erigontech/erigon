@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
-	"net"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -14,9 +12,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func registerAccountAPI(account *gin.RouterGroup) error {
+func registerAccountAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
+	fmt.Println("remote db connected")
+
 	account.GET(":accountID", func(c *gin.Context) {
-		account, err := FindAccountByID(c.Param("accountID"))
+		account, err := FindAccountByID(c.Param("accountID"), remoteDB)
 		if err == ErrEntityNotFound {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
 			return
@@ -30,7 +30,6 @@ func registerAccountAPI(account *gin.RouterGroup) error {
 }
 
 func jsonifyAccount(account *accounts.Account) map[string]interface{} {
-	fmt.Printf("jsonify %+v\n", account)
 	result := map[string]interface{}{
 		"nonce":     account.Nonce,
 		"balance":   account.Balance.String(),
@@ -44,37 +43,13 @@ func jsonifyAccount(account *accounts.Account) map[string]interface{} {
 	return result
 }
 
-func FindAccountByID(accountID string) (*accounts.Account, error) {
-	var remoteDB *remote.DB
-
-	remoteDbAddress := "localhost:9999"
-
-	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", remoteDbAddress, err)
-		}
-		return conn, conn, conn, err
-	}
-
-	remoteDB, err := remote.NewDB(context.TODO(), dial)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if err := remoteDB.Close(); err != nil {
-			fmt.Printf("error while closing the remote db: %v\n", err)
-		}
-	}()
-
-	fmt.Println("remote db connected")
+func FindAccountByID(accountID string, remoteDB *remote.DB) (*accounts.Account, error) {
 
 	possibleKeys := getPossibleKeys(accountID)
 
 	var account *accounts.Account
 
-	err = remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
+	err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
 		bucket, err := tx.Bucket(dbutils.AccountsBucket)
 		if err != nil {
 			return err
@@ -111,7 +86,7 @@ func getPossibleKeys(accountID string) [][]byte {
 	address := common.FromHex(accountID)
 	addressHash, _ := common.HashData(address[:])
 	return [][]byte{
-		address,
 		addressHash[:],
+		address,
 	}
 }

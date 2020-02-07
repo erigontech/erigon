@@ -10,16 +10,19 @@ import (
 func main() {
 	r := gin.Default()
 
-	r.Use(func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, X-Rentals-Auth")
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		c.Next()
-	})
-
 	root := r.Group("api/v1")
+	allowCORS(root)
 
-	err := registerAccountAPI(root.Group("accounts"))
+	remoteDbAddress := "localhost:9999"
+	remoteDB := MustConnectRemoteDB(remoteDbAddress)
+	defer func() {
+		fmt.Println("closing remote db")
+		if err := remoteDB.Close(); err != nil {
+			fmt.Printf("error while closing the remote db: %v\n", err)
+		}
+	}()
+
+	err := registerAccountAPI(root.Group("accounts"), remoteDB)
 	if err != nil {
 		panic(err)
 	}
@@ -29,3 +32,12 @@ func main() {
 }
 
 var ErrEntityNotFound = errors.New("entity not found")
+
+func allowCORS(r *gin.RouterGroup) {
+	r.Use(func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Header("Access-Control-Allow-Headers", "Content-Type")
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Next()
+	})
+}
