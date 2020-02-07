@@ -2,10 +2,10 @@ package consensus
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type ResultWithContext struct {
@@ -19,7 +19,7 @@ type Cancel struct {
 }
 
 func (c *Cancel) CancelFunc() {
-	fmt.Println("### CANCEL", debug.Callers(100))
+	log.Debug("cancel mining task", "callers", debug.Callers(10))
 	c.cancel()
 }
 
