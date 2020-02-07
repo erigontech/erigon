@@ -1181,3 +1181,8 @@ func (t *Trie) evictSubtreeFromHashMap(n node) {
 		}
 	}
 }
+
+// HashMapSize returns the number of entries in trie's hash map.
+func (t *Trie) HashMapSize() int {
+	return len(t.hashMap)
+}
