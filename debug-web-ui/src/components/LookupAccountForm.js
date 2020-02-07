@@ -34,7 +34,7 @@ class TextField extends React.Component {
 
     handleSubmit(event) {
         this.props.onClick(this.state.value);
-        event.preventDefault()
+        event.preventDefault();
     }
 
     render() {
@@ -67,7 +67,6 @@ class DetailsForm extends React.Component {
             .lookupAccount(this.props.accountID)
             .then((response) => this.setState({account: response.data, error: undefined}))
             .catch((error) => this.setState({account: undefined, error: error}))
-            // TODO: implement a catcher
     }
 
 
@@ -81,9 +80,9 @@ class DetailsForm extends React.Component {
             );
         }
 
-        if (this.state.error && this.state.error.response.status == 404) {
+        if (this.state.error && this.state.error.response && this.state.error.response.status === 404) {
             return (
-                <code>Account Not Found</code>
+                <h5>Account Not Found</h5>
             )
         }
 
