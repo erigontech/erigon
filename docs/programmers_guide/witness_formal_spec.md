@@ -19,6 +19,8 @@ In the end, when there are no more instructions left, there MUST be only one ite
 
 There are multiple types of nodes that can be present on the stack.
 
+TODO: use an algebraic type
+
 - `hashNode`
 - `branchNode`
 - `accountNode`
@@ -170,7 +172,7 @@ The exact implementation details are undefined in this spec.
 
 ```
 LEAF(key, raw_value) |=> 
-STACK(shortNode(key, valueNode(raw_value), RLP(KECCAK(RLP(key, RLP(raw_value))))))
+STACK(shortNode(key, valueNode(raw_value), VALUE_HASH(key, raw_value)))
 ```
 
 ### `EXTENSION key`
@@ -222,7 +224,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, hashNode(storage_hash), storage_hash, code_hash))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, hashNode(storage_hash), storage_hash, code_hash))), ACC_HASH(key, account))
 --
 
 GUARD has_code == true
@@ -230,7 +232,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, code_hash))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, code_hash))), ACC_HASH(key, account))
 
 --
 
@@ -239,7 +241,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), ACC_HASH(key, account))
 
 ---
 
@@ -248,7 +250,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), ACC_HASH(key, account))
 
 --
 
@@ -256,7 +258,7 @@ GUARD has_code == true
 GUARD has_storage == false
 
 STACK(nil, code_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, code_hash))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, code_hash))), ACC_HASH(key, account))
 
 --
 
@@ -264,7 +266,7 @@ GUARD has_code == false
 GUARD has_storage == false
 
 ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, nil))), TBD)
+STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, nil))), ACC_HASH(key, account))
 
 ```
 
