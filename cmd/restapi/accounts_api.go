@@ -62,12 +62,15 @@ func FindAccountByID(accountID string) (*accounts.Account, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer func() {
+		if err := remoteDB.Close(); err != nil {
+			fmt.Printf("error while closing the remote db: %v\n", err)
+		}
+	}()
 
 	fmt.Println("remote db connected")
 
 	possibleKeys := getPossibleKeys(accountID)
-
-	fmt.Printf("possible keys = %+v\n", possibleKeys)
 
 	var account *accounts.Account
 

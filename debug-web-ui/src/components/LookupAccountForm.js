@@ -59,13 +59,14 @@ class TextField extends React.Component {
 class DetailsForm extends React.Component {
     constructor(props) {
         super(props)
-        this.state = {account: undefined}
+        this.state = {account: undefined, error: undefined}
     }
 
     componentDidMount() {
         this.props.api
             .lookupAccount(this.props.accountID)
-            .then((response) => this.setState({account: response.data}))
+            .then((response) => this.setState({account: response.data, error: undefined}))
+            .catch((error) => this.setState({account: undefined, error: error}))
             // TODO: implement a catcher
     }
 
@@ -74,10 +75,22 @@ class DetailsForm extends React.Component {
 
         console.log(JSON.stringify(this.state.account));
 
-        if (!this.state.account) {
+        if (!this.state.account && !this.state.error) {
             return (
                 <div>loading...</div>
             );
+        }
+
+        if (this.state.error && this.state.error.response.status == 404) {
+            return (
+                <code>Account Not Found</code>
+            )
+        }
+
+        if (this.state.error) {
+            return (
+                <code>{this.state.error.message || "Unknown error"}</code>
+            )
         }
 
         return (
