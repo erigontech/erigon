@@ -1115,11 +1115,11 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		panic(err)
 	}
 	fmt.Printf("%x:%x\n%x\n%x\n%d\n", secKey, v, a.Root, a.CodeHash, a.Incarnation)
-	var addrHash common.Hash
-	copy(addrHash[:], secKey)
-	codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
-	check(err)
-	fmt.Printf("codeHash: %x\n", codeHash)
+	//var addrHash common.Hash
+	//copy(addrHash[:], secKey)
+	//codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+	//check(err)
+	//fmt.Printf("codeHash: %x\n", codeHash)
 	timestamp := block
 	for i := uint64(0); i < rewind; i++ {
 		var printed bool
