@@ -9,7 +9,7 @@ import LookupAccountForm from './components/LookupAccountForm.js'
 import API from './utils/API.js'
 
 function App() {
-  const api = new API('localhost:8080')
+  const api = new API('http://localhost:8080')
   return (
     <div className="App">
       <Container>

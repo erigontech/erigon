@@ -65,19 +65,20 @@ class DetailsForm extends React.Component {
     componentDidMount() {
         this.props.api
             .lookupAccount(this.props.accountID)
-            .then((account) => this.setState({account: account}))
+            .then((response) => this.setState({account: response.data}))
             // TODO: implement a catcher
     }
 
+
     render () { 
+
+        console.log(JSON.stringify(this.state.account));
 
         if (!this.state.account) {
             return (
                 <div>loading...</div>
             );
         }
-
-        const rows = Object.entries(this.state.account).map(([key, value]) => <TableRow key={key} name={key} value={value} />)
 
         return (
             <div>
@@ -89,7 +90,13 @@ class DetailsForm extends React.Component {
                 <Row>
                     <Col>
                         <Table>
-                            <tbody>{rows}</tbody>
+                            <tbody>
+                                <TableRow name="balance" value={this.state.account.balance} />
+                                <TableRow name="nonce" value={this.state.account.nonce} />
+                                <TableRow name="code hash" value={this.state.account.code_hash} />
+                                <TableRow name="storage hash" value={this.state.account.root_hash} />
+                                <TableRow name="incarnation (turbo-geth)" value={this.state.account.implementation.incarnation} />
+                            </tbody>
                         </Table>
                     </Col>
                 </Row>

@@ -1,3 +1,5 @@
+const axios = require('axios');
+
 export default class API {
     constructor(baseURL) {
         this.baseURL = baseURL
@@ -7,16 +9,10 @@ export default class API {
         return this.baseURL + name
     }
 
-    lookupAccount(accountID) {
-        return new Promise((resolve, reject) => {
-            resolve({
-                'id': accountID,
-                'balance': 999,
-                'nonce': 1,
-                'rootHash': 'blah-root-hash',
-                'incarnation': 1,
-                'codeHash': 'blah-code-hash'
-            })
-        });
+    lookupAccount(id) {
+        return axios({
+            url: this.endpoint('/api/v1/accounts/' + id),
+            method: 'get',
+        })
     }
 }

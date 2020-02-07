@@ -18,7 +18,7 @@ func registerAccountAPI(account *gin.RouterGroup) error {
 	account.GET(":accountID", func(c *gin.Context) {
 		account, err := FindAccountByID(c.Param("accountID"))
 		if err == ErrEntityNotFound {
-			c.AbortWithStatus(http.StatusNotFound)
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
 			return
 		} else if err != nil {
 			c.AbortWithError(http.StatusInternalServerError, err)
@@ -30,6 +30,7 @@ func registerAccountAPI(account *gin.RouterGroup) error {
 }
 
 func jsonifyAccount(account *accounts.Account) map[string]interface{} {
+	fmt.Printf("jsonify %+v\n", account)
 	result := map[string]interface{}{
 		"nonce":     account.Nonce,
 		"balance":   account.Balance.String(),
@@ -62,7 +63,11 @@ func FindAccountByID(accountID string) (*accounts.Account, error) {
 		return nil, err
 	}
 
+	fmt.Println("remote db connected")
+
 	possibleKeys := getPossibleKeys(accountID)
+
+	fmt.Printf("possible keys = %+v\n", possibleKeys)
 
 	var account *accounts.Account
 
@@ -100,7 +105,10 @@ func FindAccountByID(accountID string) (*accounts.Account, error) {
 }
 
 func getPossibleKeys(accountID string) [][]byte {
+	address := common.FromHex(accountID)
+	addressHash, _ := common.HashData(address[:])
 	return [][]byte{
-		common.FromHex(accountID),
+		address,
+		addressHash[:],
 	}
 }
