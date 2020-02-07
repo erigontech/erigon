@@ -164,6 +164,20 @@ The exact implementation details are undefined in this spec.
 
 ## Instructions
 
+### `LEAF key raw_value`
+
+### `EXTENSION key`
+
+### `HASH raw_hash`
+
+### `CODE raw_code`
+
+### `ACCOUNT_LEAF key nonce balance has_code has_storage`
+
+### `EMPTY_ROOT`
+
+### `NEW_TRIE`
+
 ### `BRANCH mask`
 
 This instruction pops `NBITSET(mask)` items from both node stack and hash stack (up to 16 for each one). Then it pushes a new branch node on the node stack that has children according to the stack; it also pushes a new hash to the hash stack.
