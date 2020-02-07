@@ -19,13 +19,15 @@ In the end, when there are no more instructions left, there MUST be only one ite
 
 There are multiple types of nodes that can be present on the stack.
 
-TODO: use an algebraic type
+```
+type node = nil
+          | hashNode raw_hash:byte[32]
+          | valueNode raw_value:byte[]
+          | accountNode nonce:uint balance:int storage:node storage_hash:hash code_hash:hash
+          | shortNode key:byte[] value:node
+          | branchNode child0:node child1:node child3:node ... child15:node
 
-- `hashNode`
-- `branchNode`
-- `accountNode`
-- `valueNode`
-- `extensionNode`
+```
 
 ## Substitution rules
 
@@ -142,7 +144,7 @@ Stack: `(hashNode(h2), h2); (hashNode(h1), h1)`
 
 Witness: ` <empty> `
 
-Stack: `(fullNode{0: hashNode(h2), 1: hashNode(h1)}, KECCAK(h2+h1))`
+Stack: `(branchNode{0: hashNode(h2), 1: hashNode(h1)}, KECCAK(h2+h1))`
 
 ---
 
