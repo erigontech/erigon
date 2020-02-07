@@ -17,16 +17,13 @@ In the end, when there are no more instructions left, there MUST be only one ite
 
 ### Nodes
 
-There are multiple types of nodes that can be present on the stack.
-
 ```
 type node = nil
-          | hashNode raw_hash:byte[32]
-          | valueNode raw_value:byte[]
-          | accountNode nonce:uint balance:int storage:node storage_hash:hash code_hash:hash
-          | shortNode key:byte[] value:node
-          | branchNode child0:node child1:node child3:node ... child15:node
-
+          | hashNode (raw_hash:byte[32])
+          | valueNode (raw_value:byte[])
+          | accountNode (nonce:uint balance:int storage:node storage_hash:hash code_hash:hash)
+          | shortNode (key:byte[] value:node)
+          | branchNode (child0:node child1:node child3:node ... child15:node)
 ```
 
 ## Substitution rules
