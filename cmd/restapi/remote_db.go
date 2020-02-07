@@ -9,9 +9,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func MustConnectRemoteDB(remoteDbAddress string) *remote.DB {
-	var remoteDB *remote.DB
-
+func ConnectRemoteDB(remoteDbAddress string) (*remote.DB, error) {
 	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 		dialer := net.Dialer{}
 		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
@@ -21,9 +19,5 @@ func MustConnectRemoteDB(remoteDbAddress string) *remote.DB {
 		return conn, conn, conn, err
 	}
 
-	remoteDB, err := remote.NewDB(context.TODO(), dial)
-	if err != nil {
-		panic(err)
-	}
-	return remoteDB
+	return remote.NewDB(context.TODO(), dial)
 }
