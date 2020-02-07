@@ -622,6 +622,11 @@ func (t *Trie) hook(hex []byte, n node) {
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	if del {
 		t.evictNodeFromHashMap(n)
+	} else {
+		key, ok := t.nodeHash(n)
+		if ok {
+			t.hashMap[key] = n
+		}
 	}
 
 	switch n := n.(type) {
@@ -1145,17 +1150,24 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 	return common.CopyBytes(rlp)
 }
 
-func (t *Trie) evictNodeFromHashMap(nd node) {
+func (t *Trie) nodeHash(nd node) (hash common.Hash, ok bool) {
 	h := t.getHasher()
 	defer returnHasherToPool(h)
 
 	var key common.Hash
 	refLen, err := h.hash(nd, false, key[:])
 	if err != nil || refLen != common.HashLength {
-		return
+		return hash, false
 	}
 
-	delete(t.hashMap, key)
+	return hash, true
+}
+
+func (t *Trie) evictNodeFromHashMap(nd node) {
+	key, ok := t.nodeHash(nd)
+	if ok {
+		delete(t.hashMap, key)
+	}
 }
 
 func (t *Trie) evictSubtreeFromHashMap(n node) {
