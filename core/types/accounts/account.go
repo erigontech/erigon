@@ -9,7 +9,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
 // Account is the Ethereum consensus representation of accounts.
@@ -199,34 +198,6 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 	buffer[0] = byte(fieldSet)
 }
 
-// Decodes length and determines whether it corresponds to a structure of a byte array
-func decodeLengthForHashing(buffer []byte, pos int) (length int, structure bool, newPos int) {
-	switch firstByte := int(buffer[pos]); {
-	case firstByte < 128:
-		return 0, false, pos
-	case firstByte < 184:
-		return firstByte - 128, false, pos + 1
-	case firstByte < 192:
-		// Next byte is the length of the length + 183
-		lenEnd := pos + 1 + firstByte - 183
-		len := 0
-		for i := pos + 1; i < lenEnd; i++ {
-			len = (len << 8) + int(buffer[i])
-		}
-		return len, false, lenEnd
-	case firstByte < 248:
-		return firstByte - 192, true, pos + 1
-	default:
-		// Next byte is the length of the length + 247
-		lenEnd := pos + 1 + firstByte - 247
-		len := 0
-		for i := pos + 1; i < lenEnd; i++ {
-			len = (len << 8) + int(buffer[i])
-		}
-		return len, true, lenEnd
-	}
-}
-
 func (a *Account) EncodeRLP(w io.Writer) error {
 	len := a.EncodingLengthForHashing()
 	buffer := pool.GetBuffer(len)
@@ -357,181 +328,6 @@ func (a *Account) Copy(image *Account) {
 	a.Incarnation = image.Incarnation
 }
 
-func (a *Account) DecodeForHashing(enc []byte) error {
-	length, structure, pos := decodeLengthForHashing(enc, 0)
-	if pos+length != len(enc) {
-		return fmt.Errorf(
-			"malformed RLP for Account(%x): prefixLength(%d) + dataLength(%d) != sliceLength(%d)",
-			enc, pos, length, len(enc))
-	}
-	if !structure {
-		return fmt.Errorf(
-			"encoding of Account should be RLP struct, got byte array: %x",
-			enc,
-		)
-	}
-
-	a.Initialised = true
-	a.Nonce = 0
-	a.Balance.SetInt64(0)
-	a.Root = emptyRoot
-	a.CodeHash = emptyCodeHash
-	a.StorageSize = 0
-	a.HasStorageSize = false
-	if length == 0 && structure {
-		return nil
-	}
-
-	if pos < len(enc) {
-		nonceBytes, s, newPos := decodeLengthForHashing(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.Nonce should be byte array, got RLP struct: %x",
-				enc[pos:newPos+nonceBytes],
-			)
-		}
-
-		if newPos+nonceBytes > len(enc) {
-			return fmt.Errorf(
-				"malformed RLP for Account.Nonce(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:newPos+nonceBytes],
-				newPos-pos, nonceBytes, len(enc)-pos,
-			)
-		}
-
-		var nonce uint64
-		if nonceBytes == 0 && newPos == pos {
-			nonce = uint64(enc[newPos])
-			pos = newPos + 1
-		} else {
-			for _, b := range enc[newPos : newPos+nonceBytes] {
-				nonce = (nonce << 8) + uint64(b)
-			}
-			pos = newPos + nonceBytes
-		}
-
-		a.Nonce = nonce
-	}
-	if pos < len(enc) {
-		balanceBytes, s, newPos := decodeLengthForHashing(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.Balance should be byte array, got RLP struct: %x",
-				enc[pos:newPos+balanceBytes],
-			)
-		}
-
-		if newPos+balanceBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.Balance(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos],
-				newPos-pos, balanceBytes, len(enc)-pos,
-			)
-		}
-
-		var bigB big.Int
-		if balanceBytes == 0 && newPos == pos {
-			a.Balance.SetInt64(int64(enc[newPos]))
-			pos = newPos + 1
-		} else {
-			for _, b := range enc[newPos : newPos+balanceBytes] {
-				a.Balance.Lsh(&a.Balance, 8)
-				bigB.SetUint64(uint64(b))
-				a.Balance.Add(&a.Balance, &bigB)
-			}
-			pos = newPos + balanceBytes
-		}
-	}
-
-	if pos < len(enc) {
-		rootBytes, s, newPos := decodeLengthForHashing(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.Root should be byte array, got RLP struct: %x",
-				enc[pos:newPos+rootBytes],
-			)
-		}
-
-		if rootBytes != 32 {
-			return fmt.Errorf(
-				"encoding of Account.Root should have size 32, got %d",
-				rootBytes,
-			)
-		}
-
-		if newPos+rootBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.Root(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos],
-				newPos-pos, rootBytes, len(enc)-pos,
-			)
-		}
-
-		copy(a.Root[:], enc[newPos:newPos+rootBytes])
-		pos = newPos + rootBytes
-	}
-
-	if pos < len(enc) {
-		codeHashBytes, s, newPos := decodeLengthForHashing(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.CodeHash should be byte array, got RLP struct: %x",
-				enc[pos:newPos+codeHashBytes],
-			)
-		}
-
-		if codeHashBytes != 32 {
-			return fmt.Errorf(
-				"encoding of Account.CodeHash should have size 32, got %d",
-				codeHashBytes,
-			)
-		}
-
-		if newPos+codeHashBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:newPos+codeHashBytes],
-				newPos-pos, codeHashBytes, len(enc)-pos,
-			)
-		}
-
-		copy(a.CodeHash[:], enc[newPos:newPos+codeHashBytes])
-		pos = newPos + codeHashBytes
-	}
-
-	if pos < len(enc) {
-		storageSizeBytes, s, newPos := decodeLengthForHashing(enc, pos)
-		if s {
-			return fmt.Errorf(
-				"encoding of Account.StorageSize should be byte array, got RLP struct: %x",
-				enc[pos:newPos+storageSizeBytes],
-			)
-		}
-
-		if newPos+storageSizeBytes > len(enc) {
-			return fmt.Errorf(
-				"malformed RLP for Account.StorageSize(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
-				enc[pos:newPos+storageSizeBytes],
-				newPos-pos, storageSizeBytes, len(enc)-pos,
-			)
-		}
-
-		var storageSize uint64
-		if storageSizeBytes == 0 && newPos == pos {
-			storageSize = uint64(enc[newPos])
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			//pos = newPos + 1
-		} else {
-			for _, b := range enc[newPos : newPos+storageSizeBytes] {
-				storageSize = (storageSize << 8) + uint64(b)
-			}
-			// Commented out because of the ineffectual assignment - uncomment if adding more fields
-			//pos = newPos + storageSizeBytes
-		}
-
-		a.StorageSize = storageSize
-		a.HasStorageSize = true
-	}
-	return nil
-}
-
 func (a *Account) Reset() {
 	a.Initialised = true
 	a.Nonce = 0
@@ -648,16 +444,6 @@ func (a *Account) SelfCopy() *Account {
 	newAcc := NewAccount()
 	newAcc.Copy(a)
 	return &newAcc
-}
-
-func (a *Account) DecodeRLP(s *rlp.Stream) error {
-	raw, err := s.Raw()
-	if err != nil {
-		return err
-	}
-
-	err = a.DecodeForHashing(raw)
-	return err
 }
 
 func (a *Account) IsEmptyCodeHash() bool {

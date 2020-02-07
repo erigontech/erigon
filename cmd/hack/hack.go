@@ -1129,7 +1129,7 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		if v != nil {
 			err = dbutils.Walk(v, func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
-					incarnation := (^uint64(0) ^ binary.BigEndian.Uint64(key[common.HashLength:common.HashLength+common.IncarnationLength]))
+					incarnation := ^binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
 					if !printed {
 						fmt.Printf("Changes for block %d\n", timestamp)
 						printed = true
@@ -1176,7 +1176,7 @@ func nextIncarnation(chaindata string, addrHash common.Hash) {
 		return
 	}
 	if found {
-		fmt.Printf("Incarnation: %d\n", (^uint64(0)^binary.BigEndian.Uint64(incarnationBytes[:]))+1)
+		fmt.Printf("Incarnation: %d\n", (^binary.BigEndian.Uint64(incarnationBytes[:]))+1)
 		return
 	}
 	fmt.Printf("Incarnation(f): %d\n", state.FirstContractIncarnation)
@@ -1358,4 +1358,5 @@ func main() {
 	if *action == "bucket" {
 		printBucket(*chaindata)
 	}
+	fmt.Printf("%x\n", ^uint64(1))
 }
