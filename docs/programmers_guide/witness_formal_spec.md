@@ -166,17 +166,122 @@ The exact implementation details are undefined in this spec.
 
 ### `LEAF key raw_value`
 
+**Substitution rules**
+
+```
+LEAF(key, raw_value) |=> 
+STACK(shortNode(key, valueNode(raw_value), RLP(KECCAK(RLP(key, RLP(raw_value))))))
+```
+
 ### `EXTENSION key`
+
+**Substitution rules**
+
+```
+GUARD node != nil
+
+STACK(node, hash) EXTENSION(key) |=>
+STACK(shortNode(key, node), hash)
+
+---
+
+GUARD node == nil
+
+STACK(nil, hash) EXTENSION(key) |=>
+STACK(shortNode(key, hashNode(hash)), hash)
+```
 
 ### `HASH raw_hash`
 
+Pushes a `hashNode` to stack.
+
+**Substitution rules**
+
+```
+HASH(raw_hash) |=>
+STACK(hashNode(raw_hash), raw_hash)
+```
+
 ### `CODE raw_code`
+
+Pushes an nil node + the code hash to the stack.
+
+```
+CODE(raw_code) |=>
+STACK(nil, RLP(KECCAK(raw_code)))
+```
 
 ### `ACCOUNT_LEAF key nonce balance has_code has_storage`
 
+**Substitution rules**
+
+```
+
+GUARD has_code == true
+GUARD storage_node == nil
+GUARD has_storage == true
+
+STACK(nil, code_hash) STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, hashNode(storage_hash), storage_hash, code_hash))), TBD)
+--
+
+GUARD has_code == true
+GUARD storage_node != nil
+GUARD has_storage == true
+
+STACK(nil, code_hash) STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, code_hash))), TBD)
+
+--
+
+GUARD has_code == false
+GUARD storage_node != nil
+GUARD has_storage == true
+
+STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), TBD)
+
+---
+
+GUARD has_code == false
+GUARD storage_node == nil
+GUARD has_storage == true
+
+STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), TBD)
+
+--
+
+GUARD has_code == true
+GUARD has_storage == false
+
+STACK(nil, code_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, code_hash))), TBD)
+
+--
+
+GUARD has_code == false
+GUARD has_storage == false
+
+ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, nil))), TBD)
+
+```
+
 ### `EMPTY_ROOT`
 
+Pushes an empty node + an empty hash to the stack
+
+**Substitution rules**
+
+```
+EMPTY_ROOT |=>
+STACK(nil, RLP(0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421))
+```
+
 ### `NEW_TRIE`
+
+Stops the witness execution.
 
 ### `BRANCH mask`
 
@@ -189,8 +294,8 @@ GUARD NBITSET(mask) == 2
 
 STACK(n0, h0) STACK(n1, h1) BRANCH(mask) |=> 
 STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
----
 
+---
 
 GUARD NBITSET(mask) == 3
 
