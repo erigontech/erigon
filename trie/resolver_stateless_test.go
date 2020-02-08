@@ -25,7 +25,7 @@ func generateValue(i int) []byte {
 func buildTestTrie(numberOfNodes int) *Trie {
 	trie := New(EmptyRoot)
 	for i := 0; i < numberOfNodes; i++ {
-		trie.Update(generateKey(i), generateValue(i), 1)
+		trie.Update(generateKey(i), generateValue(i))
 	}
 	return trie
 }

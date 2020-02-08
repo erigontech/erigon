@@ -199,7 +199,7 @@ func prefixGroups4() {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
 		vs := fmt.Sprintf("%d", i)
-		tr.Update(hexKey, []byte(vs), 0)
+		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 	}
 	visual.StartGraph(f, false)
@@ -238,7 +238,7 @@ func prefixGroups5() {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
 		vs := fmt.Sprintf("%d", i)
-		tr.Update(hexKey, []byte(vs), 0)
+		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
 	}
@@ -279,7 +279,7 @@ func prefixGroups6() {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
 		vs := fmt.Sprintf("%d", i)
-		tr.Update(hexKey, []byte(vs), 0)
+		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
 	}
@@ -321,7 +321,7 @@ func prefixGroups7() {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
 		vs := fmt.Sprintf("%d", i)
-		tr.Update(hexKey, []byte(vs), 0)
+		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		folds = append(folds, hexKey)
 	}
@@ -365,7 +365,7 @@ func prefixGroups8() {
 			hexKey[j] = key[2*j+1] | (key[2*j] << 4)
 		}
 		vs := fmt.Sprintf("%d", i)
-		tr.Update(hexKey, []byte(vs), 0)
+		tr.Update(hexKey, []byte(vs))
 		hightlights = append(hightlights, []byte(key))
 		switch i {
 		case 3, 8, 22, 23:

@@ -66,7 +66,7 @@ func TestPrintLoad(t *testing.T) {
 			tr.UpdateAccount(common.FromHex(debugTest.aHexKeys[i]), account)
 		}
 		for i, sHexKey := range debugTest.sHexKeys {
-			tr.Update(common.FromHex(sHexKey), common.FromHex(debugTest.sHexValues[i]), 0)
+			tr.Update(common.FromHex(sHexKey), common.FromHex(debugTest.sHexValues[i]))
 		}
 		trieHash := tr.Hash()
 		var b bytes.Buffer
