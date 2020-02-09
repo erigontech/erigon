@@ -687,9 +687,13 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
-				tds.t.UpdateAccount(addrHash[:], account)
+				if aPresent, ok := tds.t.GetAccount(addrHash[:]); !ok || !aPresent.Equals(account) {
+					tds.t.UpdateAccount(addrHash[:], account)
+				}
 			} else {
-				tds.t.Delete(addrHash[:])
+				if _, ok := tds.t.GetAccount(addrHash[:]); ok {
+					tds.t.Delete(addrHash[:])
+				}
 			}
 		}
 		for addrHash, m := range b.storageUpdates {
@@ -698,30 +702,22 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-						tds.t.Update(cKey, v)
+						if vPresent, ok := tds.t.Get(cKey); !ok || !bytes.Equal(vPresent, v) {
+							tds.t.Update(cKey, v)
+						}
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
 						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
 						// to the point where it existed (with storage), then rewinding to the point of existence
 						// will not bring back the full storage trie. Instead there will be one hashNode.
 						// So we probe for this situation first
-						if _, ok := tds.t.Get(cKey); ok {
+						if vPresent, ok := tds.t.Get(cKey); ok && !bytes.Equal(vPresent, v) {
 							tds.t.Update(cKey, v)
 						}
 					}
 				} else {
-					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
-					if forward {
+					if _, ok := tds.t.Get(cKey); ok {
 						tds.t.Delete(cKey)
-					} else {
-						// If rewinding, it might not be possible to execute storage item update.
-						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
-						// to the point where it existed (with storage), then rewinding to the point of existence
-						// will not bring back the full storage trie. Instead there will be one hashNode.
-						// So we probe for this situation first
-						if _, ok := tds.t.Get(cKey); ok {
-							tds.t.Delete(cKey)
-						}
 					}
 				}
 			}

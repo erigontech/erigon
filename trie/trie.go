@@ -369,6 +369,7 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
 	var nn node
+	t.evictNodeFromHashMap(origNode)
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
 		vn, vnok := value.(valueNode)
@@ -376,7 +377,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated = !bytes.Equal(origN, vn)
 			if updated {
 				newNode = value
-				t.evictNodeFromHashMap(origNode)
 			} else {
 				newNode = origN
 			}
@@ -387,7 +387,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if origNok && vnok {
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
-				t.evictNodeFromHashMap(origNode)
 				origAccN.Account.Copy(&vAccN.Account)
 			}
 			newNode = origAccN
@@ -396,7 +395,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 		// replacing nodes except accounts
 		if !origNok {
-			t.evictNodeFromHashMap(origNode)
 			return true, value
 		}
 	}
@@ -408,7 +406,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
-			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
@@ -420,12 +417,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.Val = nn
 			}
 			newNode = n
 		} else {
-			t.evictNodeFromHashMap(n)
 			// Otherwise branch out at the index where they differ.
 			var c1 node
 			if len(n.Key) == matchlen+1 {
@@ -474,7 +469,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		case i1:
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.child1 = nn
 				n.flags.dirty = true
 			}
@@ -482,13 +476,11 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.child2 = nn
 				n.flags.dirty = true
 			}
 			newNode = n
 		default:
-			t.evictNodeFromHashMap(n)
 			var child node
 			if len(key) == pos+1 {
 				child = value
@@ -511,7 +503,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
 		if child == nil {
-			t.evictNodeFromHashMap(n)
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
@@ -523,7 +514,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
-				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
 				n.flags.dirty = true
 			}
@@ -703,6 +693,7 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 // nodes on the way up after deleting recursively.
 func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode node) {
 	var nn node
+	t.evictNodeFromHashMap(origNode)
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
@@ -715,7 +706,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 
 			if removeNodeEntirely {
 				updated = true
-				t.evictNodeFromHashMap(n)
 				touchKey := key[:keyStart+matchlen]
 				if touchKey[len(touchKey)-1] == 16 {
 					touchKey = touchKey[:len(touchKey)-1]
@@ -731,7 +721,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				if !updated {
 					newNode = n
 				} else {
-					t.evictNodeFromHashMap(n)
 					if nn == nil {
 						newNode = nil
 					} else {
@@ -765,7 +754,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
-				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child2, uint(i2))
@@ -782,7 +770,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
-				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child1, uint(i1))
@@ -807,7 +794,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
-			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
@@ -863,14 +849,12 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		return
 
 	case valueNode:
-		t.evictNodeFromHashMap(n)
 		updated = true
 		newNode = nil
 		return
 
 	case *accountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
-			t.evictNodeFromHashMap(n)
 			// Key terminates here
 			if n.storage != nil {
 				h := key[:keyStart]
@@ -890,7 +874,6 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		}
 		updated, nn = t.delete(n.storage, key, keyStart, preserveAccountNode)
 		if updated {
-			t.evictNodeFromHashMap(n)
 			n.storage = nn
 			n.rootCorrect = false
 		}
