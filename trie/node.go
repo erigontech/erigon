@@ -50,8 +50,9 @@ type (
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
-		Key []byte // HEX encoding
-		Val node
+		flags nodeFlag
+		Key   []byte // HEX encoding
+		Val   node
 	}
 	hashNode  []byte
 	valueNode []byte
@@ -275,14 +276,14 @@ func (n hashNode) dirty() bool      { return false }
 func (n valueNode) dirty() bool     { return true }
 func (n *fullNode) dirty() bool     { return n.flags.dirty }
 func (n *duoNode) dirty() bool      { return n.flags.dirty }
-func (n *shortNode) dirty() bool    { return true }
+func (n *shortNode) dirty() bool    { return n.flags.dirty }
 func (an *accountNode) dirty() bool { return true }
 
 func (n hashNode) hash() []byte      { return n }
 func (n valueNode) hash() []byte     { return nil }
 func (n *fullNode) hash() []byte     { return n.flags.hash[:] }
 func (n *duoNode) hash() []byte      { return n.flags.hash[:] }
-func (n *shortNode) hash() []byte    { return nil }
+func (n *shortNode) hash() []byte    { return n.flags.hash[:] }
 func (an *accountNode) hash() []byte { return nil }
 
 // Pretty printing.

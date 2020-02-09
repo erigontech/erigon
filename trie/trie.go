@@ -402,6 +402,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
+		s.flags.dirty = true
 		return true, s
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
@@ -418,6 +419,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
 				n.Val = nn
+				n.flags.dirty = true
 			}
 			newNode = n
 		} else {
@@ -427,6 +429,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				c1 = n.Val
 			} else {
 				s1 := &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val}
+				s1.flags.dirty = true
 				c1 = s1
 			}
 			var c2 node
@@ -434,6 +437,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				c2 = value
 			} else {
 				s2 := &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value}
+				s2.flags.dirty = true
 				c2 = s2
 			}
 			branch := &duoNode{}
@@ -486,6 +490,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				child = value
 			} else {
 				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
+				short.flags.dirty = true
 				child = short
 			}
 			newnode := &fullNode{}
@@ -507,6 +512,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				n.Children[key[pos]] = value
 			} else {
 				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
+				short.flags.dirty = true
 				n.Children[key[pos]] = short
 			}
 			updated = true
@@ -686,7 +692,9 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
 	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
-	return &shortNode{Key: []byte{byte(pos)}, Val: cnode}
+	s := &shortNode{Key: []byte{byte(pos)}, Val: cnode}
+	s.flags.dirty = true
+	return s
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -732,10 +740,13 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 							// always creates a new slice) instead of append to
 							// avoid modifying n.Key since it might be shared with
 							// other nodes.
-							newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
+							s := &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
+							s.flags.dirty = true
+							newNode = s
 						} else {
 							n.Val = nn
 							newNode = n
+							n.flags.dirty = true
 						}
 					}
 				}
@@ -1151,8 +1162,10 @@ func (t *Trie) evictNodeFromHashMap(nd node) {
 	if nd == nil {
 		return
 	}
-	key, ok := t.nodeHash(nd)
-	if ok {
+	hash := nd.hash()
+	if hash != nil {
+		var key common.Hash
+		copy(key[:], hash[:])
 		delete(t.hashMap, key)
 	}
 }
