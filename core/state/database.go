@@ -687,7 +687,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
 				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
-				if aPresent, ok := tds.t.GetAccount(addrHash[:]); !ok || !aPresent.Equals(account) {
+				if aPresent, ok := tds.t.GetAccount(addrHash[:]); !ok || aPresent == nil || !aPresent.Equals(account) {
 					tds.t.UpdateAccount(addrHash[:], account)
 				}
 			} else {
