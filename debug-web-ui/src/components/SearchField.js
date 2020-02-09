@@ -25,7 +25,7 @@ class SearchField extends React.Component {
 
     render() {
         return (
-            <Form>
+            <Form onSubmit={this.handleSubmit}>
                 <Form.Row>
                     <Col>
                         <Form.Control type="text"
@@ -34,7 +34,7 @@ class SearchField extends React.Component {
                                     onChange={this.handleChange} />
                     </Col>
                     <Col>
-                        <Button variant="primary" type="submit" onClick={this.handleSubmit}>Find</Button>
+                        <Button variant="primary" type="submit">Find</Button>
                     </Col>
                 </Form.Row>
             </Form>
