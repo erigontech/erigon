@@ -16,8 +16,14 @@ const LookupAccountForm = ({api}) => {
     const [state, setState] = useState({account: undefined, error: undefined, loading: false});
 
     const lookupSuccess = (response) => setState({account: response.data, error: undefined});
-    const lookupFail = (error) => setState({account: undefined, error: error})
-
+    const lookupFail = (error) => {
+        if (error && error.response && error.response.status === 404) {
+            setState({account: undefined, error: error})
+        } else {
+            setState(() => { throw error })
+        }
+    }
+    
     return (
         <div>
             <SearchField placeholder="AccountID"
@@ -26,7 +32,7 @@ const LookupAccountForm = ({api}) => {
                                             .catch(lookupFail)} />
             <hr />
             {state.account && <DetailsForm account={state.account} />}
-            {state.error && <ErrorForm error={state.error} />}
+            {state.error && <ErrorForm message={"Account not found"} />}
         </div>
     );
 }
