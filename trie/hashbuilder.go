@@ -68,6 +68,7 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
 	}
+	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -217,6 +218,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
+	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
@@ -307,6 +309,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 		fmt.Printf("EXTENSION %x\n", key)
 	}
 	nd := hb.nodeStack[len(hb.nodeStack)-1]
+	var s *shortNode
 	switch n := nd.(type) {
 	case nil:
 		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-common.HashLength:])
@@ -316,9 +319,11 @@ func (hb *HashBuilder) extension(key []byte) error {
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
+	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if err := hb.extensionHash(key); err != nil {
 		return err
 	}
+	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
