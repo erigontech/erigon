@@ -33,7 +33,7 @@ export default class ErrorCatcher extends React.Component {
     render() {
         let show = this.state.error !== undefined;
         return (
-            <div>
+            <div class={this.props.className}>
                 {this.props.children}
                 <Modal show={show} onHide={this.handleClose}>
                     <Modal.Header>

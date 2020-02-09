@@ -13,8 +13,7 @@ import ErrorCatcher from './components/ErrorCatcher.js'
 function App() {
   const api = new API('http://localhost:8080')
   return (
-    <div className="App">
-      <ErrorCatcher>
+    <ErrorCatcher className="App">
         <Navbar bg="dark" variant="dark">
           <Navbar.Brand href="#home">Turbo-Geth Debug Utility</Navbar.Brand>
           <Navbar.Toggle aria-controls="basic-navbar-nav" />
@@ -26,10 +25,10 @@ function App() {
             </Nav>
           </Navbar.Collapse>
         </Navbar>
-        <Container>
+        <Container style={{'margin-top': '1rem'}}>
           <Row>
             <Col>
-              <h3>Accounts</h3>
+              <h1>Lookup Accounts</h1>
             </Col>
           </Row>
           <Row>
@@ -38,8 +37,7 @@ function App() {
             </Col>
           </Row>
         </Container>
-      </ErrorCatcher>
-    </div>
+    </ErrorCatcher>
   );
 }
 

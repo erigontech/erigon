@@ -26,7 +26,7 @@ const LookupAccountForm = ({api}) => {
     
     return (
         <div>
-            <SearchField placeholder="AccountID"
+            <SearchField placeholder="lookup by id or hash"
                          onClick={(id) => loadAccount(id, api)
                                             .then(lookupSuccess)
                                             .catch(lookupFail)} />

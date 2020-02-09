@@ -47,6 +47,15 @@ state:
 	$(GORUN) build/ci.go install ./cmd/state
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/state\" to launch state."
+
+restapi:
+	$(GORUN) build/ci.go install ./cmd/restapi
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/restapi\" to launch restapi."
+
+run-web-ui:
+	@echo 'Web: Turbo-Geth Debug Utility is launching...'
+	@cd debug-web-ui && yarn start
 	
 pics:
 	$(GORUN) build/ci.go install ./cmd/pics
