@@ -67,7 +67,6 @@ func loadNode(br *bufio.Reader) (node, error) {
 
 func loadFull(br *bufio.Reader) (*fullNode, error) {
 	n := fullNode{}
-	n.flags.dirty = true
 	for {
 		next, err := br.Peek(1)
 		if err != nil {
@@ -98,7 +97,6 @@ func loadFull(br *bufio.Reader) (*fullNode, error) {
 
 func loadDuo(br *bufio.Reader) (*duoNode, error) {
 	n := duoNode{}
-	n.flags.dirty = true
 	idxStr1, err := br.ReadBytes(':')
 	if err != nil {
 		return nil, err
@@ -270,9 +268,6 @@ func (an accountNode) print(w io.Writer) {
 	defer pool.PutBuffer(encodedAccount)
 
 	fmt.Fprintf(w, "v(%x)", encodedAccount.String())
-	if an.storage != nil {
-		fmt.Printf("\n\n%s\n\n", an.storage.fstring(("")))
-	}
 }
 
 func printDiffSide(n node, w io.Writer, ind string, key string) {

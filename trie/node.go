@@ -31,7 +31,7 @@ var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b
 type node interface {
 	print(io.Writer)
 	fstring(string) string
-	dirty() bool
+	hashLen() int
 	hash() []byte
 }
 
@@ -176,10 +176,10 @@ func (n *fullNode) duoCopy() *duoNode {
 			break
 		}
 	}
-	if !n.flags.dirty {
+	if n.flags.hashLen > 0 {
 		copy(c.flags.hash[:], n.flags.hash[:])
 	}
-	c.flags.dirty = n.flags.dirty
+	c.flags.hashLen = n.flags.hashLen
 	return &c
 }
 
@@ -188,10 +188,10 @@ func (n *duoNode) fullCopy() *fullNode {
 	i1, i2 := n.childrenIdx()
 	c.Children[i1] = n.child1
 	c.Children[i2] = n.child2
-	if !n.flags.dirty {
+	if n.flags.hashLen > 0 {
 		copy(c.flags.hash[:], n.flags.hash[:])
 	}
-	c.flags.dirty = n.flags.dirty
+	c.flags.hashLen = n.flags.hashLen
 	return &c
 }
 
@@ -268,16 +268,16 @@ func (n *shortNode) copy() *shortNode {
 
 // nodeFlag contains caching-related metadata about a node.
 type nodeFlag struct {
-	hash  common.Hash // cached hash of the node
-	dirty bool        // whether the hash field represent the true hash
+	hash    common.Hash // cached hash of the node
+	hashLen byte        // length of the hash (length of hash < 32 if it is embedded RLP)
 }
 
-func (n hashNode) dirty() bool      { return false }
-func (n valueNode) dirty() bool     { return true }
-func (n *fullNode) dirty() bool     { return n.flags.dirty }
-func (n *duoNode) dirty() bool      { return n.flags.dirty }
-func (n *shortNode) dirty() bool    { return n.flags.dirty }
-func (an *accountNode) dirty() bool { return true }
+func (n hashNode) hashLen() int      { return 32 }
+func (n valueNode) hashLen() int     { return 0 }
+func (n *fullNode) hashLen() int     { return int(n.flags.hashLen) }
+func (n *duoNode) hashLen() int      { return int(n.flags.hashLen) }
+func (n *shortNode) hashLen() int    { return int(n.flags.hashLen) }
+func (an *accountNode) hashLen() int { return 0 }
 
 func (n hashNode) hash() []byte      { return n }
 func (n valueNode) hash() []byte     { return nil }

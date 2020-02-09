@@ -402,7 +402,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 	switch n := origNode.(type) {
 	case nil:
 		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
-		s.flags.dirty = true
 		return true, s
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
@@ -419,7 +418,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
 				n.Val = nn
-				n.flags.dirty = true
+				n.flags.hashLen = 0
 			}
 			newNode = n
 		} else {
@@ -428,17 +427,13 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
 			} else {
-				s1 := &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val}
-				s1.flags.dirty = true
-				c1 = s1
+				c1 = &shortNode{Key: common.CopyBytes(n.Key[matchlen+1:]), Val: n.Val}
 			}
 			var c2 node
 			if len(key) == pos+matchlen+1 {
 				c2 = value
 			} else {
-				s2 := &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value}
-				s2.flags.dirty = true
-				c2 = s2
+				c2 = &shortNode{Key: common.CopyBytes(key[pos+matchlen+1:]), Val: value}
 			}
 			branch := &duoNode{}
 			if n.Key[matchlen] < key[pos+matchlen] {
@@ -449,7 +444,6 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				branch.child2 = c1
 			}
 			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
-			branch.flags.dirty = true
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -474,14 +468,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
 				n.child1 = nn
-				n.flags.dirty = true
+				n.flags.hashLen = 0
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
 				n.child2 = nn
-				n.flags.dirty = true
+				n.flags.hashLen = 0
 			}
 			newNode = n
 		default:
@@ -489,14 +483,11 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(key) == pos+1 {
 				child = value
 			} else {
-				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
-				short.flags.dirty = true
-				child = short
+				child = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 			}
 			newnode := &fullNode{}
 			newnode.Children[i1] = n.child1
 			newnode.Children[i2] = n.child2
-			newnode.flags.dirty = true
 			newnode.Children[key[pos]] = child
 			updated = true
 			// current node leaves the generation but newnode joins it
@@ -511,17 +502,15 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
-				short := &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
-				short.flags.dirty = true
-				n.Children[key[pos]] = short
+				n.Children[key[pos]] = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 			}
 			updated = true
-			n.flags.dirty = true
+			n.flags.hashLen = 0
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
 				n.Children[key[pos]] = nn
-				n.flags.dirty = true
+				n.flags.hashLen = 0
 			}
 		}
 		newNode = n
@@ -692,9 +681,7 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
 	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
-	s := &shortNode{Key: []byte{byte(pos)}, Val: cnode}
-	s.flags.dirty = true
-	return s
+	return &shortNode{Key: []byte{byte(pos)}, Val: cnode}
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -740,13 +727,11 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 							// always creates a new slice) instead of append to
 							// avoid modifying n.Key since it might be shared with
 							// other nodes.
-							s := &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
-							s.flags.dirty = true
-							newNode = s
+							newNode = &shortNode{Key: concat(n.Key, shortChild.Key...), Val: shortChild.Val}
 						} else {
 							n.Val = nn
 							newNode = n
-							n.flags.dirty = true
+							n.flags.hashLen = 0
 						}
 					}
 				}
@@ -772,7 +757,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					n.flags.dirty = true
+					n.flags.hashLen = 0
 					newNode = n
 				}
 			}
@@ -788,7 +773,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					n.flags.dirty = true
+					n.flags.hashLen = 0
 					newNode = n
 				}
 			}
@@ -848,13 +833,12 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				} else {
 					duo.child2 = n.Children[pos2]
 				}
-				duo.flags.dirty = true
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				n.flags.dirty = true
+				n.flags.hashLen = 0
 				newNode = n
 			}
 		}
