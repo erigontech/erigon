@@ -18,12 +18,12 @@ In the end, when there are no more instructions left, there MUST be only one ite
 ### Nodes
 
 ```
-type node = nil
-          | hashNode (raw_hash:byte[32])
-          | valueNode (raw_value:byte[])
-          | accountNode (nonce:uint balance:int storage:node storage_hash:hash code_hash:hash)
-          | shortNode (key:byte[] value:node)
-          | branchNode (child0:node child1:node child3:node ... child15:node)
+type Node = nil
+          | HashNode (raw_hash:Byte[32])
+          | ValueNode (raw_value:Byte[])
+          | AccountNode (nonce:Uint balance:int storage:Node storage_hash:byte[32] code_hash:byte[32])
+          | ShortNode (key:Byte[] value:node)
+          | BranchNode (child0:Node child1:Node child3:Node ... child15:Node)
 ```
 
 ## Substitution rules
@@ -125,7 +125,7 @@ Initial state of the stack is ` <empty> `;
 
 Witness: `HASH h2; BRANCH 0b11`
 
-Stack: `(hashNode(h1), h1)`
+Stack: `(HashNode{h1}, h1)`
 
 ---
 
@@ -133,7 +133,7 @@ Stack: `(hashNode(h1), h1)`
 
 Witness `BRANCH 0b11`
 
-Stack: `(hashNode(h2), h2); (hashNode(h1), h1)`
+Stack: `(HashNode{h2}, h2); (HashNode{h1}, h1)`
 
 ---
 
@@ -141,7 +141,7 @@ Stack: `(hashNode(h2), h2); (hashNode(h1), h1)`
 
 Witness: ` <empty> `
 
-Stack: `(branchNode{0: hashNode(h2), 1: hashNode(h1)}, KECCAK(h2+h1))`
+Stack: `(BranchNode{0: HashNode{h2}, 1: HashNode{h1}}, KECCAK(h2+h1))`
 
 ---
 
@@ -171,7 +171,7 @@ The exact implementation details are undefined in this spec.
 
 ```
 LEAF(key, raw_value) |=> 
-STACK(shortNode(key, valueNode(raw_value), VALUE_HASH(key, raw_value)))
+STACK(ShortNode{key, ValueNode(raw_value)}, VALUE_HASH(key, raw_value)))
 ```
 
 ### `EXTENSION key`
@@ -182,25 +182,25 @@ STACK(shortNode(key, valueNode(raw_value), VALUE_HASH(key, raw_value)))
 GUARD node != nil
 
 STACK(node, hash) EXTENSION(key) |=>
-STACK(shortNode(key, node), hash)
+STACK(ShortNode{key, node}, hash)
 
 ---
 
 GUARD node == nil
 
 STACK(nil, hash) EXTENSION(key) |=>
-STACK(shortNode(key, hashNode(hash)), hash)
+STACK(ShortNode{key, HashNode(hash)}, hash)
 ```
 
 ### `HASH raw_hash`
 
-Pushes a `hashNode` to stack.
+Pushes a `HashNode` to stack.
 
 **Substitution rules**
 
 ```
 HASH(raw_hash) |=>
-STACK(hashNode(raw_hash), raw_hash)
+STACK(HashNode{raw_hash}, raw_hash)
 ```
 
 ### `CODE raw_code`
@@ -223,7 +223,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, hashNode(storage_hash), storage_hash, code_hash))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode{Account(nonce, balance, HashNode{storage_hash}, storage_hash, code_hash)}}, ACC_HASH(key, account))
 --
 
 GUARD has_code == true
@@ -231,7 +231,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, code_hash))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, code_hash)}}, ACC_HASH(key, account))
 
 --
 
@@ -240,7 +240,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(key, account))
 
 ---
 
@@ -249,7 +249,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, storage_node, storage_hash, nil))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(key, account))
 
 --
 
@@ -257,7 +257,7 @@ GUARD has_code == true
 GUARD has_storage == false
 
 STACK(nil, code_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, code_hash))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode(Account(nonce, balance, nil, nil, code_hash)}}, ACC_HASH(key, account))
 
 --
 
@@ -265,7 +265,7 @@ GUARD has_code == false
 GUARD has_storage == false
 
 ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(shortNode(key, accountNode(account(nonce, balance, nil, nil, nil))), ACC_HASH(key, account))
+STACK(ShortNode{key, AccountNode{Account(nonce, balance, nil, nil, nil)}}, ACC_HASH(key, account))
 
 ```
 
@@ -294,14 +294,14 @@ This instruction pops `NBITSET(mask)` items from both node stack and hash stack 
 GUARD NBITSET(mask) == 2 
 
 STACK(n0, h0) STACK(n1, h1) BRANCH(mask) |=> 
-STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
+STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)}, KECCAK(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1))))
 
 ---
 
 GUARD NBITSET(mask) == 3
 
 STACK(n0, h0) STACK(n1, h1) STACK(n2, h2) BRANCH(mask) |=> 
-STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, n2))))
+STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, n2)}, KECCAK(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, n2))))
 
 ---
 
@@ -312,7 +312,7 @@ STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, n2)), keccak(CONCAT(MAKE_VALUES
 GUARD NBITSET(mask) == 16
 
 STACK(n0, h0) STACK(n1, h1) ... STACK(n15, h15) BRANCH(mask) |=>
-STACK(branchNode(MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)), keccak(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, ..., n15))))
+STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)}, KECCAK(CONCAT(MAKE_VALUES_ARRAY(mask, h0, n1, ..., n15))))
 ```
 
 ## Helper functions
