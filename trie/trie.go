@@ -1147,6 +1147,9 @@ func (t *Trie) nodeHash(nd node) (hash common.Hash, ok bool) {
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {
+	if nd == nil {
+		return
+	}
 	key, ok := t.nodeHash(nd)
 	if ok {
 		delete(t.hashMap, key)
