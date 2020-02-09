@@ -313,9 +313,9 @@ func (hb *HashBuilder) extension(key []byte) error {
 	switch n := nd.(type) {
 	case nil:
 		branchHash := common.CopyBytes(hb.hashStack[len(hb.hashStack)-common.HashLength:])
-		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: common.CopyBytes(key), Val: hashNode(branchHash)}
+		s = &shortNode{Key: common.CopyBytes(key), Val: hashNode(branchHash)}
 	case *fullNode:
-		hb.nodeStack[len(hb.nodeStack)-1] = &shortNode{Key: common.CopyBytes(key), Val: n}
+		s = &shortNode{Key: common.CopyBytes(key), Val: n}
 	default:
 		return fmt.Errorf("wrong Val type for an extension: %T", nd)
 	}
