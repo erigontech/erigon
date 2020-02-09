@@ -21,7 +21,7 @@ func RegisterAccountAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
 			return
 		} else if err != nil {
-			c.AbortWithError(http.StatusInternalServerError, err)
+			c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
 			return
 		}
 		c.JSON(http.StatusOK, jsonifyAccount(account))

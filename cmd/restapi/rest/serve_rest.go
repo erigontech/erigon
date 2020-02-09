@@ -36,7 +36,8 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 	}
 
 	fmt.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
-	r.Run(localAddress)
+
+	r.Run(localAddress) //nolint:errcheck
 
 	return nil
 }
