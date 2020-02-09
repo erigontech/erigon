@@ -667,6 +667,7 @@ func (t *Trie) Delete(key []byte) {
 }
 
 func (t *Trie) convertToShortNode(child node, pos uint) node {
+	t.evictNodeFromHashMap(child)
 	cnode := child
 	if pos != 16 {
 		// If the remaining entry is a short node, it replaces
