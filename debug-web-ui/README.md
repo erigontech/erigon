@@ -1,5 +1,22 @@
 This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
 
+## Prerequisites
+
+* Node.js v13
+
+* yarn (install with `npm install -g yarn`)
+
+## Quickstart
+
+1. Run geth with the remote DB interface on `localhost:9999`
+
+2. Install dependencies: `cd debug-web-ui && yarn install && cd ..`
+
+3. Run the rest server: `make restapi && ./build/bin/restapi`
+
+4. Run the web UI: `make run-web-ui`
+
+
 ## Available Scripts
 
 In the project directory, you can run:
