@@ -275,7 +275,7 @@ func fixState(chaindata string, url string) {
 				for key, entry := range sm {
 					var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 					copy(cKey[:], addrHash[:])
-					binary.BigEndian.PutUint64(cKey[common.HashLength:], ^uint64(account.Incarnation))
+					binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
 					copy(cKey[common.HashLength+common.IncarnationLength:], key[:])
 					dbValue, _ := stateDb.Get(dbutils.StorageBucket, cKey[:])
 					value := bytes.TrimLeft(entry.Value[:], "\x00")
@@ -288,7 +288,7 @@ func fixState(chaindata string, url string) {
 				}
 				var cKey [common.HashLength + common.IncarnationLength + common.HashLength]byte
 				copy(cKey[:], addrHash[:])
-				binary.BigEndian.PutUint64(cKey[common.HashLength:], ^uint64(account.Incarnation))
+				binary.BigEndian.PutUint64(cKey[common.HashLength:], ^account.Incarnation)
 				err = stateDb.Walk(dbutils.StorageBucket, cKey[:], 8*(common.HashLength+common.IncarnationLength), func(k, v []byte) (bool, error) {
 					var kh common.Hash
 					copy(kh[:], k[common.HashLength+common.IncarnationLength:])
