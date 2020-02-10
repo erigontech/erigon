@@ -1,12 +1,15 @@
 package trie
 
 import (
+	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -187,12 +190,12 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 	} else {
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 	}
 	if err != nil {
 		return err
@@ -214,7 +217,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
-	if fromCache {
+	if fromCache && bytes.Compare(common.FromHex("0808"), k) == 0 {
 		fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
 	}
 	if keyIdx != tr.keyIdx {
@@ -309,8 +312,18 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 	return nil
 }
 
+var csvCached *bufio.Writer
+
+func init() {
+	fmFile, err := os.OpenFile("cached_iterations.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
+	if err != nil {
+		panic(err)
+	}
+	csvCached = bufio.NewWriter(fmFile)
+}
+
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
 	nibblesBuf := pool.GetBuffer(128)
 	defer pool.PutBuffer(nibblesBuf)
 
@@ -321,6 +334,19 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.View(func(tx *bolt.Tx) error {
+		var iterations uint
+		defer func(t time.Time) {
+			_, err := csvCached.WriteString(fmt.Sprintf("%d,%d\n", iterations, blockNr))
+			if err != nil {
+				panic(err)
+			}
+			x := time.Since(t)
+			if x.Milliseconds() < 20 {
+				return
+			}
+			fmt.Println("MultiWalk2 tx: end", x, iterations)
+		}(time.Now())
+
 		cacheBucket := tx.Bucket(dbutils.IntermediateTrieCacheBucket)
 		if cacheBucket == nil {
 			return nil
@@ -339,6 +365,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
+			iterations++
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if len(k) == common.HashLength && len(cacheK) > common.HashLength-1 {
 				next, ok := nextSubtree(cacheK[:common.HashLength-1])
@@ -448,21 +475,20 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
+				if bytes.Compare(common.FromHex("88"), cacheK) == 0 {
+					fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
+					for i, a := range tr.rss {
+						for _, h := range a.hexes {
+							fmt.Printf("In hexes: %d %x\n", i, h)
+						}
+					}
 
-				//if fmt.Sprintf("%x", nibblesBuf.B) == "070f" {
-				//	fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
-				//	for i, a := range tr.rss {
-				//		for _, h := range a.hexes {
-				//			fmt.Printf("In hexes: %d %x\n", i, h)
-				//		}
-				//	}
-				//
-				//	for _, r := range tr.requests {
-				//		fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
-				//	}
-				//}
+					for _, r := range tr.requests {
+						fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
+					}
+				}
 
-				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
+				if err := walker(rangeIdx, common.CopyBytes(cacheK), common.CopyBytes(cacheV), fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}

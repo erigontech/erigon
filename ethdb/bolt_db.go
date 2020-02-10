@@ -86,6 +86,10 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 					} else {
 						counters[len(k)] = 1
 					}
+
+					if bytes.HasPrefix(k, common.FromHex("88")) {
+						fmt.Printf("Found in cache: %x %x\n", k, v)
+					}
 					return nil
 				}); err != nil {
 					return err

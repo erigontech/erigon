@@ -278,7 +278,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
 	}
 }
 
-const ShortestCacheableNibblesLen = 6
+const ShortestCacheableNibblesLen = 2
 
 func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
 	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
@@ -306,8 +306,9 @@ func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []
 		fmt.Printf("what is it? %T\n", tds.db)
 	}
 
-	fmt.Printf("Put: %x\n", key.Bytes())
-
+	if bytes.Compare(common.FromHex("88"), key.Bytes()) == 0 {
+		fmt.Printf("Put: %x %x\n", key.Bytes(), v)
+	}
 	if err := db.Put(dbutils.IntermediateTrieCacheBucket, key.Bytes(), v); err != nil {
 		log.Warn("could not put intermediate trie cache", "err", err)
 	}
@@ -337,7 +338,9 @@ func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {
 		fmt.Printf("what is it? %T\n", tds.db)
 	}
 
-	//fmt.Printf("Del: %x\n", key.Bytes())
+	if bytes.Compare(common.FromHex("88"), key.Bytes()) == 0 {
+		fmt.Printf("Del: %x\n", key.Bytes())
+	}
 
 	if err := db.Delete(dbutils.IntermediateTrieCacheBucket, key.Bytes()); err != nil {
 		log.Warn("could not delete intermediate trie cache", "err", err)
