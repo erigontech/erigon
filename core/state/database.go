@@ -264,12 +264,8 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 }
 
 func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
-	return
-
-	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
-		return
-	}
-	if len(prefix) == 0 {
+	if len(prefix) != common.HashLength*2 {
+		panic(fmt.Sprintf("Do you have terminator? %x", prefix))
 		return
 	}
 
@@ -287,10 +283,6 @@ const ShortestCacheableNibblesLen = 6
 
 func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
 	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
-		return
-	}
-
-	if len(prefixAsNibbles) >= common.HashLength*2 {
 		return
 	}
 
@@ -315,7 +307,7 @@ func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []
 		fmt.Printf("what is it? %T\n", tds.db)
 	}
 
-	//fmt.Printf("Put: %x\n", key.Bytes())
+	fmt.Printf("Put: %x\n", key.Bytes())
 
 	if err := db.Put(dbutils.IntermediateTrieCacheBucket, key.Bytes(), v); err != nil {
 		log.Warn("could not put intermediate trie cache", "err", err)

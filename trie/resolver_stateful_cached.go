@@ -462,12 +462,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				//	}
 				//}
 
-				copyK := make([]byte, len(cacheK))
-				copy(copyK, cacheK)
-				copyV := make([]byte, len(cacheV))
-				copy(copyV, cacheV)
-
-				if err := walker(rangeIdx, copyK, copyV, fromCache); err != nil {
+				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
