@@ -387,11 +387,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 
-					if cmp == 0 && minKeyIndex == len(minKey) {
-						if minKeyIndex > startKeyIndex {
-							panic("Need to check")
-						}
-						cmp = 1
+					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
+						cmp = -1
 					}
 
 					if cmp == 0 {
