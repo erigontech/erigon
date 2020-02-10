@@ -47,6 +47,7 @@ var account = flag.String("account", "0x", "specifies account to investigate")
 var name = flag.String("name", "", "name to add to the file names")
 var chaindata = flag.String("chaindata", "chaindata", "path to the chaindata database file")
 var hash = flag.String("hash", "0x00", "image for preimage or state root for testBlockHashes action")
+var preImage = flag.String("preimage", "0x00", "preimage")
 
 func bucketList(db *bolt.DB) [][]byte {
 	bucketList := [][]byte{}
@@ -1010,6 +1011,14 @@ func preimage(chaindata string, image common.Hash) {
 	fmt.Printf("%x\n", p)
 }
 
+func addPreimage(chaindata string, image common.Hash, preimage []byte) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer ethDb.Close()
+	err = ethDb.Put(dbutils.PreimagePrefix, image[:], preimage)
+	check(err)
+}
+
 func loadAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
@@ -1096,7 +1105,7 @@ func printBranches(block uint64) {
 	}
 }
 
-func readAccount(chaindata string, account common.Address) {
+func readAccount(chaindata string, account common.Address, block uint64, rewind uint64) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	secKey := crypto.Keccak256(account[:])
@@ -1105,7 +1114,72 @@ func readAccount(chaindata string, account common.Address) {
 	if err = a.DecodeForStorage(v); err != nil {
 		panic(err)
 	}
-	fmt.Printf("%x:%x\n%x\n", secKey, v, a.Root)
+	fmt.Printf("%x:%x\n%x\n%x\n%d\n", secKey, v, a.Root, a.CodeHash, a.Incarnation)
+	//var addrHash common.Hash
+	//copy(addrHash[:], secKey)
+	//codeHash, err := ethDb.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
+	//check(err)
+	//fmt.Printf("codeHash: %x\n", codeHash)
+	timestamp := block
+	for i := uint64(0); i < rewind; i++ {
+		var printed bool
+		encodedTS := dbutils.EncodeTimestamp(timestamp)
+		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
+		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
+		if v != nil {
+			err = dbutils.Walk(v, func(key, value []byte) error {
+				if bytes.HasPrefix(key, secKey) {
+					incarnation := ^binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
+					if !printed {
+						fmt.Printf("Changes for block %d\n", timestamp)
+						printed = true
+					}
+					fmt.Printf("%d %x %x\n", incarnation, key[common.HashLength+common.IncarnationLength:], value)
+				}
+				return nil
+			})
+			check(err)
+		}
+		timestamp--
+	}
+}
+
+func fixAccount(chaindata string, addrHash common.Hash, storageRoot common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	v, _ := ethDb.Get(dbutils.AccountsBucket, addrHash[:])
+	var a accounts.Account
+	if err = a.DecodeForStorage(v); err != nil {
+		panic(err)
+	}
+	a.Root = storageRoot
+	v = make([]byte, a.EncodingLengthForStorage())
+	a.EncodeForStorage(v)
+	err = ethDb.Put(dbutils.AccountsBucket, addrHash[:], v)
+	check(err)
+}
+
+func nextIncarnation(chaindata string, addrHash common.Hash) {
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	var found bool
+	var incarnationBytes [common.IncarnationLength]byte
+	startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
+	var fixedbits uint = 8 * common.HashLength
+	copy(startkey, addrHash[:])
+	if err := ethDb.Walk(dbutils.StorageBucket, startkey, fixedbits, func(k, v []byte) (bool, error) {
+		copy(incarnationBytes[:], k[common.HashLength:])
+		found = true
+		return false, nil
+	}); err != nil {
+		fmt.Printf("Incarnation(z): %d\n", 0)
+		return
+	}
+	if found {
+		fmt.Printf("Incarnation: %d\n", (^binary.BigEndian.Uint64(incarnationBytes[:]))+1)
+		return
+	}
+	fmt.Printf("Incarnation(f): %d\n", state.FirstContractIncarnation)
 }
 
 func repairCurrent() {
@@ -1256,12 +1330,21 @@ func main() {
 	if *action == "preimage" {
 		preimage(*chaindata, common.HexToHash(*hash))
 	}
+	if *action == "addPreimage" {
+		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
+	}
 	//printBranches(uint64(*block))
 	//execToBlock(*block)
 	//extractTrie(*block)
 	//repair()
 	if *action == "readAccount" {
-		readAccount(*chaindata, common.HexToAddress(*account))
+		readAccount(*chaindata, common.HexToAddress(*account), uint64(*block), uint64(*rewind))
+	}
+	if *action == "fixAccount" {
+		fixAccount(*chaindata, common.HexToHash(*account), common.HexToHash(*hash))
+	}
+	if *action == "nextIncarnation" {
+		nextIncarnation(*chaindata, common.HexToHash(*account))
 	}
 	//repairCurrent()
 	//testMemBolt()
@@ -1275,4 +1358,5 @@ func main() {
 	if *action == "bucket" {
 		printBucket(*chaindata)
 	}
+	fmt.Printf("%x\n", ^uint64(1))
 }

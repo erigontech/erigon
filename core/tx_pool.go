@@ -138,6 +138,7 @@ type blockChain interface {
 	StateAt(root common.Hash, blockNr uint64) (*state.IntraBlockState, *state.DbState, error)
 
 	SubscribeChainHeadEvent(ch chan<- ChainHeadEvent) event.Subscription
+	GetTrieDbState() (*state.TrieDbState, error)
 }
 
 // TxPoolConfig are the configuration parameters of the transaction pool.
@@ -238,7 +239,7 @@ type TxPool struct {
 	pendingNonces *txNoncer // Pending state tracking virtual nonces
 
 	currentState  *state.IntraBlockState // Current state in the blockchain head
-	currentTds    *state.DbState
+	currentTds    *state.TrieDbState
 	currentMaxGas uint64 // Current gas limit for transaction caps
 
 	locals  *accountSet // Set of local transaction to exempt from eviction rules
@@ -458,11 +459,13 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 	if newHead == nil {
 		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
 	}
-	statedb, tds, err := pool.chain.StateAt(newHead.Root, newHead.Number.Uint64())
+	tds, err := pool.chain.GetTrieDbState()
+	tds = tds.WithNewBuffer()
 	if err != nil {
 		log.Error("Failed to reset txpool state", "err", err)
 		return
 	}
+	statedb := state.New(tds)
 	pool.currentState = statedb
 	pool.currentTds = tds
 	pool.pendingNonces = newTxNoncer(statedb)

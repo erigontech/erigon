@@ -358,7 +358,7 @@ func (m *mutation) Commit() (uint64, error) {
 			for hBucketStr, changes := range changesByBucket {
 				hBucket := []byte(hBucketStr)
 				changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
-				if debug.IsThinHistory() && !bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
+				if debug.IsThinHistory() {
 					changedKeys := changes.ChangedKeys()
 					for k := range changedKeys {
 						var (
@@ -367,9 +367,9 @@ func (m *mutation) Commit() (uint64, error) {
 							err error
 						)
 						switch {
-						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
+						case bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
 							key = []byte(k)
-						case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+						case bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
 							key = []byte(k)[:common.HashLength+common.IncarnationLength]
 						default:
 							key = []byte(k)

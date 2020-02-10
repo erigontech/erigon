@@ -235,7 +235,6 @@ func TestTwoStorageItems(t *testing.T) {
 	var branch fullNode
 	branch.Children[0x7] = &leaf1
 	branch.Children[0xf] = &leaf2
-	branch.flags.dirty = true
 	root := shortNode{Key: []byte{0xd}, Val: &branch}
 
 	hasher := newHasher(false)

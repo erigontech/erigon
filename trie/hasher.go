@@ -91,9 +91,9 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		copy(storeTo, hn)
 		return common.HashLength, nil
 	}
-	if !n.dirty() {
+	if n.hashLen() > 0 {
 		copy(storeTo, n.hash())
-		return common.HashLength, nil
+		return n.hashLen(), nil
 	}
 	// Trie not processed yet or needs storage, walk the children
 	nodeRlp, err := h.hashChildren(n, bufOffset)
@@ -106,18 +106,20 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		return 0, err
 	}
 
+	switch n := n.(type) {
+	case *shortNode:
+		n.flags.hashLen = byte(refLen)
+		copy(n.flags.hash[:], storeTo)
+	case *accountNode:
+		n.rootCorrect = true
+	case *duoNode:
+		copy(n.flags.hash[:], storeTo)
+		n.flags.hashLen = byte(refLen)
+	case *fullNode:
+		copy(n.flags.hash[:], storeTo)
+		n.flags.hashLen = byte(refLen)
+	}
 	if refLen == common.HashLength {
-		switch n := n.(type) {
-		case *accountNode:
-			n.rootCorrect = true
-		case *duoNode:
-			copy(n.flags.hash[:], storeTo)
-			n.flags.dirty = false
-		case *fullNode:
-			copy(n.flags.hash[:], storeTo)
-			n.flags.dirty = false
-		}
-
 		if h.callback != nil {
 			var hash common.Hash
 			copy(hash[:], storeTo)

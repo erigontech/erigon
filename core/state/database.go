@@ -176,6 +176,7 @@ type TrieDbState struct {
 	newStream           trie.Stream
 	hashBuilder         *trie.HashBuilder
 	resolver            *trie.Resolver
+	incarnationMap      map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -201,6 +202,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp:                tp,
 		savePreimages:     true,
 		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Hash]uint64),
 	}
 	t.SetTouchFunc(func(hex []byte, del bool) {
 		tp.Touch(hex, del)
@@ -242,12 +244,13 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
-		t:           &tcopy,
-		tMu:         new(sync.Mutex),
-		db:          tds.db,
-		blockNr:     n,
-		tp:          tp,
-		hashBuilder: trie.NewHashBuilder(false),
+		t:              &tcopy,
+		tMu:            new(sync.Mutex),
+		db:             tds.db,
+		blockNr:        n,
+		tp:             tp,
+		hashBuilder:    trie.NewHashBuilder(false),
+		incarnationMap: make(map[common.Hash]uint64),
 	}
 
 	if !tds.noIntermediateCache {
@@ -707,7 +710,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						}
 					}
 				} else {
-					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					if forward {
 						tds.t.Delete(cKey)
 					} else {
@@ -1133,6 +1135,9 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 			return 0, err
 		}
 	} else {
+		if inc, ok := tds.incarnationMap[addrHash]; ok {
+			return inc + 1, nil
+		}
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
@@ -1145,7 +1150,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		}
 	}
 	if found {
-		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
 	return FirstContractIncarnation, nil
 }
@@ -1159,6 +1164,7 @@ type TrieStateWriter struct {
 func (tds *TrieDbState) PruneTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
+	tds.incarnationMap = make(map[common.Hash]uint64)
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
@@ -1294,12 +1300,13 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 		return err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
-	incarnation, err := tsw.tds.nextIncarnation(addrHash)
-	if err != nil {
-		return err
-	}
 	if account, ok := tsw.tds.currentBuffer.accountUpdates[addrHash]; ok && account != nil {
+		incarnation, err := tsw.tds.nextIncarnation(addrHash)
+		if err != nil {
+			return err
+		}
 		account.SetIncarnation(incarnation)
+		tsw.tds.incarnationMap[addrHash] = incarnation
 	}
 	return nil
 }
