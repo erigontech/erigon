@@ -106,21 +106,20 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		return 0, err
 	}
 
+	switch n := n.(type) {
+	case *shortNode:
+		n.flags.hashLen = byte(refLen)
+		copy(n.flags.hash[:], storeTo)
+	case *accountNode:
+		n.rootCorrect = true
+	case *duoNode:
+		copy(n.flags.hash[:], storeTo)
+		n.flags.hashLen = byte(refLen)
+	case *fullNode:
+		copy(n.flags.hash[:], storeTo)
+		n.flags.hashLen = byte(refLen)
+	}
 	if refLen == common.HashLength {
-		switch n := n.(type) {
-		case *shortNode:
-			n.flags.hashLen = 32
-			copy(n.flags.hash[:], storeTo)
-		case *accountNode:
-			n.rootCorrect = true
-		case *duoNode:
-			copy(n.flags.hash[:], storeTo)
-			n.flags.hashLen = 32
-		case *fullNode:
-			copy(n.flags.hash[:], storeTo)
-			n.flags.hashLen = 32
-		}
-
 		if h.callback != nil {
 			var hash common.Hash
 			copy(hash[:], storeTo)
