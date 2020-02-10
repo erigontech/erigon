@@ -221,13 +221,13 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	// Using AddBalance instead of SetBalance to make it dirty
 	statedb.AddBalance(address, new(big.Int).SetUint64(params.Ether))
 	ctx := context.Background()
-	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := tds.ComputeTrieRoots(); err != nil {
+	if _, err = tds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 		t.Fatal(err)
 	}
 	blockchain := &testChain{&testBlockChain{statedb, tds, 1000000000, new(event.Feed)}, address, &trigger}
