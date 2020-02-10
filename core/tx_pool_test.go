@@ -47,7 +47,7 @@ func init() {
 
 type testBlockChain struct {
 	statedb       *state.IntraBlockState
-	tds      	  *state.TrieDbState
+	tds           *state.TrieDbState
 	gasLimit      uint64
 	chainHeadFeed *event.Feed
 }
