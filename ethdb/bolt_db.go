@@ -77,7 +77,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 					return nil
 				}
 
-				b.ForEach(func(k, v []byte) error {
+				if err := b.ForEach(func(k, v []byte) error {
 					if len(v) == 0 {
 						amountOfDestructed++
 					}
@@ -87,10 +87,12 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 						counters[len(k)] = 1
 					}
 					return nil
-				})
+				}); err != nil {
+					return err
+				}
 				return nil
 			})
-			fmt.Printf("Alex: %+v %d\n", counters, amountOfDestructed)
+			fmt.Printf("Alex, IntermediateBucketStats: %+v %d\n", counters, amountOfDestructed)
 		}
 	}()
 

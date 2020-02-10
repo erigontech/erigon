@@ -282,6 +282,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
 const ShortestCacheableNibblesLen = 6
 
 func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
+	fmt.Printf("Try Put: %x\n", prefixAsNibbles)
 	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
 		return
 	}

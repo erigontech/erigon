@@ -793,7 +793,9 @@ func testResolveCached() {
 		err = r2.ResolveStatefulCached(ethDb, currentBlockNr)
 		check(err)
 
-		bufs := []*bytes.Buffer{&bytes.Buffer{}, &bytes.Buffer{}}
+		bufs := [2]*bytes.Buffer{
+			{}, {},
+		}
 		tries[0].Print(bufs[0])
 		tries[1].Print(bufs[1])
 		fmt.Printf("Res: %v\n", bytes.Compare(bufs[0].Bytes(), bufs[1].Bytes()))
