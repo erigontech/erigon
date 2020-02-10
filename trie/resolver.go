@@ -134,7 +134,7 @@ const (
 
 // ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
-	if debug.IsIntermediateTrieCache() && !tr.historical {
+	if debug.IsIntermediateTrieCache() && !tr.historical && tr.accounts {
 		return tr.ResolveStatefulCached(db, blockNr)
 	}
 
