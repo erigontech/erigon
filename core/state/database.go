@@ -264,8 +264,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 }
 
 func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
-	if len(prefix) != common.HashLength*2 {
-		panic(fmt.Sprintf("Do you have terminator? %x", prefix))
+	if len(prefix) != common.HashLength {
 		return
 	}
 
@@ -282,7 +281,6 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
 const ShortestCacheableNibblesLen = 6
 
 func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
-	fmt.Printf("Try Put: %x\n", prefixAsNibbles)
 	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
 		return
 	}
