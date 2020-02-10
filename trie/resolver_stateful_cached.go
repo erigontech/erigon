@@ -217,9 +217,9 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
-	if fromCache && bytes.Compare(common.FromHex("0808"), k) == 0 {
-		fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
-	}
+	//if bytes.Compare(common.FromHex("0808"), k) == 0 {
+	//	fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+	//}
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -475,22 +475,20 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
-				if bytes.Compare(common.FromHex("88"), cacheK) == 0 {
-					fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
-					for i, a := range tr.rss {
-						for _, h := range a.hexes {
-							fmt.Printf("In hexes: %d %x\n", i, h)
-						}
-					}
-
-					for _, r := range tr.requests {
-						fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
+				fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
+				for i, a := range tr.rss {
+					for _, h := range a.hexes {
+						fmt.Printf("In hexes: %d %x\n", i, h)
 					}
 				}
 
-				if err := walker(rangeIdx, common.CopyBytes(cacheK), common.CopyBytes(cacheV), fromCache); err != nil {
-					return fmt.Errorf("waker err: %w", err)
+				for _, r := range tr.requests {
+					fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
 				}
+			}
+
+			if err := walker(rangeIdx, common.CopyBytes(cacheK), common.CopyBytes(cacheV), fromCache); err != nil {
+				return fmt.Errorf("waker err: %w", err)
 			}
 
 			// skip subtree
