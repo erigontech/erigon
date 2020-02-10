@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -918,8 +919,10 @@ func (t *Trie) Hash() common.Hash {
 
 func (t *Trie) getHasher() *hasher {
 	h := t.newHasherFunc()
-	h.callback = func(key common.Hash, nd node) {
-		t.hashMap[key] = nd
+	if debug.IsGetNodeData() {
+		h.callback = func(key common.Hash, nd node) {
+			t.hashMap[key] = nd
+		}
 	}
 	return h
 }
@@ -1143,6 +1146,9 @@ func (t *Trie) nodeHash(nd node) (hash common.Hash, ok bool) {
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {
+	if !debug.IsGetNodeData() {
+		return
+	}
 	if nd == nil {
 		return
 	}
@@ -1157,6 +1163,9 @@ func (t *Trie) evictNodeFromHashMap(nd node) {
 }
 
 func (t *Trie) evictSubtreeFromHashMap(n node) {
+	if !debug.IsGetNodeData() {
+		return
+	}
 	t.evictNodeFromHashMap(n)
 
 	switch n := n.(type) {
