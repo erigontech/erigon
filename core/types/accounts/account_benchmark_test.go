@@ -1,7 +1,6 @@
 package accounts
 
 import (
-	"bytes"
 	"fmt"
 	"io/ioutil"
 	"math/big"
@@ -440,90 +439,6 @@ func BenchmarkRLPEncodingAccount(b *testing.B) {
 				}
 			}
 		})
-	}
-}
-
-func BenchmarkRLPDecodingAccount(b *testing.B) {
-	accountCases := []struct {
-		name string
-		acc  *Account
-	}{
-		{
-			name: "EmptyAccount",
-			acc: &Account{
-				Nonce:    0,
-				Balance:  *new(big.Int),
-				Root:     emptyRoot,     // extAccount doesn't have Root value
-				CodeHash: emptyCodeHash, // extAccount doesn't have CodeHash value
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCode",
-			acc: &Account{
-				Nonce:    2,
-				Balance:  *new(big.Int).SetInt64(1000),
-				Root:     common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash: common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeHack",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-				HasStorageSize: true,
-				StorageSize:    0,
-			},
-		},
-
-		{
-			name: "AccountEncodeWithCodeWithStorageSizeEIP2027",
-			acc: &Account{
-				Nonce:          2,
-				Balance:        *new(big.Int).SetInt64(1000),
-				Root:           common.HexToHash("0000000000000000000000000000000000000000000000000000000000000021"),
-				CodeHash:       common.BytesToHash(crypto.Keccak256([]byte{1, 2, 3})),
-				HasStorageSize: true,
-				StorageSize:    1000,
-			},
-		},
-	}
-
-	var decodedAccounts []Account
-	b.ResetTimer()
-	for _, test := range accountCases {
-		test := test
-		b.Run(fmt.Sprint(test.name), func(b *testing.B) {
-			for i := 0; i < b.N; i++ {
-				bufBytes := make([]byte, 0, test.acc.EncodingLengthForHashing())
-				buf := bytes.NewBuffer(bufBytes)
-				if err := test.acc.EncodeRLP(buf); err != nil {
-					b.Fatal("cant encode the account", err, test)
-				}
-
-				accBytes := buf.Bytes()
-
-				b.StartTimer()
-
-				var decodedAccount Account
-				if err := decodedAccount.DecodeForHashing(accBytes); err != nil {
-					b.Fatal("cant decode the account", err, test)
-				}
-
-				b.StopTimer()
-				decodedAccounts = append(decodedAccounts, decodedAccount)
-				b.StartTimer()
-			}
-		})
-	}
-
-	b.StopTimer()
-	for _, acc := range decodedAccounts {
-		fmt.Fprint(ioutil.Discard, acc)
 	}
 }
 

@@ -1146,11 +1146,13 @@ func (t *Trie) evictNodeFromHashMap(nd node) {
 	if nd == nil {
 		return
 	}
-	hash := nd.hash()
-	if hash != nil {
-		var key common.Hash
-		copy(key[:], hash[:])
-		delete(t.hashMap, key)
+	if nd.hashLen() > 0 {
+		hash := nd.hash()
+		if hash != nil {
+			var key common.Hash
+			copy(key[:], hash[:])
+			delete(t.hashMap, key)
+		}
 	}
 }
 
