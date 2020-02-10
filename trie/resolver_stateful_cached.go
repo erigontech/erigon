@@ -1,12 +1,10 @@
 package trie
 
 import (
-	"bufio"
 	"bytes"
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"runtime/debug"
 	"strings"
 
@@ -311,16 +309,6 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 	return nil
 }
 
-var csvCached *bufio.Writer
-
-func init() {
-	fmFile, err := os.OpenFile("cached_iterations.csv", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0600)
-	if err != nil {
-		panic(err)
-	}
-	csvCached = bufio.NewWriter(fmFile)
-}
-
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
 func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
 	nibblesBuf := pool.GetBuffer(128)
@@ -433,16 +421,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// skip subtree
 			}
 
+			currentReq := tr.currentReq
+			currentRs := tr.currentRs
 			if rangeIdx != tr.keyIdx {
-				tr.groups = nil
-				tr.keyIdx = rangeIdx
-				tr.currentReq = tr.requests[tr.reqIndices[rangeIdx]]
-				tr.currentRs = tr.rss[rangeIdx]
+				currentReq = tr.requests[tr.reqIndices[rangeIdx]]
+				currentRs = tr.rss[rangeIdx]
 			}
 
 			canUseCache := false
 			if len(cacheV) > 0 {
-				if len(cacheK)*2 < tr.currentReq.extResolvePos {
+				if len(cacheK)*2 < currentReq.extResolvePos {
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
@@ -452,13 +440,13 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					return err
 				}
 
-				canUseCache = tr.currentRs.HashOnly(nibblesBuf.B[tr.currentReq.extResolvePos:])
+				canUseCache = currentRs.HashOnly(nibblesBuf.B[currentReq.extResolvePos:])
 				if !canUseCache { // can't use cache as is, need go to children
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
 				/*
-					fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
+					fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx,currentReq.extResolvePos, nibblesBuf.B[currentReq.extResolvePos:], nibblesBuf.B)
 					for i, a := range tr.rss {
 						for _, h := range a.hexes {
 							fmt.Printf("In hexes: %d %x\n", i, h)
