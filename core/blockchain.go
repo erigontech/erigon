@@ -377,7 +377,7 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 			return nil, err
 		}
 		tds.SetNoHistory(bc.NoHistory())
-		tds.NoIntermediateCache(bc.NoIntermediateTrieCache())
+		tds.EnableIntermediateCache(!bc.NoIntermediateTrieCache())
 		tds.SetResolveReads(bc.resolveReads)
 		tds.EnablePreimages(bc.enablePreimages)
 		if err := tds.Rebuild(); err != nil {
@@ -2289,15 +2289,7 @@ func (bc *BlockChain) NoIntermediateTrieCache() bool {
 }
 
 func (bc *BlockChain) IsNoIntermediateTrieCache(currentBlock *big.Int) bool {
-	if currentBlock == nil {
-		return bc.cacheConfig.NoHistory
-	}
-
-	if !bc.cacheConfig.NoHistory {
-		return false
-	}
-
-	return true
+	return bc.cacheConfig.NoIntermediateTrieCache
 }
 
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {

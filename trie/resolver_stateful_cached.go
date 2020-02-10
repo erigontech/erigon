@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"strings"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -26,19 +28,19 @@ func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFu
 	}
 }
 
-// hexIncrement does []byte++. Returns nil if overflow.
-func hexIncrement(in []byte) []byte {
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
 	for i := len(r) - 1; i >= 0; i-- {
 		if r[i] != 255 {
 			r[i]++
-			return r
+			return r, true
 		}
 
 		r[i] = 0
 	}
-	return nil
+	return nil, false
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
@@ -115,7 +117,11 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+		err := tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 	return nil
 }
@@ -189,9 +195,13 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		err = tr.MultiWalk2(boltDb, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 	}
 	if err != nil {
-		return fmt.Errorf("failed RebuildTrie: %w", err)
+		return err
 	}
-	return tr.finaliseRoot()
+
+	if err = tr.finaliseRoot(); err != nil {
+		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
+	}
+	return nil
 }
 
 func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, k []byte, v []byte, fromCache bool) error {
@@ -204,7 +214,9 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+	if fromCache {
+		fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+	}
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -232,12 +244,17 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 			}
 			i++
 		}
-		tr.succ.WriteByte(16)
+
+		if !fromCache {
+			tr.succ.WriteByte(16)
+		}
+
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
 			if tr.fromCache {
-				data = GenStructStepHashData{Hash: common.BytesToHash(tr.value.Bytes())}
+				tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
+				data = &tr.hashData
 			} else if tr.fieldSet == 0 {
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 				data = &tr.leafData
@@ -256,10 +273,10 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 			}
 		}
 		// Remember the current key and value
+		tr.fromCache = fromCache
 		if fromCache {
 			tr.value.Reset()
 			tr.value.Write(v)
-			tr.fromCache = true
 			return nil
 		}
 
@@ -294,6 +311,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
 func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
+	nibblesBuf := pool.GetBuffer(128)
+	defer pool.PutBuffer(nibblesBuf)
+
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -319,21 +339,37 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			fromCache, minKey = keyIsBefore(cacheK, k)
-			if fromCache && !tr.currentRs.HashOnly(minKey) { // can't use cache as is, need go to children
-				cacheK, cacheV = cache.SeekTo(append(minKey, 0)) // seek only cache cursor, because it's minimal move
+			// for Address bucket, skip cache keys longer than 31 bytes
+			if len(k) == common.HashLength && len(cacheK) > common.HashLength-1 {
+				next, ok := nextSubtree(cacheK[:common.HashLength-1])
+				if !ok { // no siblings left in cache
+					cacheK, cacheV = nil, nil
+					continue
+				}
+				cacheK, cacheV = cache.SeekTo(next)
 				continue
 			}
+
+			fromCache, minKey = keyIsBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					_, minKey = keyIsBefore(cacheK, k)
+					minKeyIndex := int(math.Min(float64(len(minKey)), float64(fixedbytes-1)))
+					startKeyIndex := int(math.Min(float64(len(startkey)), float64(fixedbytes-1)))
 
-					cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
+					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+
+					if cmp == 0 && minKeyIndex == len(minKey) {
+						if minKeyIndex > startKeyIndex {
+							panic("Need to check")
+						}
+						cmp = 1
+					}
+
 					if cmp == 0 {
-						k1 := minKey[fixedbytes-1] & mask
-						k2 := startkey[fixedbytes-1] & mask
+						k1 := minKey[minKeyIndex] & mask
+						k2 := startkey[startKeyIndex] & mask
 						if k1 < k2 {
 							cmp = -1
 						} else if k1 > k2 {
@@ -346,6 +382,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 						if k == nil && cacheK == nil {
 							return nil
 						}
+						_, minKey = keyIsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -360,23 +397,90 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 			fromCache, _ = keyIsBefore(cacheK, k)
 			if !fromCache {
 				if len(v) > 0 {
-					if err := walker(rangeIdx, k, v, fromCache); err != nil {
-						return fmt.Errorf("waker err: %w", err)
+					if err := walker(rangeIdx, k, v, false); err != nil {
+						return err
 					}
 				}
 				k, v = c.Next()
 				continue
 			}
 
+			// cache part
+
+			// Special case: self-destructed accounts.
+			// self destcructed accounts may be marked in cache bucket by empty value
+			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
+			if len(cacheV) == 0 {
+				if len(cacheK) != common.HashLength { // skip invalid cache key
+					cacheK, cacheV = cache.Next()
+					continue
+				}
+
+				if len(k) == common.HashLength && len(v) > 0 && bytes.Equal(k, cacheK) {
+					if err := walker(rangeIdx, k, v, false); err != nil {
+						return err
+					}
+				}
+				// skip subtree
+			}
+
+			if rangeIdx != tr.keyIdx {
+				tr.groups = nil
+				tr.keyIdx = rangeIdx
+				tr.currentReq = tr.requests[tr.reqIndices[rangeIdx]]
+				tr.currentRs = tr.rss[rangeIdx]
+			}
+
+			canUseCache := false
 			if len(cacheV) > 0 {
-				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
+				if len(cacheK)*2 < tr.currentReq.extResolvePos {
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
+
+				nibblesBuf.Reset()
+				if err := DecompressNibbles(cacheK, &nibblesBuf.B); err != nil {
+					return err
+				}
+
+				canUseCache = tr.currentRs.HashOnly(nibblesBuf.B[tr.currentReq.extResolvePos:])
+				if !canUseCache { // can't use cache as is, need go to children
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
+
+				//if fmt.Sprintf("%x", nibblesBuf.B) == "070f" {
+				//	fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx, tr.currentReq.extResolvePos, nibblesBuf.B[tr.currentReq.extResolvePos:], nibblesBuf.B)
+				//	for i, a := range tr.rss {
+				//		for _, h := range a.hexes {
+				//			fmt.Printf("In hexes: %d %x\n", i, h)
+				//		}
+				//	}
+				//
+				//	for _, r := range tr.requests {
+				//		fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
+				//	}
+				//}
+
+				copyK := make([]byte, len(cacheK))
+				copy(copyK, cacheK)
+				copyV := make([]byte, len(cacheV))
+				copy(copyV, cacheV)
+
+				if err := walker(rangeIdx, copyK, copyV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
 
-			next := hexIncrement(cacheK)
-			if next == nil { // no siblings left
-				break
+			// skip subtree
+
+			next, ok := nextSubtree(cacheK)
+			if !ok { // no siblings left in cache
+				cacheK, cacheV = nil, nil
+				if canUseCache { // last sub-tree was taken from cache
+					break
+				}
+				continue
 			}
 			k, v = c.SeekTo(next)
 			cacheK, cacheV = cache.SeekTo(next)

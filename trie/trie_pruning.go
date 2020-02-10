@@ -77,7 +77,7 @@ func (tp *TriePruning) SetCreateNodeFunc(f func(prefix []byte)) {
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
 func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
-	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
+	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hexS, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
 	}
@@ -127,7 +127,7 @@ func (tp *TriePruning) Timestamp(hex []byte) uint64 {
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
 // parent is the node that needs to be modified to unload the touched node
-func (tp *TriePruning) Touch(hex []byte, del bool) error {
+func (tp *TriePruning) Touch(hex []byte, del bool) {
 	var exists = false
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
@@ -144,7 +144,6 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	}
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
-	return nil
 }
 
 func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {

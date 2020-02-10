@@ -16,10 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -29,6 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -606,7 +606,7 @@ func trieChart() {
 }
 
 func execToBlock(block int) {
-	blockDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	blockDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -741,7 +741,7 @@ func testRewind(chaindata string, block, rewind int) {
 
 func testStartup() {
 	startTime := time.Now()
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
@@ -762,6 +762,111 @@ func testStartup() {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
+}
+
+func testResolveCached() {
+	//startTime := time.Now()
+	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
+	check(err)
+	defer ethDb.Close()
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	check(err)
+	currentBlock := bc.CurrentBlock()
+	check(err)
+	currentBlockNr := currentBlock.NumberU64()
+	keys := []string{
+		"070f0f04010a0a0c0b0e0e0a010e0306020004090901000d03070d080704010b0f000809010204050d050d06050606050a0c0e090d05000a090b050a0d020705",
+		"0c0a",
+		"0a",
+	}
+
+	for _, key := range keys {
+		tries := []*trie.Trie{trie.New(currentBlock.Root()), trie.New(currentBlock.Root())}
+
+		r1 := trie.NewResolver(2, true, currentBlockNr)
+		r1.AddRequest(tries[0].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
+		err = r1.ResolveStateful(ethDb, currentBlockNr)
+		check(err)
+
+		r2 := trie.NewResolver(2, true, currentBlockNr)
+		r2.AddRequest(tries[1].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
+		err = r2.ResolveStatefulCached(ethDb, currentBlockNr)
+		check(err)
+
+		bufs := []*bytes.Buffer{&bytes.Buffer{}, &bytes.Buffer{}}
+		tries[0].Print(bufs[0])
+		tries[1].Print(bufs[1])
+		fmt.Printf("Res: %v\n", bytes.Compare(bufs[0].Bytes(), bufs[1].Bytes()))
+	}
+
+	return
+	/*
+		fmt.Printf("Current block number: %d\n", currentBlockNr)
+		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
+		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
+		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
+
+		resolve := func(key []byte) {
+			for topLevels := 0; topLevels < 1; topLevels++ {
+				need, req := tries[0].NeedResolution(nil, key)
+				if need {
+					r := trie.NewResolver(topLevels, true, currentBlockNr)
+					r.AddRequest(req)
+					err1 := r.ResolveStateful(ethDb, currentBlockNr)
+					if err1 != nil {
+						fmt.Println("With NeedResolution check1:", err1)
+					}
+				}
+				need, req = tries[1].NeedResolution(nil, key)
+				if need {
+					r2 := trie.NewResolver(topLevels, true, currentBlockNr)
+					r2.AddRequest(req)
+					err2 := r2.ResolveStatefulCached(ethDb, currentBlockNr)
+					if err2 != nil {
+						fmt.Println("With NeedResolution check2:", err2)
+					}
+				}
+
+				//r := trie.NewResolver(topLevels, true, currentBlockNr)
+				//r.AddRequest(tries[0].NewResolveRequest(nil, key, 1, currentBlock.Root().Bytes()))
+				//err1 := r.ResolveStateful(ethDb, currentBlockNr)
+				//if err1 != nil {
+				//	fmt.Println("No NeedResolution check1:", err1)
+				//}
+				//r2 := trie.NewResolver(topLevels, true, currentBlockNr)
+				//r2.AddRequest(tries[1].NewResolveRequest(nil, key, 1, currentBlock.Root().Bytes()))
+				//err2 := r2.ResolveStatefulCached(ethDb, currentBlockNr)
+				//if err2 != nil {
+				//	fmt.Println("No NeedResolution check2:", err2)
+				//}
+				//
+				//if tries[0].Hash() != tries[1].Hash() {
+				//	fmt.Printf("Differrent hash")
+				//}
+				//if err1 == nil || err2 == nil {
+				//	if err1 != err2 {
+				//		fmt.Printf("Not equal errors: \n%v\n%v\n\n", err1, err2)
+				//		fmt.Printf("Input: %d  %x\n", topLevels, key)
+				//	}
+				//} else if err1.Error() != err2.Error() {
+				//	fmt.Printf("Not equal errors: \n%v\n%v\n\n", err1, err2)
+				//	fmt.Printf("Input: %d %x\n", topLevels, key)
+				//}
+			}
+		}
+
+		keys := []string{
+			"070f0f04010a0a0c0b0e0e0a010e0306020004090901000d03070d080704010b0f000809010204050d050d06050606050a0c0e090d05000a090b050a0d020705",
+		}
+		buf := pool.GetBuffer(32)
+		defer pool.PutBuffer(buf)
+		for _, key := range keys {
+			trie.CompressNibbles(common.FromHex(key), &buf.B)
+			resolve(buf.B)
+		}
+
+		fmt.Printf("Took %v\n", time.Since(startTime))
+	*/
 }
 
 func testResolve() {
@@ -894,7 +999,7 @@ func printCurrentBlockNumber(chaindata string) {
 }
 
 func printTxHashes() {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
 	for b := uint64(0); b < uint64(100000); b++ {
@@ -911,7 +1016,7 @@ func printTxHashes() {
 
 func relayoutKeys() {
 	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(node.DefaultDataDir()+"/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	var count int
@@ -931,7 +1036,7 @@ func relayoutKeys() {
 }
 
 func upgradeBlocks() {
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
@@ -1021,7 +1126,7 @@ func addPreimage(chaindata string, image common.Hash, preimage []byte) {
 
 func loadAccount() {
 	ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
+	//ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/Volumes/tb4/turbo-geth/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
@@ -1081,7 +1186,7 @@ func loadAccount() {
 }
 
 func printBranches(block uint64) {
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/testnet/geth/chaindata")
+	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/testnet/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
 	defer ethDb.Close()
@@ -1217,7 +1322,7 @@ func repairCurrent() {
 }
 
 func dumpStorage() {
-	db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	db, err := bolt.Open(node.DefaultDataDir()+"/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	err = db.View(func(tx *bolt.Tx) error {
 		sb := tx.Bucket(dbutils.StorageHistoryBucket)
@@ -1287,7 +1392,7 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//db, err := bolt.Open(node.DefaultDataDir() + "/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	//check(err)
 	//defer db.Close()
 	if *action == "bucketStats" {
@@ -1304,6 +1409,9 @@ func main() {
 	//buildHashFromFile()
 	if *action == "testResolve" {
 		testResolve()
+	}
+	if *action == "testResolveCached" {
+		testResolveCached()
 	}
 	//rlpIndices()
 	//printFullNodeRLPs()

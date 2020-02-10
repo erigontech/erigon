@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -84,6 +85,11 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 				log.Error("Pruning error", "err", err)
 				return
 			}
+			err = PruneStorageOfSelfDestructedAccounts(db)
+			if err != nil {
+				log.Error("PruneStorageOfSelfDestructedAccounts error", "err", err)
+				return
+			}
 			p.LastPrunedBlockNum = to
 		}
 	}
@@ -130,6 +136,37 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 	if err := p.db.Put(dbutils.LastPrunedBlockKey, dbutils.LastPrunedBlockKey, b); err != nil {
 		log.Crit("Failed to store last pruned block's num", "err", err)
 	}
+}
+
+func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
+	if !debug.IsIntermediateTrieCache() {
+		return nil
+	}
+
+	keysToRemove := newKeysToRemove()
+	if err := db.Walk(dbutils.IntermediateTrieCacheBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if len(v) > 0 { // marker is - empty value
+			return true, nil
+		}
+
+		if len(k) != common.HashLength { // only account addresses must be marked as deleted
+			return true, nil
+		}
+
+		if err := db.Walk(dbutils.StorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, k)
+			return true, nil
+		}); err != nil {
+			return false, err
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	//return batchDelete(db, keysToRemove)
+	log.Info("pruner can remove self-destructed accounts Storage rows", "amount", keysToRemove)
+	return nil
 }
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
@@ -207,6 +244,7 @@ func newKeysToRemove() *keysToRemove {
 type keysToRemove struct {
 	AccountHistoryKeys [][]byte
 	StorageHistoryKeys [][]byte
+	StorageKeys        [][]byte
 	ChangeSet          [][]byte
 }
 
@@ -243,6 +281,9 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
 		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
 	}
+	if bytes.Equal(i.currentBucket, dbutils.StorageBucket) {
+		return i.k.StorageKeys[i.currentNum], dbutils.StorageBucket, true
+	}
 	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
 		return i.k.ChangeSet[i.currentNum], dbutils.ChangeSetBucket, true
 	}
@@ -270,6 +311,11 @@ func (i *limitIterator) updateBucket() {
 	}
 
 	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys) == i.currentNum {
+		i.currentBucket = dbutils.StorageBucket
+		i.currentNum = 0
+	}
+
+	if bytes.Equal(i.currentBucket, dbutils.StorageBucket) && len(i.k.StorageKeys) == i.currentNum {
 		i.currentBucket = dbutils.ChangeSetBucket
 		i.currentNum = 0
 	}

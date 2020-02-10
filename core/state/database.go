@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -157,26 +158,26 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                   *trie.Trie
-	tMu                 *sync.Mutex
-	db                  ethdb.Database
-	blockNr             uint64
-	buffers             []*Buffer
-	aggregateBuffer     *Buffer // Merge of all buffers
-	currentBuffer       *Buffer
-	codeCache           *lru.Cache
-	codeSizeCache       *lru.Cache
-	historical          bool
-	noHistory           bool
-	resolveReads        bool
-	savePreimages       bool
-	noIntermediateCache bool
-	resolveSetBuilder   *trie.ResolveSetBuilder
-	tp                  *trie.TriePruning
-	newStream           trie.Stream
-	hashBuilder         *trie.HashBuilder
-	resolver            *trie.Resolver
-	incarnationMap      map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
+	t                       *trie.Trie
+	tMu                     *sync.Mutex
+	db                      ethdb.Database
+	blockNr                 uint64
+	buffers                 []*Buffer
+	aggregateBuffer         *Buffer // Merge of all buffers
+	currentBuffer           *Buffer
+	codeCache               *lru.Cache
+	codeSizeCache           *lru.Cache
+	historical              bool
+	noHistory               bool
+	resolveReads            bool
+	savePreimages           bool
+	enableIntermediateCache bool
+	resolveSetBuilder       *trie.ResolveSetBuilder
+	tp                      *trie.TriePruning
+	newStream               trie.Stream
+	hashBuilder             *trie.HashBuilder
+	resolver                *trie.Resolver
+	incarnationMap          map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -204,12 +205,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
-	t.SetTouchFunc(func(hex []byte, del bool) {
-		tp.Touch(hex, del)
-	})
+	t.SetTouchFunc(tp.Touch)
 
-	if !tds.noIntermediateCache {
-		t.SetUnloadFunc(tds.putIntermediateCache)
+	if debug.IsIntermediateTrieCache() {
+		t.SetUnloadNodeFunc(tds.putIntermediateCache)
+		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateCache)
 		tp.SetCreateNodeFunc(tds.delIntermediateCache)
 	}
 
@@ -231,8 +231,9 @@ func (tds *TrieDbState) SetResolveReads(rr bool) {
 func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
-func (tds *TrieDbState) NoIntermediateCache(v bool) {
-	tds.noIntermediateCache = v
+
+func (tds *TrieDbState) EnableIntermediateCache(v bool) {
+	tds.enableIntermediateCache = v
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -253,36 +254,103 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	if !tds.noIntermediateCache {
-		cpy.t.SetUnloadFunc(cpy.putIntermediateCache)
+	if debug.IsIntermediateTrieCache() {
+		cpy.t.SetUnloadNodeFunc(cpy.putIntermediateCache)
+		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateCache)
 		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
 	}
 
 	return &cpy
 }
 
-func (tds *TrieDbState) putIntermediateCache(prefix []byte, nodeHash []byte) {
+func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
+	return
+
 	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
 		return
 	}
 	if len(prefix) == 0 {
 		return
 	}
-	if err := putIntermediateCache(tds.db, prefix, nodeHash); err != nil {
+
+	db := tds.db
+	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
+		db = hasDb.DB()
+	}
+
+	if err := db.Put(dbutils.IntermediateTrieCacheBucket, prefix, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie cache", "err", err)
 	}
-
 }
 
-func (tds *TrieDbState) delIntermediateCache(prefix []byte) {
-	if len(prefix)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+const ShortestCacheableNibblesLen = 6
+
+func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
+	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
 		return
 	}
-	if len(prefix) == 0 {
+
+	if len(prefixAsNibbles) >= common.HashLength*2 {
 		return
 	}
-	if err := delIntermediateCache(tds.db, prefix); err != nil {
+
+	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of prefixAsNibbles
+		return
+	}
+
+	key := pool.GetBuffer(64)
+	defer pool.PutBuffer(key)
+
+	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
+		log.Warn("could not CompressNibbles for intermediate trie cache", "err", err)
+		return
+	}
+
+	v := common.CopyBytes(nodeHash)
+
+	db := tds.db
+	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
+		db = hasDb.DB()
+	} else {
+		fmt.Printf("what is it? %T\n", tds.db)
+	}
+
+	//fmt.Printf("Put: %x\n", key.Bytes())
+
+	if err := db.Put(dbutils.IntermediateTrieCacheBucket, key.Bytes(), v); err != nil {
+		log.Warn("could not put intermediate trie cache", "err", err)
+	}
+}
+
+func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {
+	if len(prefixAsNibbles) < ShortestCacheableNibblesLen {
+		return
+	}
+
+	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+
+	key := pool.GetBuffer(64)
+	defer pool.PutBuffer(key)
+
+	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
+		log.Warn("could not CompressNibbles for intermediate trie cache", "err", err)
+		return
+	}
+
+	db := tds.db
+	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
+		db = hasDb.DB()
+	} else {
+		fmt.Printf("what is it? %T\n", tds.db)
+	}
+
+	//fmt.Printf("Del: %x\n", key.Bytes())
+
+	if err := db.Delete(dbutils.IntermediateTrieCacheBucket, key.Bytes()); err != nil {
 		log.Warn("could not delete intermediate trie cache", "err", err)
+		return
 	}
 }
 
@@ -679,6 +747,8 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
 				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
+			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
+
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
@@ -686,7 +756,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
+				//fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:])

@@ -19,8 +19,10 @@ package ethdb
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 
@@ -64,6 +66,34 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	}
 	// Open the db and recover any potential corruptions
 	db, err := bolt.Open(file, 0600, &bolt.Options{})
+	ticker := time.Tick(10 * time.Second)
+	go func() {
+		for range ticker {
+			counters := map[int]int{}
+			amountOfDestructed := 0
+			err = db.View(func(tx *bolt.Tx) error {
+				b := tx.Bucket(dbutils.IntermediateTrieCacheBucket)
+				if b == nil {
+					return nil
+				}
+
+				b.ForEach(func(k, v []byte) error {
+					if len(v) == 0 {
+						amountOfDestructed++
+					}
+					if val, ok := counters[len(k)]; ok {
+						counters[len(k)] = val + 1
+					} else {
+						counters[len(k)] = 1
+					}
+					return nil
+				})
+				return nil
+			})
+			fmt.Printf("Alex: %+v %d\n", counters, amountOfDestructed)
+		}
+	}()
+
 	// (Re)check for errors and abort if opening of the db failed
 	if err != nil {
 		return nil, err
@@ -708,7 +738,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
-	return 100 * 1024
+	return 1 * 124
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

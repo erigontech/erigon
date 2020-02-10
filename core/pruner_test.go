@@ -1,8 +1,17 @@
 package core
 
 import (
+	"errors"
+	"fmt"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestCalculateNumOfPrunedBlocks(t *testing.T) {
@@ -121,4 +130,46 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
+	t.Skip("disable test, because pruner doesn't delete anything yet, just printing")
+	if !debug.IsIntermediateTrieCache() {
+		t.Skip()
+	}
+
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+
+	storageKey := func(k string) []byte {
+		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
+	}
+	putCache := func(k string, v string) {
+		require.NoError(db.Put(dbutils.IntermediateTrieCacheBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+	}
+	putStorage := func(k string, v string) {
+		require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), common.Hex2Bytes(v)))
+	}
+
+	k0 := fmt.Sprintf("%02x%062x", 0, 0)
+	k1 := fmt.Sprintf("%02x%062x", 1, 0)
+	k2 := fmt.Sprintf("%02x%062x", 2, 0)
+	putCache(k0, "0000")
+	putCache(k1, "")
+	putCache(k2, "2222")
+
+	putStorage(k0, "9999")
+	putStorage(k1, "9999")
+	putStorage(k2, "9999")
+
+	err := PruneStorageOfSelfDestructedAccounts(db)
+	require.NoError(err)
+
+	v, err := db.Get(dbutils.StorageBucket, storageKey(k1))
+	require.True(errors.Is(err, ethdb.ErrKeyNotFound))
+	assert.Nil(v)
+
+	v, err = db.Get(dbutils.StorageBucket, storageKey(k2))
+	require.NoError(err)
+
+	assert.Equal("9999", common.Bytes2Hex(v))
 }

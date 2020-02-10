@@ -28,6 +28,7 @@ import (
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type closerType struct {
@@ -48,16 +49,16 @@ const (
 	value3 = "value3"
 )
 
-func TestCmdVersion(t *testing.T) {
-	assert := assert.New(t)
+func memBb(t require.TestingT) *bolt.DB {
+	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
+	require.NoError(t, err)
+	return db
+}
 
-	ctx := context.Background()
+func TestCmdVersion(t *testing.T) {
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -69,9 +70,8 @@ func TestCmdVersion(t *testing.T) {
 	// ---------- End of boilerplate code
 	assert.Nil(encoder.Encode(CmdVersion), "Could not encode CmdVersion")
 
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
 
 	var responseCode ResponseCode
 	assert.Nil(decoder.Decode(&responseCode), "Could not decode ResponseCode returned by CmdVersion")
@@ -82,14 +82,9 @@ func TestCmdVersion(t *testing.T) {
 }
 
 func TestCmdBeginEndError(t *testing.T) {
-	assert := assert.New(t)
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
-	ctx := context.Background()
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -111,9 +106,8 @@ func TestCmdBeginEndError(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
 
 	var responseCode ResponseCode
 	// Begin
@@ -130,14 +124,9 @@ func TestCmdBeginEndError(t *testing.T) {
 }
 
 func TestCmdBucket(t *testing.T) {
-	assert := assert.New(t)
-	ctx := context.Background()
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -149,7 +138,7 @@ func TestCmdBucket(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket
 	var name = []byte("testbucket")
-	if err = db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket(name, false)
 		return err1
 	}); err != nil {
@@ -162,9 +151,8 @@ func TestCmdBucket(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
 	var responseCode ResponseCode
@@ -179,15 +167,9 @@ func TestCmdBucket(t *testing.T) {
 }
 
 func TestCmdGet(t *testing.T) {
-	assert := assert.New(t)
-
-	ctx := context.Background()
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -199,7 +181,7 @@ func TestCmdGet(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	if err = db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -233,9 +215,9 @@ func TestCmdGet(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
+
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	var responseCode ResponseCode
@@ -260,15 +242,9 @@ func TestCmdGet(t *testing.T) {
 }
 
 func TestCmdSeek(t *testing.T) {
-	assert := assert.New(t)
-
-	ctx := context.Background()
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -280,7 +256,7 @@ func TestCmdSeek(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	if err = db.Update(func(tx *bolt.Tx) error {
+	if err := db.Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -311,9 +287,9 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
+
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	var responseCode ResponseCode
@@ -340,14 +316,9 @@ func TestCmdSeek(t *testing.T) {
 }
 
 func TestCursorOperations(t *testing.T) {
-	assert := assert.New(t)
+	assert, require, ctx, db := assert.New(t), require.New(t), context.Background(), memBb(t)
 
 	// ---------- Start of boilerplate code
-	ctx := context.Background()
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		t.Errorf("Could not create database: %v", err)
-	}
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -359,21 +330,17 @@ func TestCursorOperations(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = b.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
+		require.NoError(err1)
+		err1 = b.Put([]byte(key1), []byte(value1))
+		require.NoError(err1)
+		err1 = b.Put([]byte(key2), []byte(value2))
+		require.NoError(err1)
 		return nil
-	}); err != nil {
-		t.Errorf("Could not create and populate a bucket: %v", err)
-	}
+	})
+	require.NoError(err)
+
 	assert.Nil(encoder.Encode(CmdBeginTx), "Could not encode CmdBeginTx")
 
 	assert.Nil(encoder.Encode(CmdBucket), "Could not encode CmdBucket")
@@ -419,9 +386,9 @@ func TestCursorOperations(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	if err = Server(ctx, db, &inBuf, &outBuf, closer); err != nil {
-		t.Errorf("Error while calling Server: %v", err)
-	}
+	err = Server(ctx, db, &inBuf, &outBuf, closer)
+	require.NoError(err, "Error while calling Server")
+
 	// And then we interpret the results
 	// Results of CmdBeginTx
 	var responseCode ResponseCode
@@ -470,12 +437,10 @@ func TestCursorOperations(t *testing.T) {
 }
 
 func TestTxYield(t *testing.T) {
-	assert := assert.New(t)
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	assert.Nil(err, "Could not create database")
+	assert, db := assert.New(t), memBb(t)
 
 	// Create bucket
-	err = db.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket([]byte("bucket"), false)
 		return err1
 	})
@@ -540,12 +505,10 @@ func TestTxYield(t *testing.T) {
 }
 
 func BenchmarkRemoteCursorFirst(b *testing.B) {
+	assert, require, ctx, db := assert.New(b), require.New(b), context.Background(), memBb(b)
+
 	// ---------- Start of boilerplate code
-	ctx := context.Background()
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		b.Errorf("Could not create database: %v", err)
-	}
+
 	// Prepare input buffer with one command CmdVersion
 	var inBuf bytes.Buffer
 	encoder := codecpool.Encoder(&inBuf)
@@ -558,7 +521,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
 
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		bucket, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -574,14 +537,13 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 			return err1
 		}
 		return nil
-	}); err != nil {
-		b.Errorf("Could not create and populate a bucket: %v", err)
-	}
+	})
+	require.NoError(err, "Could not create and populate a bucket")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
-		assert.Nil(b, Server(ctx, db, &inBuf, &outBuf, closer))
+		require.NoError(Server(ctx, db, &inBuf, &outBuf, closer))
 	}()
 
 	var responseCode ResponseCode
@@ -589,82 +551,70 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Begin
-		assert.Nil(b, encoder.Encode(CmdBeginTx))
-		assert.Nil(b, decoder.Decode(&responseCode))
+		assert.Nil(encoder.Encode(CmdBeginTx))
+		assert.Nil(decoder.Decode(&responseCode))
 		if responseCode != ResponseOk {
 			panic("not Ok")
 		}
 
 		// Bucket
-		assert.Nil(b, encoder.Encode(CmdBucket))
-		assert.Nil(b, encoder.Encode(name))
+		assert.Nil(encoder.Encode(CmdBucket))
+		assert.Nil(encoder.Encode(name))
 
 		var bucketHandle uint64 = 0
-		assert.Nil(b, decoder.Decode(&responseCode))
+		assert.Nil(decoder.Decode(&responseCode))
 		if responseCode != ResponseOk {
 			panic("not Ok")
 		}
-		assert.Nil(b, decoder.Decode(&bucketHandle))
+		assert.Nil(decoder.Decode(&bucketHandle))
 
 		// Cursor
-		assert.Nil(b, encoder.Encode(CmdCursor))
-		assert.Nil(b, encoder.Encode(bucketHandle))
+		assert.Nil(encoder.Encode(CmdCursor))
+		assert.Nil(encoder.Encode(bucketHandle))
 		var cursorHandle uint64 = 0
-		assert.Nil(b, decoder.Decode(&cursorHandle))
+		assert.Nil(decoder.Decode(&cursorHandle))
 
 		// .First()
-		assert.Nil(b, encoder.Encode(CmdCursorFirst))
-		assert.Nil(b, encoder.Encode(cursorHandle))
+		assert.Nil(encoder.Encode(CmdCursorFirst))
+		assert.Nil(encoder.Encode(cursorHandle))
 		var numberOfFirstKeys uint64 = 3 // Trying to get 3 keys, but will get 1 + nil
-		assert.Nil(b, encoder.Encode(numberOfFirstKeys))
+		assert.Nil(encoder.Encode(numberOfFirstKeys))
 
 		// .First()
-		assert.Nil(b, decoder.Decode(&responseCode))
-		assert.Nil(b, decoder.Decode(&key))
-		assert.Nil(b, decoder.Decode(&value))
+		assert.Nil(decoder.Decode(&responseCode))
+		assert.Nil(decoder.Decode(&key))
+		assert.Nil(decoder.Decode(&value))
 		// Results of CmdCursorNext
-		assert.Nil(b, decoder.Decode(&key))
-		assert.Nil(b, decoder.Decode(&value))
+		assert.Nil(decoder.Decode(&key))
+		assert.Nil(decoder.Decode(&value))
 		// Results of last CmdCursorNext
-		assert.Nil(b, decoder.Decode(&key))
-		assert.Nil(b, decoder.Decode(&value))
+		assert.Nil(decoder.Decode(&key))
+		assert.Nil(decoder.Decode(&value))
 
 		// .End()
-		assert.Nil(b, encoder.Encode(CmdEndTx))
-		assert.Nil(b, decoder.Decode(&responseCode))
-		assert.Equal(b, responseCode, ResponseOk)
+		assert.Nil(encoder.Encode(CmdEndTx))
+		assert.Nil(decoder.Decode(&responseCode))
+		assert.Equal(responseCode, ResponseOk)
 	}
 }
 
 func BenchmarkBoltCursorFirst(b *testing.B) {
+	assert, require, db := assert.New(b), require.New(b), memBb(b)
+
 	// ---------- Start of boilerplate code
-	db, err := bolt.Open("in-memory", 0600, &bolt.Options{MemOnly: true})
-	if err != nil {
-		b.Errorf("Could not create database: %v", err)
-	}
-	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
 
-	if err = db.Update(func(tx *bolt.Tx) error {
+	err := db.Update(func(tx *bolt.Tx) error {
 		bucket, err1 := tx.CreateBucket(name, false)
-		if err1 != nil {
-			return err1
-		}
+		require.NoError(err1)
 
-		if err1 = bucket.Put([]byte(key1), []byte(value1)); err1 != nil {
-			return err1
-		}
-		if err1 = bucket.Put([]byte(key2), []byte(value2)); err1 != nil {
-			return err1
-		}
-		if err1 = bucket.Put([]byte(key3), []byte(value3)); err1 != nil {
-			return err1
-		}
+		require.NoError(bucket.Put([]byte(key1), []byte(value1)))
+		require.NoError(bucket.Put([]byte(key2), []byte(value2)))
+		require.NoError(bucket.Put([]byte(key3), []byte(value3)))
 		return nil
-	}); err != nil {
-		b.Errorf("Could not create and populate a bucket: %v", err)
-	}
+	})
+	require.NoError(err, "Could not create and populate a bucket")
 
 	var k, v []byte
 	b.ResetTimer()

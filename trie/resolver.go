@@ -127,7 +127,6 @@ const (
 	AccountFieldCodeHashOnly        uint32 = 0x08
 	AccountFieldSSizeOnly           uint32 = 0x10
 	AccountFieldSetNotAccount       uint32 = 0x00
-	AccountFieldSetHashOfAccount    uint32 = 0x80 // For review: add this value? Of add another field resolver.isCache ?
 	AccountFieldSetNotContract      uint32 = 0x03 // Bit 0 is set for nonce, bit 1 is set for balance
 	AccountFieldSetContract         uint32 = 0x0f // Bits 0-3 are set for nonce, balance, storageRoot and codeHash
 	AccountFieldSetContractWithSize uint32 = 0x1f // Bits 0-4 are set for nonce, balance, storageRoot, codeHash and storageSize
@@ -135,6 +134,14 @@ const (
 
 // ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
+	if debug.IsIntermediateTrieCache() && !tr.historical && tr.accounts {
+		return tr.ResolveStatefulCached(db, blockNr)
+	}
+
+	return tr.ResolveStateful(db, blockNr)
+}
+
+func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -144,12 +151,21 @@ func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
 
 	sort.Stable(tr)
 
-	if debug.IsIntermediateTrieCache() && !tr.historical {
-		resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
-		return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+}
+
+func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) error {
+	var hf hookFunction
+	if tr.collectWitnesses {
+		hf = tr.extractWitnessAndHookSubtrie
+	} else {
+		hf = hookSubtrie
 	}
 
-	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
+	sort.Stable(tr)
+
+	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
 	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
 }
 

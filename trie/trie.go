@@ -46,8 +46,9 @@ var (
 type Trie struct {
 	root node
 
-	touchFunc  func(hex []byte, del bool)
-	unloadFunc func(prefix []byte, nodeHash []byte)
+	touchFunc           func(hex []byte, del bool)
+	unloadNodeFunc      func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
+	onDeleteSubtreeFunc func(prefix []byte)                  // called when subtree unloaded
 
 	newHasherFunc func() *hasher
 
@@ -66,10 +67,11 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash) *Trie {
 	trie := &Trie{
-		touchFunc:     func([]byte, bool) {},
-		unloadFunc:    func(prefix []byte, nodeHash []byte) {},
-		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
-		hashMap:       make(map[common.Hash]node),
+		touchFunc:           func([]byte, bool) {},
+		unloadNodeFunc:      func(prefix []byte, nodeHash []byte) {},
+		onDeleteSubtreeFunc: func(prefix []byte) {},
+		newHasherFunc:       func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
+		hashMap:             make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -101,8 +103,12 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-func (t *Trie) SetUnloadFunc(unloadFunc func(prefix []byte, nodeHash []byte)) {
-	t.unloadFunc = unloadFunc
+func (t *Trie) SetUnloadNodeFunc(f func(prefixAsNibbles []byte, nodeHash []byte)) {
+	t.unloadNodeFunc = f
+}
+
+func (t *Trie) SetOnDeleteSubtreeFunc(f func(prefix []byte)) {
+	t.onDeleteSubtreeFunc = f
 }
 
 // Get returns the value for key stored in the trie.
@@ -904,6 +910,8 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 		hexPrefix = keyHexToBin(hexPrefix)
 	}
 	_, t.root = t.delete(t.root, hexPrefix, 0, true)
+
+	t.onDeleteSubtreeFunc(keyPrefix)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
@@ -1039,15 +1047,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			t.unloadFunc(hex, p.child1.reference())
+			t.unloadNodeFunc(hex, hnode.reference())
 			p.child1 = hnode
 		case i2:
-			t.unloadFunc(hex, p.child2.reference())
+			t.unloadNodeFunc(hex, hnode.reference())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-		t.unloadFunc(hex, p.Children[idx].reference())
+		t.unloadNodeFunc(hex, hnode.reference())
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode
