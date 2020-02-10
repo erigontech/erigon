@@ -196,7 +196,7 @@ func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error 
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
+	fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
