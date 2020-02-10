@@ -3,7 +3,9 @@ package consensus
 import (
 	"context"
 
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type ResultWithContext struct {
@@ -13,7 +15,12 @@ type ResultWithContext struct {
 
 type Cancel struct {
 	context.Context
-	context.CancelFunc
+	cancel context.CancelFunc
+}
+
+func (c *Cancel) CancelFunc() {
+	log.Debug("cancel mining task", "callers", debug.Callers(10))
+	c.cancel()
 }
 
 func NewCancel(ctxs ...context.Context) Cancel {
