@@ -401,8 +401,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 	switch n := origNode.(type) {
 	case nil:
-		s := &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
-		return true, s
+		return true, &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
 	case *accountNode:
 		updated, nn = t.insert(n.storage, key, pos, value)
 		if updated {
@@ -454,6 +453,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
+				n.flags.hashLen = 0
 				newNode = n
 			}
 			updated = true
