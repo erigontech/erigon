@@ -308,6 +308,7 @@ func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []
 	if err := db.Put(dbutils.IntermediateTrieCacheBucket, key.Bytes(), v); err != nil {
 		log.Warn("could not put intermediate trie cache", "err", err)
 	}
+	_, _ = db, v
 }
 
 func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {

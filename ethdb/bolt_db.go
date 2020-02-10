@@ -87,9 +87,6 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 						counters[len(k)] = 1
 					}
 
-					if bytes.HasPrefix(k, common.FromHex("88")) {
-						fmt.Printf("Found in cache: %x %x\n", k, v)
-					}
 					return nil
 				}); err != nil {
 					return err
@@ -744,7 +741,8 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
-	return 100 * 1024
+	//return 100 * 1024
+	return 128
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)
