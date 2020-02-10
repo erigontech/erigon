@@ -461,7 +461,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				if err := walker(rangeIdx, common.CopyBytes(cacheK), common.CopyBytes(cacheV), fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
-
 			}
 			// skip subtree
 
