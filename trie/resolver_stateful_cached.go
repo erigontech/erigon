@@ -373,7 +373,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						if k == nil && cacheK == nil {
 							return nil
 						}
-						_, minKey = keyIsBefore(cacheK, k)
+						fromCache, minKey = keyIsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -385,7 +385,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				}
 			}
 
-			fromCache, _ = keyIsBefore(cacheK, k)
 			if !fromCache {
 				if len(v) > 0 {
 					if err := walker(rangeIdx, k, v, false); err != nil {
@@ -397,34 +396,23 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			}
 
 			// cache part
+			canUseCache := false
 
 			// Special case: self-destructed accounts.
 			// self-destructed accounts may be marked in cache bucket by empty value
 			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
 			isSelfDestructedMarker := len(cacheV) == 0
 			if isSelfDestructedMarker {
-				if len(cacheK) != common.HashLength { // skip invalid cache key
-					cacheK, cacheV = cache.Next()
-					continue
-				}
-
 				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
 					if err := walker(rangeIdx, k, v, false); err != nil {
 						return err
 					}
 				}
 				// skip subtree
-			}
+			} else {
+				currentReq := tr.requests[tr.reqIndices[rangeIdx]]
+				currentRs := tr.rss[rangeIdx]
 
-			currentReq := tr.currentReq
-			currentRs := tr.currentRs
-			if rangeIdx != tr.keyIdx {
-				currentReq = tr.requests[tr.reqIndices[rangeIdx]]
-				currentRs = tr.rss[rangeIdx]
-			}
-
-			canUseCache := false
-			if len(cacheV) > 0 {
 				if len(cacheK)*2 < currentReq.extResolvePos {
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
@@ -443,18 +431,19 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
+
 			// skip subtree
 
 			next, ok := nextSubtree(cacheK)
-			if !ok { // no siblings left in cache
-				cacheK, cacheV = nil, nil
-				if canUseCache { // last sub-tree was taken from cache
+			if !ok { // no siblings left
+				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
 					break
 				}
+				cacheK, cacheV = nil, nil
 				continue
 			}
-			k, v = c.SeekTo(next)
-			cacheK, cacheV = cache.SeekTo(next)
+			k, v = c.Seek(next)
+			cacheK, cacheV = cache.Seek(next)
 		}
 		return nil
 	})
