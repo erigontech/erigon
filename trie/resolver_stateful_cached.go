@@ -19,15 +19,15 @@ import (
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
-	fromCache  bool
-	hashData   GenStructStepHashData
-	nibblesBuf *bytebufferpool.ByteBuffer
+	fromCache    bool
+	hashData     GenStructStepHashData
+	keyAsNibbles *bytebufferpool.ByteBuffer
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
-		nibblesBuf:       pool.GetBuffer(128),
+		keyAsNibbles:     pool.GetBuffer(128),
 	}
 }
 
@@ -236,9 +236,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		tr.nibblesBuf.Reset()
-		DecompressNibbles(k, &tr.nibblesBuf.B)
-		tr.succ.Write(tr.nibblesBuf.B[skip:])
+		tr.keyAsNibbles.Reset()
+		DecompressNibbles(k, &tr.keyAsNibbles.B)
+		tr.succ.Write(tr.keyAsNibbles.B[skip:])
 
 		if !fromCache {
 			tr.succ.WriteByte(16)
@@ -309,6 +309,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	if len(startkeys) == 0 {
 		return nil
 	}
+	isAccountBucket := bytes.Equal(bucket, dbutils.AccountsBucket)
+
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
@@ -332,7 +334,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			// for Address bucket, skip cache keys longer than 31 bytes
-			if len(k) == common.HashLength && len(cacheK) > common.HashLength-1 {
+			if isAccountBucket && len(cacheK) > common.HashLength-1 {
 				next, ok := nextSubtree(cacheK[:common.HashLength-1])
 				if !ok { // no siblings left in cache
 					cacheK, cacheV = nil, nil
@@ -399,13 +401,14 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			// Special case: self-destructed accounts.
 			// self destcructed accounts may be marked in cache bucket by empty value
 			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
-			if len(cacheV) == 0 {
+			isSelfDestructedMarker := len(cacheV) == 0
+			if isSelfDestructedMarker {
 				if len(cacheK) != common.HashLength { // skip invalid cache key
 					cacheK, cacheV = cache.Next()
 					continue
 				}
 
-				if len(k) == common.HashLength && len(v) > 0 && bytes.Equal(k, cacheK) {
+				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
 					if err := walker(rangeIdx, k, v, false); err != nil {
 						return err
 					}
@@ -427,10 +430,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					continue
 				}
 
-				tr.nibblesBuf.Reset()
-				DecompressNibbles(cacheK, &tr.nibblesBuf.B)
+				tr.keyAsNibbles.Reset()
+				DecompressNibbles(cacheK, &tr.keyAsNibbles.B)
 
-				canUseCache = currentRs.HashOnly(tr.nibblesBuf.B[currentReq.extResolvePos:])
+				canUseCache = currentRs.HashOnly(tr.keyAsNibbles.B[currentReq.extResolvePos:])
 				if !canUseCache { // can't use cache as is, need go to children
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
