@@ -159,13 +159,21 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 		}); err != nil {
 			return false, err
 		}
+
+		if err := db.Walk(dbutils.IntermediateTrieCacheBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+			keysToRemove.IntermediateTrieCacheKeys = append(keysToRemove.IntermediateTrieCacheKeys, k)
+			return true, nil
+		}); err != nil {
+			return false, err
+		}
+
 		return true, nil
 	}); err != nil {
 		return err
 	}
 
 	//return batchDelete(db, keysToRemove)
-	log.Info("pruner can remove self-destructed accounts Storage rows", "amount", keysToRemove)
+	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieCacheKeys))
 	return nil
 }
 
@@ -235,17 +243,26 @@ func batchDelete(db ethdb.Database, keys *keysToRemove) error {
 
 func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
-		AccountHistoryKeys: make([][]byte, 0),
-		StorageHistoryKeys: make([][]byte, 0),
-		ChangeSet:          make([][]byte, 0),
+		AccountHistoryKeys:        make(Keys, 0),
+		StorageHistoryKeys:        make(Keys, 0),
+		ChangeSet:                 make(Keys, 0),
+		StorageKeys:               make(Keys, 0),
+		IntermediateTrieCacheKeys: make(Keys, 0),
 	}
 }
 
+type Keys [][]byte
+type Batch struct {
+	bucket []byte
+	keys   Keys
+}
+
 type keysToRemove struct {
-	AccountHistoryKeys [][]byte
-	StorageHistoryKeys [][]byte
-	StorageKeys        [][]byte
-	ChangeSet          [][]byte
+	AccountHistoryKeys        Keys
+	StorageHistoryKeys        Keys
+	ChangeSet                 Keys
+	StorageKeys               Keys
+	IntermediateTrieCacheKeys Keys
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
@@ -275,17 +292,20 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		i.currentNum++
 		i.counter++
 	}()
-	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) {
-		return i.k.AccountHistoryKeys[i.currentNum], dbutils.AccountsHistoryBucket, true
+
+	batches := []Batch{
+		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
+		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
+		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
 	}
-	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
-		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
-	}
-	if bytes.Equal(i.currentBucket, dbutils.StorageBucket) {
-		return i.k.StorageKeys[i.currentNum], dbutils.StorageBucket, true
-	}
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
-		return i.k.ChangeSet[i.currentNum], dbutils.ChangeSetBucket, true
+	for batchIndex, batch := range batches {
+		if batchIndex == len(batches)-1 {
+			break
+		}
+		if bytes.Equal(i.currentBucket, batch.bucket) {
+			return batch.keys[i.currentNum], batch.bucket, true
+		}
 	}
 	return nil, nil, false
 }
@@ -305,18 +325,22 @@ func (i *limitIterator) updateBucket() {
 	if i.currentBucket == nil {
 		i.currentBucket = dbutils.AccountsHistoryBucket
 	}
-	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) && len(i.k.AccountHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.StorageHistoryBucket
-		i.currentNum = 0
+
+	batches := []Batch{
+		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
+		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
+		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
 	}
 
-	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.StorageBucket
-		i.currentNum = 0
-	}
+	for batchIndex, batch := range batches {
+		if batchIndex == len(batches)-1 {
+			break
+		}
 
-	if bytes.Equal(i.currentBucket, dbutils.StorageBucket) && len(i.k.StorageKeys) == i.currentNum {
-		i.currentBucket = dbutils.ChangeSetBucket
-		i.currentNum = 0
+		if bytes.Equal(i.currentBucket, batch.bucket) && len(batch.keys) == i.currentNum {
+			i.currentBucket = batches[batchIndex+1].bucket
+			i.currentNum = 0
+		}
 	}
 }
