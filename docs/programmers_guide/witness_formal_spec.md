@@ -171,7 +171,7 @@ The exact implementation details are undefined in this spec.
 
 ```
 LEAF(key, raw_value) |=> 
-STACK(ShortNode{key, ValueNode(raw_value)}, VALUE_HASH(key, raw_value)))
+STACK(ShortNode{key, ValueNode(raw_value)}, COMPACT_KECCAK(RLP(RLP(raw_value))))
 ```
 
 ### `EXTENSION key`
@@ -340,6 +340,30 @@ MAKE_VALUES_ARRAY(mask, idx, values...) {
     }
 }
 ```
+
+
+### `ACC_HASH(key, account)`
+
+hashes the specified account and a the specified key
+
+```
+ACC_HASH(key, account) {
+    bytes = CONCAT(RLP(account.Nonce), RLP(account.Balance), RLP(account.Root), RLP(account.CodeHash))
+    if account.HasStorageSize {
+        return COMPACT_KECCAK(RLP(CONCAT(bytes, RLP(a.StorageSize))))
+    }
+    return COMPACT_KECCAK(RLP(bytes))
+}
+```
+
+### `COMPACT_KECCAK(bytes)`
+
+returns `bytes` if LEN(`bytes`) < 32, KECCAK(`bytes`) otherwise.
+
+### `RLP(value)`
+
+returns the RLP encoding of a value
+
 
 ### `NBITSET(number)`
 
