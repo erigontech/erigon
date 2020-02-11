@@ -27,7 +27,7 @@ type ResolverStatefulCached struct {
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
-		keyAsNibbles:     pool.GetBuffer(128),
+		keyAsNibbles:     pool.GetBuffer(256),
 	}
 }
 
