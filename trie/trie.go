@@ -418,7 +418,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
 				n.Val = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		} else {
@@ -454,7 +454,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
-				n.flags.hashLen = 0
+				n.ref.len = 0
 				newNode = n
 			}
 			updated = true
@@ -469,14 +469,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
 				n.child1 = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
 				n.child2 = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		default:
@@ -506,12 +506,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				n.Children[key[pos]] = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 			}
 			updated = true
-			n.flags.hashLen = 0
+			n.ref.len = 0
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
 				n.Children[key[pos]] = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 		}
 		newNode = n
@@ -732,7 +732,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 						} else {
 							n.Val = nn
 							newNode = n
-							n.flags.hashLen = 0
+							n.ref.len = 0
 						}
 					}
 				}
@@ -758,7 +758,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					n.flags.hashLen = 0
+					n.ref.len = 0
 					newNode = n
 				}
 			}
@@ -774,7 +774,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					n.flags.hashLen = 0
+					n.ref.len = 0
 					newNode = n
 				}
 			}
@@ -839,7 +839,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				n.flags.hashLen = 0
+				n.ref.len = 0
 				newNode = n
 			}
 		}
@@ -1031,15 +1031,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			t.unloadFunc(hex, p.child1.hash())
+			t.unloadFunc(hex, p.child1.reference())
 			p.child1 = hnode
 		case i2:
-			t.unloadFunc(hex, p.child2.hash())
+			t.unloadFunc(hex, p.child2.reference())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-		t.unloadFunc(hex, p.Children[idx].hash())
+		t.unloadFunc(hex, p.Children[idx].reference())
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode
@@ -1152,13 +1152,11 @@ func (t *Trie) evictNodeFromHashMap(nd node) {
 	if nd == nil {
 		return
 	}
-	if nd.hashLen() > 0 {
-		hash := nd.hash()
-		if hash != nil {
-			var key common.Hash
-			copy(key[:], hash[:])
-			delete(t.hashMap, key)
-		}
+	// TODO [Andrew] correct for 0 < len(nd.reference()) < common.HashLength
+	if len(nd.reference()) == common.HashLength {
+		var key common.Hash
+		copy(key[:], nd.reference())
+		delete(t.hashMap, key)
 	}
 }
 

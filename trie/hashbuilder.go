@@ -68,8 +68,8 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 	if err := hb.leafHashWithKeyVal(key, val); err != nil {
 		return err
 	}
-	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.flags.hashLen = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -219,8 +219,8 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
 		return err
 	}
-	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.flags.hashLen = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
@@ -325,8 +325,8 @@ func (hb *HashBuilder) extension(key []byte) error {
 	if err := hb.extensionHash(key); err != nil {
 		return err
 	}
-	copy(s.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.flags.hashLen = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -427,8 +427,8 @@ func (hb *HashBuilder) branch(set uint16) error {
 	if err := hb.branchHash(set); err != nil {
 		return err
 	}
-	copy(f.flags.hash[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	f.flags.hashLen = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	f.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}

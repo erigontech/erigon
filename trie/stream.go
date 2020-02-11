@@ -192,9 +192,9 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if !goDeep {
 				it.top--
 				if accounts {
-					return AHashStreamItem, hex, nil, n.hash(), nil
+					return AHashStreamItem, hex, nil, n.reference(), nil
 				}
-				return SHashStreamItem, hex, nil, n.hash(), nil
+				return SHashStreamItem, hex, nil, n.reference(), nil
 			}
 			i1, i2 := n.childrenIdx()
 			index := it.iStack[l]
@@ -212,17 +212,17 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				}
 				it.hex = hex
@@ -256,18 +256,18 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					if !childGoDeep {
 						it.top--
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				}
 				it.hex = hex
@@ -284,9 +284,9 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 			if !goDeep {
 				it.top--
 				if accounts {
-					return AHashStreamItem, hex, nil, n.hash(), nil
+					return AHashStreamItem, hex, nil, n.reference(), nil
 				}
-				return SHashStreamItem, hex, nil, n.hash(), nil
+				return SHashStreamItem, hex, nil, n.reference(), nil
 			}
 			var i1, i2 int
 			i1Found := false
@@ -318,17 +318,17 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				}
 				it.hex = hex
@@ -362,18 +362,18 @@ func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.A
 					if !childGoDeep {
 						it.top--
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				case *fullNode:
 					childGoDeep = !it.rs.HashOnly(hex)
 					if !childGoDeep {
 						it.top--
 						if accounts {
-							return AHashStreamItem, hex, nil, v.hash(), nil
+							return AHashStreamItem, hex, nil, v.reference(), nil
 						}
-						return SHashStreamItem, hex, nil, v.hash(), nil
+						return SHashStreamItem, hex, nil, v.reference(), nil
 					}
 				}
 				it.hex = hex
