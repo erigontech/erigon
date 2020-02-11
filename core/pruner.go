@@ -171,6 +171,7 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 
 	//return batchDelete(db, keysToRemove)
 	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieHashKeys))
+
 	return nil
 }
 
