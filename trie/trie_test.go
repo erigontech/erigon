@@ -30,10 +30,12 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -527,4 +529,31 @@ func TestDeepHash(t *testing.T) {
 			t.Errorf("DeepHash mistmatch: %x, expected %x, testcase %d", hash2, hash1, i)
 		}
 	}
+}
+
+func TestHashMapLeak(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+
+	// freeze the randomness
+	random := rand.New(rand.NewSource(794656320434))
+
+	nInserts := 1 << 10
+
+	trie := newEmpty()
+
+	// a long value to ensure that node RLPs are greater than 32
+	val := common.FromHex("42e973d81a79e623471ab295c0deb4e7a7d12484996d08140cb4c6e77243421c95")
+
+	var key [1]byte
+	for i := 0; i < nInserts; i++ {
+		key[0] = byte(random.Intn(256))
+		trie.Update(key[:], val[:])
+	}
+
+	trie.Hash()
+
+	nHashes := trie.HashMapSize()
+	assert.Greater(t, nHashes, 0)
+	assert.LessOrEqual(t, nHashes, 256+16+1)
 }
