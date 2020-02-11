@@ -22,14 +22,11 @@ import (
 	"os"
 	"path"
 
-	"github.com/ledgerwatch/turbo-geth/common"
-
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/log"
-
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var OpenFileLimit = 64
