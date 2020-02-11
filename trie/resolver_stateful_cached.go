@@ -14,17 +14,20 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/valyala/bytebufferpool"
 )
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
-	fromCache bool
-	hashData  GenStructStepHashData
+	fromCache  bool
+	hashData   GenStructStepHashData
+	nibblesBuf *bytebufferpool.ByteBuffer
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
+		nibblesBuf:       pool.GetBuffer(128),
 	}
 }
 
@@ -233,17 +236,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		i := 0
-		for _, b := range k {
-			if i >= skip {
-				tr.succ.WriteByte(b / 16)
-			}
-			i++
-			if i >= skip {
-				tr.succ.WriteByte(b % 16)
-			}
-			i++
-		}
+		tr.nibblesBuf.Reset()
+		DecompressNibbles(k, &tr.nibblesBuf.B)
+		tr.succ.Write(tr.nibblesBuf.B[skip:])
 
 		if !fromCache {
 			tr.succ.WriteByte(16)
@@ -311,9 +306,6 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
 func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
-	nibblesBuf := pool.GetBuffer(128)
-	defer pool.PutBuffer(nibblesBuf)
-
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -435,30 +427,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					continue
 				}
 
-				nibblesBuf.Reset()
-				if err := DecompressNibbles(cacheK, &nibblesBuf.B); err != nil {
-					return err
-				}
+				tr.nibblesBuf.Reset()
+				DecompressNibbles(cacheK, &tr.nibblesBuf.B)
 
-				canUseCache = currentRs.HashOnly(nibblesBuf.B[currentReq.extResolvePos:])
+				canUseCache = currentRs.HashOnly(tr.nibblesBuf.B[currentReq.extResolvePos:])
 				if !canUseCache { // can't use cache as is, need go to children
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
-				/*
-					fmt.Printf("HashOnly says yes: %d %d %d %x %x\n", tr.topLevels, rangeIdx,currentReq.extResolvePos, nibblesBuf.B[currentReq.extResolvePos:], nibblesBuf.B)
-					for i, a := range tr.rss {
-						for _, h := range a.hexes {
-							fmt.Printf("In hexes: %d %x\n", i, h)
-						}
-					}
 
-					for _, r := range tr.requests {
-						fmt.Printf("In request: %x %d\n", r.resolveHex, r.resolvePos)
-					}
-				*/
-
-				if err := walker(rangeIdx, common.CopyBytes(cacheK), common.CopyBytes(cacheV), fromCache); err != nil {
+				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}

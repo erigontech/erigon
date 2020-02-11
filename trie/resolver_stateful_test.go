@@ -291,8 +291,7 @@ func TestTwoAccounts(t *testing.T) {
 	buf.Reset()
 	defer pool.PutBuffer(buf)
 
-	err = DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), &buf.B)
-	require.NoError(err)
+	DecompressNibbles(common.Hex2Bytes("03601462093b5945d1676df093446790fd31b20e7b12a2e8e5e09d068109616b"), &buf.B)
 
 	req := &ResolveRequest{
 		t:           tr,
@@ -425,7 +424,7 @@ func TestApiDetails(t *testing.T) {
 			expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
 
 			buf := pool.GetBuffer(128)
-			assert.NoError(DecompressNibbles(common.Hex2Bytes(fmt.Sprintf("0%x%x%063x", 1, 1, 0)), &buf.B))
+			DecompressNibbles(common.Hex2Bytes(fmt.Sprintf("0%x%x%063x", 1, 1, 0)), &buf.B)
 
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(buf.B, 16), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
