@@ -277,13 +277,19 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 }
 
 // Tests that the node state database can be retrieved based on hashes.
-func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
-func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
+func TestGetNodeData63(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+	testGetNodeData(t, 63)
+}
+
+func TestGetNodeData64(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+	testGetNodeData(t, 64)
+}
 
 func testGetNodeData(t *testing.T, protocol int) {
-	if !debug.IsGetNodeData() {
-		return
-	}
 	// Assemble the test environment
 	pm, addr := setUpStorageContractA(t)
 	peer, _ := newTestPeer("peer", protocol, pm, true)
