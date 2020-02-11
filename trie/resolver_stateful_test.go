@@ -510,10 +510,10 @@ func TestApiDetails(t *testing.T) {
 			assert.Nil(storage) // not exists in DB
 
 			assert.NotPanics(func() {
-				tr.Update(storageKey(fmt.Sprintf("001%061x", 0)), nil, 0)
-				tr.Update(storageKey(fmt.Sprintf("011%061x", 0)), nil, 0)
-				tr.Update(storageKey(fmt.Sprintf("021%061x", 0)), nil, 0)
-				tr.Update(storageKey(fmt.Sprintf("051%061x", 0)), nil, 0)
+				tr.Update(storageKey(fmt.Sprintf("001%061x", 0)), nil)
+				tr.Update(storageKey(fmt.Sprintf("011%061x", 0)), nil)
+				tr.Update(storageKey(fmt.Sprintf("021%061x", 0)), nil)
+				tr.Update(storageKey(fmt.Sprintf("051%061x", 0)), nil)
 			})
 		}
 	})

@@ -399,7 +399,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			// cache part
 
 			// Special case: self-destructed accounts.
-			// self destcructed accounts may be marked in cache bucket by empty value
+			// self-destructed accounts may be marked in cache bucket by empty value
 			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
 			isSelfDestructedMarker := len(cacheV) == 0
 			if isSelfDestructedMarker {
