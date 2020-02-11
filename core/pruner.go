@@ -145,7 +145,7 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 
 	keysToRemove := newKeysToRemove()
 	if err := db.Walk(dbutils.IntermediateTrieCacheBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if len(v) > 0 { // marker is - empty value
+		if len(v) > 0 { // marker of self-destructed account is - empty value
 			return true, nil
 		}
 
@@ -298,6 +298,7 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
 		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
 		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
+		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
 	}
 	for batchIndex, batch := range batches {
 		if batchIndex == len(batches)-1 {
@@ -329,8 +330,9 @@ func (i *limitIterator) updateBucket() {
 	batches := []Batch{
 		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
-		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
 		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
+		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
 	}
 
 	for batchIndex, batch := range batches {
