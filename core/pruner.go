@@ -266,10 +266,19 @@ type keysToRemove struct {
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
-	return &limitIterator{
+	i := &limitIterator{
 		k:     k,
 		limit: limit,
 	}
+	i.batches = []Batch{
+		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
+		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
+		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
+		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
+	}
+
+	return i
 }
 
 type limitIterator struct {
@@ -278,6 +287,7 @@ type limitIterator struct {
 	currentBucket []byte
 	currentNum    int
 	limit         int
+	batches       []Batch
 }
 
 func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
@@ -293,15 +303,8 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		i.counter++
 	}()
 
-	batches := []Batch{
-		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
-		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
-		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
-		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
-		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
-	}
-	for batchIndex, batch := range batches {
-		if batchIndex == len(batches)-1 {
+	for batchIndex, batch := range i.batches {
+		if batchIndex == len(i.batches)-1 {
 			break
 		}
 		if bytes.Equal(i.currentBucket, batch.bucket) {
@@ -316,7 +319,8 @@ func (i *limitIterator) ResetLimit() {
 }
 
 func (i *limitIterator) HasMore() bool {
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.ChangeSet) == i.currentNum {
+	lastBatch := i.batches[len(i.batches)-1]
+	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
 	return true
@@ -324,24 +328,16 @@ func (i *limitIterator) HasMore() bool {
 
 func (i *limitIterator) updateBucket() {
 	if i.currentBucket == nil {
-		i.currentBucket = dbutils.AccountsHistoryBucket
+		i.currentBucket = i.batches[0].bucket
 	}
 
-	batches := []Batch{
-		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
-		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
-		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
-		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
-		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
-	}
-
-	for batchIndex, batch := range batches {
-		if batchIndex == len(batches)-1 {
+	for batchIndex, batch := range i.batches {
+		if batchIndex == len(i.batches)-1 {
 			break
 		}
 
 		if bytes.Equal(i.currentBucket, batch.bucket) && len(batch.keys) == i.currentNum {
-			i.currentBucket = batches[batchIndex+1].bucket
+			i.currentBucket = i.batches[batchIndex+1].bucket
 			i.currentNum = 0
 		}
 	}
