@@ -324,7 +324,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		return
 	}
 	if n2 != nil && bytes.Equal(n1.reference(), n2.reference()) {
-		fmt.Fprintf(w, "hash(%x)", []byte(n1.reference()))
+		fmt.Fprintf(w, "hash(%x)", n1.reference())
 		if len(n1.reference()) == 0 {
 			fmt.Fprintf(w, "%s/%s", n1.fstring(""), n2.fstring(""))
 		}
