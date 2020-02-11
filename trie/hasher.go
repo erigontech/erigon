@@ -108,8 +108,8 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 
 	switch n := n.(type) {
 	case *shortNode:
-		n.ref.len = byte(refLen)
 		copy(n.ref.data[:], storeTo)
+		n.ref.len = byte(refLen)
 	case *accountNode:
 		n.rootCorrect = true
 	case *duoNode:
@@ -119,13 +119,13 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 		copy(n.ref.data[:], storeTo)
 		n.ref.len = byte(refLen)
 	}
-	if refLen == common.HashLength {
-		if h.callback != nil {
-			var hash common.Hash
-			copy(hash[:], storeTo)
-			h.callback(hash, n)
-		}
+
+	if h.callback != nil && len(n.reference()) == common.HashLength {
+		var hash common.Hash
+		copy(hash[:], storeTo)
+		h.callback(hash, n)
 	}
+
 	return refLen, nil
 }
 
@@ -312,17 +312,6 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 
 	ac.EncodeForHashing(encodedAccount.B)
 	acRlp := encodedAccount.Bytes()
-
-	if h.callback != nil {
-		var hash common.Hash
-		refLen, err := h.nodeRef(acRlp, false, hash[:])
-		if err != nil {
-			return 0, err
-		}
-		if refLen == common.HashLength {
-			h.callback(hash, ac)
-		}
-	}
 
 	enc := rlphacks.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)

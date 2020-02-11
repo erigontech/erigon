@@ -1146,13 +1146,9 @@ func (t *Trie) nodeHash(nd node) (hash common.Hash, ok bool) {
 }
 
 func (t *Trie) evictNodeFromHashMap(nd node) {
-	if !debug.IsGetNodeData() {
+	if !debug.IsGetNodeData() || nd == nil {
 		return
 	}
-	if nd == nil {
-		return
-	}
-	// TODO [Andrew] correct for 0 < len(nd.reference()) < common.HashLength
 	if len(nd.reference()) == common.HashLength {
 		var key common.Hash
 		copy(key[:], nd.reference())
