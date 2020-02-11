@@ -55,6 +55,7 @@ func (p *BasicPruner) Start() error {
 
 	return nil
 }
+
 func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 	prunerRun := time.NewTicker(p.config.PruneTimeout)
 	saveLastPrunedBlockNum := time.NewTicker(time.Minute * 5)
@@ -139,17 +140,13 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 }
 
 func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
-	if !debug.IsIntermediateTrieCache() {
+	if !debug.IsIntermediateTrieHash() {
 		return nil
 	}
 
 	keysToRemove := newKeysToRemove()
-	if err := db.Walk(dbutils.IntermediateTrieCacheBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if len(v) > 0 { // marker of self-destructed account is - empty value
-			return true, nil
-		}
-
-		if len(k) != common.HashLength { // only account addresses must be marked as deleted
+	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
 			return true, nil
 		}
 
@@ -160,8 +157,8 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 			return false, err
 		}
 
-		if err := db.Walk(dbutils.IntermediateTrieCacheBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.IntermediateTrieCacheKeys = append(keysToRemove.IntermediateTrieCacheKeys, k)
+		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, k)
 			return true, nil
 		}); err != nil {
 			return false, err
@@ -173,7 +170,7 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 	}
 
 	//return batchDelete(db, keysToRemove)
-	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieCacheKeys))
+	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieHashKeys))
 	return nil
 }
 
@@ -243,11 +240,11 @@ func batchDelete(db ethdb.Database, keys *keysToRemove) error {
 
 func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
-		AccountHistoryKeys:        make(Keys, 0),
-		StorageHistoryKeys:        make(Keys, 0),
-		ChangeSet:                 make(Keys, 0),
-		StorageKeys:               make(Keys, 0),
-		IntermediateTrieCacheKeys: make(Keys, 0),
+		AccountHistoryKeys:       make(Keys, 0),
+		StorageHistoryKeys:       make(Keys, 0),
+		ChangeSet:                make(Keys, 0),
+		StorageKeys:              make(Keys, 0),
+		IntermediateTrieHashKeys: make(Keys, 0),
 	}
 }
 
@@ -258,11 +255,11 @@ type Batch struct {
 }
 
 type keysToRemove struct {
-	AccountHistoryKeys        Keys
-	StorageHistoryKeys        Keys
-	ChangeSet                 Keys
-	StorageKeys               Keys
-	IntermediateTrieCacheKeys Keys
+	AccountHistoryKeys       Keys
+	StorageHistoryKeys       Keys
+	ChangeSet                Keys
+	StorageKeys              Keys
+	IntermediateTrieHashKeys Keys
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
@@ -275,7 +272,7 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
 		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
 		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
-		{bucket: dbutils.IntermediateTrieCacheBucket, keys: i.k.IntermediateTrieCacheKeys},
+		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
 	}
 
 	return i

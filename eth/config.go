@@ -87,11 +87,11 @@ func init() {
 }
 
 type StorageMode struct {
-	History               bool
-	Receipts              bool
-	TxIndex               bool
-	Preimages             bool
-	IntermediateTrieCache bool
+	History              bool
+	Receipts             bool
+	TxIndex              bool
+	Preimages            bool
+	IntermediateTrieHash bool
 }
 
 var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
@@ -110,7 +110,7 @@ func (m StorageMode) ToString() string {
 	if m.TxIndex {
 		modeString += "t"
 	}
-	if m.IntermediateTrieCache {
+	if m.IntermediateTrieHash {
 		modeString += "i"
 	}
 	return modeString
@@ -129,7 +129,7 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 		case 'p':
 			mode.Preimages = true
 		case 'i':
-			mode.IntermediateTrieCache = true
+			mode.IntermediateTrieHash = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}

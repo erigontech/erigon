@@ -134,7 +134,7 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 
 func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 	t.Skip("disable test, because pruner doesn't delete anything yet, just printing")
-	if !debug.IsIntermediateTrieCache() {
+	if !debug.IsIntermediateTrieHash() {
 		t.Skip()
 	}
 
@@ -144,7 +144,7 @@ func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
 	}
 	putCache := func(k string, v string) {
-		require.NoError(db.Put(dbutils.IntermediateTrieCacheBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 	putStorage := func(k string, v string) {
 		require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), common.Hex2Bytes(v)))

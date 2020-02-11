@@ -346,7 +346,7 @@ func TestApiDetails(t *testing.T) {
 		return dbutils.GenerateCompositeStorageKey(common.HexToHash(k), 1, common.HexToHash(k))
 	}
 	putCache := func(k string, v string) {
-		require.NoError(db.Put(dbutils.IntermediateTrieCacheBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
 	}
 
 	// Test attempt handle cases when: Trie root hash is same for Cached and non-Cached Resolvers

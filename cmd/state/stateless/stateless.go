@@ -229,7 +229,7 @@ func Stateless(
 	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
-	tds.EnableIntermediateCache(debug.IsIntermediateTrieCache())
+	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
 	var blockWitness []byte
 	var bw *trie.Witness

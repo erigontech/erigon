@@ -176,7 +176,7 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieCacheBucket, false)
+		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
 		if err != nil {
 			return err
 		}
@@ -304,7 +304,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 	return nil
 }
 
-// MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
+// MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
 func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
 	if len(startkeys) == 0 {
 		return nil
@@ -315,7 +315,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.View(func(tx *bolt.Tx) error {
-		cacheBucket := tx.Bucket(dbutils.IntermediateTrieCacheBucket)
+		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		if cacheBucket == nil {
 			return nil
 		}

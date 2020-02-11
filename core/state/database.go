@@ -158,26 +158,26 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                       *trie.Trie
-	tMu                     *sync.Mutex
-	db                      ethdb.Database
-	blockNr                 uint64
-	buffers                 []*Buffer
-	aggregateBuffer         *Buffer // Merge of all buffers
-	currentBuffer           *Buffer
-	codeCache               *lru.Cache
-	codeSizeCache           *lru.Cache
-	historical              bool
-	noHistory               bool
-	resolveReads            bool
-	savePreimages           bool
-	enableIntermediateCache bool
-	resolveSetBuilder       *trie.ResolveSetBuilder
-	tp                      *trie.TriePruning
-	newStream               trie.Stream
-	hashBuilder             *trie.HashBuilder
-	resolver                *trie.Resolver
-	incarnationMap          map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
+	t                      *trie.Trie
+	tMu                    *sync.Mutex
+	db                     ethdb.Database
+	blockNr                uint64
+	buffers                []*Buffer
+	aggregateBuffer        *Buffer // Merge of all buffers
+	currentBuffer          *Buffer
+	codeCache              *lru.Cache
+	codeSizeCache          *lru.Cache
+	historical             bool
+	noHistory              bool
+	resolveReads           bool
+	savePreimages          bool
+	enableIntermediateHash bool
+	resolveSetBuilder      *trie.ResolveSetBuilder
+	tp                     *trie.TriePruning
+	newStream              trie.Stream
+	hashBuilder            *trie.HashBuilder
+	resolver               *trie.Resolver
+	incarnationMap         map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
@@ -207,10 +207,10 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	}
 	t.SetTouchFunc(tp.Touch)
 
-	if debug.IsIntermediateTrieCache() {
-		t.SetUnloadNodeFunc(tds.putIntermediateCache)
-		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateCache)
-		tp.SetCreateNodeFunc(tds.delIntermediateCache)
+	if debug.IsIntermediateTrieHash() {
+		t.SetUnloadNodeFunc(tds.putIntermediateHash)
+		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
+		tp.SetCreateNodeFunc(tds.delIntermediateHash)
 	}
 
 	return tds, nil
@@ -232,8 +232,8 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
 
-func (tds *TrieDbState) EnableIntermediateCache(v bool) {
-	tds.enableIntermediateCache = v
+func (tds *TrieDbState) EnableIntermediateHash(v bool) {
+	tds.enableIntermediateHash = v
 }
 
 func (tds *TrieDbState) Copy() *TrieDbState {
@@ -254,16 +254,16 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	if debug.IsIntermediateTrieCache() {
-		cpy.t.SetUnloadNodeFunc(cpy.putIntermediateCache)
-		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateCache)
-		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateCache)
+	if debug.IsIntermediateTrieHash() {
+		cpy.t.SetUnloadNodeFunc(cpy.putIntermediateHash)
+		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
+		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 	}
 
 	return &cpy
 }
 
-func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
+func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 	if len(prefix) != common.HashLength {
 		return
 	}
@@ -273,12 +273,12 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateCache(prefix []byte) {
 		db = hasDb.DB()
 	}
 
-	if err := db.Put(dbutils.IntermediateTrieCacheBucket, prefix, []byte{}); err != nil {
-		log.Warn("could not put intermediate trie cache", "err", err)
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
 
-func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []byte) {
+func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []byte) {
 	if len(prefixAsNibbles) == 0 {
 		return
 	}
@@ -291,7 +291,7 @@ func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []
 	defer pool.PutBuffer(key)
 
 	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
-		log.Warn("could not CompressNibbles for intermediate trie cache", "err", err)
+		log.Warn("could not CompressNibbles for intermediate trie hash", "err", err)
 		return
 	}
 
@@ -305,13 +305,13 @@ func (tds *TrieDbState) putIntermediateCache(prefixAsNibbles []byte, nodeHash []
 	}
 
 	//	fmt.Printf("Put: %x %x\n", key.Bytes(), v)
-	if err := db.Put(dbutils.IntermediateTrieCacheBucket, key.Bytes(), v); err != nil {
-		log.Warn("could not put intermediate trie cache", "err", err)
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), v); err != nil {
+		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 	_, _ = db, v
 }
 
-func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {
+func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
 	if len(prefixAsNibbles) == 0 {
 		return
 	}
@@ -324,7 +324,7 @@ func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {
 	defer pool.PutBuffer(key)
 
 	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
-		log.Warn("could not CompressNibbles for intermediate trie cache", "err", err)
+		log.Warn("could not CompressNibbles for intermediate trie hash", "err", err)
 		return
 	}
 
@@ -337,8 +337,8 @@ func (tds *TrieDbState) delIntermediateCache(prefixAsNibbles []byte) {
 
 	//fmt.Printf("Del: %x\n", key.Bytes())
 
-	if err := db.Delete(dbutils.IntermediateTrieCacheBucket, key.Bytes()); err != nil {
-		log.Warn("could not delete intermediate trie cache", "err", err)
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, key.Bytes()); err != nil {
+		log.Warn("could not delete intermediate trie hash", "err", err)
 		return
 	}
 }

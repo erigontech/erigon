@@ -801,7 +801,6 @@ func testResolveCached() {
 		fmt.Printf("Res: %v\n", bytes.Compare(bufs[0].Bytes(), bufs[1].Bytes()))
 	}
 
-	return
 	/*
 		fmt.Printf("Current block number: %d\n", currentBlockNr)
 		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
