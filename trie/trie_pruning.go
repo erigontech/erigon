@@ -166,7 +166,7 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 			if i == 0 || len(hex) == 0 || len(hex)%2 == 1 {
 				continue
 			}
-			nd, _, ok := t.getNode([]byte(hex), false)
+			nd, parent, ok := t.getNode([]byte(hex), false)
 			if !ok {
 				continue
 			}
@@ -176,7 +176,12 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 			default:
 				continue
 			}
-
+			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
+			case *duoNode, *fullNode:
+				// will work only with these types of nodes
+			default:
+				continue
+			}
 			counter++
 			_, err := h.hash(nd, len(hex) == 0, hn[:])
 			if err != nil {
