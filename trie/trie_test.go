@@ -30,10 +30,12 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -527,4 +529,43 @@ func TestDeepHash(t *testing.T) {
 			t.Errorf("DeepHash mistmatch: %x, expected %x, testcase %d", hash2, hash1, i)
 		}
 	}
+}
+
+func TestHashMapLeak(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+
+	// freeze the randomness
+	random := rand.New(rand.NewSource(794656320434))
+
+	// now create a tree with some small and some big leaves
+	trie := newEmpty()
+	nTouches := 256 * 10
+
+	var key [1]byte
+	var val [8]byte
+	for i := 0; i < nTouches; i++ {
+		key[0] = byte(random.Intn(256))
+		binary.BigEndian.PutUint64(val[:], random.Uint64())
+
+		option := random.Intn(3)
+		if option == 0 {
+			// small leaf node
+			trie.Update(key[:], val[:])
+		} else if option == 1 {
+			// big leaf node
+			trie.Update(key[:], crypto.Keccak256(val[:]))
+		} else {
+			// test delete as well
+			trie.Delete(key[:])
+		}
+	}
+
+	trie.Hash()
+
+	nHashes := trie.HashMapSize()
+	nExpected := 1 + 16 + 256/3
+
+	assert.GreaterOrEqual(t, nHashes, nExpected*7/8)
+	assert.LessOrEqual(t, nHashes, nExpected*9/8)
 }

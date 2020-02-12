@@ -93,9 +93,9 @@ func TestRebuildTrie(t *testing.T) {
 		trie.root = root
 		resolvedTries[currentTrie] = trie
 		currentTrie++
-		if !bytes.Equal(req.resolveHash.hash(), rootHash.Bytes()) {
+		if !bytes.Equal(req.resolveHash.reference(), rootHash.Bytes()) {
 			return fmt.Errorf("root hash mismatch: expected %x got %x",
-				req.resolveHash.hash(), rootHash.Bytes())
+				req.resolveHash.reference(), rootHash.Bytes())
 		}
 		return nil
 	}

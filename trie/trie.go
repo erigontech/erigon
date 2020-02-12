@@ -369,8 +369,6 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 }
 
 func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
-	var nn node
-	t.evictNodeFromHashMap(origNode)
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
 		vn, vnok := value.(valueNode)
@@ -396,10 +394,12 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 		// replacing nodes except accounts
 		if !origNok {
+			t.evictSubtreeFromHashMap(origNode)
 			return true, value
 		}
 	}
 
+	var nn node
 	switch n := origNode.(type) {
 	case nil:
 		return true, &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
@@ -417,12 +417,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.Val = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		} else {
 			// Otherwise branch out at the index where they differ.
+			t.evictNodeFromHashMap(n)
 			var c1 node
 			if len(n.Key) == matchlen+1 {
 				c1 = n.Val
@@ -454,7 +456,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
-				n.flags.hashLen = 0
+				n.ref.len = 0
 				newNode = n
 			}
 			updated = true
@@ -468,18 +470,21 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		case i1:
 			updated, nn = t.insert(n.child1, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.child1 = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		case i2:
 			updated, nn = t.insert(n.child2, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.child2 = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 			newNode = n
 		default:
+			t.evictNodeFromHashMap(n)
 			var child node
 			if len(key) == pos+1 {
 				child = value
@@ -500,18 +505,20 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		t.touchFunc(key[:pos], false)
 		child := n.Children[key[pos]]
 		if child == nil {
+			t.evictNodeFromHashMap(n)
 			if len(key) == pos+1 {
 				n.Children[key[pos]] = value
 			} else {
 				n.Children[key[pos]] = &shortNode{Key: common.CopyBytes(key[pos+1:]), Val: value}
 			}
 			updated = true
-			n.flags.hashLen = 0
+			n.ref.len = 0
 		} else {
 			updated, nn = t.insert(child, key, pos+1, value)
 			if updated {
+				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
-				n.flags.hashLen = 0
+				n.ref.len = 0
 			}
 		}
 		newNode = n
@@ -608,11 +615,10 @@ func (t *Trie) hook(hex []byte, n node) {
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	if del {
 		t.evictNodeFromHashMap(n)
-	} else {
-		key, ok := t.nodeHash(n)
-		if ok {
-			t.hashMap[key] = n
-		}
+	} else if len(n.reference()) == common.HashLength {
+		var key common.Hash
+		copy(key[:], n.reference())
+		t.hashMap[key] = n
 	}
 
 	switch n := n.(type) {
@@ -663,8 +669,6 @@ func (t *Trie) Delete(key []byte) {
 }
 
 func (t *Trie) convertToShortNode(child node, pos uint) node {
-	t.evictNodeFromHashMap(child)
-	cnode := child
 	if pos != 16 {
 		// If the remaining entry is a short node, it replaces
 		// n and its key gets the missing nibble tacked to the
@@ -673,6 +677,7 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 		// might not be loaded yet, resolve it just for this
 		// check.
 		if short, ok := child.(*shortNode); ok {
+			t.evictNodeFromHashMap(child)
 			k := make([]byte, len(short.Key)+1)
 			k[0] = byte(pos)
 			copy(k[1:], short.Key)
@@ -681,8 +686,7 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 	}
 	// Otherwise, n is replaced by a one-nibble short node
 	// containing the child.
-	//fmt.Println("trie/trie.go:709", hexToCompact([]byte{byte(pos)}))
-	return &shortNode{Key: []byte{byte(pos)}, Val: cnode}
+	return &shortNode{Key: []byte{byte(pos)}, Val: child}
 }
 
 // delete returns the new root of the trie with key deleted.
@@ -690,7 +694,6 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 // nodes on the way up after deleting recursively.
 func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNode bool) (updated bool, newNode node) {
 	var nn node
-	t.evictNodeFromHashMap(origNode)
 	switch n := origNode.(type) {
 	case *shortNode:
 		matchlen := prefixLen(key[keyStart:], n.Key)
@@ -702,6 +705,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 			}
 
 			if removeNodeEntirely {
+				t.evictNodeFromHashMap(n)
 				updated = true
 				touchKey := key[:keyStart+matchlen]
 				if touchKey[len(touchKey)-1] == 16 {
@@ -718,6 +722,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				if !updated {
 					newNode = n
 				} else {
+					t.evictNodeFromHashMap(n)
 					if nn == nil {
 						newNode = nil
 					} else {
@@ -732,7 +737,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 						} else {
 							n.Val = nn
 							newNode = n
-							n.flags.hashLen = 0
+							n.ref.len = 0
 						}
 					}
 				}
@@ -752,13 +757,14 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child2, uint(i2))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child1 = nn
-					n.flags.hashLen = 0
+					n.ref.len = 0
 					newNode = n
 				}
 			}
@@ -768,13 +774,14 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				t.touchFunc(key[:keyStart], false)
 				newNode = n
 			} else {
+				t.evictNodeFromHashMap(n)
 				if nn == nil {
 					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child1, uint(i1))
 				} else {
 					t.touchFunc(key[:keyStart], false)
 					n.child2 = nn
-					n.flags.hashLen = 0
+					n.ref.len = 0
 					newNode = n
 				}
 			}
@@ -792,6 +799,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 			t.touchFunc(key[:keyStart], false)
 			newNode = n
 		} else {
+			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
 			// Check how many non-nil entries are left after deleting and
 			// reduce the full node to a short node if only one entry is
@@ -839,7 +847,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 			} else if count > 2 {
 				t.touchFunc(key[:keyStart], false)
 				// n still contains at least three values and cannot be reduced.
-				n.flags.hashLen = 0
+				n.ref.len = 0
 				newNode = n
 			}
 		}
@@ -1031,15 +1039,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			t.unloadFunc(hex, p.child1.hash())
+			t.unloadFunc(hex, p.child1.reference())
 			p.child1 = hnode
 		case i2:
-			t.unloadFunc(hex, p.child2.hash())
+			t.unloadFunc(hex, p.child2.reference())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-		t.unloadFunc(hex, p.Children[idx].hash())
+		t.unloadFunc(hex, p.Children[idx].reference())
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode
@@ -1132,33 +1140,14 @@ func (t *Trie) GetNodeByHash(hash common.Hash) []byte {
 	return common.CopyBytes(rlp)
 }
 
-func (t *Trie) nodeHash(nd node) (hash common.Hash, ok bool) {
-	h := t.getHasher()
-	defer returnHasherToPool(h)
-
-	var key common.Hash
-	refLen, err := h.hash(nd, false, key[:])
-	if err != nil || refLen != common.HashLength {
-		return hash, false
-	}
-
-	return hash, true
-}
-
 func (t *Trie) evictNodeFromHashMap(nd node) {
-	if !debug.IsGetNodeData() {
+	if !debug.IsGetNodeData() || nd == nil {
 		return
 	}
-	if nd == nil {
-		return
-	}
-	if nd.hashLen() > 0 {
-		hash := nd.hash()
-		if hash != nil {
-			var key common.Hash
-			copy(key[:], hash[:])
-			delete(t.hashMap, key)
-		}
+	if len(nd.reference()) == common.HashLength {
+		var key common.Hash
+		copy(key[:], nd.reference())
+		delete(t.hashMap, key)
 	}
 }
 

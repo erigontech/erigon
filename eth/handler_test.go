@@ -277,13 +277,19 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 }
 
 // Tests that the node state database can be retrieved based on hashes.
-func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
-func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
+func TestGetNodeData63(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+	testGetNodeData(t, 63)
+}
+
+func TestGetNodeData64(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+	testGetNodeData(t, 64)
+}
 
 func testGetNodeData(t *testing.T, protocol int) {
-	if !debug.IsGetNodeData() {
-		return
-	}
 	// Assemble the test environment
 	pm, addr := setUpStorageContractA(t)
 	peer, _ := newTestPeer("peer", protocol, pm, true)
@@ -292,8 +298,6 @@ func testGetNodeData(t *testing.T, protocol int) {
 	state, err := pm.blockchain.GetTrieDbState()
 	assert.NoError(t, err)
 	account, err := state.ReadAccountData(addr)
-	assert.NoError(t, err)
-	accountRlp, err := rlp.EncodeToBytes(account)
 	assert.NoError(t, err)
 
 	node0Rlp, node1Rlp, branchRlp := storageNodesOfContractA(t, 2)
@@ -304,7 +308,6 @@ func testGetNodeData(t *testing.T, protocol int) {
 		crypto.Keccak256Hash(node1Rlp),
 		pm.blockchain.CurrentBlock().Root(),
 		crypto.Keccak256Hash(branchRlp),
-		crypto.Keccak256Hash(accountRlp),
 		account.CodeHash,
 		crypto.Keccak256Hash(node0Rlp),
 	}

@@ -77,7 +77,7 @@ func returnHasherToPool(h *hasher) {
 // hash calculates node's RLP for hashing
 // and stores the RLP if len(RLP) < 32 and not force,
 // otherwise it stores hash(RLP).
-// It also updates flags.hash of the node.
+// It also updates node's ref with that value.
 func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 	return h.hashInternal(n, force, storeTo, 0)
 }
@@ -85,15 +85,15 @@ func (h *hasher) hash(n node, force bool, storeTo []byte) (int, error) {
 // hashInternal calculates node's RLP for hashing
 // and stores the RLP if len(RLP) < 32 and not force,
 // otherwise it stores hash(RLP).
-// It also updates flags.hash of the node.
+// It also updates node's ref with that value.
 func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int) (int, error) {
 	if hn, ok := n.(hashNode); ok {
 		copy(storeTo, hn)
 		return common.HashLength, nil
 	}
-	if n.hashLen() > 0 {
-		copy(storeTo, n.hash())
-		return n.hashLen(), nil
+	if len(n.reference()) > 0 {
+		copy(storeTo, n.reference())
+		return len(n.reference()), nil
 	}
 	// Trie not processed yet or needs storage, walk the children
 	nodeRlp, err := h.hashChildren(n, bufOffset)
@@ -108,24 +108,24 @@ func (h *hasher) hashInternal(n node, force bool, storeTo []byte, bufOffset int)
 
 	switch n := n.(type) {
 	case *shortNode:
-		n.flags.hashLen = byte(refLen)
-		copy(n.flags.hash[:], storeTo)
+		copy(n.ref.data[:], storeTo)
+		n.ref.len = byte(refLen)
 	case *accountNode:
 		n.rootCorrect = true
 	case *duoNode:
-		copy(n.flags.hash[:], storeTo)
-		n.flags.hashLen = byte(refLen)
+		copy(n.ref.data[:], storeTo)
+		n.ref.len = byte(refLen)
 	case *fullNode:
-		copy(n.flags.hash[:], storeTo)
-		n.flags.hashLen = byte(refLen)
+		copy(n.ref.data[:], storeTo)
+		n.ref.len = byte(refLen)
 	}
-	if refLen == common.HashLength {
-		if h.callback != nil {
-			var hash common.Hash
-			copy(hash[:], storeTo)
-			h.callback(hash, n)
-		}
+
+	if h.callback != nil && len(n.reference()) == common.HashLength {
+		var hash common.Hash
+		copy(hash[:], storeTo)
+		h.callback(hash, n)
 	}
+
 	return refLen, nil
 }
 
@@ -312,17 +312,6 @@ func (h *hasher) accountNodeToBuffer(ac *accountNode, buffer []byte, pos int) (i
 
 	ac.EncodeForHashing(encodedAccount.B)
 	acRlp := encodedAccount.Bytes()
-
-	if h.callback != nil {
-		var hash common.Hash
-		refLen, err := h.nodeRef(acRlp, false, hash[:])
-		if err != nil {
-			return 0, err
-		}
-		if refLen == common.HashLength {
-			h.callback(hash, ac)
-		}
-	}
 
 	enc := rlphacks.RlpEncodedBytes(acRlp)
 	h.bw.Setup(buffer, pos)
