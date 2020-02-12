@@ -538,22 +538,35 @@ func TestHashMapLeak(t *testing.T) {
 	// freeze the randomness
 	random := rand.New(rand.NewSource(794656320434))
 
-	nInserts := 1 << 10
+	nInserts := 256 * 16
 
+	// now create a tree with some small and some big leaves
 	trie := newEmpty()
 
-	// a long value to ensure that node RLPs are greater than 32
-	val := common.FromHex("42e973d81a79e623471ab295c0deb4e7a7d12484996d08140cb4c6e77243421c95")
-
 	var key [1]byte
+	var val [8]byte
 	for i := 0; i < nInserts; i++ {
 		key[0] = byte(random.Intn(256))
-		trie.Update(key[:], val[:])
+		binary.BigEndian.PutUint64(val[:], random.Uint64())
+
+		option := random.Intn(3)
+		if option == 0 {
+			// small leaf node
+			trie.Update(key[:], val[:])
+		} else if option == 1 {
+			// big leaf node
+			trie.Update(key[:], crypto.Keccak256(val[:]))
+		} else {
+			// test delete as well
+			trie.Delete(key[:])
+		}
 	}
 
 	trie.Hash()
 
 	nHashes := trie.HashMapSize()
-	assert.Greater(t, nHashes, 0)
-	assert.LessOrEqual(t, nHashes, 256+16+1)
+	nExpected := 1 + 16 + 256/3
+
+	assert.GreaterOrEqual(t, nHashes, nExpected*9/10)
+	assert.LessOrEqual(t, nHashes, nExpected*11/10)
 }
