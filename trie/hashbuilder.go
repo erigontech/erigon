@@ -70,6 +70,10 @@ func (hb *HashBuilder) leaf(length int, keyHex []byte, val rlphacks.RlpSerializa
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
 	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	if s.ref.len > 32 {
+		s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0xc0 + 1
+		copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength-1:])
+	}
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
