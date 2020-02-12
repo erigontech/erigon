@@ -536,14 +536,14 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 }
 
 // non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node) {
+func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
 	nd = t.root
 	pos := 0
 	var account bool
 	for pos < len(hex) || account {
 		switch n := nd.(type) {
 		case nil:
-			return nil, nil
+			return nil, nil, false
 		case *shortNode:
 			matchlen := prefixLen(hex[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
@@ -554,7 +554,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node) {
 					account = true
 				}
 			} else {
-				return nil, nil
+				return nil, nil, false
 			}
 		case *duoNode:
 			if doTouch {
@@ -572,35 +572,37 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node) {
 				nd = n.child2
 				pos++
 			default:
-				return nil, nil
+				return nil, nil, false
 			}
 		case *fullNode:
-			t.touchFunc(hex[:pos], false)
+			if doTouch {
+				t.touchFunc(hex[:pos], false)
+			}
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return nil, nil
+				return nil, nil, false
 			}
 			parent = n
 			nd = child
 			pos++
 		case valueNode:
-			return
+			return nd, parent, true
 		case *accountNode:
 			parent = n
 			nd = n.storage
 			account = false
 		case hashNode:
-			return nil, nil
+			return nd, parent, true
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
 	}
-	return nd, parent
+	return nd, parent, true
 }
 
 func (t *Trie) hook(hex []byte, n node) {
-	nd, parent := t.getNode(hex, true)
-	if nd == nil {
+	nd, parent, ok := t.getNode(hex, true)
+	if !ok {
 		return
 	}
 	if _, ok := nd.(hashNode); !ok && nd != nil {
@@ -982,12 +984,15 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 }
 
 func (t *Trie) unload(hex []byte, h *hasher) {
-	nd, parent := t.getNode(hex, false)
-	if nd == nil {
+	nd, parent, ok := t.getNode(hex, false)
+	if !ok {
 		return
 	}
-	if _, ok := nd.(hashNode); ok {
+	switch nd.(type) {
+	case valueNode, hashNode:
 		return
+	default:
+		// can work with other nodes type
 	}
 
 	t.evictSubtreeFromHashMap(nd)

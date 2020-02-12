@@ -165,8 +165,8 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 			if i == 0 || len(hex) == 0 {
 				continue
 			}
-			nd, parent := t.getNode([]byte(hex), false)
-			if nd == nil {
+			nd, parent, ok := t.getNode([]byte(hex), false)
+			if !ok {
 				continue
 			}
 			if _, ok := nd.(hashNode); ok {
