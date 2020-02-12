@@ -47,8 +47,8 @@ type Trie struct {
 	root node
 
 	touchFunc           func(hex []byte, del bool)
-	unloadNodeFunc      func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
-	onDeleteSubtreeFunc func(prefix []byte)                  // called when subtree unloaded
+	unloadNodeFunc      func(prefix []byte, nodeHash common.Hash) // called when fullNode or dualNode unloaded
+	onDeleteSubtreeFunc func(prefix []byte)                       // called when subtree unloaded
 
 	newHasherFunc func() *hasher
 
@@ -68,7 +68,7 @@ type Trie struct {
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		touchFunc:           func([]byte, bool) {},
-		unloadNodeFunc:      func(prefix []byte, nodeHash []byte) {},
+		unloadNodeFunc:      func(prefix []byte, nodeHash common.Hash) {},
 		onDeleteSubtreeFunc: func(prefix []byte) {},
 		newHasherFunc:       func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 		hashMap:             make(map[common.Hash]node),
@@ -103,7 +103,7 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-func (t *Trie) SetUnloadNodeFunc(f func(prefixAsNibbles []byte, nodeHash []byte)) {
+func (t *Trie) SetUnloadNodeFunc(f func(prefixAsNibbles []byte, nodeHash common.Hash)) {
 	t.unloadNodeFunc = f
 }
 
@@ -535,29 +535,32 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 	}
 }
 
-func (t *Trie) hook(hex []byte, n node) {
-	var nd = t.root
-	var parent node
+// non-recursive version of get and returns: node and parent node
+func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node) {
+	nd = t.root
 	pos := 0
 	var account bool
 	for pos < len(hex) || account {
 		switch n := nd.(type) {
 		case nil:
-			return
+			return nil, nil
 		case *shortNode:
 			matchlen := prefixLen(hex[pos:], n.Key)
 			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
 				parent = n
 				nd = n.Val
 				pos += matchlen
-				if _, ok := nd.(*accountNode); ok {
+				if _, ok := n.Val.(*accountNode); ok {
 					account = true
 				}
 			} else {
-				return
+				return nil, nil
 			}
 		case *duoNode:
-			t.touchFunc(hex[:pos], false)
+			if doTouch {
+				t.touchFunc(hex[:pos], false)
+			}
+
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
@@ -569,29 +572,36 @@ func (t *Trie) hook(hex []byte, n node) {
 				nd = n.child2
 				pos++
 			default:
-				return
+				return nil, nil
 			}
 		case *fullNode:
 			t.touchFunc(hex[:pos], false)
 			child := n.Children[hex[pos]]
 			if child == nil {
-				return
-			} else {
-				parent = n
-				nd = child
-				pos++
+				return nil, nil
 			}
+			parent = n
+			nd = child
+			pos++
+		case valueNode:
+			return
 		case *accountNode:
 			parent = n
 			nd = n.storage
 			account = false
-		case valueNode:
-			return
 		case hashNode:
-			return
+			return nil, nil
 		default:
 			panic(fmt.Sprintf("Unknown node: %T", n))
 		}
+	}
+	return nd, parent
+}
+
+func (t *Trie) hook(hex []byte, n node) {
+	nd, parent := t.getNode(hex, true)
+	if nd == nil {
+		return
 	}
 	if _, ok := nd.(hashNode); !ok && nd != nil {
 		return
@@ -972,59 +982,9 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 }
 
 func (t *Trie) unload(hex []byte, h *hasher) {
-	nd := t.root
-	var parent node
-	pos := 0
-	var account bool
-	for pos < len(hex) || account {
-		switch n := nd.(type) {
-		case nil:
-			return
-		case *shortNode:
-			matchlen := prefixLen(hex[pos:], n.Key)
-			if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-				parent = n
-				nd = n.Val
-				pos += matchlen
-				if _, ok := n.Val.(*accountNode); ok {
-					account = true
-				}
-			} else {
-				return
-			}
-		case *duoNode:
-			i1, i2 := n.childrenIdx()
-			switch hex[pos] {
-			case i1:
-				parent = n
-				nd = n.child1
-				pos++
-			case i2:
-				parent = n
-				nd = n.child2
-				pos++
-			default:
-				return
-			}
-		case *fullNode:
-			child := n.Children[hex[pos]]
-			if child == nil {
-				return
-			}
-			parent = n
-			nd = child
-			pos++
-		case valueNode:
-			return
-		case *accountNode:
-			parent = n
-			nd = n.storage
-			account = false
-		case hashNode:
-			return
-		default:
-			panic(fmt.Sprintf("Unknown node: %T", n))
-		}
+	nd, parent := t.getNode(hex, false)
+	if nd == nil {
+		return
 	}
 	if _, ok := nd.(hashNode); ok {
 		return
@@ -1047,15 +1007,15 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			t.unloadNodeFunc(hex, hnode.reference())
+			//t.unloadNodeFunc(hex, hnode.reference())
 			p.child1 = hnode
 		case i2:
-			t.unloadNodeFunc(hex, hnode.reference())
+			//t.unloadNodeFunc(hex, hnode.reference())
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-		t.unloadNodeFunc(hex, hnode.reference())
+		//t.unloadNodeFunc(hex, hnode.reference())
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode

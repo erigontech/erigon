@@ -273,7 +273,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 	}
 }
 
-func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []byte) {
+func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash common.Hash) {
 	if len(prefixAsNibbles) == 0 {
 		return
 	}
@@ -290,9 +290,7 @@ func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []b
 		return
 	}
 
-	v := common.CopyBytes(nodeHash)
-
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), v); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), nodeHash[:]); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
