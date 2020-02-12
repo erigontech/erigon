@@ -161,31 +161,30 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 	var hn common.Hash
 	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
 		now := time.Now()
+		counter := 0
 		for i, hex := range hexes {
-			if i == 0 || len(hex) == 0 {
+			if i == 0 || len(hex) == 0 || len(hex)%2 == 1 {
 				continue
 			}
-			nd, parent, ok := t.getNode([]byte(hex), false)
+			nd, _, ok := t.getNode([]byte(hex), false)
 			if !ok {
 				continue
 			}
-			if _, ok := nd.(hashNode); ok {
-				continue
-			}
-			switch parent.(type) {
+			switch nd.(type) {
 			case *duoNode, *fullNode:
-				// will work only with this types of nodes
+				// will work only with these types of nodes
 			default:
 				continue
 			}
 
+			counter++
 			_, err := h.hash(nd, len(hex) == 0, hn[:])
 			if err != nil {
 				continue
 			}
 			t.unloadNodeFunc([]byte(hex), hn)
 		}
-		fmt.Printf("Hashed %d nodes, took %s \n", len(hexes), time.Since(now))
+		fmt.Printf("Hashed %d nodes, took %s \n", counter, time.Since(now))
 	}
 
 	for i, hex := range hexes {
