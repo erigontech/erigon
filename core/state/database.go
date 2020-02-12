@@ -268,12 +268,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 		return
 	}
 
-	db := tds.db
-	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
-		db = hasDb.DB()
-	}
-
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
@@ -297,18 +292,9 @@ func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []b
 
 	v := common.CopyBytes(nodeHash)
 
-	db := tds.db
-	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
-		db = hasDb.DB()
-	} else {
-		fmt.Printf("what is it? %T\n", tds.db)
-	}
-
-	//	fmt.Printf("Put: %x %x\n", key.Bytes(), v)
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), v); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), v); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
-	_, _ = db, v
 }
 
 func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
@@ -328,16 +314,7 @@ func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
 		return
 	}
 
-	db := tds.db
-	if hasDb, ok := tds.db.(ethdb.HasDb); ok {
-		db = hasDb.DB()
-	} else {
-		fmt.Printf("what is it? %T\n", tds.db)
-	}
-
-	//fmt.Printf("Del: %x\n", key.Bytes())
-
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, key.Bytes()); err != nil {
+	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key.Bytes())); err != nil {
 		log.Warn("could not delete intermediate trie hash", "err", err)
 		return
 	}

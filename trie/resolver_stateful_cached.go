@@ -14,20 +14,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
-	"github.com/valyala/bytebufferpool"
 )
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
-	fromCache    bool
-	hashData     GenStructStepHashData
-	keyAsNibbles *bytebufferpool.ByteBuffer
+	fromCache bool
+	hashData  GenStructStepHashData
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
-		keyAsNibbles:     pool.GetBuffer(256),
 	}
 }
 
@@ -216,7 +213,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
+func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
 	//if bytes.Compare(common.FromHex("0808"), k) == 0 {
 	//	fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
 	//}
@@ -236,9 +233,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		tr.keyAsNibbles.Reset()
-		DecompressNibbles(k, &tr.keyAsNibbles.B)
-		tr.succ.Write(tr.keyAsNibbles.B[skip:])
+		tr.succ.Write(kAsNibbles[skip:])
 
 		if !fromCache {
 			tr.succ.WriteByte(16)
@@ -310,6 +305,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		return nil
 	}
 	isAccountBucket := bytes.Equal(bucket, dbutils.AccountsBucket)
+	maxAccountKeyLen := common.HashLength - 1
+
+	keyAsNibbles := pool.GetBuffer(256)
+	defer pool.PutBuffer(keyAsNibbles)
 
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
@@ -334,8 +333,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			// for Address bucket, skip cache keys longer than 31 bytes
-			if isAccountBucket && len(cacheK) > common.HashLength-1 {
-				next, ok := nextSubtree(cacheK[:common.HashLength-1])
+			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
+				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
 				if !ok { // no siblings left in cache
 					cacheK, cacheV = nil, nil
 					continue
@@ -387,7 +386,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			if !fromCache {
 				if len(v) > 0 {
-					if err := walker(rangeIdx, k, v, false); err != nil {
+					keyAsNibbles.Reset()
+					DecompressNibbles(minKey, &keyAsNibbles.B)
+					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
 						return err
 					}
 				}
@@ -404,7 +405,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			isSelfDestructedMarker := len(cacheV) == 0
 			if isSelfDestructedMarker {
 				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
-					if err := walker(rangeIdx, k, v, false); err != nil {
+					keyAsNibbles.Reset()
+					DecompressNibbles(minKey, &keyAsNibbles.B)
+					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
 						return err
 					}
 				}
@@ -412,22 +415,21 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			} else {
 				currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 				currentRs := tr.rss[rangeIdx]
+				keyAsNibbles.Reset()
+				DecompressNibbles(minKey, &keyAsNibbles.B)
 
-				if len(cacheK)*2 < currentReq.extResolvePos {
+				if len(keyAsNibbles.B) < currentReq.extResolvePos {
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
 
-				tr.keyAsNibbles.Reset()
-				DecompressNibbles(cacheK, &tr.keyAsNibbles.B)
-
-				canUseCache = currentRs.HashOnly(tr.keyAsNibbles.B[currentReq.extResolvePos:])
+				canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
 				if !canUseCache { // can't use cache as is, need go to children
 					cacheK, cacheV = cache.Next() // go to children, not to sibling
 					continue
 				}
 
-				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
+				if err := walker(rangeIdx, keyAsNibbles.B, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
