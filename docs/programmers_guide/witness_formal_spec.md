@@ -21,8 +21,9 @@ In the end, when there are no more instructions left, there MUST be only one ite
 type Node = nil
           | HashNode (raw_hash:Byte[32])
           | ValueNode (raw_value:Byte[])
-          | AccountNode (nonce:Uint balance:int storage:Node storage_hash:byte[32] code_hash:byte[32])
-          | ShortNode (key:Byte[] value:node)
+          | AccountNode (nonce:Int balance:Int storage:Node storage_hash:Byte[32] code_hash:Byte[32])
+          | LeafNode (key:Byte[] value:ValueNode|AccountNode)
+          | ExtensionNode (key:Byte[] child:Node)
           | BranchNode (child0:Node child1:Node child3:Node ... child15:Node)
 ```
 
@@ -141,7 +142,7 @@ Stack: `(HashNode{h2}, h2); (HashNode{h1}, h1)`
 
 Witness: ` <empty> `
 
-Stack: `(BranchNode{0: HashNode{h2}, 1: HashNode{h1}}, KECCAK(h2+h1))`
+Stack: `(BranchNode{0: HashNode{h2}, 1: HashNode{h1}}, KECCAK(CONCAT(h2,h1)))`
 
 ---
 
@@ -171,7 +172,7 @@ The exact implementation details are undefined in this spec.
 
 ```
 LEAF(key, raw_value) |=> 
-STACK(ShortNode{key, ValueNode(raw_value)}, COMPACT_KECCAK(RLP(RLP(raw_value))))
+STACK(LeafNode{key, ValueNode(raw_value)}, COMPACT_KECCAK(RLP(RLP(raw_value))))
 ```
 
 ### `EXTENSION key`
@@ -182,14 +183,14 @@ STACK(ShortNode{key, ValueNode(raw_value)}, COMPACT_KECCAK(RLP(RLP(raw_value))))
 GUARD node != nil
 
 STACK(node, hash) EXTENSION(key) |=>
-STACK(ShortNode{key, node}, hash)
+STACK(ExtensionNode{key, node}, hash)
 
 ---
 
 GUARD node == nil
 
 STACK(nil, hash) EXTENSION(key) |=>
-STACK(ShortNode{key, HashNode(hash)}, hash)
+STACK(ExtensionNode{key, HashNode(hash)}, hash)
 ```
 
 ### `HASH raw_hash`
@@ -223,7 +224,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode{Account(nonce, balance, HashNode{storage_hash}, storage_hash, code_hash)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode{Account(nonce, balance, HashNode{storage_hash}, storage_hash, code_hash)}}, ACC_HASH(account))
 --
 
 GUARD has_code == true
@@ -231,7 +232,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, code_hash)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, code_hash)}}, ACC_HASH(account))
 
 --
 
@@ -240,7 +241,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(account))
 
 ---
 
@@ -249,7 +250,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(account))
 
 --
 
@@ -257,7 +258,7 @@ GUARD has_code == true
 GUARD has_storage == false
 
 STACK(nil, code_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode(Account(nonce, balance, nil, nil, code_hash)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode(Account(nonce, balance, nil, nil, code_hash)}}, ACC_HASH(account))
 
 --
 
@@ -265,7 +266,7 @@ GUARD has_code == false
 GUARD has_storage == false
 
 ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(ShortNode{key, AccountNode{Account(nonce, balance, nil, nil, nil)}}, ACC_HASH(key, account))
+STACK(LeafNode{key, AccountNode{Account(nonce, balance, nil, nil, nil)}}, ACC_HASH(account))
 
 ```
 
@@ -342,12 +343,12 @@ MAKE_VALUES_ARRAY(mask, idx, values...) {
 ```
 
 
-### `ACC_HASH(key, account)`
+### `ACC_HASH(account)`
 
-hashes the specified account and a the specified key
+hashes the specified account
 
 ```
-ACC_HASH(key, account) {
+ACC_HASH(account) {
     bytes = CONCAT(RLP(account.Nonce), RLP(account.Balance), RLP(account.Root), RLP(account.CodeHash))
     if account.HasStorageSize {
         return COMPACT_KECCAK(RLP(CONCAT(bytes, RLP(a.StorageSize))))
