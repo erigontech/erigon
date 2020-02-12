@@ -9,6 +9,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -54,6 +55,7 @@ func (p *BasicPruner) Start() error {
 
 	return nil
 }
+
 func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 	prunerRun := time.NewTicker(p.config.PruneTimeout)
 	saveLastPrunedBlockNum := time.NewTicker(time.Minute * 5)
@@ -82,6 +84,11 @@ func (p *BasicPruner) pruningLoop(db ethdb.Database) {
 			err := Prune(db, from, to)
 			if err != nil {
 				log.Error("Pruning error", "err", err)
+				return
+			}
+			err = PruneStorageOfSelfDestructedAccounts(db)
+			if err != nil {
+				log.Error("PruneStorageOfSelfDestructedAccounts error", "err", err)
 				return
 			}
 			p.LastPrunedBlockNum = to
@@ -130,6 +137,42 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 	if err := p.db.Put(dbutils.LastPrunedBlockKey, dbutils.LastPrunedBlockKey, b); err != nil {
 		log.Crit("Failed to store last pruned block's num", "err", err)
 	}
+}
+
+func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
+	if !debug.IsIntermediateTrieHash() {
+		return nil
+	}
+
+	keysToRemove := newKeysToRemove()
+	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
+			return true, nil
+		}
+
+		if err := db.Walk(dbutils.StorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, k)
+			return true, nil
+		}); err != nil {
+			return false, err
+		}
+
+		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
+			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, k)
+			return true, nil
+		}); err != nil {
+			return false, err
+		}
+
+		return true, nil
+	}); err != nil {
+		return err
+	}
+
+	//return batchDelete(db, keysToRemove)
+	log.Debug("PruneStorageOfSelfDestructedAccounts can remove rows amount", "storage_bucket", len(keysToRemove.StorageKeys), "intermediate_bucket", len(keysToRemove.IntermediateTrieHashKeys))
+
+	return nil
 }
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
@@ -198,23 +241,42 @@ func batchDelete(db ethdb.Database, keys *keysToRemove) error {
 
 func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
-		AccountHistoryKeys: make([][]byte, 0),
-		StorageHistoryKeys: make([][]byte, 0),
-		ChangeSet:          make([][]byte, 0),
+		AccountHistoryKeys:       make(Keys, 0),
+		StorageHistoryKeys:       make(Keys, 0),
+		ChangeSet:                make(Keys, 0),
+		StorageKeys:              make(Keys, 0),
+		IntermediateTrieHashKeys: make(Keys, 0),
 	}
+}
+
+type Keys [][]byte
+type Batch struct {
+	bucket []byte
+	keys   Keys
 }
 
 type keysToRemove struct {
-	AccountHistoryKeys [][]byte
-	StorageHistoryKeys [][]byte
-	ChangeSet          [][]byte
+	AccountHistoryKeys       Keys
+	StorageHistoryKeys       Keys
+	ChangeSet                Keys
+	StorageKeys              Keys
+	IntermediateTrieHashKeys Keys
 }
 
 func LimitIterator(k *keysToRemove, limit int) *limitIterator {
-	return &limitIterator{
+	i := &limitIterator{
 		k:     k,
 		limit: limit,
 	}
+	i.batches = []Batch{
+		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
+		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
+		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
+		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
+		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
+	}
+
+	return i
 }
 
 type limitIterator struct {
@@ -223,6 +285,7 @@ type limitIterator struct {
 	currentBucket []byte
 	currentNum    int
 	limit         int
+	batches       []Batch
 }
 
 func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
@@ -237,14 +300,14 @@ func (i *limitIterator) GetNext() ([]byte, []byte, bool) {
 		i.currentNum++
 		i.counter++
 	}()
-	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) {
-		return i.k.AccountHistoryKeys[i.currentNum], dbutils.AccountsHistoryBucket, true
-	}
-	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) {
-		return i.k.StorageHistoryKeys[i.currentNum], dbutils.StorageHistoryBucket, true
-	}
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) {
-		return i.k.ChangeSet[i.currentNum], dbutils.ChangeSetBucket, true
+
+	for batchIndex, batch := range i.batches {
+		if batchIndex == len(i.batches)-1 {
+			break
+		}
+		if bytes.Equal(i.currentBucket, batch.bucket) {
+			return batch.keys[i.currentNum], batch.bucket, true
+		}
 	}
 	return nil, nil, false
 }
@@ -254,7 +317,8 @@ func (i *limitIterator) ResetLimit() {
 }
 
 func (i *limitIterator) HasMore() bool {
-	if bytes.Equal(i.currentBucket, dbutils.ChangeSetBucket) && len(i.k.ChangeSet) == i.currentNum {
+	lastBatch := i.batches[len(i.batches)-1]
+	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
 	return true
@@ -262,15 +326,17 @@ func (i *limitIterator) HasMore() bool {
 
 func (i *limitIterator) updateBucket() {
 	if i.currentBucket == nil {
-		i.currentBucket = dbutils.AccountsHistoryBucket
-	}
-	if bytes.Equal(i.currentBucket, dbutils.AccountsHistoryBucket) && len(i.k.AccountHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.StorageHistoryBucket
-		i.currentNum = 0
+		i.currentBucket = i.batches[0].bucket
 	}
 
-	if bytes.Equal(i.currentBucket, dbutils.StorageHistoryBucket) && len(i.k.StorageHistoryKeys) == i.currentNum {
-		i.currentBucket = dbutils.ChangeSetBucket
-		i.currentNum = 0
+	for batchIndex, batch := range i.batches {
+		if batchIndex == len(i.batches)-1 {
+			break
+		}
+
+		if bytes.Equal(i.currentBucket, batch.bucket) && len(batch.keys) == i.currentNum {
+			i.currentBucket = i.batches[batchIndex+1].bucket
+			i.currentNum = 0
+		}
 	}
 }

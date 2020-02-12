@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"runtime/debug"
 	"strings"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
@@ -26,19 +28,19 @@ func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFu
 	}
 }
 
-// hexIncrement does []byte++. Returns nil if overflow.
-func hexIncrement(in []byte) []byte {
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
 	r := make([]byte, len(in))
 	copy(r, in)
 	for i := len(r) - 1; i >= 0; i-- {
 		if r[i] != 255 {
 			r[i]++
-			return r
+			return r, true
 		}
 
 		r[i] = 0
 	}
-	return nil
+	return nil, false
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
@@ -115,7 +117,11 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+		err := tr.hookFunction(tr.currentReq, hbRoot, hbHash)
+		if err != nil {
+			return err
+		}
+		return nil
 	}
 	return nil
 }
@@ -167,7 +173,7 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieCacheBucket, false)
+		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
 		if err != nil {
 			return err
 		}
@@ -181,17 +187,21 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 	} else {
 		if historical {
 			return errors.New("historical resolver not supported yet")
 		}
-		err = tr.MultiWalk2(boltDb, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 	}
 	if err != nil {
-		return fmt.Errorf("failed RebuildTrie: %w", err)
+		return err
 	}
-	return tr.finaliseRoot()
+
+	if err = tr.finaliseRoot(); err != nil {
+		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
+	}
+	return nil
 }
 
 func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, k []byte, v []byte, fromCache bool) error {
@@ -203,8 +213,10 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, k []byte, v []byte) error {
-	//fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
+	//if bytes.Compare(common.FromHex("0808"), k) == 0 {
+	//	fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+	//}
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -221,23 +233,18 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
-		i := 0
-		for _, b := range k {
-			if i >= skip {
-				tr.succ.WriteByte(b / 16)
-			}
-			i++
-			if i >= skip {
-				tr.succ.WriteByte(b % 16)
-			}
-			i++
+		tr.succ.Write(kAsNibbles[skip:])
+
+		if !fromCache {
+			tr.succ.WriteByte(16)
 		}
-		tr.succ.WriteByte(16)
+
 		if tr.curr.Len() > 0 {
 			var err error
 			var data GenStructStepData
 			if tr.fromCache {
-				data = GenStructStepHashData{Hash: common.BytesToHash(tr.value.Bytes())}
+				tr.hashData.Hash = common.BytesToHash(tr.value.Bytes())
+				data = &tr.hashData
 			} else if tr.fieldSet == 0 {
 				tr.leafData.Value = rlphacks.RlpSerializableBytes(tr.value.Bytes())
 				data = &tr.leafData
@@ -256,10 +263,10 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 			}
 		}
 		// Remember the current key and value
+		tr.fromCache = fromCache
 		if fromCache {
 			tr.value.Reset()
 			tr.value.Write(v)
-			tr.fromCache = true
 			return nil
 		}
 
@@ -292,16 +299,22 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 	return nil
 }
 
-// MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieCacheBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
+// MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
+	isAccountBucket := bytes.Equal(bucket, dbutils.AccountsBucket)
+	maxAccountKeyLen := common.HashLength - 1
+
+	keyAsNibbles := pool.GetBuffer(256)
+	defer pool.PutBuffer(keyAsNibbles)
+
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.View(func(tx *bolt.Tx) error {
-		cacheBucket := tx.Bucket(dbutils.IntermediateTrieCacheBucket)
+		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		if cacheBucket == nil {
 			return nil
 		}
@@ -319,21 +332,34 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			fromCache, minKey = keyIsBefore(cacheK, k)
-			if fromCache && !tr.currentRs.HashOnly(minKey) { // can't use cache as is, need go to children
-				cacheK, cacheV = cache.SeekTo(append(minKey, 0)) // seek only cache cursor, because it's minimal move
+			// for Address bucket, skip cache keys longer than 31 bytes
+			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
+				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
+				if !ok { // no siblings left in cache
+					cacheK, cacheV = nil, nil
+					continue
+				}
+				cacheK, cacheV = cache.SeekTo(next)
 				continue
 			}
+
+			fromCache, minKey = keyIsBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					_, minKey = keyIsBefore(cacheK, k)
+					minKeyIndex := int(math.Min(float64(len(minKey)), float64(fixedbytes-1)))
+					startKeyIndex := int(math.Min(float64(len(startkey)), float64(fixedbytes-1)))
 
-					cmp = bytes.Compare(minKey[:fixedbytes-1], startkey[:fixedbytes-1])
+					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+
+					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
+						cmp = -1
+					}
+
 					if cmp == 0 {
-						k1 := minKey[fixedbytes-1] & mask
-						k2 := startkey[fixedbytes-1] & mask
+						k1 := minKey[minKeyIndex] & mask
+						k2 := startkey[startKeyIndex] & mask
 						if k1 < k2 {
 							cmp = -1
 						} else if k1 > k2 {
@@ -346,6 +372,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 						if k == nil && cacheK == nil {
 							return nil
 						}
+						fromCache, minKey = keyIsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -357,29 +384,68 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, bucket []byte, startke
 				}
 			}
 
-			fromCache, _ = keyIsBefore(cacheK, k)
 			if !fromCache {
 				if len(v) > 0 {
-					if err := walker(rangeIdx, k, v, fromCache); err != nil {
-						return fmt.Errorf("waker err: %w", err)
+					keyAsNibbles.Reset()
+					DecompressNibbles(minKey, &keyAsNibbles.B)
+					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
+						return err
 					}
 				}
 				k, v = c.Next()
 				continue
 			}
 
-			if len(cacheV) > 0 {
-				if err := walker(rangeIdx, cacheK, cacheV, fromCache); err != nil {
+			// cache part
+			canUseCache := false
+
+			// Special case: self-destructed accounts.
+			// self-destructed accounts may be marked in cache bucket by empty value
+			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
+			isSelfDestructedMarker := len(cacheV) == 0
+			if isSelfDestructedMarker {
+				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
+					keyAsNibbles.Reset()
+					DecompressNibbles(minKey, &keyAsNibbles.B)
+					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
+						return err
+					}
+				}
+				// skip subtree
+			} else {
+				currentReq := tr.requests[tr.reqIndices[rangeIdx]]
+				currentRs := tr.rss[rangeIdx]
+				keyAsNibbles.Reset()
+				DecompressNibbles(minKey, &keyAsNibbles.B)
+
+				if len(keyAsNibbles.B) < currentReq.extResolvePos {
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
+
+				canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+				if !canUseCache { // can't use cache as is, need go to children
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
+
+				if err := walker(rangeIdx, keyAsNibbles.B, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
 
-			next := hexIncrement(cacheK)
-			if next == nil { // no siblings left
-				break
+			// skip subtree
+
+			next, ok := nextSubtree(cacheK)
+			if !ok { // no siblings left
+				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
+					break
+				}
+				cacheK, cacheV = nil, nil
+				continue
 			}
-			k, v = c.SeekTo(next)
-			cacheK, cacheV = cache.SeekTo(next)
+			k, v = c.Seek(next)
+			cacheK, cacheV = cache.Seek(next)
 		}
 		return nil
 	})
