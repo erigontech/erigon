@@ -208,7 +208,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 	t.SetTouchFunc(tp.Touch)
 
 	if debug.IsIntermediateTrieHash() {
-		t.SetUnloadNodeFunc(tds.putIntermediateHash)
+		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
 		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		tp.SetCreateNodeFunc(tds.delIntermediateHash)
 	}
@@ -255,7 +255,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	}
 
 	if debug.IsIntermediateTrieHash() {
-		cpy.t.SetUnloadNodeFunc(cpy.putIntermediateHash)
+		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
 		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 	}
@@ -273,21 +273,8 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 	}
 }
 
-func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []byte) {
-	if len(prefixAsNibbles) == 0 {
-		return
-	}
-
-	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of prefixAsNibbles
-		return
-	}
-
-	key := pool.GetBuffer(64)
-	defer pool.PutBuffer(key)
-
-	trie.CompressNibbles(prefixAsNibbles, &key.B)
-
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), nodeHash); err != nil {
+func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key, nodeHash); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }

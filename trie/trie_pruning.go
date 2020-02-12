@@ -25,6 +25,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 type TriePruning struct {
@@ -45,7 +46,8 @@ type TriePruning struct {
 	// Current timestamp
 	blockNr uint64
 
-	createNodeFunc func(prefix []byte)
+	createNodeFunc func(prefixAsNibbles []byte)
+	unloadNodeFunc func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
 }
 
 func NewTriePruning(oldestGeneration uint64) *TriePruning {
@@ -67,8 +69,12 @@ func (tp *TriePruning) BlockNr() uint64 {
 	return tp.blockNr
 }
 
-func (tp *TriePruning) SetCreateNodeFunc(f func(prefix []byte)) {
+func (tp *TriePruning) SetCreateNodeFunc(f func(prefixAsNibbles []byte)) {
 	tp.createNodeFunc = f
+}
+
+func (t *TriePruning) SetUnloadNodeFunc(f func(prefix []byte, nodeHash []byte)) {
+	t.unloadNodeFunc = f
 }
 
 // Updates a node to the current timestamp
@@ -157,33 +163,8 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 	var empty = false
 	sort.Strings(hexes)
 
-	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
-		for i, hex := range hexes {
-			if i == 0 || len(hex) == 0 || len(hex)%2 == 1 {
-				continue
-			}
-			nd, parent, ok := t.getNode([]byte(hex), false)
-			if !ok {
-				continue
-			}
-			switch nd.(type) {
-			case *duoNode, *fullNode:
-				// will work only with these types of nodes
-			default:
-				continue
-			}
-			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
-			case *duoNode, *fullNode:
-				// will work only with these types of nodes
-			default:
-				continue
-			}
-			t.unloadNodeFunc([]byte(hex), nd.hash())
-		}
-	}
-
 	for i, hex := range hexes {
-		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes are pruned, there is no need to prune descendants
+		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes pruned, there is no need to prune descendants
 			t.unload([]byte(hex), h)
 			if len(hex) == 0 {
 				empty = true
@@ -209,6 +190,37 @@ func (tp *TriePruning) PruneToTimestamp(
 		}
 		delete(tp.accounts, gen)
 	}
+
+	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
+		key := pool.GetBuffer(64)
+		defer pool.PutBuffer(key)
+		for prefix := range aggregateAccounts {
+			if len(prefix) == 0 || len(prefix)%2 == 1 {
+				continue
+			}
+
+			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
+			if !ok {
+				continue
+			}
+			switch nd.(type) {
+			case *duoNode, *fullNode:
+				// will work only with these types of nodes
+			default:
+				continue
+			}
+			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
+			case *duoNode, *fullNode:
+				// will work only with these types of nodes
+			default:
+				continue
+			}
+
+			CompressNibbles([]byte(prefix), &key.B)
+			tp.unloadNodeFunc(key.B, nd.hash())
+		}
+	}
+
 	h := newHasher(false)
 	defer returnHasherToPool(h)
 	pruneMap(accountsTrie, aggregateAccounts, h)
