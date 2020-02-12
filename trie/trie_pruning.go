@@ -220,7 +220,7 @@ func (tp *TriePruning) PruneToTimestamp(
 			}
 
 			CompressNibbles([]byte(prefix), &key.B)
-			tp.unloadNodeFunc(key.B, nd.hash())
+			tp.unloadNodeFunc(key.B, nd.reference())
 		}
 
 		fmt.Println("Alex: finished")
