@@ -47,8 +47,8 @@ type Trie struct {
 	root node
 
 	touchFunc           func(hex []byte, del bool)
-	unloadNodeFunc      func(prefix []byte, nodeHash common.Hash) // called when fullNode or dualNode unloaded
-	onDeleteSubtreeFunc func(prefix []byte)                       // called when subtree unloaded
+	unloadNodeFunc      func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
+	onDeleteSubtreeFunc func(prefix []byte)                  // called when subtree unloaded
 
 	newHasherFunc func() *hasher
 
@@ -68,7 +68,7 @@ type Trie struct {
 func New(root common.Hash) *Trie {
 	trie := &Trie{
 		touchFunc:           func([]byte, bool) {},
-		unloadNodeFunc:      func(prefix []byte, nodeHash common.Hash) {},
+		unloadNodeFunc:      func(prefix []byte, nodeHash []byte) {},
 		onDeleteSubtreeFunc: func(prefix []byte) {},
 		newHasherFunc:       func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 		hashMap:             make(map[common.Hash]node),
@@ -103,7 +103,7 @@ func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
 }
 
-func (t *Trie) SetUnloadNodeFunc(f func(prefixAsNibbles []byte, nodeHash common.Hash)) {
+func (t *Trie) SetUnloadNodeFunc(f func(prefixAsNibbles []byte, nodeHash []byte)) {
 	t.unloadNodeFunc = f
 }
 

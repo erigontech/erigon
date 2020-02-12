@@ -1,24 +1,15 @@
 package trie
 
-import (
-	"errors"
-)
-
 // CompressNibbles - supports only even number of nibbles
 //
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F
-func CompressNibbles(nibbles []byte, out *[]byte) error {
-	if len(nibbles)%2 != 0 {
-		return errors.New("this method supports only arrays of even nibbles")
-	}
-
+func CompressNibbles(nibbles []byte, out *[]byte) {
 	tmp := (*out)[:0]
 	for i := 0; i < len(nibbles); i += 2 {
 		tmp = append(tmp, nibbles[i]<<4|nibbles[i+1])
 	}
 	*out = tmp
-	return nil
 }
 
 // DecompressNibbles - supports only even number of nibbles

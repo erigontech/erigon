@@ -273,7 +273,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 	}
 }
 
-func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash common.Hash) {
+func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash []byte) {
 	if len(prefixAsNibbles) == 0 {
 		return
 	}
@@ -285,12 +285,9 @@ func (tds *TrieDbState) putIntermediateHash(prefixAsNibbles []byte, nodeHash com
 	key := pool.GetBuffer(64)
 	defer pool.PutBuffer(key)
 
-	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
-		log.Warn("could not CompressNibbles for intermediate trie hash", "err", err)
-		return
-	}
+	trie.CompressNibbles(prefixAsNibbles, &key.B)
 
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), nodeHash[:]); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key.Bytes(), nodeHash); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
@@ -307,10 +304,7 @@ func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
 	key := pool.GetBuffer(64)
 	defer pool.PutBuffer(key)
 
-	if err := trie.CompressNibbles(prefixAsNibbles, &key.B); err != nil {
-		log.Warn("could not CompressNibbles for intermediate trie hash", "err", err)
-		return
-	}
+	trie.CompressNibbles(prefixAsNibbles, &key.B)
 
 	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key.Bytes())); err != nil {
 		log.Warn("could not delete intermediate trie hash", "err", err)

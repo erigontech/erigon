@@ -32,9 +32,8 @@ func TestCompressNibbles(t *testing.T) {
 		decompressBuf.Reset()
 
 		in := common.Hex2Bytes(tc.in)
-		err := CompressNibbles(in, &compressBuf.B)
+		CompressNibbles(in, &compressBuf.B)
 		compressed := compressBuf.Bytes()
-		assert.Nil(t, err)
 		msg := "On: " + tc.in + " Len: " + strconv.Itoa(len(compressed))
 		assert.Equal(t, tc.expect, fmt.Sprintf("%x", compressed), msg)
 		DecompressNibbles(compressed, &decompressBuf.B)

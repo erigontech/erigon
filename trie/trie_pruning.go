@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -158,10 +157,7 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 	var empty = false
 	sort.Strings(hexes)
 
-	var hn common.Hash
 	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
-		now := time.Now()
-		counter := 0
 		for i, hex := range hexes {
 			if i == 0 || len(hex) == 0 || len(hex)%2 == 1 {
 				continue
@@ -182,14 +178,8 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 			default:
 				continue
 			}
-			counter++
-			_, err := h.hash(nd, len(hex) == 0, hn[:])
-			if err != nil {
-				continue
-			}
-			t.unloadNodeFunc([]byte(hex), hn)
+			t.unloadNodeFunc([]byte(hex), nd.hash())
 		}
-		fmt.Printf("Hashed %d nodes, took %s \n", counter, time.Since(now))
 	}
 
 	for i, hex := range hexes {
