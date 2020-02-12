@@ -1006,23 +1006,14 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-<<<<<<< HEAD
-			//t.unloadNodeFunc(hex, hnode.reference())
 			p.child1 = hnode
 		case i2:
-			//t.unloadNodeFunc(hex, hnode.reference())
-=======
 			p.child1 = hnode
 		case i2:
->>>>>>> move unloadFunc from trie to pruner
 			p.child2 = hnode
 		}
 	case *fullNode:
 		idx := hex[len(hex)-1]
-<<<<<<< HEAD
-		//t.unloadNodeFunc(hex, hnode.reference())
-=======
->>>>>>> move unloadFunc from trie to pruner
 		p.Children[idx] = hnode
 	case *accountNode:
 		p.storage = hnode
