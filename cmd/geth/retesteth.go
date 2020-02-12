@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"math/big"
 	"os"
 	"os/signal"
@@ -47,6 +48,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
 )
 
@@ -252,8 +255,8 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 	}
 }
 
-func (e *NoRewardEngine) Seal(chain consensus.ChainReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return e.inner.Seal(chain, block, results, stop)
+func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+	return e.inner.Seal(ctx, chain, block, results, stop)
 }
 
 func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
@@ -379,7 +382,7 @@ func (api *RetestethAPI) SetChainParams(_ context.Context, chainParams ChainPara
 	if err != nil {
 		return false, err
 	}
-	fmt.Printf("Chain config: %v\n", chainConfig)
+	log.Debug("Chain config", "cfg", chainConfig)
 
 	var inner consensus.Engine
 	switch chainParams.SealEngine {
@@ -551,7 +554,7 @@ func (api *RetestethAPI) mineBlock() error {
 }
 
 func (api *RetestethAPI) importBlock(block *types.Block) error {
-	if _, err := api.blockchain.InsertChain([]*types.Block{block}); err != nil {
+	if _, err := api.blockchain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
 		return err
 	}
 	api.blockNumber = block.NumberU64()
@@ -745,7 +748,23 @@ func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, bloc
 	if err != nil {
 		return nil, err
 	}
-	return statedb.GetCode(address), nil
+	return getCode(statedb.GetCode(address)), nil
+}
+
+func getCode(c hexutil.Bytes) hexutil.Bytes {
+	isNil := true
+	for _, nibble := range c {
+		if nibble != 0 {
+			isNil = false
+			break
+		}
+	}
+
+	if isNil {
+		return hexutil.Bytes{}
+	}
+
+	return c
 }
 
 func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {
@@ -795,33 +814,9 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 			return StorageRangeResult{}, err
 		}
 	} else {
-		var statedb *state.IntraBlockState
-		root = parentHeader.Root
-		statedb, dbstate, err = api.blockchain.StateAt(root, parentHeader.Number.Uint64())
+		_, _, _, dbstate, err = eth.ComputeTxEnv(ctx, api.blockchain, api.blockchain.Config(), api.blockchain, api.blockchain.ChainDb(), block.Hash(), txIndex)
 		if err != nil {
 			return StorageRangeResult{}, err
-		}
-		// Recompute transactions up to the target index.
-		signer := types.MakeSigner(api.blockchain.Config(), block.Number())
-		for idx, tx := range block.Transactions() {
-			// Assemble the transaction call message and return if the requested offset
-			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), api.blockchain, nil)
-			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, statedb, api.blockchain.Config(), vm.Config{})
-			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
-				return StorageRangeResult{}, fmt.Errorf("transaction %#x failed: %v", tx.Hash(), err)
-			}
-			// Ensure any modifications are committed to the state
-			// Only delete empty objects if EIP158/161 (a.k.a Spurious Dragon) is in effect
-			//_ = statedb.IntermediateRoot(vmenv.ChainConfig().IsEIP158(block.Number()))
-			if idx == int(txIndex) {
-				// This is to make sure root can be opened by OpenTrie
-				err = statedb.CommitBlock(ctx, dbstate)
-				if err != nil {
-					return StorageRangeResult{}, err
-				}
-			}
 		}
 	}
 	/*
@@ -876,10 +871,18 @@ func (api *RetestethAPI) StorageRangeAt(ctx context.Context,
 	}
 
 	for h, entry := range rangeResults.Storage {
-		result.Storage[h] = SRItem{entry.Key.Hex(), entry.Value.Hex()}
+		result.Storage[h] = SRItem{hash2CompactHex(*entry.Key), hash2CompactHex(entry.Value)}
 	}
 
 	return result, nil
+}
+
+func hash2CompactHex(h common.Hash) string {
+	d := h.Big()
+	if d.Uint64() < math.MaxInt32 {
+		return fmt.Sprintf("0x%02x", d.Uint64())
+	}
+	return hexutil.EncodeBig(d)
 }
 
 func (api *RetestethAPI) ClientVersion(_ context.Context) (string, error) {
@@ -897,6 +900,21 @@ func splitAndTrim(input string) []string {
 }
 
 func retesteth(ctx *cli.Context) error {
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.LvlInfo)
+
 	log.Info("Welcome to retesteth!")
 	// register signer API with server
 	var (

@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "method": "debug_storageRangeAt",
+  "params": [
+    "0x2bf07c790737be3bc4c57cbf3dedb231806f6bfef434657d59dcc9ddbe4665ab",
+    1,
+    "0x8b3b3b624c3c0397d3da8fd861512393d51dcbac",
+    "0xfade75560a6cfb895f5dc7c4ab3fa10089ac2372c98aa78280d029ab36285ad6",
+    1024
+  ],
+  "id": 1377
+}

@@ -19,14 +19,14 @@ package ethdb
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"os"
 	"path"
 
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/log"
-
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var OpenFileLimit = 64
@@ -42,6 +42,16 @@ type BoltDatabase struct {
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
+func NewWrapperBoltDatabase(db *bolt.DB) *BoltDatabase {
+	logger := log.New()
+	return &BoltDatabase{
+		db:  db,
+		log: logger,
+		id:  id(),
+	}
+}
+
+// NewBoltDatabase returns a BoltDB wrapper.
 func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	logger := log.New("database", file)
 
@@ -51,6 +61,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	}
 	// Open the db and recover any potential corruptions
 	db, err := bolt.Open(file, 0600, &bolt.Options{})
+
 	// (Re)check for errors and abort if opening of the db failed
 	if err != nil {
 		return nil, err
@@ -85,7 +96,8 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			if err != nil {
 				return err
 			}
-			if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+			switch {
+			case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
 				b, _ := hb.Get(key)
 				b, err = AppendToIndex(b, timestamp)
 				if err != nil {
@@ -95,7 +107,17 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 				if err = hb.Put(key, b); err != nil {
 					return err
 				}
-			} else {
+			case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+				b, _ := hb.Get(key[:common.HashLength+common.IncarnationLength])
+				b, err = AppendToStorageIndex(b, key[common.HashLength+common.IncarnationLength:common.HashLength+common.IncarnationLength+common.HashLength], timestamp)
+				if err != nil {
+					log.Error("PutS AppendChangedOnIndex err", "err", err)
+					return err
+				}
+				if err = hb.Put(key, b); err != nil {
+					return err
+				}
+			default:
 				if err = hb.Put(composite, value); err != nil {
 					return err
 				}
@@ -108,21 +130,12 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 		}
 
 		dat, _ := sb.Get(changeSetKey)
-		sh, err := dbutils.DecodeChangeSet(dat)
+		dat, err = addToChangeSet(dat, key, value)
 		if err != nil {
 			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
 			return err
 		}
-		err = sh.Add(key, value)
-		if err != nil {
-			return err
-		}
-		dat, err = sh.Encode()
-		if err != nil {
-			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
-			return err
-		}
-
+		// s.Sort(dat) not sorting it here. seems that this Puts is only for testing.
 		return sb.Put(changeSetKey, dat)
 	})
 	return err
@@ -199,27 +212,8 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
-// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-func (db *BoltDatabase) GetS(hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	if !debug.IsThinHistory() || bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
-		composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-		return db.Get(hBucket, composite)
-	}
-
-	chs, err := db.GetChangeSetByBlock(hBucket, timestamp)
-	if err != nil {
-		return nil, err
-	}
-
-	res, err := chs.FindLast(key)
-	if err != nil {
-		return nil, ErrKeyNotFound
-	}
-	return res, nil
-}
-
 // getChangeSetByBlockNoLock returns changeset by block and bucket
-func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*dbutils.ChangeSet, error) {
+func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
 	key := dbutils.CompositeChangeSetKey(dbutils.EncodeTimestamp(timestamp), hBucket)
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
@@ -238,14 +232,15 @@ func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) (*
 	if err != nil {
 		return nil, err
 	}
-	return dbutils.DecodeChangeSet(dat)
+	return dat, nil
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	var dat []byte
 	err := db.db.View(func(tx *bolt.Tx) error {
-		if debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+		switch {
+		case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket):
 			v, err := BoltDBFindByHistory(tx, hBucket, key, timestamp)
 			if err != nil {
 				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
@@ -254,7 +249,16 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 				copy(dat, v)
 				return nil
 			}
-		} else {
+		case debug.IsThinHistory() && bytes.Equal(hBucket, dbutils.StorageHistoryBucket):
+			v, err := BoltDBFindStorageByHistory(tx, hBucket, key, timestamp)
+			if err != nil {
+				log.Debug("BoltDB BoltDBFindStorageByHistory err", "err", err)
+			} else {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		default:
 			composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
 			hB := tx.Bucket(hBucket)
 			if hB == nil {
@@ -307,7 +311,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 		}
 		c := b.Cursor()
 		k, v := c.Seek(startkey)
-		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
+		for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
 			goOn, err := walker(k, v)
 			if err != nil {
 				return err
@@ -630,11 +634,7 @@ func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
 			if hb == nil {
 				return nil
 			}
-			changedAccounts, err := dbutils.DecodeChangeSet(v)
-			if err != nil {
-				return err
-			}
-			err = changedAccounts.Walk(func(kk, _ []byte) error {
+			err := dbutils.Walk(v, func(kk, _ []byte) error {
 				kk = append(kk, encodedTS...)
 				return hb.Delete(kk)
 			})
@@ -707,6 +707,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
 	return 100 * 1024
+	//return 128
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

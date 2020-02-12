@@ -30,10 +30,12 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/stretchr/testify/assert"
 )
 
 func init() {
@@ -60,7 +62,7 @@ func TestNull(t *testing.T) {
 	var trie Trie
 	key := make([]byte, 32)
 	value := []byte("test")
-	trie.Update(key, value, 0)
+	trie.Update(key, value)
 	v, _ := trie.Get(key)
 	if !bytes.Equal(v, value) {
 		t.Fatal("wrong value")
@@ -79,7 +81,7 @@ func TestInsert(t *testing.T) {
 	exp := common.HexToHash("8aad789dff2f538bca5d8ea56e8abe10f4c7ba3a5dea95fea4cd6e7c3a1168d3")
 	root := trie.Hash()
 	if root != exp {
-		t.Errorf("exp %x got %x", exp, root)
+		t.Errorf("case 1: exp %x got %x", exp, root)
 	}
 
 	trie = newEmpty()
@@ -88,7 +90,7 @@ func TestInsert(t *testing.T) {
 	exp = common.HexToHash("d23786fb4a010da3ce639d66d5e904a11dbc02746d1ce25029e53290cabf28ab")
 	root = trie.Hash()
 	if root != exp {
-		t.Errorf("exp %x got %x", exp, root)
+		t.Errorf("case 2: exp %x got %x", exp, root)
 	}
 }
 
@@ -223,8 +225,8 @@ func TestReplication(t *testing.T) {
 
 func TestLargeValue(t *testing.T) {
 	trie := newEmpty()
-	trie.Update([]byte("key1"), []byte{99, 99, 99, 99}, 0)
-	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32), 0)
+	trie.Update([]byte("key1"), []byte{99, 99, 99, 99})
+	trie.Update([]byte("key2"), bytes.Repeat([]byte{1}, 32))
 	trie.Hash()
 }
 
@@ -236,6 +238,41 @@ type countingDB struct {
 func (db *countingDB) Get(bucket []byte, key []byte) ([]byte, error) {
 	db.gets[string(key)]++
 	return db.Database.Get(bucket, key)
+}
+
+// TestRandomCases tests som cases that were found via random fuzzing
+func TestRandomCases(t *testing.T) {
+	var rt []randTestStep = []randTestStep{
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 0
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 1
+		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000002")},   // step 2
+		{op: 2, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("")},                 // step 3
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 4
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 5
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 6
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 7
+		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000008")}, // step 8
+		{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000009")},   // step 9
+		{op: 2, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("")},                                                                                       // step 10
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 11
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 12
+		{op: 0, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("000000000000000d")},                                                                       // step 13
+		{op: 6, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 14
+		{op: 1, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("")},                 // step 15
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 16
+		{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000011")}, // step 17
+		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 18
+		{op: 3, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")},                                                                                         // step 19
+		// FIXME: fix these testcases for turbo-geth
+		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000014")},           // step 20
+		//{op: 0, key: common.Hex2Bytes("d51b182b95d677e5f1c82508c0228de96b73092d78ce78b2230cd948674f66fd1483bd"), value: common.Hex2Bytes("0000000000000015")},           // step 21
+		//{op: 0, key: common.Hex2Bytes("c2a38512b83107d665c65235b0250002882ac2022eb00711552354832c5f1d030d0e408e"), value: common.Hex2Bytes("0000000000000016")},         // step 22
+		{op: 5, key: common.Hex2Bytes(""), value: common.Hex2Bytes("")}, // step 23
+		//{op: 1, key: common.Hex2Bytes("980c393656413a15c8da01978ed9f89feb80b502f58f2d640e3a2f5f7a99a7018f1b573befd92053ac6f78fca4a87268"), value: common.Hex2Bytes("")}, // step 24
+		//{op: 1, key: common.Hex2Bytes("fd"), value: common.Hex2Bytes("")}, // step 25
+	}
+	runRandTest(rt)
+
 }
 
 // randTest performs random trie operations.
@@ -296,12 +333,14 @@ func runRandTest(rt randTest) bool {
 	values := make(map[string]string) // tracks content of the trie
 
 	for i, step := range rt {
+		fmt.Printf("{op: %d, key: common.Hex2Bytes(\"%x\"), value: common.Hex2Bytes(\"%x\")}, // step %d\n",
+			step.op, step.key, step.value, i)
 		switch step.op {
 		case opUpdate:
-			tr.Update(step.key, step.value, 0)
+			tr.Update(step.key, step.value)
 			values[string(step.key)] = string(step.value)
 		case opDelete:
-			tr.Delete(step.key, 0)
+			tr.Delete(step.key)
 			delete(values, string(step.key))
 		case opGet:
 			v, _ := tr.Get(step.key)
@@ -367,7 +406,7 @@ func benchGet(b *testing.B, commit bool) {
 	k := make([]byte, 32)
 	for i := 0; i < benchElemCount; i++ {
 		binary.LittleEndian.PutUint64(k, uint64(i))
-		trie.Update(k, k, 0)
+		trie.Update(k, k)
 	}
 	binary.LittleEndian.PutUint64(k, benchElemCount/2)
 
@@ -386,9 +425,10 @@ func benchGet(b *testing.B, commit bool) {
 func benchUpdate(b *testing.B, e binary.ByteOrder) *Trie {
 	trie := newEmpty()
 	k := make([]byte, 32)
+	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		e.PutUint64(k, uint64(i))
-		trie.Update(k, k, 0)
+		trie.Update(k, k)
 	}
 	return trie
 }
@@ -421,7 +461,7 @@ func BenchmarkHash(b *testing.B) {
 	// Insert the accounts into the trie and hash it
 	trie := newEmpty()
 	for i := 0; i < len(addresses); i++ {
-		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i], 0)
+		trie.Update(crypto.Keccak256(addresses[i][:]), accounts[i])
 	}
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -446,11 +486,11 @@ func getString(trie *Trie, k string) []byte {
 }
 
 func updateString(trie *Trie, k, v string) {
-	trie.Update([]byte(k), []byte(v), 0)
+	trie.Update([]byte(k), []byte(v))
 }
 
 func deleteString(trie *Trie, k string) {
-	trie.Delete([]byte(k), 0)
+	trie.Delete([]byte(k))
 }
 
 func TestDeepHash(t *testing.T) {
@@ -469,7 +509,7 @@ func TestDeepHash(t *testing.T) {
 		fmt.Println("Test", i)
 		trie := New(common.Hash{})
 		for _, keyVal := range keyVals {
-			trie.Update([]byte(keyVal.key), []byte(keyVal.value), 0)
+			trie.Update([]byte(keyVal.key), []byte(keyVal.value))
 		}
 		trie.PrintTrie()
 		hash1 := trie.Hash()
@@ -478,7 +518,7 @@ func TestDeepHash(t *testing.T) {
 		prefixTrie.UpdateAccount([]byte(prefix), &acc)
 		for _, keyVal := range keyVals {
 			// Add a prefix to every key
-			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value), 0)
+			prefixTrie.Update([]byte(prefix+keyVal.key), []byte(keyVal.value))
 		}
 
 		got2, hash2 := prefixTrie.DeepHash([]byte(prefix))
@@ -489,4 +529,43 @@ func TestDeepHash(t *testing.T) {
 			t.Errorf("DeepHash mistmatch: %x, expected %x, testcase %d", hash2, hash1, i)
 		}
 	}
+}
+
+func TestHashMapLeak(t *testing.T) {
+	debug.OverrideGetNodeData(true)
+	defer debug.RestoreGetNodeData()
+
+	// freeze the randomness
+	random := rand.New(rand.NewSource(794656320434))
+
+	// now create a tree with some small and some big leaves
+	trie := newEmpty()
+	nTouches := 256 * 10
+
+	var key [1]byte
+	var val [8]byte
+	for i := 0; i < nTouches; i++ {
+		key[0] = byte(random.Intn(256))
+		binary.BigEndian.PutUint64(val[:], random.Uint64())
+
+		option := random.Intn(3)
+		if option == 0 {
+			// small leaf node
+			trie.Update(key[:], val[:])
+		} else if option == 1 {
+			// big leaf node
+			trie.Update(key[:], crypto.Keccak256(val[:]))
+		} else {
+			// test delete as well
+			trie.Delete(key[:])
+		}
+	}
+
+	trie.Hash()
+
+	nHashes := trie.HashMapSize()
+	nExpected := 1 + 16 + 256/3
+
+	assert.GreaterOrEqual(t, nHashes, nExpected*7/8)
+	assert.LessOrEqual(t, nHashes, nExpected*9/8)
 }

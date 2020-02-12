@@ -46,8 +46,8 @@ type Stateless struct {
 // NewStateless creates a new instance of Stateless
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
-func NewStateless(stateRoot common.Hash, witness []byte, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
-	t, codeMap, err := trie.BlockWitnessToTrieBin(witness, trace, isBinary)
+func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
+	t, codeMap, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
 	if err != nil {
 		return nil, err
 	}
@@ -175,6 +175,9 @@ func (s *Stateless) UpdateAccountCode(addrHash common.Hash, incarnation uint64, 
 	if _, ok := s.codeMap[codeHash]; !ok {
 		s.codeMap[codeHash] = code
 	}
+	if s.trace {
+		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", addrHash, codeHash)
+	}
 	return nil
 }
 
@@ -200,6 +203,9 @@ func (s *Stateless) WriteAccountStorage(_ context.Context, address common.Addres
 		m[seckey] = v
 	} else {
 		m[seckey] = nil
+	}
+	if s.trace {
+		fmt.Printf("Stateless: WriteAccountStorage %x key %x val %x\n", address, *key, *value)
 	}
 	return nil
 }
@@ -235,13 +241,13 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		}
 		// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 		// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-		s.t.DeleteSubtree(addrHash[:], s.blockNr)
+		s.t.DeleteSubtree(addrHash[:])
 	}
 	for addrHash, account := range s.accountUpdates {
 		if account != nil {
 			s.t.UpdateAccount(addrHash[:], account)
 		} else {
-			s.t.Delete(addrHash[:], s.blockNr)
+			s.t.Delete(addrHash[:])
 		}
 	}
 	for addrHash, m := range s.storageUpdates {
@@ -253,9 +259,9 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		for keyHash, v := range m {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			if len(v) > 0 {
-				s.t.Update(cKey, v, s.blockNr)
+				s.t.Update(cKey, v)
 			} else {
-				s.t.Delete(cKey, s.blockNr)
+				s.t.Delete(cKey)
 			}
 		}
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
@@ -283,7 +289,7 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 		if account, ok := s.accountUpdates[addrHash]; ok && account != nil {
 			account.Root = trie.EmptyRoot
 		}
-		s.t.DeleteSubtree(addrHash[:], s.blockNr)
+		s.t.DeleteSubtree(addrHash[:])
 	}
 	myRoot := s.t.Hash()
 	if myRoot != expected {
@@ -300,4 +306,12 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 	s.deleted = make(map[common.Hash]struct{})
 	s.created = make(map[common.Hash]struct{})
 	return nil
+}
+
+func (s *Stateless) GetTrie() *trie.Trie {
+	return s.t
+}
+
+func (s *Stateless) GetCodeMap() map[common.Hash][]byte {
+	return s.codeMap
 }

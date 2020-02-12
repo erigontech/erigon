@@ -80,7 +80,10 @@ type stateObject struct {
 	//trie Trie // storage trie, which becomes non-nil on first access
 	code Code // contract bytecode, which gets set when code is loaded
 
-	originStorage      Storage // Storage cache of original entries to dedup rewrites
+	originStorage Storage // Storage cache of original entries to dedup rewrites
+	// blockOriginStorage keeps the values of storage items at the beginning of the block
+	// Used to make decision on whether to make a write to the
+	// database (value != origin) or not (value == origin)
 	blockOriginStorage Storage
 	dirtyStorage       Storage // Storage entries that need to be flushed to disk
 	fakeStorage        Storage // Fake storage which constructed by caller for debugging purpose.

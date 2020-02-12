@@ -178,20 +178,25 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			EVMInterpreter:          config.EVMInterpreter,
 		}
 		cacheConfig = &core.CacheConfig{
-			Disabled:            config.NoPruning,
-			BlocksBeforePruning: config.BlocksBeforePruning,
-			BlocksToPrune:       config.BlocksToPrune,
-			PruneTimeout:        config.PruningTimeout,
-			TrieCleanLimit:      config.TrieCleanCache,
-			TrieDirtyLimit:      config.TrieDirtyCache,
-			TrieCleanNoPrefetch: config.NoPrefetch,
-			TrieTimeLimit:       config.TrieTimeout,
-			DownloadOnly:        config.DownloadOnly,
-			NoHistory:           !config.StorageMode.History,
-			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
+			Disabled:               config.NoPruning,
+			BlocksBeforePruning:    config.BlocksBeforePruning,
+			BlocksToPrune:          config.BlocksToPrune,
+			PruneTimeout:           config.PruningTimeout,
+			TrieCleanLimit:         config.TrieCleanCache,
+			TrieDirtyLimit:         config.TrieDirtyCache,
+			TrieCleanNoPrefetch:    config.NoPrefetch,
+			TrieTimeLimit:          config.TrieTimeout,
+			DownloadOnly:           config.DownloadOnly,
+			NoHistory:              !config.StorageMode.History,
+			NoIntermediateTrieHash: !config.StorageMode.IntermediateTrieHash,
+			ArchiveSyncInterval:    uint64(config.ArchiveSyncInterval),
 		}
 	)
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve)
+	if err != nil {
+		return nil, err
+	}
+	_, err = eth.blockchain.GetTrieDbState()
 	if err != nil {
 		return nil, err
 	}

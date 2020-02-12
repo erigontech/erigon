@@ -730,7 +730,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		original = &accounts.Account{}
 	} else {
 		account.Copy(&previous.data)
-		account.Incarnation = 0
+		account.Incarnation = NonContractIncarnation
 		original = &previous.original
 	}
 	newobj = newObject(sdb, addr, account, original)
@@ -754,7 +754,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 //   2. tx_create(sha(account ++ nonce)) (note that this gets the address of 1)
 //
 // Carrying over the balance ensures that Ether doesn't disappear.
-func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
+func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation bool) {
 	sdb.Lock()
 	defer sdb.Unlock()
 	if sdb.tracer != nil {
@@ -770,14 +770,18 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, checkPrev bool) {
 	}
 
 	var previous *stateObject
-	if checkPrev {
+	if contractCreation {
 		previous = sdb.getStateObject(addr)
 	}
+
 	newObj, prev := sdb.createObject(addr, previous)
 	if prev != nil {
 		newObj.setBalance(&prev.data.Balance)
 	}
-	newObj.created = true
+
+	if contractCreation {
+		newObj.created = true
+	}
 }
 
 // Snapshot returns an identifier for the current revision of the state.
@@ -890,6 +894,9 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
+		if common.IsCanceled(ctx) {
+			return ctx.Err()
+		}
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
 

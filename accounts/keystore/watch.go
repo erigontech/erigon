@@ -22,7 +22,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rjeczalik/notify"
+	"github.com/JekaMas/notify"
 
 	"github.com/ledgerwatch/turbo-geth/log"
 )

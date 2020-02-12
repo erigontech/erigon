@@ -33,13 +33,13 @@ type VisualOpts struct {
 	Highlights     [][]byte               // Collection of keys, in the HEX encoding, that need to be highlighted with digits
 	IndexColors    []string               // Array of colors for representing digits as colored boxes
 	FontColors     []string               // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
-	Values         bool                   // Whether to display value nodes (as box with rounded corners)
 	CutTerminals   int                    // Specifies how many digits to cut from the terminal short node keys for a more convinient display
-	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
+	Values         bool                   // Whether to display value nodes (as box with rounded corners)
 	CodeCompressed bool                   // Whether to turn the code from a large rectange to a small square for a more convinient display
 	ValCompressed  bool                   // Whether long values (over 10 characters) are shortened using ... in the middle
 	ValHex         bool                   // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
 	SameLevel      bool                   // Whether the leaves (and hashes) need to be on the same horizontal level
+	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
 }
 
 // Visual creates visualisation of trie with highlighting
@@ -82,16 +82,20 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 		if v, ok := n.Val.(valueNode); ok {
 			if leaves != nil {
 				leaves[string(hex)] = struct{}{}
-				var valStr string
-				if opts.ValHex {
-					valStr = fmt.Sprintf("%x", []byte(v))
-				} else {
-					valStr = string(v)
-				}
-				if opts.ValCompressed && len(valStr) > 10 {
-					valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
-				}
-				visual.Circle(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), valStr, false)
+				/*
+					var valStr string
+					if opts.ValHex {
+						valStr = fmt.Sprintf("%x", []byte(v))
+					} else {
+						valStr = string(v)
+					}
+					if opts.ValCompressed && len(valStr) > 10 {
+						valStr = fmt.Sprintf("%x..%x", []byte(v)[:2], []byte(v)[len(v)-2:])
+					}
+				*/
+				valHex := keybytesToHex(v)
+				valHex = valHex[:len(valHex)-1]
+				visual.HexBox(w, fmt.Sprintf("e_%x", concat(hex, n.Key...)), valHex, 32, opts.ValCompressed, false)
 				fmt.Fprintf(w,
 					`n_%x -> e_%x;
 	`, hex, concat(hex, n.Key...))
@@ -104,25 +108,33 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 				`n_%x -> e_%x;
 `, hex, accountHex)
 			if !a.IsEmptyCodeHash() {
-				codeHex := keybytesToHex(opts.CodeMap[a.CodeHash])
-				codeHex = codeHex[:len(codeHex)-1]
-				visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)
+				if code, ok := opts.CodeMap[a.CodeHash]; ok {
+					codeHex := keybytesToHex(code)
+					codeHex = codeHex[:len(codeHex)-1]
+					visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)
+				} else {
+					visual.Box(w, fmt.Sprintf("c_%x", accountHex), "codeHash")
+				}
 				fmt.Fprintf(w,
 					`e_%x -> c_%x;
 				`, accountHex, accountHex)
 			}
 			if !a.IsEmptyRoot() {
-				nKey := n.Key
-				if nKey[len(nKey)-1] == 16 {
-					nKey = nKey[:len(nKey)-1]
-				}
-				var newHighlights [][]byte
-				for _, h := range highlights {
-					if h != nil && bytes.HasPrefix(h, nKey) {
-						newHighlights = append(newHighlights, h[len(nKey):])
+				if a.storage != nil {
+					nKey := n.Key
+					if nKey[len(nKey)-1] == 16 {
+						nKey = nKey[:len(nKey)-1]
 					}
+					var newHighlights [][]byte
+					for _, h := range highlights {
+						if h != nil && bytes.HasPrefix(h, nKey) {
+							newHighlights = append(newHighlights, h[len(nKey):])
+						}
+					}
+					visualNode(a.storage, accountHex[:len(accountHex)-1], w, newHighlights, opts, leaves, hashes)
+				} else {
+					visual.Box(w, fmt.Sprintf("n_%x", accountHex[:len(accountHex)-1]), "storHash")
 				}
-				visualNode(a.storage, accountHex[:len(accountHex)-1], w, newHighlights, opts, leaves, hashes)
 				fmt.Fprintf(w,
 					`e_%x -> n_%x;
 	`, accountHex, accountHex[:len(accountHex)-1])

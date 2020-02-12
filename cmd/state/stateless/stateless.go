@@ -1,13 +1,19 @@
 package stateless
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
@@ -20,6 +26,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/visual"
 )
 
 var chartColors = []drawing.Color{
@@ -70,6 +78,66 @@ func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
 	return nil
 }
 
+func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number uint64) error {
+	filename := fmt.Sprintf("state_%d.dot", number)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	indexColors := visual.HexIndexColors
+	fontColors := visual.HexFontColors
+	visual.StartGraph(f, false)
+	trie.Visual(t, f, &trie.VisualOpts{
+		Highlights:     nil,
+		IndexColors:    indexColors,
+		FontColors:     fontColors,
+		Values:         true,
+		CutTerminals:   0,
+		CodeMap:        codeMap,
+		CodeCompressed: false,
+		ValCompressed:  false,
+		ValHex:         true,
+	})
+	visual.EndGraph(f)
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func parseStarkBlockFile(starkBlocksFile string) (map[uint64]struct{}, error) {
+	dat, err := ioutil.ReadFile(starkBlocksFile)
+	if err != nil {
+		return nil, err
+	}
+	blockStrs := strings.Split(string(dat), "\n")
+	m := make(map[uint64]struct{})
+	for _, blockStr := range blockStrs {
+		if len(blockStr) == 0 {
+			continue
+		}
+		if b, err1 := strconv.ParseUint(blockStr, 10, 64); err1 == nil {
+			m[b] = struct{}{}
+		} else {
+			return nil, err1
+		}
+
+	}
+	return m, nil
+}
+
+func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) error {
+	filename := fmt.Sprintf("%s_%d.txt", starkStatsBase, blockNum)
+	f, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	if err = trie.StarkStats(witness, f, false); err != nil {
+		return err
+	}
+	return nil
+}
+
 type CreateDbFunc func(string) (ethdb.Database, error)
 
 func Stateless(
@@ -84,7 +152,11 @@ func Stateless(
 	statsfile string,
 	verifySnapshot bool,
 	binary bool,
-	createDb CreateDbFunc) {
+	createDb CreateDbFunc,
+	starkBlocksFile string,
+	starkStatsBase string,
+	useStatelessResolver bool,
+	witnessDatabasePath string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -96,6 +168,13 @@ func Stateless(
 		<-sigs
 		interruptCh <- true
 	}()
+
+	timeF, err := os.Create("timings.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer timeF.Close()
+	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
 	ethDb, err := createDb(chaindata)
 	check(err)
@@ -113,6 +192,11 @@ func Stateless(
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
+	var starkBlocks map[uint64]struct{}
+	if starkBlocksFile != "" {
+		starkBlocks, err = parseStarkBlockFile(starkBlocksFile)
+		check(err)
+	}
 	var preRoot common.Hash
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
@@ -145,19 +229,58 @@ func Stateless(
 	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
+	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
-	var witness []byte
+	var blockWitness []byte
+	var bw *trie.Witness
 
 	processed := 0
 	blockProcessingStartTime := time.Now()
 
+	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
+
+	var witnessDBWriter *WitnessDBWriter
+	var witnessDBReader *WitnessDBReader
+
+	if useStatelessResolver && witnessDatabasePath == "" {
+		panic("to use stateless resolver, set the witness DB path")
+	}
+
+	if witnessDatabasePath != "" {
+		var db ethdb.Database
+		db, err = createDb(witnessDatabasePath)
+		check(err)
+		defer db.Close()
+
+		if useStatelessResolver {
+			witnessDBReader = NewWitnessDBReader(db)
+			fmt.Printf("Will use the stateless resolver with DB: %s\n", witnessDatabasePath)
+		} else {
+			statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
+
+			var file *os.File
+			file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+			check(err)
+			defer file.Close()
+
+			statsFileCsv := csv.NewWriter(file)
+			defer statsFileCsv.Flush()
+
+			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
+			check(err)
+			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s\n", witnessDatabasePath, statsFilePath)
+		}
+
+	}
+
 	for !interrupt {
-		trace := false // blockNum == 545080
+		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
+		execStart := time.Now()
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -185,32 +308,70 @@ func Stateless(
 			return
 		}
 
+		execTime1 := time.Since(execStart)
+		execStart = time.Now()
+
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
 			return
 		}
 
-		if err = tds.ResolveStateTrie(); err != nil {
-			fmt.Printf("Failed to resolve state trie: %v\n", err)
-			return
+		if witnessDBReader != nil {
+			tds.SetBlockNr(blockNum)
+			err = tds.ResolveStateTrieStateless(witnessDBReader)
+			if err != nil {
+				fmt.Printf("Failed to statelessly resolve state trie: %v\n", err)
+				return
+			}
+		} else {
+			var resolveWitnesses []*trie.Witness
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil); err != nil {
+				fmt.Printf("Failed to resolve state trie: %v\n", err)
+				return
+			}
+
+			if len(resolveWitnesses) > 0 {
+				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+			}
 		}
-		witness = nil
+		execTime2 := time.Since(execStart)
+		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
-			var tapeStats *state.BlockWitnessStats
-			witness, tapeStats, err = tds.ExtractWitness(trace, binary /* is binary */)
+			var blockWitnessStats *trie.BlockWitnessStats
+			bw, err = tds.ExtractWitness(trace, binary /* is binary */)
 			if err != nil {
 				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
 				return
 			}
-			err = stats.AddRow(tapeStats)
+
+			var buf bytes.Buffer
+			blockWitnessStats, err = bw.WriteTo(&buf)
+			if err != nil {
+				fmt.Printf("error extracting witness for block %d: %v\n", blockNum, err)
+				return
+			}
+			blockWitness = buf.Bytes()
+			err = stats.AddRow(blockNum, blockWitnessStats)
 			check(err)
 		}
 		finalRootFail := false
-		if blockNum >= witnessThreshold && witness != nil { // witness == nil means the extraction fails
+		execStart = time.Now()
+		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
-			s, err = state.NewStateless(preRoot, witness, blockNum-1, trace, binary /* is binary */)
+			var w *trie.Witness
+			w, err = trie.NewWitnessFromReader(bytes.NewReader(blockWitness), false)
+			bw.WriteDiff(w, os.Stdout)
+			if err != nil {
+				fmt.Printf("error deserializing witness for block %d: %v\n", blockNum, err)
+				return
+			}
+			if _, ok := starkBlocks[blockNum-1]; ok {
+				err = starkData(w, starkStatsBase, blockNum-1)
+				check(err)
+			}
+			s, err = state.NewStateless(preRoot, w, blockNum-1, trace, binary /* is binary */)
 			if err != nil {
 				fmt.Printf("Error making stateless2 for block %d: %v\n", blockNum, err)
 				filename := fmt.Sprintf("right_%d.txt", blockNum-1)
@@ -221,25 +382,33 @@ func Stateless(
 				}
 				return
 			}
+			if _, ok := starkBlocks[blockNum-1]; ok {
+				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
+				check(err)
+			}
 			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			}
 		}
-
+		execTime3 := time.Since(execStart)
+		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 1)
 			if err != nil {
 				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
 				return
 			}
 		}
+		execTime4 := time.Since(execStart)
+		execStart = time.Now()
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
+		execTime5 := time.Since(execStart)
 		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -312,6 +481,12 @@ func Stateless(
 
 			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
+		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d,%d\n", blockNum,
+			execTime1.Nanoseconds(),
+			execTime2.Nanoseconds(),
+			execTime3.Nanoseconds(),
+			execTime4.Nanoseconds(),
+			execTime5.Nanoseconds())
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:

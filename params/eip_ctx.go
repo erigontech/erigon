@@ -19,6 +19,7 @@ const (
 	IsEWASM
 	BlockNumber
 	NoHistory
+	NoIntermediateTrieHash
 	WithHistoryHighest
 )
 
@@ -38,6 +39,10 @@ func (c *ChainConfig) WithEIPsFlags(ctx context.Context, blockNum *big.Int) cont
 
 func WithNoHistory(ctx context.Context, defaultValue bool, f noHistFunc) context.Context {
 	return context.WithValue(ctx, NoHistory, getIsNoHistory(defaultValue, f))
+}
+
+func WithNoIntermediateTrieHash(ctx context.Context, defaultValue bool, f noIntermediateTrieHashFunc) context.Context {
+	return context.WithValue(ctx, NoIntermediateTrieHash, getIsNoIntermediateTrieHash(defaultValue, f))
 }
 
 func GetForkFlag(ctx context.Context, name configKey) bool {
@@ -155,6 +160,18 @@ func GetNoHistory(ctx context.Context) (context.Context, bool) {
 type noHistFunc func(currentBlock *big.Int) bool
 
 func getIsNoHistory(defaultValue bool, f noHistFunc) noHistFunc {
+	return func(currentBlock *big.Int) bool {
+		if f == nil {
+			return defaultValue
+		}
+
+		return f(currentBlock)
+	}
+}
+
+type noIntermediateTrieHashFunc func(currentBlock *big.Int) bool
+
+func getIsNoIntermediateTrieHash(defaultValue bool, f noIntermediateTrieHashFunc) noIntermediateTrieHashFunc {
 	return func(currentBlock *big.Int) bool {
 		if f == nil {
 			return defaultValue

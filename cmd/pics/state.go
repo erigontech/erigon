@@ -166,7 +166,7 @@ func stateDatabaseComparison(first *bolt.DB, second *bolt.DB, number int) error 
 				firstB := firstTx.Bucket(bucketName)
 				return b.ForEach(func(k, v []byte) error {
 					if firstB != nil {
-						if firstV, _ := firstB.Get(k); bytes.Equal(v, firstV) {
+						if firstV, _ := firstB.Get(k); firstV != nil && bytes.Equal(v, firstV) {
 							// Skip the record that is the same as in the first Db
 							return nil
 						}
@@ -456,7 +456,7 @@ func initialState1() error {
 	// BLOCK 1
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -472,7 +472,7 @@ func initialState1() error {
 	// BLOCK 2
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -488,7 +488,7 @@ func initialState1() error {
 	// BLOCK 3
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
 	if codeMap, err = constructCodeMap(tds); err != nil {
@@ -510,7 +510,7 @@ func initialState1() error {
 	// BLOCK 4
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 4); err != nil {
@@ -526,7 +526,7 @@ func initialState1() error {
 	// BLOCK 5
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[4]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[4]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
@@ -542,7 +542,7 @@ func initialState1() error {
 	// BLOCK 6
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[5]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[5]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
@@ -561,7 +561,7 @@ func initialState1() error {
 	// BLOCK 7
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[6]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[6]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 7); err != nil {
@@ -579,7 +579,7 @@ func initialState1() error {
 	// BLOCK 8
 	snapshotDb = db.MemCopy().(*ethdb.BoltDatabase).DB()
 
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[7]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[7]}); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 8); err != nil {
@@ -605,20 +605,21 @@ func initialState1() error {
 		rs.AddHex(touchQuad)
 		touchQuads = append(touchQuads, touchQuad)
 	}
-	bwb := trie.NewBlockWitnessBuilder(false)
+
 	if codeMap, err = constructCodeMap(tds); err != nil {
 		return err
 	}
-	if err = bwb.MakeBlockWitness(quadTrie, rs, codeMap); err != nil {
+
+	var witness *trie.Witness
+
+	if witness, err = quadTrie.ExtractWitness(0, false, rs, codeMap); err != nil {
 		return err
 	}
-	var witness bytes.Buffer
-	if _, err = bwb.WriteTo(&witness); err != nil {
-		return err
-	}
+
 	var witnessTrie *trie.Trie
 	var witnessCodeMap map[common.Hash][]byte
-	if witnessTrie, witnessCodeMap, err = trie.BlockWitnessToTrie(witness.Bytes(), false); err != nil {
+
+	if witnessTrie, witnessCodeMap, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
 		return err
 	}
 	if _, err = statePicture(witnessTrie, witnessCodeMap, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {

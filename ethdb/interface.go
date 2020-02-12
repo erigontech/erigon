@@ -18,10 +18,11 @@ package ethdb
 
 import (
 	"errors"
+
+	"github.com/ledgerwatch/bolt"
 )
 
-// TODO [Andrew] Add some comments about historical buckets & ChangeSet.
-// https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
+// DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
 
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
@@ -41,10 +42,6 @@ type Putter interface {
 type Getter interface {
 	// Get returns the value for a given key if it's present.
 	Get(bucket, key []byte) ([]byte, error)
-
-	// GetS returns the value that was recorded in a given historical bucket for an exact timestamp.
-	// timestamp == block number
-	GetS(hBucket, key []byte, timestamp uint64) ([]byte, error)
 
 	// GetAsOf returns the value valid as of a given timestamp.
 	// timestamp == block number
@@ -124,6 +121,14 @@ type DbWithPendingMutations interface {
 	Commit() (uint64, error)
 	Rollback()
 	BatchSize() int
+}
+
+type HasDb interface {
+	DB() Database
+}
+
+type HasBolt interface {
+	DB() *bolt.DB
 }
 
 var errNotSupported = errors.New("not supported")

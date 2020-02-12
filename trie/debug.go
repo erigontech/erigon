@@ -67,7 +67,6 @@ func loadNode(br *bufio.Reader) (node, error) {
 
 func loadFull(br *bufio.Reader) (*fullNode, error) {
 	n := fullNode{}
-	n.flags.dirty = true
 	for {
 		next, err := br.Peek(1)
 		if err != nil {
@@ -98,7 +97,6 @@ func loadFull(br *bufio.Reader) (*fullNode, error) {
 
 func loadDuo(br *bufio.Reader) (*duoNode, error) {
 	n := duoNode{}
-	n.flags.dirty = true
 	idxStr1, err := br.ReadBytes(':')
 	if err != nil {
 		return nil, err
@@ -295,7 +293,7 @@ func printDiffSide(n node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "\n")
 		fmt.Fprintf(w, "%s)\n", ind)
 	case *shortNode:
-		fmt.Fprintf(w, "short %x(", n.hash())
+		fmt.Fprintf(w, "short %x(", n.reference())
 		keyHex := n.Key
 		hexV := make([]byte, len(keyHex))
 		for i := 0; i < len(hexV); i++ {
@@ -325,9 +323,9 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, ")")
 		return
 	}
-	if n2 != nil && bytes.Equal(n1.hash(), n2.hash()) {
-		fmt.Fprintf(w, "hash(%x)", []byte(n1.hash()))
-		if len(n1.hash()) == 0 {
+	if n2 != nil && bytes.Equal(n1.reference(), n2.reference()) {
+		fmt.Fprintf(w, "hash(%x)", n1.reference())
+		if len(n1.reference()) == 0 {
 			fmt.Fprintf(w, "%s/%s", n1.fstring(""), n2.fstring(""))
 		}
 		return
@@ -340,7 +338,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 				child2 := n.Children[i]
 				if child == nil {
 					if child2 != nil {
-						fmt.Fprintf(w, "%s%s:(nil/%x %T)\n", ind, indices[i], child2.hash(), child2)
+						fmt.Fprintf(w, "%s%s:(nil/%x %T)\n", ind, indices[i], child2.reference(), child2)
 					}
 				} else if child2 == nil {
 					fmt.Fprintf(w, "%s%s:(%T/nil)\n", ind, indices[i], child)
@@ -411,7 +409,7 @@ func printDiff(n1, n2 node, w io.Writer, ind string, key string) {
 		if n, ok := n2.(hashNode); ok {
 			fmt.Fprintf(w, "%x/%x", []byte(n1), []byte(n))
 		} else {
-			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", []byte(n1), n2, n2.hash())
+			fmt.Fprintf(w, "hash(%x)/%T(%x)\n", []byte(n1), n2, n2.reference())
 			//printDiffSide(n2, w, ind, key)
 		}
 		fmt.Fprintf(w, ")")

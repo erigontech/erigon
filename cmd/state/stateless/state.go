@@ -4,12 +4,12 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"math/big"
-	"net"
 	"os"
 	"os/signal"
 	"sort"
@@ -19,7 +19,10 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 
@@ -40,6 +43,14 @@ import (
 )
 
 var emptyCodeHash = crypto.Keccak256(nil)
+
+const (
+	PrintMemStatsEvery = 1_000_000
+	PrintProgressEvery = 100_000
+	CommitEvery        = 100_000
+	MaxIterationsPerTx = 10_000_000
+	CursorBatchSize    = 10_000
+)
 
 func check(e error) {
 	if e != nil {
@@ -102,77 +113,192 @@ func (isa IntSorterAddr) Swap(i, j int) {
 	isa.values[i], isa.values[j] = isa.values[j], isa.values[i]
 }
 
-type Reporter struct {
-	db *remote.DB
+var ReportsProgressBucket = []byte("reports_progress")
+
+func commit(k []byte, tx *bolt.Tx, data interface{}) {
+	//defer func(t time.Time) { fmt.Println("Commit:", time.Since(t)) }(time.Now())
+	var buf bytes.Buffer
+
+	encoder := codecpool.Encoder(&buf)
+	defer codecpool.Return(encoder)
+
+	encoder.MustEncode(data)
+	if err := tx.Bucket(ReportsProgressBucket).Put(k, buf.Bytes()); err != nil {
+		panic(err)
+	}
 }
 
-func NewReporter(ctx context.Context, remoteDbAddress string) (*Reporter, error) {
-	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
-		return conn, conn, conn, err
-	}
-
-	db, err := remote.NewDB(ctx, dial)
+func restore(k []byte, tx *bolt.Tx, data interface{}) {
+	//defer func(t time.Time) { fmt.Println("Restore:", time.Since(t)) }(time.Now())
+	reportsProgress, err := tx.CreateBucketIfNotExists(ReportsProgressBucket, false)
 	if err != nil {
-		return nil, err
+		panic(err)
+	}
+	v, _ := reportsProgress.Get(k)
+	if v == nil {
+		return
 	}
 
-	return &Reporter{db: db}, nil
+	decoder := codecpool.Decoder(bytes.NewReader(v))
+	decoder.MustDecode(data)
 }
 
-func (r *Reporter) StateGrowth1(ctx context.Context) {
+type StateGrowth1Reporter struct {
+	StartedWhenBlockNumber uint64
+	MaxTimestamp           uint64
+	HistoryKey             []byte
+	AccountKey             []byte
+	// For each timestamp, how many accounts were created in the state
+	CreationsByBlock map[uint64]int
+
+	// map[addrHash]uint64
+	lastTimestamps *typedbucket.Uint64 `codec:"-"`
+	commit         func(ctx context.Context)
+	rollback       func(ctx context.Context)
+	remoteDb       *remote.DB `codec:"-"`
+}
+
+func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth1Reporter {
+	var LastTimestampsBucket = []byte("sg1_accounts_last_timestamps")
+	var ProgressKey = []byte("state_growth_1")
+
+	var err error
+	var localTx *bolt.Tx
+	var lastTimestamps *bolt.Bucket
+
+	if localTx, err = localDb.Begin(true); err != nil {
+		panic(err)
+	}
+
+	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
+		panic(err)
+	}
+
+	rep := &StateGrowth1Reporter{
+		remoteDb:         remoteDb,
+		HistoryKey:       []byte{},
+		AccountKey:       []byte{},
+		MaxTimestamp:     0,
+		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
+		CreationsByBlock: make(map[uint64]int),
+	}
+	rep.commit = func(ctx context.Context) {
+		commit(ProgressKey, localTx, rep)
+		if err = localTx.Commit(); err != nil {
+			panic(err)
+		}
+		localTx, err = localDb.Begin(true)
+		if err != nil {
+			panic(err)
+		}
+
+		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
+	}
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
+	}
+
+	restore(ProgressKey, localTx, rep)
+	return rep
+}
+
+func (r *StateGrowth1Reporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		debug.PrintMemStats(true)
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
+
+func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
+	defer r.rollback(ctx)
 	startTime := time.Now()
 
-	var count int
-	var maxTimestamp uint64
-	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Hash]uint64)
-	// For each timestamp, how many accounts were created in the state
-	creationsByBlock := make(map[uint64]int)
-	var addrHash common.Hash
+	var i int
+	var processingDone bool
+
+beginTx:
 	// Go through the history of account first
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+		}
+
 		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if err != nil {
 			return err
 		}
-
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			// First 32 bytes is the hash of the address, then timestamp encoding
-			copy(addrHash[:], k[:32])
-			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
-			if timestamp+1 > maxTimestamp {
-				maxTimestamp = timestamp + 1
+		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
+			if err != nil {
+				return err
 			}
-			if len(v) == 0 {
-				creationsByBlock[timestamp]++
-				if lt, ok := lastTimestamps[addrHash]; ok {
-					creationsByBlock[lt]--
+			i++
+			r.HistoryKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
+
+			var addrHash common.Hash
+
+			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address, then timestamp encoding
+			timestamp, _ := dbutils.DecodeTimestamp(k[32:])
+
+			if timestamp > r.StartedWhenBlockNumber { // skip what happened after analysis started
+				continue
+			}
+
+			if timestamp+1 > r.MaxTimestamp {
+				r.MaxTimestamp = timestamp + 1
+			}
+			if vIsEmpty {
+				r.CreationsByBlock[timestamp]++
+				if lt, ok := r.lastTimestamps.Get(addrHash.Bytes()); ok {
+					r.CreationsByBlock[lt]--
 				}
 			}
-			lastTimestamps[addrHash] = timestamp
-			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), timestamp); err != nil {
+				return err
 			}
 		}
-		check(c.Err())
+		processingDone = true
 		return nil
 	}); err != nil {
 		check(err)
 	}
 
+	if !processingDone {
+		goto beginTx
+	}
+
+	processingDone = false
+	i = 0
+
+beginTx2:
 	// Go through the current state
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		pre, err := tx.Bucket(dbutils.PreimagePrefix)
 		if err != nil {
 			return err
@@ -189,48 +315,64 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			// First 32 bytes is the hash of the address
-			copy(addrHash[:], k[:32])
-			lastTimestamps[addrHash] = maxTimestamp
-			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+		for k, _, err := c.SeekKey(r.AccountKey); k != nil || err != nil; k, _, err = c.NextKey() {
+			if err != nil {
+				return err
+			}
+			i++
+			r.AccountKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
+
+			var addrHash common.Hash
+
+			copy(addrHash[:], k[:32]) // First 32 bytes is the hash of the address
+			if err := r.lastTimestamps.Put(addrHash.Bytes(), r.MaxTimestamp); err != nil {
+				return err
 			}
 		}
-		check(c.Err())
+		processingDone = true
 		return nil
 	}); err != nil {
 		check(err)
 	}
 
-	for _, lt := range lastTimestamps {
-		if lt < maxTimestamp {
-			creationsByBlock[lt]--
+	if !processingDone {
+		goto beginTx2
+	}
+
+	if err := r.lastTimestamps.ForEach(func(_ []byte, lt uint64) error {
+		if lt < r.MaxTimestamp {
+			r.CreationsByBlock[lt]--
 		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
-	fmt.Printf("Account history records: %d\n", count)
+	fmt.Printf("Account history records: %d\n", i)
 	fmt.Printf("Creating dataset...\n")
 	// Sort accounts by timestamp
-	tsi := NewTimeSorterInt(len(creationsByBlock))
+	tsi := NewTimeSorterInt(len(r.CreationsByBlock))
 	idx := 0
-	for timestamp, count := range creationsByBlock {
+	for timestamp, count := range r.CreationsByBlock {
 		tsi.timestamps[idx] = timestamp
 		tsi.values[idx] = count
 		idx++
 	}
 	sort.Sort(tsi)
-	fmt.Printf("Writing dataset...")
+	fmt.Printf("Writing dataset...\n")
 	f, err := os.Create("accounts_growth.csv")
 	check(err)
 	defer f.Close()
+
 	w := bufio.NewWriter(f)
 	defer w.Flush()
 	cumulative := 0
@@ -240,18 +382,110 @@ func (r *Reporter) StateGrowth1(ctx context.Context) {
 	}
 }
 
-func (r *Reporter) StateGrowth2(ctx context.Context) {
-	startTime := time.Now()
-	var count int
-	var maxTimestamp uint64
+type StateGrowth2Reporter struct {
+	StartedWhenBlockNumber uint64
+	MaxTimestamp           uint64
+	HistoryKey             []byte
+	StorageKey             []byte
+
+	// map[common.Hash]map[common.Hash]uint64 - key is addrHash + hash
 	// For each address hash, when was it last accounted
-	lastTimestamps := make(map[common.Hash]map[common.Hash]uint64)
-	// For each timestamp, how many storage items were created
-	creationsByBlock := make(map[common.Hash]map[uint64]int)
-	var addrHash common.Hash
-	var hash common.Hash
+	lastTimestamps *typedbucket.Uint64 `codec:"-"`
+	// map[common.Hash]map[uint64]int - key is addrHash + hash
+	// For each address hash, when was it last accounted
+	creationsByBlock *typedbucket.Int `codec:"-"`
+
+	remoteDb *remote.DB `codec:"-"`
+	commit   func(ctx context.Context)
+	rollback func(ctx context.Context)
+}
+
+func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
+	var LastTimestampsBucket = []byte("sg2_accounts_last_timestamps")
+	var CreationsByBlockBucket = []byte("sg2_creations_by_block")
+	var ProgressKey = []byte("state_growth_2")
+
+	var err error
+	var localTx *bolt.Tx
+	var lastTimestamps *bolt.Bucket
+	var creationsByBlock *bolt.Bucket
+
+	if localTx, err = localDb.Begin(true); err != nil {
+		panic(err)
+	}
+
+	if lastTimestamps, err = localTx.CreateBucketIfNotExists(LastTimestampsBucket, false); err != nil {
+		panic(err)
+	}
+
+	if creationsByBlock, err = localTx.CreateBucketIfNotExists(CreationsByBlockBucket, false); err != nil {
+		panic(err)
+	}
+
+	rep := &StateGrowth2Reporter{
+		remoteDb:         remoteDb,
+		HistoryKey:       []byte{},
+		StorageKey:       []byte{},
+		MaxTimestamp:     0,
+		lastTimestamps:   typedbucket.NewUint64(lastTimestamps),
+		creationsByBlock: typedbucket.NewInt(creationsByBlock),
+	}
+	rep.commit = func(ctx context.Context) {
+		commit(ProgressKey, localTx, rep)
+		if err = localTx.Commit(); err != nil {
+			panic(err)
+		}
+		if localTx, err = localDb.Begin(true); err != nil {
+			panic(err)
+		}
+
+		rep.lastTimestamps = typedbucket.NewUint64(localTx.Bucket(LastTimestampsBucket))
+		rep.creationsByBlock = typedbucket.NewInt(localTx.Bucket(CreationsByBlockBucket))
+	}
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
+	}
+
+	restore(ProgressKey, localTx, rep)
+	return rep
+}
+
+func (r *StateGrowth2Reporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		debug.PrintMemStats(true)
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
+
+func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
+	defer r.rollback(ctx)
+	startTime := time.Now()
+	var i int
+
+	var processingDone bool
+
+beginTx:
 	// Go through the history of account first
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+		}
+
 		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
 		if err != nil {
 			return err
@@ -260,54 +494,65 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			// First 20 bytes is the address
-			copy(addrHash[:], k[:32])
+		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
+			if err != nil {
+				return err
+			}
+			r.HistoryKey = k
+			i++
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
+
+			var addrHash, hash common.Hash
+			copy(addrHash[:], k[:32]) // First 20 bytes is the address
 			copy(hash[:], k[40:72])
 			timestamp, _ := dbutils.DecodeTimestamp(k[72:])
-			if timestamp+1 > maxTimestamp {
-				maxTimestamp = timestamp + 1
+
+			if timestamp > r.StartedWhenBlockNumber { // only count what happened before analysis started
+				continue
 			}
-			if len(v) == 0 {
-				c, ok := creationsByBlock[addrHash]
-				if !ok {
-					c = make(map[uint64]int)
-					creationsByBlock[addrHash] = c
+
+			addr2HashKey := append(addrHash.Bytes(), hash.Bytes()...)
+
+			if timestamp+1 > r.MaxTimestamp {
+				r.MaxTimestamp = timestamp + 1
+			}
+			if vIsEmpty {
+				addr2TsKey := append(addrHash.Bytes(), dbutils.EncodeTimestamp(timestamp)...)
+				if err := r.creationsByBlock.Increment(addr2TsKey); err != nil {
+					return err
 				}
-				c[timestamp]++
-				l, ok := lastTimestamps[addrHash]
-				if !ok {
-					l = make(map[common.Hash]uint64)
-					lastTimestamps[addrHash] = l
-				}
-				if lt, ok := l[hash]; ok {
-					c[lt]--
+
+				if err := r.lastTimestamps.DecrementIfExist(addr2HashKey); err != nil {
+					return err
 				}
 			}
-			l, ok := lastTimestamps[addrHash]
-			if !ok {
-				l = make(map[common.Hash]uint64)
-				lastTimestamps[addrHash] = l
-			}
-			l[hash] = timestamp
-			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+			if err := r.lastTimestamps.Put(addr2HashKey, timestamp); err != nil {
+				return err
 			}
 		}
-		check(c.Err())
+		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 
+	if !processingDone {
+		goto beginTx
+	}
+
+	processingDone = false
+	i = 0
+
+beginTx2:
 	// Go through the current state
-	if err := r.db.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.StorageBucket)
 		if err != nil {
 			return err
@@ -316,50 +561,67 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
-		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+		for k, _, err := c.SeekKey(r.StorageKey); k != nil || err != nil; k, _, err = c.NextKey() {
+			if err != nil {
+				return err
+			}
+			i++
+			r.StorageKey = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
+
+			var addrHash, hash common.Hash
 			copy(addrHash[:], k[:32])
 			copy(hash[:], k[40:72])
-			l, ok := lastTimestamps[addrHash]
-			if !ok {
-				l = make(map[common.Hash]uint64)
-				lastTimestamps[addrHash] = l
-			}
-			l[hash] = maxTimestamp
-			count++
-			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+			localKey := append(addrHash.Bytes(), hash.Bytes()...)
+			if err := r.lastTimestamps.Put(localKey, r.MaxTimestamp); err != nil {
+				return err
 			}
 		}
-		check(c.Err())
+		processingDone = true
 		return nil
 	}); err != nil {
 		panic(err)
 	}
 
-	for address, l := range lastTimestamps {
-		for _, lt := range l {
-			if lt < maxTimestamp {
-				creationsByBlock[address][lt]--
+	if !processingDone {
+		goto beginTx2
+	}
+
+	if err := r.lastTimestamps.ForEach(func(k []byte, lt uint64) error {
+		address := common.BytesToHash(k[:32])
+		if lt < r.MaxTimestamp {
+			addr2BlockKey := append(address.Bytes(), dbutils.EncodeTimestamp(lt)...)
+			if h, ok := r.creationsByBlock.Get(addr2BlockKey); ok {
+				h--
+				if err := r.creationsByBlock.Put(addr2BlockKey, h); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
+	}); err != nil {
+		panic(err)
 	}
 
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
-	fmt.Printf("Storage history records: %d\n", count)
+	fmt.Printf("Storage history records: %d\n", i)
 	fmt.Printf("Creating dataset...\n")
 	totalCreationsByBlock := make(map[uint64]int)
-	for _, c := range creationsByBlock {
-		cumulative := 0
-		for timestamp, count := range c {
-			totalCreationsByBlock[timestamp] += count
-			cumulative += count
-		}
+	if err := r.creationsByBlock.ForEach(func(k []byte, count int) error {
+		timestamp, _ := dbutils.DecodeTimestamp(k[32:])
+		totalCreationsByBlock[timestamp] += count
+		return nil
+	}); err != nil {
+		panic(err)
 	}
+
 	// Sort accounts by timestamp
 	tsi := NewTimeSorterInt(len(totalCreationsByBlock))
 	idx := 0
@@ -380,9 +642,85 @@ func (r *Reporter) StateGrowth2(ctx context.Context) {
 		cumulative += tsi.values[i]
 		fmt.Fprintf(w, "%d, %d, %d\n", tsi.timestamps[i], tsi.values[i], cumulative)
 	}
+
+	debug.PrintMemStats(true)
 }
 
-func (r *Reporter) GasLimits(ctx context.Context) {
+type GasLimitReporter struct {
+	remoteDb               *remote.DB `codec:"-"`
+	StartedWhenBlockNumber uint64
+	HeaderPrefixKey1       []byte
+	HeaderPrefixKey2       []byte
+
+	// map[common.Hash]uint64 - key is addrHash + hash
+	mainHashes *typedbucket.Uint64 // For each address hash, when was it last accounted
+
+	commit   func(ctx context.Context)
+	rollback func(ctx context.Context)
+}
+
+func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *GasLimitReporter {
+	var MainHashesBucket = []byte("gl_main_hashes")
+	var ProgressKey = []byte("gas_limit")
+
+	var err error
+	var localTx *bolt.Tx
+	var mainHashes *bolt.Bucket
+
+	if localTx, err = localDb.Begin(true); err != nil {
+		panic(err)
+	}
+	if mainHashes, err = localTx.CreateBucketIfNotExists(MainHashesBucket, false); err != nil {
+		panic(err)
+	}
+
+	rep := &GasLimitReporter{
+		remoteDb:         remoteDb,
+		HeaderPrefixKey1: []byte{},
+		HeaderPrefixKey2: []byte{},
+		mainHashes:       typedbucket.NewUint64(mainHashes),
+	}
+	rep.commit = func(ctx context.Context) {
+		commit(ProgressKey, localTx, rep)
+		if err = localTx.Commit(); err != nil {
+			panic(err)
+		}
+		if localTx, err = localDb.Begin(true); err != nil {
+			panic(err)
+		}
+
+		rep.mainHashes = typedbucket.NewUint64(localTx.Bucket(MainHashesBucket))
+	}
+
+	rep.rollback = func(ctx context.Context) {
+		if err := localTx.Rollback(); err != nil {
+			panic(err)
+		}
+	}
+
+	restore(ProgressKey, localTx, rep)
+	return rep
+}
+
+func (r *GasLimitReporter) interrupt(ctx context.Context, i int, startTime time.Time) (breakTx bool) {
+	if i%PrintProgressEvery == 0 {
+		fmt.Printf("Processed %dK, %s\n", i/1000, time.Since(startTime))
+	}
+	if i%PrintMemStatsEvery == 0 {
+		debug.PrintMemStats(true)
+	}
+	if i%CommitEvery == 0 {
+		r.commit(ctx)
+	}
+	if i%MaxIterationsPerTx == 0 {
+		return true
+	}
+	return false
+}
+func (r *GasLimitReporter) GasLimits(ctx context.Context) {
+	defer r.rollback(ctx)
+	startTime := time.Now()
+
 	f, ferr := os.Create("gas_limits.csv")
 	check(ferr)
 	defer f.Close()
@@ -390,10 +728,19 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 	defer w.Flush()
 	//var blockNum uint64 = 5346726
 	var blockNum uint64 = 0
+	i := 0
+	var processingDone bool
 
-	mainHashes := make(map[string]struct{}, 10*000*000)
+beginTx:
+	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+		var err error
+		if r.StartedWhenBlockNumber == 0 {
+			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+		}
 
-	err := r.db.View(ctx, func(tx *remote.Tx) error {
 		b, err := tx.Bucket(dbutils.HeaderPrefix)
 		if err != nil {
 			return err
@@ -402,31 +749,62 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.BatchCursor(CursorBatchSize)
 		if err != nil {
 			return err
 		}
 
 		fmt.Println("Preloading block numbers...")
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return fmt.Errorf("loop break: %w", err)
+			}
+			i++
+			r.HeaderPrefixKey1 = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
+
+			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
+			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
+				break
+			}
+
 			// skip bucket keys not useful for analysis
 			if !dbutils.IsHeaderHashKey(k) {
 				continue
 			}
 
-			mainHashes[string(v)] = struct{}{}
+			mainHash := make([]byte, len(v))
+			copy(mainHash[:], v[:])
+			if err := r.mainHashes.Put(mainHash, 0); err != nil {
+				return err
+			}
 		}
-		check(c.Err())
 
-		fmt.Println("Preloaded: ", len(mainHashes))
+		fmt.Println("Preloaded: ", r.mainHashes.Stats().KeyN)
+		i = 0
+		for k, v, err := c.Seek(r.HeaderPrefixKey2); k != nil || err != nil; k, v, err = c.Next() {
+			if err != nil {
+				return fmt.Errorf("loop break: %w", err)
+			}
+			i++
+			r.HeaderPrefixKey2 = k
+			if r.interrupt(ctx, i, startTime) {
+				return nil
+			}
 
-		for k, v := c.First(); k != nil; k, v = c.Next() {
+			timestamp := binary.BigEndian.Uint64(k[:common.BlockNumberLength])
+			if timestamp > r.StartedWhenBlockNumber { // skip everything what happened after analysis started
+				continue
+			}
+
 			if !dbutils.IsHeaderKey(k) {
 				continue
 			}
 
-			if _, ok := mainHashes[string(k[common.BlockNumberLength:])]; !ok {
+			if _, ok := r.mainHashes.Get(k[common.BlockNumberLength:]); !ok {
 				continue
 			}
 
@@ -437,18 +815,20 @@ func (r *Reporter) GasLimits(ctx context.Context) {
 			}
 
 			fmt.Fprintf(w, "%d, %d\n", blockNum, header.GasLimit)
-			if blockNum%1000000 == 0 {
-				fmt.Printf("Processed %d blocks\n", blockNum)
-			}
-
 			blockNum++
 		}
-		check(c.Err())
+		processingDone = true
 		return nil
-	})
-	check(err)
+	}); err != nil {
+		panic(err)
+	}
+
+	if !processingDone {
+		goto beginTx
+	}
 
 	fmt.Printf("Finish processing %d blocks\n", blockNum)
+	debug.PrintMemStats(true)
 }
 
 func parseFloat64(str string) float64 {
@@ -1079,7 +1459,7 @@ func makeCreators(blockNum uint64) {
 		}
 		blockNum++
 		if blockNum%1000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
 		}
 		// Check for interrupts
 		select {
@@ -1150,7 +1530,7 @@ func storageUsage() {
 			leafSize += uint64(len(v))
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records, deleted contracts: %d\n", count, numDeleted)
+				fmt.Printf("Processed %dK storage records, deleted contracts: %d\n", count/1000, numDeleted)
 			}
 		}
 		return nil
@@ -1209,9 +1589,9 @@ func storageUsage() {
 
 func tokenUsage() {
 	startTime := time.Now()
-	//db, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDb, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//db, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDb, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	tokensFile, err := os.Open("tokens.csv")
@@ -1247,7 +1627,7 @@ func tokenUsage() {
 				itemsByAddress[addr]++
 				count++
 				if count%100000 == 0 {
-					fmt.Printf("Processed %d storage records\n", count)
+					fmt.Printf("Processed %dK storage records\n", count/1000)
 				}
 			}
 		}
@@ -1323,7 +1703,7 @@ func nonTokenUsage() {
 				itemsByAddress[addr]++
 				count++
 				if count%100000 == 0 {
-					fmt.Printf("Processed %d storage records\n", count)
+					fmt.Printf("Processed %dK storage records\n", count/1000)
 				}
 			}
 		}
@@ -1383,7 +1763,7 @@ func oldStorage() {
 			itemsByAddress[addr]++
 			count++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d storage records\n", count)
+				fmt.Printf("Processed %dK storage records\n", count/1000)
 			}
 		}
 		return nil
@@ -1468,7 +1848,7 @@ func dustEOA() {
 			}
 			thresholdMap[a.Balance.Uint64()]++
 			if count%100000 == 0 {
-				fmt.Printf("Processed %d account records\n", count)
+				fmt.Printf("Processed %dK account records\n", count/1000)
 			}
 		}
 		return nil
@@ -1483,7 +1863,7 @@ func dustEOA() {
 		idx++
 	}
 	sort.Sort(tsi)
-	fmt.Printf("Writing dataset...")
+	fmt.Printf("Writing dataset...\n")
 	f, err := os.Create("dust_eoa.csv")
 	check(err)
 	defer f.Close()
@@ -1497,6 +1877,7 @@ func dustEOA() {
 	fmt.Printf("Processing took %s\n", time.Since(startTime))
 }
 
+//nolint:deadcode,unused,golint,stylecheck
 func dustChartEOA() {
 	dust_eoaFile, err := os.Open("dust_eoa.csv")
 	check(err)
@@ -1663,7 +2044,7 @@ func makeSha3Preimages(blockNum uint64) {
 		}
 		blockNum++
 		if blockNum%100 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			fmt.Printf("Processed %dK blocks\n", blockNum/1000)
 			if err := tx.Commit(); err != nil {
 				panic(err)
 			}

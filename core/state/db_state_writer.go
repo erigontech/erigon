@@ -41,7 +41,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 		// and we don't need root in history requests
 		testAcc := original.SelfCopy()
 		if debug.IsThinHistory() {
-			testAcc.CodeHash = common.BytesToHash(emptyCodeHash)
+			copy(testAcc.CodeHash[:], emptyCodeHash)
 			testAcc.Root = trie.EmptyRoot
 		}
 

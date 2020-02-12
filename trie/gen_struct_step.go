@@ -21,21 +21,22 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
 // Experimental code for separating data and structural information
 // Each function corresponds to an opcode
 // DESCRIBED: docs/programmers_guide/guide.md#separation-of-keys-and-the-structure
 type structInfoReceiver interface {
-	leaf(length int, keyHex []byte, val RlpSerializable) error
-	leafHash(length int, keyHex []byte, val RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
-	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, fieldset uint32) error
+	leaf(length int, keyHex []byte, val rlphacks.RlpSerializable) error
+	leafHash(length int, keyHex []byte, val rlphacks.RlpSerializable) error
+	accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
+	accountLeafHash(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
 	branchHash(set uint16) error
-	hash(common.Hash) error
+	hash([]byte) error
 }
 
 func calcPrecLen(groups []uint16) int {
@@ -52,14 +53,15 @@ type GenStructStepData interface {
 type GenStructStepAccountData struct {
 	FieldSet    uint32
 	StorageSize uint64
-	Balance     *big.Int // nil-able
+	Balance     big.Int
 	Nonce       uint64
+	Incarnation uint64
 }
 
 func (GenStructStepAccountData) GenStructStepData() {}
 
 type GenStructStepLeafData struct {
-	Value RlpSerializable
+	Value rlphacks.RlpSerializable
 }
 
 func (GenStructStepLeafData) GenStructStepData() {}
@@ -91,6 +93,7 @@ func GenStructStep(
 	e structInfoReceiver,
 	data GenStructStepData,
 	groups []uint16,
+	trace bool,
 ) ([]uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
 		var precExists = len(groups) > 0
@@ -106,7 +109,9 @@ func GenStructStep(
 		} else {
 			maxLen = succLen
 		}
-		//fmt.Printf("curr: %x, succ: %x, isHashOfNode: %v, maxLen %d, groups: %b, precLen: %d, succLen: %d\n", curr, succ, hashOfNode, maxLen, groups, precLen, succLen)
+		if trace {
+			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
+		}
 		// Add the digit immediately following the max common prefix and compute length of remainder length
 		extraDigit := curr[maxLen]
 		for maxLen >= len(groups) {
@@ -120,39 +125,27 @@ func GenStructStep(
 		}
 		remainderLen := len(curr) - remainderStart
 
-		if buildExtensions {
-			if remainderLen > 0 {
-				/* building extensions */
-				if hashOnly(curr[:maxLen]) {
-					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
-				} else {
-					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
-						return nil, err
-					}
-				}
-			}
-		} else {
+		if !buildExtensions {
 			emitHash := hashOnly(curr[:maxLen])
 
 			switch v := data.(type) {
-			case GenStructStepHashData:
+			case *GenStructStepHashData:
 				/* building a hash */
-				if err := e.hash(v.Hash); err != nil {
+				if err := e.hash(v.Hash[:]); err != nil {
 					return nil, err
 				}
-			case GenStructStepAccountData:
+				buildExtensions = true
+			case *GenStructStepAccountData:
 				if emitHash {
-					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+					if err := e.accountLeafHash(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				} else {
-					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, v.Balance, v.Nonce, v.FieldSet); err != nil {
+					if err := e.accountLeaf(remainderLen, curr, v.StorageSize, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
 						return nil, err
 					}
 				}
-			case GenStructStepLeafData:
+			case *GenStructStepLeafData:
 				/* building leafs */
 				if emitHash {
 					if err := e.leafHash(remainderLen, curr, v.Value); err != nil {
@@ -165,6 +158,24 @@ func GenStructStep(
 				}
 			default:
 				panic(fmt.Errorf("unknown data type: %T", data))
+			}
+		}
+
+		if buildExtensions {
+			if remainderLen > 0 {
+				if trace {
+					fmt.Printf("Extension %x\n", curr[remainderStart:remainderStart+remainderLen])
+				}
+				/* building extensions */
+				if hashOnly(curr[:maxLen]) {
+					if err := e.extensionHash(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
+				} else {
+					if err := e.extension(curr[remainderStart : remainderStart+remainderLen]); err != nil {
+						return nil, err
+					}
+				}
 			}
 		}
 		// Check for the optional part
