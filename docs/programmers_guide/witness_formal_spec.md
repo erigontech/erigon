@@ -2,30 +2,48 @@
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://tools.ietf.org/html/rfc2119).
 
+## Basic Data types
+
+`nil` - an empty value.
+
+`Int` - an integer value. We treat the domain of integers as infinite,
+the overflow behaviour or mapping to the actual data types is undefined
+in this spec and should be up to implementation.
+
+`Hash` - 32 byte value, representing a result of Keccak256 hashing.
+
+`ByteArray` - a byte array of arbitrary size. MUST NOT be empty.
+
+
+## Nodes
+
+```
+type Node = nil
+          | HashNode (raw_hash:nil|Hash)
+          | ValueNode (raw_value:nil|ByteArray)
+          | AccountNode (nonce:Int balance:Int storage:Node storage_hash:Hash code_hash:Hash)
+          | LeafNode (key:ByteArray value:ValueNode|AccountNode)
+          | ExtensionNode (key:ByteArray child:Node)
+          | BranchNode (child0:Node child1:Node child3:Node ... child15:Node)
+```
+
 ## The Stack
 
 Witnesses are executed on a stack machine that builds tries/calculates hashes.
 
-The stack consists of stack items.
-Each item is a pair: `(node, hash)`, where `node` is an object representing the Merkle trie node, and `hash` is 32 byte node hash value. The exact implementation details of `node`s and `hash`es are not the part of the spec.
+```
+type Stack = () 
+           | (Node, Hash) Stack
+```
+
+
+## The Witness
 
 Each witness is a queue of instructions.
 
 In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
 
 In the end, when there are no more instructions left, there MUST be only one item left on the stack.  
-
-### Nodes
-
-```
-type Node = nil
-          | HashNode (raw_hash:Byte[32])
-          | ValueNode (raw_value:Byte[])
-          | AccountNode (nonce:Int balance:Int storage:Node storage_hash:Byte[32] code_hash:Byte[32])
-          | LeafNode (key:Byte[] value:ValueNode|AccountNode)
-          | ExtensionNode (key:Byte[] child:Node)
-          | BranchNode (child0:Node child1:Node child3:Node ... child15:Node)
-```
 
 ## Substitution rules
 
@@ -107,10 +125,6 @@ Helper functions MUST be pure.
 Helper functions MUST have at least one argument.
 Helper functions MAY have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
 Helper functions MAY contain recursion.
-
-## Data types
-
-INTEGER - we treat the domain of integers as infinite, the overflow behaviour or mapping to the actual data types is undefined in this spec and should be dependent on implementation.
 
 ## Execution flow 
 
