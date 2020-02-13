@@ -34,8 +34,11 @@ type Node = nil
 Witnesses are executed on a stack machine that builds tries/calculates hashes.
 
 ```
+type Item  = Hash
+           | (Node, Hash)
+
 type Stack = () 
-           | (Node, Hash) Stack
+           | Cons Item Stack
 ```
 
 At the beginning of witness execution the stack MUST be empty.
@@ -47,13 +50,13 @@ Each witness is a queue of instructions.
 
 ```
 type Parameters  = Any 
-                 | Any Parameters
+                 | Cons Any Parameters
 
 type Instruction = OpCode
                  | (OpCode, Parameters)
 
 type Witness     = ()
-                 | Instuction Witness
+                 | Cons Instuction Witness
 ```
 
 In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
