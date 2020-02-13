@@ -36,6 +36,8 @@ type Stack = ()
            | (Node, Hash) Stack
 ```
 
+At the beginning of witness execution the stack MUST be empty.
+
 
 ## The Witness
 
@@ -45,7 +47,22 @@ In every execution cycle a single instruction gets dequeued and a matching subst
 
 In the end, when there are no more instructions left, there MUST be only one item left on the stack.  
 
+## Instructions & Parameters
+
+A single instruction is defined by one or multiple substitution rules and its
+parameters.
+
+Each instruction MAY have one or more parameters.
+The parameters values MUST be situated in the witness.
+The parameter values MUST NOT be taken from the stack.
+
+That makes it different from the helper function parameters that MAY come from the stack or MAY come from the witness.
+
+
 ## Substitution rules
+
+A substitution rule is applied to the stack. It replaces zero, one or multiple
+stack items with a single one.
 
 Here is an example substitution rule. The current instruction is named `INSTR1`.
 
@@ -75,7 +92,7 @@ The specification for a substitution rule
 [GUARD <CONDITION> ...]
 
 [ STACK(<node-var-name>, <hash-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
-STACK(node-value, hash-value), ...
+STACK(node-value, hash-value)
 ```
 
 There MUST be one and only one substitution rule applicable to the execution state. If an instruction has multiple substitution rules, the applicability is defined by the `GUARD` statements.
@@ -85,7 +102,7 @@ The substitution rule MUST have exactly one instruction.
 The substitution rule MAY have parameters for the instruction.
 The substitution rule MUST have at least one STACK statement after the arrow.
 
-So, the minimal substitution rule is for the `HASH` instruction that pushes one hash to the stack:
+So, the minimal substitution rule is the one for the `HASH` instruction that pushes one hash to the stack:
 ```
 HASH(hashValue) |=> STACK(hashNode(hashValue), hashValue)
 ```
@@ -99,23 +116,11 @@ Each `GUARD` statement looks like this:
 GUARD <CONDITION>
 ```
 
-That means that for the substitution rule to be applicable the `<CONDITION>` in the guard statement must be true.
+For a substitution rule to be applicable, the `<CONDITION>` in its `GUARD` statement MUST be true.
 
-If a substitution rule has multiple guard statements, all of the conditions specified there should be satisfied.
+If a substitution rule has multiple `GUARD` statements, all of them MUST BE satisfied.
 
-## `TRAP` statements
-
-If no substitution rules are applicable for an instruction, then the execution MUST stop (`TRAP` instruction) and the partial results MUST NOT be used.
-
-Implementation of the `TRAP` instruction is undefined, but it should stop the execution flow. (e.g. in Golang it might be a function returning an error or a panic).
-
-## Instructions & Parameters
-
-Each instruction MAY have one or more parameters.
-The parameters values MUST be situated in the witness.
-The parameter values MUST NOT be taken from the stack.
-
-That makes it different from the helper function parameters that MAY come from the stack or MAY come from the witness.
+If there are no `GUARD` statements, the substitution rule is always applicable.
 
 ## Helper functions
 
@@ -238,7 +243,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{Account(nonce, balance, HashNode{storage_hash}, storage_hash, code_hash)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode{nonce, balance, HashNode{storage_hash}, storage_hash, code_hash}}, ACC_HASH(account))
 --
 
 GUARD has_code == true
@@ -246,7 +251,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(nil, code_hash) STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, code_hash)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_node, storage_hash, code_hash}}, ACC_HASH(account))
 
 --
 
@@ -255,7 +260,7 @@ GUARD storage_node != nil
 GUARD has_storage == true
 
 STACK(storage_node, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_node, storage_hash, nil}}, ACC_HASH(account))
 
 ---
 
@@ -264,7 +269,7 @@ GUARD storage_node == nil
 GUARD has_storage == true
 
 STACK(nil, storage_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{Account(nonce, balance, storage_node, storage_hash, nil)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_node, storage_hash, nil}}, ACC_HASH(account))
 
 --
 
@@ -272,7 +277,7 @@ GUARD has_code == true
 GUARD has_storage == false
 
 STACK(nil, code_hash) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode(Account(nonce, balance, nil, nil, code_hash)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode(nonce, balance, nil, nil, code_hash}}, ACC_HASH(account))
 
 --
 
@@ -280,7 +285,7 @@ GUARD has_code == false
 GUARD has_storage == false
 
 ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{Account(nonce, balance, nil, nil, nil)}}, ACC_HASH(account))
+STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, nil}}, ACC_HASH(account))
 
 ```
 
@@ -365,7 +370,7 @@ hashes the specified account
 ACC_HASH(account) {
     bytes = CONCAT(RLP(account.Nonce), RLP(account.Balance), RLP(account.Root), RLP(account.CodeHash))
     if account.HasStorageSize {
-        return COMPACT_KECCAK(RLP(CONCAT(bytes, RLP(a.StorageSize))))
+        return COMPACT_KECCAK(RLP(CONCAT(bytes, RLP(account.StorageSize))))
     }
     return COMPACT_KECCAK(RLP(bytes))
 }
@@ -373,7 +378,18 @@ ACC_HASH(account) {
 
 ### `COMPACT_KECCAK(bytes)`
 
-returns `bytes` if LEN(`bytes`) < 32, KECCAK(`bytes`) otherwise.
+returns either `bytes` or `KECCAK(bytes)` whichever is shorter.
+
+
+```
+COMPACT_KECCAK(bytes) {
+    if LEN(bytes) < 32 {
+        return bytes
+    }
+    return KECCAK(bytes)
+}
+
+```
 
 ### `RLP(value)`
 
@@ -405,3 +421,11 @@ returns the first value in the specified array
 ### `REST(array)`
 
 returns the array w/o the first item
+
+### `KECCAK(bytes)`
+
+returns a keccak-256 hash of `bytes`
+
+### `LEN(bytes)`
+
+returns the lengths of the byte array
