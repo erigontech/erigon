@@ -36,10 +36,10 @@ import (
 // the protocol stack, that is passed to all constructors to be optionally used;
 // as well as utility methods to operate on the service environment.
 type ServiceContext struct {
-	config         *Config
 	services       map[reflect.Type]Service // Index of the already constructed services
-	EventMux       *event.TypeMux           // Event multiplexer used for decoupled notifications
-	AccountManager *accounts.Manager        // Account manager created by the node.
+	Config         Config
+	EventMux       *event.TypeMux    // Event multiplexer used for decoupled notifications
+	AccountManager *accounts.Manager // Account manager created by the node.
 }
 
 // OpenDatabaseWithFreezer
@@ -107,7 +107,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 // and if the user actually uses persistent storage. It will return an empty string
 // for emphemeral storage and the user's own input for absolute paths.
 func (ctx *ServiceContext) ResolvePath(path string) string {
-	return ctx.config.ResolvePath(path)
+	return ctx.Config.ResolvePath(path)
 }
 
 // Service retrieves a currently running service registered of a specific type.
@@ -123,7 +123,7 @@ func (ctx *ServiceContext) Service(service interface{}) error {
 // ExtRPCEnabled returns the indicator whether node enables the external
 // RPC(http, ws or graphql).
 func (ctx *ServiceContext) ExtRPCEnabled() bool {
-	return ctx.config.ExtRPCEnabled()
+	return ctx.Config.ExtRPCEnabled()
 }
 
 // ServiceConstructor is the function signature of the constructors needed to be
