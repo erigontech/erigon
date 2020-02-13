@@ -1246,7 +1246,8 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
 		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
-		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
+		v, err = ethDb.Get(dbutils.StorageChangeSetBucket, changeSetKey)
+		check(err)
 		if v != nil {
 			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {

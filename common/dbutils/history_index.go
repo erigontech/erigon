@@ -78,8 +78,8 @@ func (hi *HistoryIndexBytes) Remove(v uint64) *HistoryIndexBytes {
 
 	var currentElement uint64
 	var elemEnd uint32
+	var itemLen uint32
 
-	var itemLen = uint32(8)
 Loop:
 	for i := numOfElements; i > 0; i-- {
 		if i > numOfUint32Elements {
@@ -117,7 +117,7 @@ func (hi *HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	}
 	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
 	numOfUint32Elements := binary.LittleEndian.Uint32((*hi)[LenBytes : 2*LenBytes])
-	var itemLen = uint32(8)
+	var itemLen uint32
 
 	if numOfElements == 0 {
 		fmt.Println(2)
