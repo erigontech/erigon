@@ -6,6 +6,8 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 
 `nil` - an empty value.
 
+`Any` - any data type. MUST NOT be `nil`.
+
 `Int` - an integer value. We treat the domain of integers as infinite,
 the overflow behaviour or mapping to the actual data types is undefined
 in this spec and should be up to implementation.
@@ -42,6 +44,17 @@ At the beginning of witness execution the stack MUST be empty.
 ## The Witness
 
 Each witness is a queue of instructions.
+
+```
+type Parameters  = Any 
+                 | Any Parameters
+
+type Instruction = OpCode
+                 | (OpCode, Parameters)
+
+type Witness     = ()
+                 | Instuction Witness
+```
 
 In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
 
