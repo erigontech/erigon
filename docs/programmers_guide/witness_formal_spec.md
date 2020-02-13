@@ -49,8 +49,7 @@ In the end, when there are no more instructions left, there MUST be only one ite
 
 ## Instructions & Parameters
 
-A single instruction is defined by one or multiple substitution rules and its
-parameters.
+A single instruction is consists of substitution rules and parameters.
 
 Each instruction MAY have one or more parameters.
 The parameters values MUST be situated in the witness.
