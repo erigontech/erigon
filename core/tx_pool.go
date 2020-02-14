@@ -460,15 +460,17 @@ func (pool *TxPool) reset(oldHead, newHead *types.Header) {
 		newHead = pool.chain.CurrentBlock().Header() // Special case during testing
 	}
 	tds, err := pool.chain.GetTrieDbState()
-	tds = tds.WithNewBuffer()
-	if err != nil {
-		log.Error("Failed to reset txpool state", "err", err)
-		return
+	if tds != nil {
+		tds = tds.WithNewBuffer()
+		if err != nil {
+			log.Error("Failed to reset txpool state", "err", err)
+			return
+		}
+		statedb := state.New(tds)
+		pool.currentState = statedb
+		pool.currentTds = tds
+		pool.pendingNonces = newTxNoncer(statedb)
 	}
-	statedb := state.New(tds)
-	pool.currentState = statedb
-	pool.currentTds = tds
-	pool.pendingNonces = newTxNoncer(statedb)
 	pool.currentMaxGas = newHead.GasLimit
 
 	// Inject any transactions discarded due to reorgs
@@ -672,10 +674,12 @@ func (pool *TxPool) add(tx *types.Transaction, local bool) (replaced bool, err e
 		return false, fmt.Errorf("known transaction: %x", hash)
 	}
 	// If the transaction fails basic validation, discard it
-	if err := pool.validateTx(tx, local); err != nil {
-		log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
-		invalidTxMeter.Mark(1)
-		return false, err
+	if pool.currentState != nil {
+		if err := pool.validateTx(tx, local); err != nil {
+			log.Trace("Discarding invalid transaction", "hash", hash, "err", err)
+			invalidTxMeter.Mark(1)
+			return false, err
+		}
 	}
 	// If the transaction pool is full, discard underpriced transactions
 	if uint64(pool.all.Count()) >= pool.config.GlobalSlots+pool.config.GlobalQueue {
@@ -1114,7 +1118,7 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		promoteAddrs = dirtyAccounts.flatten()
 	}
 	pool.mu.Lock()
-	if reset != nil {
+	if reset != nil && pool.currentState != nil {
 		// Reset from the old head to the new, rescheduling any reorged transactions
 		pool.reset(reset.oldHead, reset.newHead)
 
@@ -1132,18 +1136,20 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 		}
 	}
 	// Check for pending transactions for every account that sent new ones
-	promoted := pool.promoteExecutables(promoteAddrs)
-	for _, tx := range promoted {
-		addr, _ := types.Sender(pool.signer, tx)
-		if _, ok := events[addr]; !ok {
-			events[addr] = newTxSortedMap()
+	if pool.currentState != nil {
+		promoted := pool.promoteExecutables(promoteAddrs)
+		for _, tx := range promoted {
+			addr, _ := types.Sender(pool.signer, tx)
+			if _, ok := events[addr]; !ok {
+				events[addr] = newTxSortedMap()
+			}
+			events[addr].Put(tx)
 		}
-		events[addr].Put(tx)
 	}
 	// If a new block appeared, validate the pool of pending transactions. This will
 	// remove any transaction that has been included in the block or was invalidated
 	// because of another transaction (e.g. higher gas price).
-	if reset != nil {
+	if reset != nil && pool.currentState != nil {
 		pool.demoteUnexecutables()
 	}
 	// Ensure pool.queue and pool.pending sizes stay within the configured limits.
@@ -1151,9 +1157,11 @@ func (pool *TxPool) runReorg(done chan struct{}, reset *txpoolResetRequest, dirt
 	pool.truncateQueue()
 
 	// Update all accounts to the latest known pending nonce
-	for addr, list := range pool.pending {
-		txs := list.Flatten() // Heavy but will be cached and is needed by the miner anyway
-		pool.pendingNonces.set(addr, txs[len(txs)-1].Nonce()+1)
+	if pool.currentState != nil {
+		for addr, list := range pool.pending {
+			txs := list.Flatten() // Heavy but will be cached and is needed by the miner anyway
+			pool.pendingNonces.set(addr, txs[len(txs)-1].Nonce()+1)
+		}
 	}
 	pool.mu.Unlock()
 

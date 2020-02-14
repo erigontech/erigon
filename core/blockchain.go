@@ -351,7 +351,7 @@ func (bc *BlockChain) EnablePreimages(ep bool) {
 }
 
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
-	if bc.trieDbState == nil {
+	if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		trieDbState, err := bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
 		if err != nil {
