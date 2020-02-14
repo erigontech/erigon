@@ -10,8 +10,8 @@ import (
 func TestExample1(t *testing.T) {
 	ctx := context.Background()
 
-	//ethdb.Open(ctx, ethdb.ProviderOptions(ethdb.Badger).InMemory(true))
-	db, err := ethdb.Open(ctx, ethdb.Options().InMemory(true))
+	//ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).InMemory(true))
+	db, err := ethdb.Open(ctx, ethdb.Opts().InMemory(true))
 	if err != nil {
 		panic(err)
 	}
@@ -22,7 +22,7 @@ func TestExample1(t *testing.T) {
 			return err
 		}
 
-		c, err := b.Cursor(b.CursorOptions().PrefetchSize(1000))
+		c, err := b.Cursor(b.CursorOpts().PrefetchSize(1000))
 		if err != nil {
 			return err
 		}

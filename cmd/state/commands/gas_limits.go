@@ -25,9 +25,7 @@ var gasLimitsCmd = &cobra.Command{
 		}
 		ctx := getContext()
 
-		opts := remote.DefaultOptions()
-		opts.DialAddress = remoteDbAddress
-		remoteDb, err := remote.Open(ctx, opts)
+		remoteDb, err := remote.Open(ctx, remote.DefaultOpts.Addr(remoteDbAddress))
 		if err != nil {
 			return err
 		}

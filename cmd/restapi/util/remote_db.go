@@ -7,7 +7,5 @@ import (
 )
 
 func ConnectRemoteDB(remoteDbAddress string) (*remote.DB, error) {
-	opts := remote.DefaultOptions()
-	opts.DialAddress = remoteDbAddress
-	return remote.Open(context.TODO(), opts)
+	return remote.Open(context.TODO(), remote.DefaultOpts.Addr(remoteDbAddress))
 }

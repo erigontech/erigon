@@ -19,20 +19,20 @@ const (
 
 const DefaultProvider = Bolt
 
-type Opts struct {
+type Options struct {
 	provider DbProvider
-	Remote   remote.DbOptions
+	Remote   remote.DbOpts
 	Bolt     *bolt.Options
 	Badger   badger.Options
 
 	path string
 }
 
-func Options() Opts {
-	return ProviderOptions(DefaultProvider)
+func Opts() Options {
+	return ProviderOpts(DefaultProvider)
 }
 
-func (opts Opts) Path(path string) Opts {
+func (opts Options) Path(path string) Options {
 	opts.path = path
 	switch opts.provider {
 	case Bolt:
@@ -40,12 +40,12 @@ func (opts Opts) Path(path string) Opts {
 	case Badger:
 		opts.Badger.WithDir(path).WithValueDir(path)
 	case Remote:
-		opts.Remote.DialAddress = path
+		opts.Remote.Addr(path)
 	}
 	return opts
 }
 
-func (opts Opts) InMemory(val bool) Opts {
+func (opts Options) InMemory(val bool) Options {
 	switch opts.provider {
 	case Bolt:
 		opts.Bolt.MemOnly = val
@@ -57,15 +57,15 @@ func (opts Opts) InMemory(val bool) Opts {
 	return opts
 }
 
-func ProviderOptions(provider DbProvider) Opts {
-	opts := Opts{}
+func ProviderOpts(provider DbProvider) Options {
+	opts := Options{}
 	switch opts.provider {
 	case Bolt:
 		opts.Badger = badger.DefaultOptions(opts.path)
 	case Badger:
 		opts.Bolt = bolt.DefaultOptions
 	case Remote:
-		opts.Remote = remote.DefaultOptions()
+		opts.Remote = remote.DefaultOpts
 	default:
 		panic("unknown db provider: " + provider)
 	}
@@ -74,13 +74,13 @@ func ProviderOptions(provider DbProvider) Opts {
 }
 
 type DB struct {
-	opts   Opts
+	opts   Options
 	bolt   *bolt.DB
 	badger *badger.DB
 	remote *remote.DB
 }
 
-func Open(ctx context.Context, opts Opts) (db *DB, err error) {
+func Open(ctx context.Context, opts Options) (db *DB, err error) {
 	db = &DB{opts: opts}
 
 	switch db.opts.provider {
@@ -147,6 +147,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	case Badger:
 		return db.badger.View(func(tx *badger.Txn) error {
 			t.badger = tx
+			// TODO: call iterators.Close()
 			return f(t)
 		})
 	case Remote:
@@ -155,7 +156,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 			return f(t)
 		})
 	}
-	return nil
+	return err
 }
 
 func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
@@ -169,12 +170,13 @@ func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
 	case Badger:
 		return db.badger.Update(func(tx *badger.Txn) error {
 			t.badger = tx
+			// TODO: call iterators.Close()
 			return f(t)
 		})
 	case Remote:
 		return fmt.Errorf("remote db provider doesn't support .Update method")
 	}
-	return nil
+	return err
 }
 
 func (tx *Tx) Bucket(name []byte) (b *Bucket, err error) {
@@ -187,10 +189,41 @@ func (tx *Tx) Bucket(name []byte) (b *Bucket, err error) {
 	case Remote:
 		b.remote, err = tx.remote.Bucket(name)
 	}
-	return nil, nil
+	return b, err
 }
 
-func (b *Bucket) CursorOptions() CursorOpts {
+type CursorOpts struct {
+	provider DbProvider
+
+	remote remote.CursorOpts
+	badger badger.IteratorOptions
+}
+
+func (opts CursorOpts) PrefetchSize(v uint) CursorOpts {
+	switch opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts.badger.PrefetchSize = int(v)
+	case Remote:
+		opts.remote.PrefetchSize(uint64(v))
+	}
+	return opts
+}
+
+func (opts CursorOpts) PrefetchValues(v bool) CursorOpts {
+	switch opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts.badger.PrefetchValues = v
+	case Remote:
+		opts.remote.PrefetchValues(v)
+	}
+	return opts
+}
+
+func (b *Bucket) CursorOpts() CursorOpts {
 	c := CursorOpts{}
 	switch b.tx.db.opts.provider {
 	case Bolt:
@@ -217,26 +250,33 @@ func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
 	case Remote:
 		c.remote, err = b.remote.Cursor(opts.remote)
 	}
-	return c, nil
+	return c, err
 }
 
-type CursorOpts struct {
-	provider DbProvider
-
-	remote remote.CursorOpts
-	badger badger.IteratorOptions
-
-	path string
-}
-
-func (opts CursorOpts) PrefetchSize(v uint) CursorOpts {
-	switch opts.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		opts.badger.PrefetchSize = int(v)
-	case Remote:
-		opts.remote.PrefetchSize(uint64(v))
-	}
-	return opts
-}
+//type Item struct {
+//	K []byte
+//}
+//
+//func (c *Cursor) First() ([]byte, []byte, error) {
+//	switch c.bucket.tx.db.opts.provider {
+//	case Bolt:
+//		c.bolt.First()
+//	case Badger:
+//		it := c.badger
+//		for it.Rewind(); it.Valid(); it.Next() {
+//			item := it.Item()
+//			k := item.Key()
+//			err := item.Value(func(v []byte) error {
+//				fmt.Printf("key=%s, value=%s\n", k, v)
+//				return nil
+//			})
+//		}
+//
+//		c.badger.Rewind()
+//		item := c.badger.Item()
+//		item.ValueCopy()
+//	case Remote:
+//		c.remote.First()
+//	}
+//	return nil, nil, nil
+//}

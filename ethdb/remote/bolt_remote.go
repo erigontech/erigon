@@ -138,8 +138,8 @@ type conn struct {
 	closer io.Closer
 }
 
-type DbOptions struct {
-	DialAddress     string
+type DbOpts struct {
+	dialAddress     string
 	DialFunc        DialFunc
 	DialTimeout     time.Duration
 	PingTimeout     time.Duration
@@ -149,10 +149,33 @@ type DbOptions struct {
 	CursorBatchSize uint64
 }
 
+var DefaultOpts = DbOpts{
+	CursorBatchSize: DefaultCursorBatchSize,
+	MaxConnections:  ClientMaxConnections,
+	DialTimeout:     3 * time.Second,
+	PingTimeout:     500 * time.Millisecond,
+	RetryDialAfter:  1 * time.Second,
+	PingEvery:       1 * time.Second,
+}
+
+func (opts DbOpts) Addr(v string) DbOpts {
+	opts.dialAddress = v
+	return opts
+}
+
+func defaultDialFunc(ctx context.Context, dialAddress string) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+	dialer := net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", dialAddress)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", dialAddress, err)
+	}
+	return conn, conn, conn, err
+}
+
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	opts           DbOptions
+	opts           DbOpts
 	connectionPool chan *conn
 	doDial         chan struct{}
 	doPing         <-chan time.Time
@@ -236,34 +259,13 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-func DefaultOptions() DbOptions {
-	opts := DbOptions{
-		CursorBatchSize: DefaultCursorBatchSize,
-		MaxConnections:  ClientMaxConnections,
-		DialTimeout:     3 * time.Second,
-		PingTimeout:     500 * time.Millisecond,
-		RetryDialAfter:  1 * time.Second,
-		PingEvery:       1 * time.Second,
-	}
-	return opts
-}
-
-func defaultDialFunc(ctx context.Context, dialAddress string) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", dialAddress)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", dialAddress, err)
-	}
-	return conn, conn, conn, err
-}
-
-func Open(parentCtx context.Context, opts DbOptions) (*DB, error) {
+func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	if opts.DialFunc == nil {
 		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-			if opts.DialAddress == "" {
-				return nil, nil, nil, fmt.Errorf("please set opts.DialAddress or opts.DialFunc")
+			if opts.dialAddress == "" {
+				return nil, nil, nil, fmt.Errorf("please set opts.dialAddress or opts.DialFunc")
 			}
-			return defaultDialFunc(ctx, opts.DialAddress)
+			return defaultDialFunc(ctx, opts.dialAddress)
 		}
 	}
 
@@ -507,15 +509,22 @@ type Cursor struct {
 }
 
 type CursorOpts struct {
-	prefetchSize uint64
+	prefetchSize   uint64
+	prefetchValues bool
 }
 
 var DefaultCursorOpts = CursorOpts{
-	prefetchSize: DefaultCursorBatchSize,
+	prefetchSize:   DefaultCursorBatchSize,
+	prefetchValues: false,
 }
 
 func (opts CursorOpts) PrefetchSize(v uint64) CursorOpts {
 	opts.prefetchSize = v
+	return opts
+}
+
+func (opts CursorOpts) PrefetchValues(v bool) CursorOpts {
+	opts.prefetchValues = v
 	return opts
 }
 

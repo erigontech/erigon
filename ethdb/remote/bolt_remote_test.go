@@ -27,7 +27,7 @@ func TestReconnect(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	pingCh := make(chan time.Time, ClientMaxConnections)
-	opts := DefaultOptions()
+	opts := DefaultOpts
 	opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 		dialCallCounter++
 		if dialCallCounter%2 == 0 {

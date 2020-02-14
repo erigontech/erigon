@@ -266,9 +266,7 @@ func daemon(cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 
-	opts := remote.DefaultOptions()
-	opts.DialAddress = cfg.remoteDbAddress
-	db, err := remote.Open(context.Background(), opts)
+	db, err := remote.Open(context.Background(), remote.DefaultOpts.Addr(cfg.remoteDbAddress))
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
