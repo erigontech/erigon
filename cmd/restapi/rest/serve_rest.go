@@ -1,11 +1,12 @@
 package rest
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ledgerwatch/turbo-geth/cmd/restapi/apis"
-	"github.com/ledgerwatch/turbo-geth/cmd/restapi/util"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
 func printError(name string, err error) {
@@ -22,7 +23,7 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 	root := r.Group("api/v1")
 	allowCORS(root)
 
-	remoteDB, err := util.ConnectRemoteDB(remoteDbAddress)
+	remoteDB, err := remote.Open(context.TODO(), remote.DefaultOpts.Addr(remoteDbAddress))
 	if err != nil {
 		return err
 	}

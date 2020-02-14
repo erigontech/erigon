@@ -139,23 +139,21 @@ type conn struct {
 }
 
 type DbOpts struct {
-	dialAddress     string
-	DialFunc        DialFunc
-	DialTimeout     time.Duration
-	PingTimeout     time.Duration
-	RetryDialAfter  time.Duration
-	PingEvery       time.Duration
-	MaxConnections  uint64
-	CursorBatchSize uint64
+	dialAddress    string
+	DialFunc       DialFunc
+	DialTimeout    time.Duration
+	PingTimeout    time.Duration
+	RetryDialAfter time.Duration
+	PingEvery      time.Duration
+	MaxConnections uint64
 }
 
 var DefaultOpts = DbOpts{
-	CursorBatchSize: DefaultCursorBatchSize,
-	MaxConnections:  ClientMaxConnections,
-	DialTimeout:     3 * time.Second,
-	PingTimeout:     500 * time.Millisecond,
-	RetryDialAfter:  1 * time.Second,
-	PingEvery:       1 * time.Second,
+	MaxConnections: ClientMaxConnections,
+	DialTimeout:    3 * time.Second,
+	PingTimeout:    500 * time.Millisecond,
+	RetryDialAfter: 1 * time.Second,
+	PingEvery:      1 * time.Second,
 }
 
 func (opts DbOpts) Addr(v string) DbOpts {

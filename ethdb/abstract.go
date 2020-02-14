@@ -3,18 +3,19 @@ package ethdb
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-type DbProvider string
+type DbProvider uint8
 
 const (
-	Bolt   DbProvider = "bolt"
-	Badger DbProvider = "badger"
-	Remote DbProvider = "remote"
+	Bolt DbProvider = iota
+	Badger
+	Remote
 )
 
 const DefaultProvider = Bolt
@@ -67,7 +68,7 @@ func ProviderOpts(provider DbProvider) Options {
 	case Remote:
 		opts.Remote = remote.DefaultOpts
 	default:
-		panic("unknown db provider: " + provider)
+		panic("unknown db provider: " + strconv.Itoa(int(provider)))
 	}
 
 	return opts
@@ -239,6 +240,20 @@ func (b *Bucket) CursorOpts() CursorOpts {
 	return c
 }
 
+func (b *Bucket) Get(key []byte) (res *Item, err error) {
+	res = &Item{K: key, tx: b.tx, db: b.tx.db} // TODO: use pool or pin object to bucket/cursor
+	switch b.tx.db.opts.provider {
+	case Bolt:
+		v, _ := b.bolt.Get(key)
+		res.v = v
+	case Badger:
+		res.badgerItem, err = b.tx.badger.Get(append(b.badgerPrefix, key...))
+	case Remote:
+		res.v, err = b.remote.Get(key)
+	}
+	return res, err
+}
+
 func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
 	c = &Cursor{bucket: b}
 	switch c.bucket.tx.db.opts.provider {
@@ -253,16 +268,50 @@ func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
 	return c, err
 }
 
-//type Item struct {
-//	K []byte
-//}
-//
+type Item struct {
+	K []byte
+	v []byte
+
+	badgerItem *badger.Item
+	db         *DB
+	tx         *Tx
+}
+
+func (item *Item) KeyCopy(dst *[]byte) {
+	switch item.db.opts.provider {
+	case Bolt:
+		*dst = append((*dst)[:0], item.K...)
+	case Badger:
+		*dst = item.badgerItem.KeyCopy(*dst)
+	case Remote:
+		*dst = append((*dst)[:0], item.K...)
+	}
+}
+
+func (item *Item) ValueCopy(dst *[]byte) (err error) {
+	switch item.db.opts.provider {
+	case Bolt:
+		*dst = append((*dst)[:0], item.v...)
+	case Badger:
+		*dst, err = item.badgerItem.ValueCopy(*dst)
+	case Remote:
+		*dst = append((*dst)[:0], item.v...)
+	}
+	return err
+}
+
 //func (c *Cursor) First() ([]byte, []byte, error) {
 //	switch c.bucket.tx.db.opts.provider {
 //	case Bolt:
 //		c.bolt.First()
 //	case Badger:
-//		it := c.badger
+//
+//		// Problems: how to return err?
+//		// Badger returns item.err when calling .Value or .ValueCopy
+//		// It's not enough for remoteDb
+//		// can change remoteBb, but need to decide API of abstract iterator
+//
+//		it := c.bucket.tx.badger.NewIterator()
 //		for it.Rewind(); it.Valid(); it.Next() {
 //			item := it.Item()
 //			k := item.Key()
