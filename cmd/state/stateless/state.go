@@ -50,7 +50,7 @@ const (
 	PrintProgressEvery = 100_000
 	CommitEvery        = 100_000
 	MaxIterationsPerTx = 10_000_000
-	CursorBatchSize    = 10_000
+	CursorBatchSize    = uint64(10_000)
 )
 
 func check(e error) {
@@ -246,7 +246,7 @@ beginTx:
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(CursorBatchSize)
+		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		if err != nil {
 			return err
 		}
@@ -316,7 +316,7 @@ beginTx2:
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(CursorBatchSize)
+		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		if err != nil {
 			return err
 		}
@@ -495,7 +495,7 @@ beginTx:
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(CursorBatchSize)
+		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		if err != nil {
 			return err
 		}
@@ -562,7 +562,7 @@ beginTx2:
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(CursorBatchSize)
+		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		if err != nil {
 			return err
 		}
@@ -750,7 +750,8 @@ beginTx:
 		if b == nil {
 			return nil
 		}
-		c, err := b.BatchCursor(CursorBatchSize)
+
+		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		if err != nil {
 			return err
 		}

@@ -152,7 +152,7 @@ type DbOptions struct {
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	opts           *DbOptions
+	opts           DbOptions
 	connectionPool chan *conn
 	doDial         chan struct{}
 	doPing         <-chan time.Time
@@ -236,8 +236,8 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-func DefaultOptions() *DbOptions {
-	opts := &DbOptions{
+func DefaultOptions() DbOptions {
+	opts := DbOptions{
 		CursorBatchSize: DefaultCursorBatchSize,
 		MaxConnections:  ClientMaxConnections,
 		DialTimeout:     3 * time.Second,
@@ -245,24 +245,28 @@ func DefaultOptions() *DbOptions {
 		RetryDialAfter:  1 * time.Second,
 		PingEvery:       1 * time.Second,
 	}
-	opts.DialFunc = opts.defaultDialFunc
 	return opts
 }
 
-func (opts *DbOptions) defaultDialFunc(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-	if opts.DialAddress == "" {
-		return nil, nil, nil, fmt.Errorf("please set opts.DialAddress or opts.DialFunc")
-	}
-
+func defaultDialFunc(ctx context.Context, dialAddress string) (in io.Reader, out io.Writer, closer io.Closer, err error) {
 	dialer := net.Dialer{}
-	conn, err := dialer.DialContext(ctx, "tcp", opts.DialAddress)
+	conn, err := dialer.DialContext(ctx, "tcp", dialAddress)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", opts.DialAddress, err)
+		return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", dialAddress, err)
 	}
 	return conn, conn, conn, err
 }
 
-func Open(parentCtx context.Context, opts *DbOptions) (*DB, error) {
+func Open(parentCtx context.Context, opts DbOptions) (*DB, error) {
+	if opts.DialFunc == nil {
+		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+			if opts.DialAddress == "" {
+				return nil, nil, nil, fmt.Errorf("please set opts.DialAddress or opts.DialFunc")
+			}
+			return defaultDialFunc(ctx, opts.DialAddress)
+		}
+	}
+
 	db := &DB{
 		opts:           opts,
 		connectionPool: make(chan *conn, ClientMaxConnections),
@@ -490,17 +494,29 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	ctx          context.Context
-	in           io.Reader
-	out          io.Writer
-	cursorHandle uint64
-
+	ctx               context.Context
+	in                io.Reader
+	out               io.Writer
+	opts              CursorOpts
+	cursorHandle      uint64
 	cacheLastIdx      uint64
 	cacheIdx          uint64
-	batchSize         uint64
 	cacheKeys         [][]byte
 	cacheValues       [][]byte
 	cacheValueIsEmpty []bool
+}
+
+type CursorOpts struct {
+	prefetchSize uint64
+}
+
+var DefaultCursorOpts = CursorOpts{
+	prefetchSize: DefaultCursorBatchSize,
+}
+
+func (opts CursorOpts) PrefetchSize(v uint64) CursorOpts {
+	opts.prefetchSize = v
+	return opts
 }
 
 // Bucket returns the handle to the bucket in remote DB
@@ -588,17 +604,8 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 	return value, nil
 }
 
-func (b *Bucket) BatchCursor(batchSize uint64) (*Cursor, error) {
-	c, err := b.Cursor()
-	if err != nil {
-		return nil, err
-	}
-	c.SetBatchSize(batchSize)
-	return c, nil
-}
-
 // Cursor iterating over bucket keys
-func (b *Bucket) Cursor() (*Cursor, error) {
+func (b *Bucket) Cursor(opts CursorOpts) (*Cursor, error) {
 	select {
 	default:
 	case <-b.ctx.Done():
@@ -639,20 +646,13 @@ func (b *Bucket) Cursor() (*Cursor, error) {
 
 	cursor := &Cursor{
 		ctx:          b.ctx,
+		opts:         opts,
 		in:           b.in,
 		out:          b.out,
 		cursorHandle: cursorHandle,
-
-		batchSize: DefaultCursorBatchSize,
 	}
 
 	return cursor, nil
-}
-
-func (c *Cursor) SetBatchSize(batchSize uint64) {
-	c.batchSize = batchSize
-	c.cacheKeys = nil
-	c.cacheValues = nil
 }
 
 func (c *Cursor) First() (key []byte, value []byte, err error) {
@@ -811,9 +811,9 @@ func (c *Cursor) NextKey() (keys []byte, vIsEmpty bool, err error) {
 
 func (c *Cursor) fetchPage(cmd Command) error {
 	if c.cacheKeys == nil {
-		c.cacheKeys = make([][]byte, c.batchSize)
-		c.cacheValues = make([][]byte, c.batchSize)
-		c.cacheValueIsEmpty = make([]bool, c.batchSize)
+		c.cacheKeys = make([][]byte, c.opts.prefetchSize)
+		c.cacheValues = make([][]byte, c.opts.prefetchSize)
+		c.cacheValueIsEmpty = make([]bool, c.opts.prefetchSize)
 	}
 
 	decoder := codecpool.Decoder(c.in)
@@ -828,7 +828,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		return fmt.Errorf("could not encode cursorHandle. %w", err)
 	}
 
-	if err := encoder.Encode(c.batchSize); err != nil {
+	if err := encoder.Encode(c.opts.prefetchSize); err != nil {
 		return fmt.Errorf("could not encode c.batchSize. %w", err)
 	}
 
@@ -843,7 +843,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		}
 	}
 
-	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < c.batchSize; c.cacheLastIdx++ {
+	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < c.opts.prefetchSize; c.cacheLastIdx++ {
 		select {
 		default:
 		case <-c.ctx.Done():

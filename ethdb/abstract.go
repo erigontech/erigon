@@ -2,6 +2,7 @@ package ethdb
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/bolt"
@@ -20,7 +21,7 @@ const DefaultProvider = Bolt
 
 type Opts struct {
 	provider DbProvider
-	Remote   *remote.DbOptions
+	Remote   remote.DbOptions
 	Bolt     *bolt.Options
 	Badger   badger.Options
 
@@ -28,7 +29,7 @@ type Opts struct {
 }
 
 func Options() Opts {
-	return Opts{provider: DefaultProvider}
+	return ProviderOptions(DefaultProvider)
 }
 
 func (opts Opts) Path(path string) Opts {
@@ -56,7 +57,8 @@ func (opts Opts) InMemory(val bool) Opts {
 	return opts
 }
 
-func (opts Opts) Provider(provider DbProvider) Opts {
+func ProviderOptions(provider DbProvider) Opts {
+	opts := Opts{}
 	switch opts.provider {
 	case Bolt:
 		opts.Badger = badger.DefaultOptions(opts.path)
@@ -78,10 +80,6 @@ type DB struct {
 	remote *remote.DB
 }
 
-// Example of getting inMemory db:
-// ethdb.Open(context.Background(), ethdb.Options().InMemory(true))
-// or
-// ethdb.Open(context.Background(), ethdb.Options().Provider(ethdb.Badger).InMemory(true))
 func Open(ctx context.Context, opts Opts) (db *DB, err error) {
 	db = &DB{opts: opts}
 
@@ -112,4 +110,133 @@ func (db *DB) Close() error {
 		return db.remote.Close()
 	}
 	return nil
+}
+
+type Tx struct {
+	db *DB
+
+	bolt   *bolt.Tx
+	badger *badger.Txn
+	remote *remote.Tx
+}
+
+type Bucket struct {
+	tx *Tx
+
+	bolt         *bolt.Bucket
+	badgerPrefix []byte
+	remote       *remote.Bucket
+}
+
+type Cursor struct {
+	bucket *Bucket
+
+	bolt   *bolt.Cursor
+	badger *badger.Iterator
+	remote *remote.Cursor
+}
+
+func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
+	t := &Tx{}
+	switch db.opts.provider {
+	case Bolt:
+		return db.bolt.View(func(tx *bolt.Tx) error {
+			t.bolt = tx
+			return f(t)
+		})
+	case Badger:
+		return db.badger.View(func(tx *badger.Txn) error {
+			t.badger = tx
+			return f(t)
+		})
+	case Remote:
+		return db.remote.View(ctx, func(tx *remote.Tx) error {
+			t.remote = tx
+			return f(t)
+		})
+	}
+	return nil
+}
+
+func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
+	t := &Tx{db: db}
+	switch db.opts.provider {
+	case Bolt:
+		return db.bolt.Update(func(tx *bolt.Tx) error {
+			t.bolt = tx
+			return f(t)
+		})
+	case Badger:
+		return db.badger.Update(func(tx *badger.Txn) error {
+			t.badger = tx
+			return f(t)
+		})
+	case Remote:
+		return fmt.Errorf("remote db provider doesn't support .Update method")
+	}
+	return nil
+}
+
+func (tx *Tx) Bucket(name []byte) (b *Bucket, err error) {
+	b = &Bucket{tx: tx}
+	switch tx.db.opts.provider {
+	case Bolt:
+		b.bolt = tx.bolt.Bucket(name)
+	case Badger:
+		b.badgerPrefix = name
+	case Remote:
+		b.remote, err = tx.remote.Bucket(name)
+	}
+	return nil, nil
+}
+
+func (b *Bucket) CursorOptions() CursorOpts {
+	c := CursorOpts{}
+	switch b.tx.db.opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts := badger.DefaultIteratorOptions
+		opts.Prefix = b.badgerPrefix
+		c.badger = opts
+	case Remote:
+		c.remote = remote.DefaultCursorOpts
+	}
+
+	return c
+}
+
+func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
+	c = &Cursor{bucket: b}
+	switch c.bucket.tx.db.opts.provider {
+	case Bolt:
+		c.bolt = b.bolt.Cursor()
+	case Badger:
+		opts.badger.Prefix = b.badgerPrefix
+		c.badger = b.tx.badger.NewIterator(opts.badger)
+	case Remote:
+		c.remote, err = b.remote.Cursor(opts.remote)
+	}
+	return c, nil
+}
+
+type CursorOpts struct {
+	provider DbProvider
+
+	remote remote.CursorOpts
+	badger badger.IteratorOptions
+
+	path string
+}
+
+func (opts CursorOpts) PrefetchSize(v uint) CursorOpts {
+	switch opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts.badger.PrefetchSize = int(v)
+	case Remote:
+		opts.remote.PrefetchSize(uint64(v))
+	}
+	return opts
 }

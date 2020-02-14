@@ -118,7 +118,7 @@ func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walk
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
@@ -161,7 +161,7 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
@@ -244,12 +244,12 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 		if hB == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
 
-		hC, err := hB.Cursor()
+		hC, err := hB.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
@@ -359,17 +359,17 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 		if hB == nil {
 			return nil
 		}
-		c, err := b.Cursor()
+		c, err := b.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
 
-		hC, err := hB.Cursor()
+		hC, err := hB.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
 
-		hC1, err := hB.Cursor()
+		hC1, err := hB.Cursor(remote.DefaultCursorOpts)
 		if err != nil {
 			return err
 		}
