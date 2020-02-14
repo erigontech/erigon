@@ -21,12 +21,13 @@ in this spec and should be up to implementation.
 ## Nodes
 
 ```
-type Node = HashNode (raw_hash:nil|Hash)
-          | ValueNode (raw_value:nil|ByteArray)
-          | AccountNode (nonce:Int balance:Int storage:nil|Node storage_hash:nil|Hash code_hash:nil|Hash)
+type Node = HashNode (raw_hash:Hash)
+          | ValueNode (raw_value:ByteArray)
+          | AccountNode (nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode)
           | LeafNode (key:ByteArray value:ValueNode|AccountNode)
           | ExtensionNode (key:ByteArray child:Node)
           | BranchNode (child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node)
+          | CodeNode(code: ByteArray)
 ```
 
 
@@ -61,8 +62,12 @@ type Parameters  = ()
 type Instruction = OpCode
                  | (OpCode, Parameters)
 
-type Witness     = ()
-                 | PREPEND(Instuction, Witness)
+type Header      = (Version: Int)
+
+type WitnessBody = WitnessBody
+                 | PREPEND(Instuction, WitnessBody)
+
+type Witness     = (Header, WitnessBody)
 ```
 
 In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
@@ -235,19 +240,21 @@ STACK(HashNode{RLP(KECCAK(raw_code))})
 ```
 
 GUARD has_code == true
+GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == true
 GUARD storage_root is HashNode
 
-STACK(code_hash_node) STACK(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, storage_root.raw_hash, code_hash_node.raw_hash}})
+STACK(code) STACK(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, code}})
 --
 
 GUARD has_code == true
+GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == true
 GUARD storage_root is not HashNode 
 
-STACK(code_hash_node) STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, HASH_STORAGE(storage_root), code_hash_node.raw_hash}})
+STACK(code) STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, code}})
 
 --
 
@@ -256,7 +263,7 @@ GUARD has_storage == true
 GUARD storage_root is not HashNode
 
 STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, HASH_STORAGE(storage_root), nil}})
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, nil}})
 
 ---
 
@@ -265,15 +272,16 @@ GUARD has_storage == true
 GUARD storage_root is HashNode
 
 STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, storage_root.raw_hash, nil}})
+STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, nil}})
 
 --
 
 GUARD has_code == true
+GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == false
 
-STACK(code_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, code_hash_node.raw_hash}})
+STACK(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, code}})
 
 --
 
@@ -381,11 +389,3 @@ returns the array w/o the first item
 ### `KECCAK(bytes)`
 
 returns a keccak-256 hash of `bytes`
-
-### `LEN(bytes)`
-
-returns the lengths of the byte array
-
-### `HASH_STORAGE(root_node)`
-
-hashes the trie starting from the root node, based on the yellow paper
