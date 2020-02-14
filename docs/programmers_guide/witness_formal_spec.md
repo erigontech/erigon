@@ -285,17 +285,6 @@ STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, nil}})
 
 ```
 
-### `EMPTY_ROOT`
-
-Pushes an empty node + an empty hash to the stack
-
-**Substitution rules**
-
-```
-EMPTY_ROOT |=>
-STACK(HashNode{RLP(0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421)})
-```
-
 ### `NEW_TRIE`
 
 Stops the witness execution.
