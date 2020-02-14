@@ -12,8 +12,6 @@ import (
 )
 
 func TestCompressNibbles(t *testing.T) {
-	var err error
-
 	cases := []struct {
 		in     string
 		expect string

@@ -25,7 +25,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -83,7 +83,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 			cancel()
 		}()
 
-		go remote.Listener(tcpCtx, boltDb.DB(), ctx.Config.RemoteDbListenAddress)
+		go remotedbserver.Listener(tcpCtx, boltDb.DB(), ctx.Config.RemoteDbListenAddress)
 	}
 	return boltDb, nil
 	/*

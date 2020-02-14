@@ -14,12 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
-package remote
+package remotedbserver
 
 import (
 	"bytes"
 	"testing"
 
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ugorji/go/codec"
 )
 
@@ -37,7 +38,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = encoder.Encode(ResponseOk)
+			_ = encoder.Encode(remote.ResponseOk)
 			_ = encodeKeyValue(encoder, k, v)
 		}
 	})
@@ -47,7 +48,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = encoder.Encode(ResponseOk)
+			_ = encoder.Encode(remote.ResponseOk)
 			_ = encoder.Encode(&k)
 			_ = encoder.Encode(&v)
 		}
@@ -58,7 +59,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			_ = encoder.Encode(ResponseOk)
+			_ = encoder.Encode(remote.ResponseOk)
 			_ = encoder.Encode(k)
 			_ = encoder.Encode(v)
 		}
@@ -69,7 +70,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			encoder.MustEncode(ResponseOk)
+			encoder.MustEncode(remote.ResponseOk)
 			encoder.MustEncode(&k)
 			encoder.MustEncode(&v)
 		}
@@ -80,7 +81,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			encoder.MustEncode(ResponseOk)
+			encoder.MustEncode(remote.ResponseOk)
 			encoder.MustEncode(k)
 			encoder.MustEncode(v)
 		}
@@ -95,13 +96,13 @@ func BenchmarkSerialize(b *testing.B) {
 			V []byte
 		}
 		type a struct {
-			C ResponseCode
+			C remote.ResponseCode
 			kv
 		}
 		x := &a{}
 
 		for i := 0; i < b.N; i++ {
-			x.C = ResponseOk
+			x.C = remote.ResponseOk
 			x.K = k
 			x.V = v
 			encoder.MustEncode(x)
@@ -115,7 +116,7 @@ func BenchmarkSerialize(b *testing.B) {
 		b.ResetTimer()
 
 		for i := 0; i < b.N; i++ {
-			encoder.MustEncode(ResponseOk)
+			encoder.MustEncode(remote.ResponseOk)
 			for i := 0; i < M; i++ {
 				encoder.MustEncode(&k)
 				encoder.MustEncode(&v)
@@ -134,7 +135,7 @@ func BenchmarkSerialize(b *testing.B) {
 				keys[i] = k
 				values[i] = v
 			}
-			encoder.MustEncode(ResponseOk)
+			encoder.MustEncode(remote.ResponseOk)
 			encoder.MustEncode(&keys)
 			encoder.MustEncode(&values)
 		}

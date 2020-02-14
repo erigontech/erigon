@@ -5,6 +5,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/spf13/cobra"
 )
 
@@ -23,7 +24,10 @@ var gasLimitsCmd = &cobra.Command{
 			panic(err)
 		}
 		ctx := getContext()
-		remoteDb, err := connectRemoteDb(ctx, remoteDbAddress)
+
+		opts := remote.DefaultOptions()
+		opts.DialAddress = remoteDbAddress
+		remoteDb, err := remote.Open(ctx, opts)
 		if err != nil {
 			return err
 		}

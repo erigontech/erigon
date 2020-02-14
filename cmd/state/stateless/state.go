@@ -22,6 +22,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -232,7 +233,7 @@ beginTx:
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
-			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}
@@ -480,7 +481,7 @@ beginTx:
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
-			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}
@@ -735,7 +736,7 @@ beginTx:
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
-			r.StartedWhenBlockNumber, err = remote.ReadLastBlockNumber(tx)
+			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
 			if err != nil {
 				return err
 			}

@@ -3,9 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
-	"io"
 	"math/big"
-	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -21,6 +19,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
@@ -85,7 +84,7 @@ func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 
 	if err := api.db.View(ctx, func(tx *remote.Tx) error {
 		var err error
-		blockNumber, err = remote.ReadLastBlockNumber(tx)
+		blockNumber, err = remotechain.ReadLastBlockNumber(tx)
 		if err != nil {
 			return err
 		}
@@ -198,11 +197,11 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	additionalFields := make(map[string]interface{})
 
 	err = api.db.View(ctx, func(tx *remote.Tx) error {
-		block, err = remote.GetBlockByNumber(tx, uint64(number.Int64()))
+		block, err = remotechain.GetBlockByNumber(tx, uint64(number.Int64()))
 		if err != nil {
 			return err
 		}
-		additionalFields["totalDifficulty"], err = remote.ReadTd(tx, block.Hash(), uint64(number.Int64()))
+		additionalFields["totalDifficulty"], err = remotechain.ReadTd(tx, block.Hash(), uint64(number.Int64()))
 		if err != nil {
 			return err
 		}
@@ -267,22 +266,16 @@ func daemon(cfg Config) {
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 
-	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", cfg.remoteDbAddress)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", cfg.remoteDbAddress, err)
-		}
-		return conn, conn, conn, nil
-	}
-	db, err := remote.NewDB(context.Background(), dial)
+	opts := remote.DefaultOptions()
+	opts.DialAddress = cfg.remoteDbAddress
+	db, err := remote.Open(context.Background(), opts)
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
 	}
 
 	var rpcAPI = []rpc.API{}
-	dbReader := remote.NewRemoteBoltDatabase(db)
+	dbReader := ethdb.NewRemoteBoltDatabase(db)
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext)
 	dbgAPIImpl := NewPrivateDebugAPI(db, dbReader, chainContext)

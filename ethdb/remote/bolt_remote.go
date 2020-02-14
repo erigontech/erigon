@@ -24,8 +24,6 @@ import (
 	"net"
 	"time"
 
-	"github.com/ledgerwatch/bolt"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ugorji/go/codec"
@@ -97,16 +95,15 @@ const (
 
 const DefaultCursorBatchSize uint64 = 1
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
-const ServerMaxConnections uint64 = 2048
 const ClientMaxConnections uint64 = 128
 
 var logger = log.New("database", "remote")
 
-func encodeKeyValue(encoder *codec.Encoder, key []byte, value []byte) error {
-	if err := encoder.Encode(&key); err != nil {
+func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
+	if err := decoder.Decode(key); err != nil {
 		return err
 	}
-	if err := encoder.Encode(&value); err != nil {
+	if err := decoder.Decode(valueIsEmpty); err != nil {
 		return err
 	}
 	return nil
@@ -122,37 +119,6 @@ func decodeKeyValue(decoder *codec.Decoder, key *[]byte, value *[]byte) (err err
 	return nil
 }
 
-func encodeKey(encoder *codec.Encoder, key []byte, valueIsEmpty bool) error {
-	if err := encoder.Encode(&key); err != nil {
-		return err
-	}
-	if err := encoder.Encode(valueIsEmpty); err != nil {
-		return err
-	}
-	return nil
-}
-
-func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
-	if err := decoder.Decode(key); err != nil {
-		return err
-	}
-	if err := decoder.Decode(valueIsEmpty); err != nil {
-		return err
-	}
-	return nil
-}
-
-func encodeErr(encoder *codec.Encoder, mainError error) {
-	if err := encoder.Encode(ResponseErr); err != nil {
-		logger.Error("could not encode ResponseErr", "err", err)
-		return
-	}
-	if err := encoder.Encode(mainError.Error()); err != nil {
-		logger.Error("could not encode errCode", "err", err)
-		return
-	}
-}
-
 func decodeErr(decoder *codec.Decoder, responseCode ResponseCode) error {
 	if responseCode != ResponseErr {
 		return fmt.Errorf("unknown response code: %d", responseCode)
@@ -166,490 +132,28 @@ func decodeErr(decoder *codec.Decoder, responseCode ResponseCode) error {
 	return errors.New(errorMessage)
 }
 
-// Server is to be called as a go-routine, one per every client connection.
-// It runs while the connection is active and keep the entire connection's context
-// in the local variables
-// For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
-	defer func() {
-		if err1 := closer.Close(); err1 != nil {
-			logger.Error("Could not close connection", "err", err1)
-		}
-	}()
-
-	decoder := codecpool.Decoder(in)
-	defer codecpool.Return(decoder)
-	encoder := codecpool.Encoder(out)
-	defer codecpool.Return(encoder)
-
-	// Server is passive - it runs a loop what reads commands (and their arguments) and attempts to respond
-	var lastHandle uint64
-	// Read-only transactions opened by the client
-	var tx *bolt.Tx
-
-	// We do Rollback and never Commit, because the remote transactions are always read-only, and must never change
-	// anything
-	defer func() {
-		if tx != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				logger.Error("could not roll back", "err", rollbackErr)
-			}
-			tx = nil
-		}
-	}()
-
-	// Buckets opened by the client
-	buckets := make(map[uint64]*bolt.Bucket, 2)
-	// List of buckets opened in each transaction
-	//bucketsByTx := make(map[uint64][]uint64, 10)
-	// Cursors opened by the client
-	cursors := make(map[uint64]*bolt.Cursor, 2)
-	// List of cursors opened in each bucket
-	cursorsByBucket := make(map[uint64][]uint64, 2)
-
-	var c Command
-	var bucketHandle uint64
-	var cursorHandle uint64
-
-	var name []byte
-	var seekKey []byte
-
-	for {
-		// Make sure we are not blocking the resizing of the memory map
-		if tx != nil {
-			tx.Yield()
-		}
-
-		if err := decoder.Decode(&c); err != nil {
-			if err == io.EOF {
-				// Graceful termination when the end of the input is reached
-				break
-			}
-			return fmt.Errorf("could not decode command: %w", err)
-		}
-		switch c {
-		case CmdVersion:
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response code to CmdVersion: %w", err)
-			}
-			if err := encoder.Encode(Version); err != nil {
-				return fmt.Errorf("could not encode response to CmdVersion: %w", err)
-			}
-		case CmdBeginTx:
-			var err error
-			tx, err = db.Begin(false)
-			if err != nil {
-				err2 := fmt.Errorf("could not start transaction for CmdBeginTx: %w", err)
-				encodeErr(encoder, err2)
-				return err2
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdBeginTx: %w", err)
-			}
-		case CmdEndTx:
-			// Remove all the buckets
-			for bucketHandle := range buckets {
-				if cursorHandles, ok2 := cursorsByBucket[bucketHandle]; ok2 {
-					for _, cursorHandle := range cursorHandles {
-						delete(cursors, cursorHandle)
-					}
-					delete(cursorsByBucket, bucketHandle)
-				}
-				delete(buckets, bucketHandle)
-			}
-
-			if tx != nil {
-				if err := tx.Rollback(); err != nil {
-					return fmt.Errorf("could not end transaction: %w", err)
-				}
-				tx = nil
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdEndTx: %w", err)
-			}
-		case CmdBucket:
-			// Read the name of the bucket
-			if err := decoder.Decode(&name); err != nil {
-				return fmt.Errorf("could not decode name for CmdBucket: %w", err)
-			}
-
-			// Open the bucket
-			if tx == nil {
-				err := fmt.Errorf("send CmdBucket before CmdBeginTx")
-				encodeErr(encoder, err)
-				return err
-			}
-
-			bucket := tx.Bucket(name)
-			if bucket == nil {
-				err := fmt.Errorf("bucket not found: %s", name)
-				encodeErr(encoder, err)
-				continue
-			}
-
-			lastHandle++
-			buckets[lastHandle] = bucket
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdBucket: %w", err)
-			}
-
-			if err := encoder.Encode(lastHandle); err != nil {
-				return fmt.Errorf("could not encode bucketHandle in response to CmdBucket: %w", err)
-			}
-
-		case CmdGet:
-			var k []byte
-			if err := decoder.Decode(&bucketHandle); err != nil {
-				return fmt.Errorf("could not decode bucketHandle for CmdGet: %w", err)
-			}
-			if err := decoder.Decode(&k); err != nil {
-				return fmt.Errorf("could not decode key for CmdGet: %w", err)
-			}
-			bucket, ok := buckets[bucketHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("bucket not found for CmdGet: %d", bucketHandle))
-				continue
-			}
-			v, _ := bucket.Get(k)
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				err = fmt.Errorf("could not encode response code for CmdGet: %w", err)
-				return err
-			}
-
-			if err := encoder.Encode(&v); err != nil {
-				return fmt.Errorf("could not encode value in response for CmdGet: %w", err)
-			}
-
-		case CmdCursor:
-			if err := decoder.Decode(&bucketHandle); err != nil {
-				return fmt.Errorf("could not decode bucketHandle for CmdCursor: %w", err)
-			}
-			bucket, ok := buckets[bucketHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("bucket not found for CmdCursor: %d", bucketHandle))
-				continue
-			}
-
-			cursor := bucket.Cursor()
-			lastHandle++
-			cursorHandle = lastHandle
-			cursors[cursorHandle] = cursor
-			if cursorHandles, ok1 := cursorsByBucket[bucketHandle]; ok1 {
-				cursorHandles = append(cursorHandles, cursorHandle)
-				cursorsByBucket[bucketHandle] = cursorHandles
-			} else {
-				cursorsByBucket[bucketHandle] = []uint64{cursorHandle}
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response for CmdCursor: %w", err)
-			}
-
-			if err := encoder.Encode(cursorHandle); err != nil {
-				return fmt.Errorf("could not cursor handle in response to CmdCursor: %w", err)
-			}
-		case CmdCursorSeek:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
-			}
-			if err := decoder.Decode(&seekKey); err != nil {
-				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
-			}
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-			k, v := cursor.Seek(seekKey)
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
-			}
-			if err := encodeKeyValue(encoder, k, v); err != nil {
-				return fmt.Errorf("could not encode (key,value) for CmdCursorSeek: %w", err)
-			}
-		case CmdCursorSeekTo:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdCursorSeekTo: %w", err)
-			}
-			if err := decoder.Decode(&seekKey); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdCursorSeekTo: %w", err)
-			}
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-
-			k, v := cursor.SeekTo(seekKey)
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdCursorSeek: %w", err)
-			}
-
-			if err := encodeKeyValue(encoder, k, v); err != nil {
-				return fmt.Errorf("could not encode (key,value) in response to CmdCursorSeekTo: %w", err)
-			}
-		case CmdCursorNext:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not decode cursorHandle for CmdCursorNext: %w", err)
-			}
-			var numberOfKeys uint64
-			if err := decoder.Decode(&numberOfKeys); err != nil {
-				return fmt.Errorf("could not decode numberOfKeys for CmdCursorNext: %w", err)
-			}
-
-			if numberOfKeys > CursorMaxBatchSize {
-				encodeErr(encoder, fmt.Errorf("requested numberOfKeys is too large: %d", numberOfKeys))
-				continue
-			}
-
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdCursorNext: %w", err)
-			}
-
-			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				if err := encodeKeyValue(encoder, k, v); err != nil {
-					return fmt.Errorf("could not encode (key,value) in response to CmdCursorNext: %w", err)
-				}
-
-				numberOfKeys--
-				if k == nil {
-					break
-				}
-			}
-
-		case CmdCursorFirst:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirst: %w", err)
-			}
-			var numberOfKeys uint64
-			if err := decoder.Decode(&numberOfKeys); err != nil {
-				return fmt.Errorf("could not decode numberOfKeys for CmdCursorFirst: %w", err)
-			}
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response code for CmdCursorFirst: %w", err)
-			}
-
-			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				if err := encodeKeyValue(encoder, k, v); err != nil {
-					return fmt.Errorf("could not encode (key,value) for CmdCursorFirst: %w", err)
-				}
-
-				numberOfKeys--
-				if k == nil {
-					break
-				}
-			}
-		case CmdCursorNextKey:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not decode cursorHandle for CmdCursorNextKey: %w", err)
-			}
-			var numberOfKeys uint64
-			if err := decoder.Decode(&numberOfKeys); err != nil {
-				return fmt.Errorf("could not decode numberOfKeys for CmdCursorNextKey: %w", err)
-			}
-
-			if numberOfKeys > CursorMaxBatchSize {
-				encodeErr(encoder, fmt.Errorf("requested numberOfKeys is too large: %d", numberOfKeys))
-				continue
-			}
-
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdCursorNextKey: %w", err)
-			}
-
-			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
-					return fmt.Errorf("could not encode (key,valueIsEmpty) in response to CmdCursorNextKey: %w", err)
-				}
-
-				numberOfKeys--
-				if k == nil {
-					break
-				}
-			}
-		case CmdCursorFirstKey:
-			if err := decoder.Decode(&cursorHandle); err != nil {
-				return fmt.Errorf("could not decode cursorHandle for CmdCursorFirstKey: %w", err)
-			}
-			var numberOfKeys uint64
-			if err := decoder.Decode(&numberOfKeys); err != nil {
-				return fmt.Errorf("could not decode numberOfKeys for CmdCursorFirstKey: %w", err)
-			}
-			cursor, ok := cursors[cursorHandle]
-			if !ok {
-				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
-				continue
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response code for CmdCursorFirstKey: %w", err)
-			}
-
-			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
-				}
-
-				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
-					return fmt.Errorf("could not encode (key,valueIsEmpty) for CmdCursorFirstKey: %w", err)
-				}
-
-				numberOfKeys--
-				if k == nil {
-					break
-				}
-			}
-		case CmdGetAsOf:
-			var bucket, hBucket, key, v []byte
-			var timestamp uint64
-			if err := decoder.Decode(&bucket); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
-			}
-			if err := decoder.Decode(&hBucket); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
-			}
-			if err := decoder.Decode(&key); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
-			}
-			if err := decoder.Decode(&timestamp); err != nil {
-				return fmt.Errorf("could not decode seekKey for CmdGetAsOf: %w", err)
-			}
-
-			d := ethdb.NewWrapperBoltDatabase(db)
-
-			var err error
-			v, err = d.GetAsOf(bucket, hBucket, key, timestamp)
-			if err != nil {
-				encodeErr(encoder, err)
-			}
-
-			if err := encoder.Encode(ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
-			}
-
-			if err := encoder.Encode(&v); err != nil {
-				return fmt.Errorf("could not encode response to CmdGetAsOf: %w", err)
-			}
-		default:
-			logger.Error("unknown", "command", c)
-			return fmt.Errorf("unknown command %d", c)
-		}
-	}
-
-	return nil
-}
-
-// Listener starts listener that for each incoming connection
-// spawn a go-routine invoking Server
-func Listener(ctx context.Context, db *bolt.DB, address string) {
-	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", address)
-	if err != nil {
-		logger.Error("Could not create listener", "address", address, "err", err)
-		return
-	}
-	defer func() {
-		if err = ln.Close(); err != nil {
-			logger.Error("Could not close listener", "err", err)
-		}
-	}()
-	logger.Info("Listening on", "address", address)
-
-	ch := make(chan bool, ServerMaxConnections)
-	defer close(ch)
-
-	go func() {
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ticker.C:
-				logger.Debug("connections", "amount", len(ch))
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	for {
-		conn, err1 := ln.Accept()
-		if err1 != nil {
-			logger.Error("Could not accept connection", "err", err1)
-			continue
-		}
-
-		go func() {
-			ch <- true
-			defer func() {
-				<-ch
-			}()
-
-			err := Server(ctx, db, conn, conn, conn)
-			if err != nil {
-				logger.Warn("server error", "err", err)
-			}
-		}()
-	}
-}
-
 type conn struct {
 	in     io.Reader
 	out    io.Writer
 	closer io.Closer
 }
 
+type DbOptions struct {
+	DialAddress     string
+	DialFunc        DialFunc
+	DialTimeout     time.Duration
+	PingTimeout     time.Duration
+	RetryDialAfter  time.Duration
+	PingEvery       time.Duration
+	MaxConnections  uint64
+	CursorBatchSize uint64
+}
+
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	dialFunc       DialFunc
+	opts           *DbOptions
 	connectionPool chan *conn
-	dialTimeout    time.Duration
-	pingTimeout    time.Duration
-	retryDialAfter time.Duration
-	pingEvery      time.Duration
 	doDial         chan struct{}
 	doPing         <-chan time.Time
 }
@@ -732,16 +236,37 @@ func (closer notifyOnClose) Close() error {
 	return closer.internal.Close()
 }
 
-// NewDB creates a new instance of DB
-func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
+func DefaultOptions() *DbOptions {
+	opts := &DbOptions{
+		CursorBatchSize: DefaultCursorBatchSize,
+		MaxConnections:  ClientMaxConnections,
+		DialTimeout:     3 * time.Second,
+		PingTimeout:     500 * time.Millisecond,
+		RetryDialAfter:  1 * time.Second,
+		PingEvery:       1 * time.Second,
+	}
+	opts.DialFunc = opts.defaultDialFunc
+	return opts
+}
+
+func (opts *DbOptions) defaultDialFunc(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
+	if opts.DialAddress == "" {
+		return nil, nil, nil, fmt.Errorf("please set opts.DialAddress or opts.DialFunc")
+	}
+
+	dialer := net.Dialer{}
+	conn, err := dialer.DialContext(ctx, "tcp", opts.DialAddress)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", opts.DialAddress, err)
+	}
+	return conn, conn, conn, err
+}
+
+func Open(parentCtx context.Context, opts *DbOptions) (*DB, error) {
 	db := &DB{
-		dialFunc:       dialFunc,
+		opts:           opts,
 		connectionPool: make(chan *conn, ClientMaxConnections),
 		doDial:         make(chan struct{}, ClientMaxConnections),
-		dialTimeout:    3 * time.Second,
-		pingTimeout:    500 * time.Millisecond,
-		retryDialAfter: 1 * time.Second,
-		pingEvery:      1 * time.Second,
 	}
 
 	for i := uint64(0); i < ClientMaxConnections; i++ {
@@ -755,7 +280,7 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 	}()
 
 	traceTicker := time.NewTicker(3 * time.Second)
-	pingTicker := time.NewTicker(db.pingEvery)
+	pingTicker := time.NewTicker(db.opts.PingEvery)
 	db.doPing = pingTicker.C
 	go func() {
 		defer pingTicker.Stop()
@@ -780,13 +305,13 @@ func NewDB(parentCtx context.Context, dialFunc DialFunc) (*DB, error) {
 func (db *DB) autoReconnect(ctx context.Context) {
 	select {
 	case <-db.doDial:
-		dialCtx, cancel := context.WithTimeout(ctx, db.dialTimeout)
+		dialCtx, cancel := context.WithTimeout(ctx, db.opts.DialTimeout)
 		defer cancel()
-		newIn, newOut, newCloser, err := db.dialFunc(dialCtx)
+		newIn, newOut, newCloser, err := db.opts.DialFunc(dialCtx)
 		if err != nil {
 			logger.Warn("dial failed", "err", err)
 			db.doDial <- struct{}{}
-			time.Sleep(db.retryDialAfter)
+			time.Sleep(db.opts.RetryDialAfter)
 			return
 		}
 
@@ -794,7 +319,7 @@ func (db *DB) autoReconnect(ctx context.Context) {
 		db.returnConn(ctx, newIn, newOut, notifyCloser)
 	case <-db.doPing:
 		// periodically ping to close broken connections
-		pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+		pingCtx, cancel := context.WithTimeout(ctx, db.opts.PingTimeout)
 		defer cancel()
 		if err := db.ping(pingCtx); err != nil {
 			if !errors.Is(err, io.EOF) { // io.EOF means server gone
@@ -804,7 +329,7 @@ func (db *DB) autoReconnect(ctx context.Context) {
 
 			// if server gone, then need re-check all connections by ping. It will remove broken connections from pool.
 			for i := uint64(0); i < ClientMaxConnections-1; i++ {
-				pingCtx, cancel := context.WithTimeout(ctx, db.pingTimeout)
+				pingCtx, cancel := context.WithTimeout(ctx, db.opts.PingTimeout)
 				_ = db.ping(pingCtx)
 				cancel()
 			}

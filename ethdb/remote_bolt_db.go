@@ -15,7 +15,7 @@
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
 // Package ethdb defines the interfaces for an Ethereum data store.
-package remote
+package ethdb
 
 import (
 	"bytes"
@@ -23,22 +23,22 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
-// BoltDatabase is a wrapper over BoltDb,
+// RemoteBoltDatabase is a wrapper over BoltDb,
 // compatible with the Database interface.
-type BoltDatabase struct {
-	db  *DB        // BoltDB instance
+type RemoteBoltDatabase struct {
+	db  *remote.DB // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 }
 
 // NewRemoteBoltDatabase returns a BoltDB wrapper.
-func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
+func NewRemoteBoltDatabase(db *remote.DB) *RemoteBoltDatabase {
 	logger := log.New()
 
-	return &BoltDatabase{
+	return &RemoteBoltDatabase{
 		db:  db,
 		log: logger,
 	}
@@ -47,9 +47,9 @@ func NewRemoteBoltDatabase(db *DB) *BoltDatabase {
 // Has checks if the value exists
 //
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
-func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
+func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
-	err := db.db.View(context.Background(), func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -72,11 +72,11 @@ func (db *BoltDatabase) Has(bucket, key []byte) (bool, error) {
 // Get returns the value for a given key if it's present.
 //
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
-func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
+func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	err := db.db.View(context.Background(), func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -97,19 +97,19 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 		return nil
 	})
 	if dat == nil {
-		return nil, ethdb.ErrKeyNotFound
+		return nil, ErrKeyNotFound
 	}
 	return dat, err
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
-func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
 }
 
-func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
-	err := db.db.View(context.Background(), func(tx *Tx) error {
+func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
+	fixedbytes, mask := Bytesmask(fixedbits)
+	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -145,14 +145,14 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 	return err
 }
 
-func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
+func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
 	rangeIdx := 0 // What is the current range we are extracting
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
+	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	err := db.db.View(context.Background(), func(tx *Tx) error {
+	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -199,7 +199,7 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 						if rangeIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
+						fixedbytes, mask = Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 					}
 				}
@@ -219,13 +219,13 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits)
+func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
+	fixedbytes, mask := Bytesmask(fixedbits)
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
-	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
-	err := db.db.View(context.Background(), func(tx *Tx) error {
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		var err error
 
 		b, err := tx.Bucket(bucket)
@@ -317,7 +317,7 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
-					copy(keyBuffer[l:], ethdb.EndSuffix)
+					copy(keyBuffer[l:], EndSuffix)
 					hK, hV, err = hC.SeekTo(keyBuffer)
 					if err != nil {
 						return err
@@ -331,18 +331,18 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 	return err
 }
 
-func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
+func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
 	keyIdx := 0 // What is the current key we are extracting
-	fixedbytes, mask := ethdb.Bytesmask(fixedbits[keyIdx])
+	fixedbytes, mask := Bytesmask(fixedbits[keyIdx])
 	startkey := startkeys[keyIdx]
 	encodedTS := dbutils.EncodeTimestamp(timestamp)
 	l := len(startkey)
 	sl := l + len(encodedTS)
-	keyBuffer := make([]byte, l+len(ethdb.EndSuffix))
-	if err := db.db.View(context.Background(), func(tx *Tx) error {
+	keyBuffer := make([]byte, l+len(EndSuffix))
+	if err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		b, err := tx.Bucket(bucket)
 		if err != nil {
 			return err
@@ -441,7 +441,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 						if keyIdx == len(startkeys) {
 							return nil
 						}
-						fixedbytes, mask = ethdb.Bytesmask(fixedbits[keyIdx])
+						fixedbytes, mask = Bytesmask(fixedbits[keyIdx])
 						startkey = startkeys[keyIdx]
 					}
 				}
@@ -493,7 +493,7 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 				}
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
-					copy(keyBuffer[l:], ethdb.EndSuffix)
+					copy(keyBuffer[l:], EndSuffix)
 					hK, hV, err = hC.SeekTo(keyBuffer)
 					if err != nil {
 						return err
@@ -511,11 +511,11 @@ func (db *BoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte
 	return nil
 }
 
-func (db *BoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
-	return ethdb.RewindData(db, timestampSrc, timestampDst, df)
+func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64, df func(hBucket, key, value []byte) error) error {
+	return RewindData(db, timestampSrc, timestampDst, df)
 }
 
-func (db *BoltDatabase) Close() {
+func (db *RemoteBoltDatabase) Close() {
 	if err := db.db.Close(); err == nil {
 		db.log.Info("Database closed")
 	} else {
