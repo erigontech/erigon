@@ -437,7 +437,7 @@ func Stateless(
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 			tds.Trie().Reset()
-			nextRoot = tds.Hash()
+			nextRoot = tds.Trie().Hash()
 			if nextRoot != block.Root() {
 				fmt.Printf("[Attempt 2]: Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
 				return
