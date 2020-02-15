@@ -935,9 +935,12 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 // database and can be used even if the trie doesn't have one.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
-	resetRefs(t.root)
 	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))
+}
+
+func (t *Trie) Reset() {
+	resetRefs(t.root)
 }
 
 func (t *Trie) getHasher() *hasher {

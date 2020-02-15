@@ -436,7 +436,24 @@ func Stateless(
 		nextRoot := roots[len(roots)-1]
 		if nextRoot != block.Root() {
 			fmt.Printf("Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
-			return
+			tds.Trie().Reset()
+			roots, err = tds.UpdateStateTrie()
+			if err != nil {
+				fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
+				return
+			}
+			if !chainConfig.IsByzantium(header.Number) {
+				for i, receipt := range receipts {
+					receipt.PostState = roots[i].Bytes()
+				}
+			}
+			nextRoot = roots[len(roots)-1]
+			if nextRoot != block.Root() {
+				fmt.Printf("[Attempt 2]: Root hash does not match for block %d, expected %x, was %x\n", blockNum, block.Root(), nextRoot)
+				return
+			} else {
+				fmt.Printf("Fixed\n")
+			}
 		}
 		tds.SetBlockNr(blockNum)
 
