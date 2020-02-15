@@ -100,13 +100,3 @@ Date:   Mon Feb 17 12:01:03 2020 +0200
 
     eth: don't enforce minimum broadcast, fix broadcast test
 
-commit 37531b18847774a7f057496bc34f2a48053fa417
-Author: Boqin Qin <Bobbqqin@gmail.com>
-Date:   Sun Feb 16 02:14:29 2020 +0800
-
-    cmd/faucet: protect f.reqs with Rlock to prevent data race (#20669)
-    
-    * cmd/faucet: add Rlock to protect f.reqs in apiHandler
-    
-    * cmd/faucet: make a locked copy of f.reqs
-
