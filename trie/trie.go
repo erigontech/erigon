@@ -935,6 +935,7 @@ func (t *Trie) Root() []byte { return t.Hash().Bytes() }
 // database and can be used even if the trie doesn't have one.
 // DESCRIBED: docs/programmers_guide/guide.md#root
 func (t *Trie) Hash() common.Hash {
+	resetRefs(t.root)
 	hash, _ := t.hashRoot()
 	return common.BytesToHash(hash.(hashNode))
 }
@@ -977,7 +978,7 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	return true, accNode.Root
 }
 
-func (t *Trie) unload(hex []byte, h *hasher) {
+func (t *Trie) unload(hex []byte) {
 	nd, parent, ok := t.getNode(hex, false)
 	if !ok {
 		return
@@ -995,7 +996,7 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 	if nd == nil {
 		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
 	}
-	h.hash(nd, len(hex) == 0, hn[:])
+	copy(hn[:], nd.reference())
 	hnode := hashNode(hn[:])
 	switch p := parent.(type) {
 	case nil:
