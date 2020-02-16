@@ -434,6 +434,10 @@ Serialized Witness: `(HEADER, OP1, OP2, ..., OPn-1, OPn, EOF)`
 
 #### Encoding
 
+##### CBOR
+
+The parts of the key that are encoded with CBOR are marked by the `CBOR` function.
+
 ##### Keys
 
 Keys are also using custom encryption to make them more compact.
