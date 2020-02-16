@@ -627,7 +627,7 @@ func (t *Trie) hook(hex []byte, n node) {
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	if del {
 		t.evictNodeFromHashMap(n)
-	} else if len(n.reference()) == common.HashLength {
+	} else if len(n.reference()) == common.HashLength && debug.IsGetNodeData() {
 		var key common.Hash
 		copy(key[:], n.reference())
 		t.hashMap[key] = n
