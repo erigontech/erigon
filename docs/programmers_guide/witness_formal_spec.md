@@ -165,7 +165,9 @@ Node(<HELPER_FUNCTION_OR_COMPUTATION>)
 `NodeType` is one of the types of nodes to match. Can also be `Node` to match
 any non-nil node.
 
-There MUST be one and only one substitution rule applicable to the execution state. If an instruction has multiple substitution rules, the applicability is defined by the `GUARD` statements.
+Substitution rules MUST be non-ambiguous. Even though, there can be multiple
+substitution rules applicable to the whole witness at the same time, there MUST
+be only one rule that is applicable to a certain position in the witness.
 The substitution rule MAY have one or more GUARD statements.
 The substitution rule MAY have one or more STACK statements before the instruction.
 The substitution rule MUST have exactly one instruction.
@@ -207,24 +209,25 @@ Helper functions MAY contain recursion.
 
 **Substitution rules**
 
+Replaces the instruction with a `ValueNode` wrapped with a `LeafNode`.
+
 ```
 LEAF(key, raw_value) |=> LeafNode{key, ValueNode(raw_value)}
 ```
 
 ### `EXTENSION key`
 
+Wraps a node to the left of the instruction with an `ExtensionNode`.
+
 **Substitution rules**
 
 ```
-GUARD node != nil
-
 Node(node) EXTENSION(key) |=> ExtensionNode{key, node}
-
 ```
 
 ### `HASH raw_hash`
 
-Pushes a `HashNode` to stack.
+Replaces the instruction with a `HashNode`.
 
 **Substitution rules**
 
@@ -234,13 +237,16 @@ HASH(hash_value) |=> HashNode{hash_value}
 
 ### `CODE raw_code`
 
-Pushes an nil node + the code hash to the stack.
+Replaces the instruction with a `CodeNode`.
 
 ```
 CODE(raw_code) |=> CodeNode{raw_code}
 ```
 
 ### `ACCOUNT_LEAF key nonce balance has_code has_storage`
+
+Replaces the instuction and, optionally, up to 2 nodes to the left of the
+instructon with a single `AccountNode` wrapped with a `LeafNode`.
 
 **Substitution rules**
 
@@ -295,13 +301,13 @@ LeafNode{key, AccountNode{nonce, balance, nil, nil, nil}}
 
 ### `NEW_TRIE`
 
-Stops the witness execution.
-
-No substitution rules
+No substitution rules. This instruction is used as a "divider" when building
+a forest of tries.
 
 ### `BRANCH mask`
 
-This instruction pops `NBITSET(mask)` items from both node stack and hash stack (up to 16 for each one). Then it pushes a new branch node on the node stack that has children according to the stack; it also pushes a new hash to the hash stack.
+Replaces `NBITSET(mask)` `Node`s to the left of the instruction with a single
+`BranchNode` with these nodes as children according to `mask`.
 
 **Substitution rules**
 ```
@@ -441,11 +447,19 @@ Each instruction starts with an opcode (`uint`).
 
 Then it might contain some data.
 
-##### `HASH` 
+##### `LEAF`
 
-format: `HASH hash:[32]byte`
+format: `LEAF key:[]byte value:[]byte` 
 
-encoded as `[ 0x03 hash_byte_1 ... hash_byte_32 ]`
+encoded as `[ 0x00 CBOR(ENCODE_KEY(key))... CBOR(value)... ]`
+
+
+##### `EXTENSION`
+
+format: `EXTENSION key:[]byte` 
+
+encoded as `[ 0x01 CBOR(ENCODE_KEY(key))... ]`
+
 
 ##### `BRANCH`
 
@@ -456,23 +470,20 @@ format: `BRANCH mask:uint32`
 
 encoded as `[ 0x02 CBOR(mask)...]`
 
+
+##### `HASH` 
+
+format: `HASH hash:[32]byte`
+
+encoded as `[ 0x03 hash_byte_1 ... hash_byte_32 ]`
+
+
 ##### `CODE`
 
 format: `CODE code:[]byte`
 
 encoded as `[ 0x04 CBOR(code)... ]`
 
-##### `EXTENSION`
-
-format: `EXTENSION key:[]byte` 
-
-encoded as `[ 0x01 CBOR(ENCODE_KEY(key))... ]`
-
-##### `LEAF`
-
-format: `LEAF key:[]byte value:[]byte` 
-
-encoded as `[ 0x00 CBOR(ENCODE_KEY(key))... CBOR(value)... ]`
 
 ##### `ACCOUNT_LEAF`
 
