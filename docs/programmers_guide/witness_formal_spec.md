@@ -251,14 +251,16 @@ GUARD has_storage == true
 
 CodeNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
---
+
+---
 
 GUARD has_code == true
 GUARD has_storage == true
 
 HashNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
---
+
+---
 
 GUARD has_code == true
 GUARD has_storage == true
@@ -266,7 +268,7 @@ GUARD has_storage == true
 CodeNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 
---
+---
 
 GUARD has_code == true
 GUARD has_storage == true
@@ -274,7 +276,7 @@ GUARD has_storage == true
 HashNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 
---
+---
 
 GUARD has_code == false
 GUARD has_storage == true
@@ -290,7 +292,7 @@ GUARD has_storage == true
 HashNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, nil}}
 
---
+---
 
 GUARD has_code == true
 GUARD has_storage == false
@@ -298,7 +300,7 @@ GUARD has_storage == false
 CodeNode(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, nil, nil, code}}
 
---
+---
 
 GUARD has_code == true
 GUARD has_storage == false
@@ -306,7 +308,7 @@ GUARD has_storage == false
 HashNode(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, nil, nil, code}}
 
---
+---
 
 GUARD has_code == false
 GUARD has_storage == false
