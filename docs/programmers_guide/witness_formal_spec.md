@@ -25,14 +25,13 @@ in this spec and should be up to implementation.
 ### Nodes
 
 ```
-type Node = HashNode{raw_hash:Hash}|DataNode
-
-type DataNode = ValueNode{raw_value:ByteArray}
-              | AccountNode{nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode}
-              | LeafNode{key:ByteArray value:ValueNode|AccountNode}
-              | ExtensionNode{key:ByteArray child:Node}
-              | BranchNode{child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node}
-              | CodeNode{code:ByteArray}
+type Node = HashNode{raw_hash:Hash}
+          | ValueNode{raw_value:ByteArray}
+          | AccountNode{nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode}
+          | LeafNode{key:ByteArray value:ValueNode|AccountNode}
+          | ExtensionNode{key:ByteArray child:Node}
+          | BranchNode{child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node}
+          | CodeNode{code:ByteArray}
 ```
 
 ### Witness
@@ -249,7 +248,7 @@ CODE(raw_code) |=> CodeNode{raw_code}
 GUARD has_code == true
 GUARD has_storage == true
 
-CodeNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+CodeNode(code) Node(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 
 ---
@@ -257,23 +256,7 @@ LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 GUARD has_code == true
 GUARD has_storage == true
 
-HashNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
-
----
-
-GUARD has_code == true
-GUARD has_storage == true
-
-CodeNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
-
----
-
-GUARD has_code == true
-GUARD has_storage == true
-
-HashNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+HashNode(code) Node(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 
 ---
@@ -281,15 +264,7 @@ LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 GUARD has_code == false
 GUARD has_storage == true
 
-DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-LeafNode{key, AccountNode{nonce, balance, storage_root, nil}}
-
----
-
-GUARD has_code == false
-GUARD has_storage == true
-
-HashNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+Node(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
 LeafNode{key, AccountNode{nonce, balance, storage_root, nil}}
 
 ---
