@@ -2,7 +2,9 @@
 
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED",  "MAY", and "OPTIONAL" in this document are to be interpreted as described in [RFC 2119](https://tools.ietf.org/html/rfc2119).
 
-## Basic Data types
+## Data Types
+
+### Basic
 
 `nil` - an empty value.
 
@@ -18,61 +20,120 @@ in this spec and should be up to implementation.
 
 `()` - an empty array of arbitrary type.
 
-## Nodes
+`(Type1 Type1 Type1)` - an array of a type `Type1`.
+
+### Nodes
 
 ```
-type Node = HashNode (raw_hash:Hash)
-          | ValueNode (raw_value:ByteArray)
-          | AccountNode (nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode)
-          | LeafNode (key:ByteArray value:ValueNode|AccountNode)
-          | ExtensionNode (key:ByteArray child:Node)
-          | BranchNode (child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node)
-          | CodeNode(code: ByteArray)
+type Node = HashNode{raw_hash:Hash}|DataNode
+
+type DataNode = ValueNode{raw_value:ByteArray}
+              | AccountNode{nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode}
+              | LeafNode{key:ByteArray value:ValueNode|AccountNode}
+              | ExtensionNode{key:ByteArray child:Node}
+              | BranchNode{child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node}
+              | CodeNode{code:ByteArray}
+```
+
+### Witness
+
+Witness MUST have at least 1 element.
+
+```
+type WitnessHeader = {version:Int}
+type Witness = (Node|Instruction{code:Int parameter:Any...} ...)
 ```
 
 
-# Execution Enviroment
+## Execution Enviroment
 
-The witness execution environment MUST contain the following 3 elements:
+The witness execution environment MUST contain the following 2 elements:
+
+- **WitnessHeader** -- a header containing the version of the witness. The `version` MUST be 1.
 
 - **Witness** -- a witness to be executed;
 
-- **Stack** -- a stack on which the witness is executed;
+- **Substitution Rules** -- a list of all possible substitution rules.
 
-## The Stack
 
-Witnesses are executed on a stack machine that builds tries/calculates hashes.
+## Execution process
+
+Initially, the Witness MUST BE an array of `Instruction`s.
+
+Then, as substitution rules are applied to the witness, some elements of the
+array are replaces with `Node`s.
+
+The execution continues until there are no substitution rules left to execute.
+
+Here is how the execution code might look like in Go for building a single trie.
+
+```go
+
+witness := GetInitialWitness()
+rules := GetSubstitutionRules()
+numberOfRulesApplied := 1 // initial state
+
+for rulesApplied {
+    witness, numberOfRulesApplied := ApplyRules(witness, rules)
+}
+
+if len(witness) == 1 {
+    trie.root = witness[0]
+} else {
+    panic("witness execution failed")
+}
 
 ```
-type Stack = () 
-           | PREPEND(Node, Stack)
-```
 
-At the beginning of witness execution the stack MUST be empty.
+And here is an example of the execution process (we will use the set of rules
+form the **Substitution Rules** section of this document):
+
+Step 1. Witness: `(HASH h1 HASH h2 BRANCH 0b101 HASH h3 BRANCH 0b11)`
+
+Step 2. Applying `HASH` substitution rules.
+Witness: `(HashNode{h1} HashNode{h2} BRANCH 0b101 HashNode{h3} BRANCH 0b11)`
+
+Step 3. Applying `BRANCH` substitution rules (only once, because `BRANCH 0b11`
+doesn't pass its `GUARD` statements just yet).
+Witness: `(BranchNode{0: HashNode{h1} 2:HashNode{h2}} HashNode{h3} BRANCH 0b11)`
+
+Step 4: Applying `BRANCH` substitution rules again.
+Witness: `(BranchNode{0: BranchNode{0: HashNode{h1} 2:HashNode{h2}} 1:HashNode{h3}})`
+
+Step 5: No more rules are applicable, the execution ends successfully.
 
 
-## The Witness
+## End Criteria
 
-Each witness is a queue of instructions.
+The execution ends when there are no substitution rules applicable for this
+witness.
 
-```
-type Parameters  = ()
-                 | PREPEND(Any, Parameters)
+### Building a single trie from the witness
 
-type Instruction = OpCode
-                 | (OpCode, Parameters)
+If we are building a single trie from the witness, then the only SUCCESS
+executon is when the following are true:
 
-type Header      = (Version: Int)
+- The execution state MUST match the End Criteria
+- There MUST be only one item left in the witness
+- This item MUST be of the type `Node`
+    
+In that case, this last item will be the root of the built trie.
 
-type WitnessBody = WitnessBody
-                 | PREPEND(Instuction, WitnessBody)
+Every other end state is considered a FAILURE.
 
-type Witness     = (Header, WitnessBody)
-```
 
-In every execution cycle a single instruction gets dequeued and a matching substitution rule gets applied to the stack.
+### Building a Forest 
 
-In the end, when there are no more instructions left, there MUST be only one item left on the stack.  
+We also can build a forest of tries with this approach, by adding a new
+Instruction `NEW_TRIE` and adjusting the success criteria a bit:
+
+- The execution state MUST match the End Criteria;
+- The items that are left in the witness MUST follow this pattern: `(Node
+    NEW_TRIE ... Node)`
+- Each `Node` element will be a root of a trie.
+
+Every other end state is considered a FAILURE.
+
 
 ## Instructions & Parameters
 
@@ -87,36 +148,23 @@ That makes it different from the helper function parameters that MAY come from t
 
 ## Substitution rules
 
-A substitution rule is applied to the stack. It replaces zero, one or multiple
-stack items with a single one.
+A substitution rule consists of 2 parts: the criteria (on the left of the `|=>` sign) and the result (on the right of the `|=>` sign).
+The criteria MUST consists of 0 or more `GUARD` statements and a pattern.
 
-Here is an example substitution rule. The current instruction is named `INSTR1`.
+The result is a single `Node` statement that replaces the pattern in the
+witness if it matches and the guards are passed.
 
-```
-STACK(node1) STACK(node2) INSTR1(params) |=> 
-STACK(helper1(node1, node2))
-```
+Pattern matching is happening by the types.
 
-This substitution rule replaces 2 stack items `node1` and `node2`
-with a single stack item `helper1(node1, node2)`.
-
-Where `helper1` and `helper2` are pure functions defined in pseudocode (see the example below).
+The result MAY contain helper functions or might have in-line computation.
 
 ```
-helper1 (value1, value2) {
-    return value1 + value2
-}
-
+[GUARD <CONDITION> ...] [ NodeType(<node-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
+Node(<HELPER_FUNCTION_OR_COMPUTATION>)
 ```
 
-The specification for a substitution rule
-
-```
-[GUARD <CONDITION> ...]
-
-[ STACK(<node-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
-STACK(node-value)
-```
+`NodeType` is one of the types of nodes to match. Can also be `Node` to match
+any non-nil node.
 
 There MUST be one and only one substitution rule applicable to the execution state. If an instruction has multiple substitution rules, the applicability is defined by the `GUARD` statements.
 The substitution rule MAY have one or more GUARD statements.
@@ -127,8 +175,9 @@ The substitution rule MUST have at least one STACK statement after the arrow.
 
 So, the minimal substitution rule is the one for the `HASH` instruction that pushes one hash to the stack:
 ```
-HASH(hashValue) |=> STACK(HashNode{hashValue})
+HASH(hashValue) |=> HashNode{hashValue}
 ```
+
 
 ## GUARDs
 
@@ -154,42 +203,6 @@ Helper functions MUST have at least one argument.
 Helper functions MAY have variadic parameters: `HELPER_EXAMPLE(arg1, arg2, list...)`.
 Helper functions MAY contain recursion.
 
-## Execution flow 
-
-Let's look at the example.
-
-Our example witness would be `HASH h1; HASH h2; BRANCH 0b11`.
-
-Initial state of the stack is ` <empty> `;
-
----
-
-**1. Executing `HASH h1`**: push a `hashNode` to the stack.
-
-Witness: `HASH h2; BRANCH 0b11`
-
-Stack: `(HashNode{h1})`
-
----
-
-**2. Executing `HASH h2`**: push one more `hashNode` to the stack.
-
-Witness `BRANCH 0b11`
-
-Stack: `(HashNode{h2}; HashNode{h1})`
-
----
-
-**3. Executing `BRANCH 0b11`**: replace 2 items on the stack with a single `fullNode`.
-
-Witness: ` <empty> `
-
-Stack: `(BranchNode{0: HashNode{h2}, 1: HashNode{h1}})`
-
----
-
-So our stack has exactly a single item and there are no more instructions in the witness, the execution is completed.
-
 ## Instructions
 
 ### `LEAF key raw_value`
@@ -197,8 +210,7 @@ So our stack has exactly a single item and there are no more instructions in the
 **Substitution rules**
 
 ```
-LEAF(key, raw_value) |=> 
-STACK(LeafNode{key, ValueNode(raw_value)})
+LEAF(key, raw_value) |=> LeafNode{key, ValueNode(raw_value)}
 ```
 
 ### `EXTENSION key`
@@ -208,8 +220,7 @@ STACK(LeafNode{key, ValueNode(raw_value)})
 ```
 GUARD node != nil
 
-STACK(node) EXTENSION(key) |=>
-STACK(ExtensionNode{key, node})
+Node(node) EXTENSION(key) |=> ExtensionNode{key, node}
 
 ```
 
@@ -220,8 +231,7 @@ Pushes a `HashNode` to stack.
 **Substitution rules**
 
 ```
-HASH(raw_hash) |=>
-STACK(HashNode{raw_hash})
+HASH(hash_value) |=> HashNode{hash_value}
 ```
 
 ### `CODE raw_code`
@@ -229,8 +239,7 @@ STACK(HashNode{raw_hash})
 Pushes an nil node + the code hash to the stack.
 
 ```
-CODE(raw_code) |=>
-STACK(HashNode{RLP(KECCAK(raw_code))})
+CODE(raw_code) |=> CodeNode{raw_code}
 ```
 
 ### `ACCOUNT_LEAF key nonce balance has_code has_storage`
@@ -238,50 +247,65 @@ STACK(HashNode{RLP(KECCAK(raw_code))})
 **Substitution rules**
 
 ```
-
 GUARD has_code == true
-GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == true
-GUARD storage_root is HashNode
 
-STACK(code) STACK(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, code}})
+CodeNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 --
 
 GUARD has_code == true
-GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == true
-GUARD storage_root is not HashNode 
 
-STACK(code) STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, code}})
+HashNode(code) HashNode(storage_hash_node) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
+--
+
+GUARD has_code == true
+GUARD has_storage == true
+
+CodeNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
+
+--
+
+GUARD has_code == true
+GUARD has_storage == true
+
+HashNode(code) DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, code}}
 
 --
 
 GUARD has_code == false
 GUARD has_storage == true
-GUARD storage_root is not HashNode
 
-STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, nil}})
+DataNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, nil}}
 
 ---
 
 GUARD has_code == false
 GUARD has_storage == true
-GUARD storage_root is HashNode
 
-STACK(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, storage_root, nil}})
+HashNode(storage_root) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, storage_root, nil}}
 
 --
 
 GUARD has_code == true
-GUARD (code is CodeNode) or (code is HashNode)
 GUARD has_storage == false
 
-STACK(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, code}})
+CodeNode(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, nil, nil, code}}
+
+--
+
+GUARD has_code == true
+GUARD has_storage == false
+
+HashNode(code) ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
+LeafNode{key, AccountNode{nonce, balance, nil, nil, code}}
 
 --
 
@@ -289,13 +313,15 @@ GUARD has_code == false
 GUARD has_storage == false
 
 ACCOUNT_LEAF(key, nonce, balance, has_code, has_storage) |=>
-STACK(LeafNode{key, AccountNode{nonce, balance, nil, nil, nil}})
+LeafNode{key, AccountNode{nonce, balance, nil, nil, nil}}
 
 ```
 
 ### `NEW_TRIE`
 
 Stops the witness execution.
+
+No substitution rules
 
 ### `BRANCH mask`
 
@@ -306,15 +332,15 @@ This instruction pops `NBITSET(mask)` items from both node stack and hash stack 
 
 GUARD NBITSET(mask) == 2 
 
-STACK(n0) STACK(n1) BRANCH(mask) |=> 
-STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)})
+Node(n0) Node(n1) BRANCH(mask) |=> 
+BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)}
 
 ---
 
 GUARD NBITSET(mask) == 3
 
-STACK(n0) STACK(n1) STACK(n2) BRANCH(mask) |=> 
-STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, n2)})
+Node(n0) Node(n1) Node(n2) BRANCH(mask) |=> 
+BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, n2)}
 
 ---
 
@@ -324,8 +350,8 @@ STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, n2)})
 
 GUARD NBITSET(mask) == 16
 
-STACK(n0) STACK(n1) ... STACK(n15) BRANCH(mask) |=>
-STACK(BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)})
+Node(n0) Node(n1) ... Node(n15) BRANCH(mask) |=>
+BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1, ..., n15)}
 ```
 
 ## Helper functions
