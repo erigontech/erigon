@@ -147,18 +147,98 @@ That makes it different from the helper function parameters that MAY come from t
 
 ## Substitution rules
 
-A substitution rule consists of 2 parts: the criteria (on the left of the `|=>` sign) and the result (on the right of the `|=>` sign).
-The criteria MUST consists of 0 or more `GUARD` statements and a pattern.
+A substitution rule consists of 3 parts: 
+
+`[GUARD] PATTERN |=> RESULT`
+
+- to the left of the `|=>` sign:
+
+    - optional `GUARD` statements;
+
+    - the pattern to match agains;
+
+- result, to the right of the `|=>` sign.
+
+
+### `GUARD`s
+
+Each substitution rule can have zero, one or multiple `GUARD` statements.
+Each `GUARD` statement looks like this:
+
+```
+GUARD <CONDITION>
+```
+
+For a substitution rule to be applicable, the `<CONDITION>` in its `GUARD` statement MUST be true.
+
+If a substitution rule has multiple `GUARD` statements, all of them MUST BE satisfied.
+
+If there are no `GUARD` statements, the substitution rule is always applicable.
+
+### Pattern
+
+`[NodeType(boundVar1)... NodeType(boundVarN)] Instruction[(param1... paramN)]`
+
+A pattern MUST contain an instruction.
+A pattern MAY contain one or more `Node`s to the left of the instruction to
+match.
+An instruction MAY have one or more parameters.
+
+Pattern matching is happening by the types. `Node` type means any node is
+matched, some specific node type will require a specific match.
+
+Pattern can have bound variable names for both matched nodes and instuction
+parameters (if present).
+
+Match:
+
+```
+HASH h0 HashNode{h1} HashNode{h2} BRANCH 0b11
+       |------------------- MATCH -----------|
+
+HASH h0 BranchNode{0: HashNode{h1} 1: HashNode{h2}}
+       |----------- SUBSTITUTED -------------------|
+```
+
+No match (not enough nodes to the left of the instruction):
+
+```
+HASH h0 HASH h1 HashNode{h2} BRANCH 0b11
+```
+
+### Result
+
+`NodeType(HELPER_FUNCTION(arguments)`
 
 The result is a single `Node` statement that replaces the pattern in the
 witness if it matches and the guards are passed.
 
-Pattern matching is happening by the types.
-
 The result MAY contain helper functions or might have in-line computation.
+The result MUST have a specific node type. No generic `Node` is allowed.
+
+Helper functions or inline computations might use bound variables from the
+pattern. 
+
+Example
 
 ```
-[GUARD <CONDITION> ...] [ NodeType(<node-var-name>), ... ] <INSTRUCTION>[(<params>)] |=>
+                             
+Node(n0) Node(n1) BRANCH(mask) |=>
+BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)}
+                             ^     ^-- ^--- BOUND NODES
+                             |---- BOUND INSTRUCTION PARAM
+          |------ HELPER CALL ------------|
+|----------------- RESULT ------------------|
+
+```
+
+### Bringing it all together
+
+
+So the full syntax is this:
+
+```
+[GUARD <CONDITION> ...] [ NodeType(bound_variable1)... ] INSTRUCTION[(param1 ...)] |=>
 Node(<HELPER_FUNCTION_OR_COMPUTATION>)
 ```
 
@@ -179,20 +259,6 @@ So, the minimal substitution rule is the one for the `HASH` instruction that pus
 HASH(hashValue) |=> HashNode{hashValue}
 ```
 
-## GUARDs
-
-Each substitution rule can have zero, one or multiple `GUARD` statements.
-Each `GUARD` statement looks like this:
-
-```
-GUARD <CONDITION>
-```
-
-For a substitution rule to be applicable, the `<CONDITION>` in its `GUARD` statement MUST be true.
-
-If a substitution rule has multiple `GUARD` statements, all of them MUST BE satisfied.
-
-If there are no `GUARD` statements, the substitution rule is always applicable.
 
 ## Helper functions
 
