@@ -30,7 +30,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -532,13 +531,10 @@ func TestDeepHash(t *testing.T) {
 }
 
 func TestHashMapLeak(t *testing.T) {
-	debug.OverrideGetNodeData(true)
-	defer debug.RestoreGetNodeData()
-
 	// freeze the randomness
 	random := rand.New(rand.NewSource(794656320434))
 
-	// now create a tree with some small and some big leaves
+	// now create a trie with some small and some big leaves
 	trie := newEmpty()
 	nTouches := 256 * 10
 
@@ -561,6 +557,7 @@ func TestHashMapLeak(t *testing.T) {
 		}
 	}
 
+	// check the size of trie's hash map
 	trie.Hash()
 
 	nHashes := trie.HashMapSize()
