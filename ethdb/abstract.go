@@ -7,6 +7,7 @@ import (
 
 	"github.com/dgraph-io/badger/v2"
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
@@ -62,9 +63,9 @@ func ProviderOpts(provider DbProvider) Options {
 	opts := Options{}
 	switch opts.provider {
 	case Bolt:
-		opts.Badger = badger.DefaultOptions(opts.path)
-	case Badger:
 		opts.Bolt = bolt.DefaultOptions
+	case Badger:
+		opts.Badger = badger.DefaultOptions(opts.path)
 	case Remote:
 		opts.Remote = remote.DefaultOpts
 	default:
@@ -81,12 +82,28 @@ type DB struct {
 	remote *remote.DB
 }
 
+var buckets = [][]byte{
+	dbutils.IntermediateTrieHashBucket,
+}
+
 func Open(ctx context.Context, opts Options) (db *DB, err error) {
 	db = &DB{opts: opts}
 
 	switch db.opts.provider {
 	case Bolt:
 		db.bolt, err = bolt.Open(opts.path, 0600, opts.Bolt)
+		if err != nil {
+			return nil, err
+		}
+		err = db.bolt.Update(func(tx *bolt.Tx) error {
+			for _, name := range buckets {
+				_, createErr := tx.CreateBucketIfNotExists(name, false)
+				if createErr != nil {
+					return createErr
+				}
+			}
+			return nil
+		})
 	case Badger:
 		db.badger, err = badger.Open(opts.Badger)
 	case Remote:
@@ -119,6 +136,8 @@ type Tx struct {
 	bolt   *bolt.Tx
 	badger *badger.Txn
 	remote *remote.Tx
+
+	badgerIterators []*badger.Iterator
 }
 
 type Bucket struct {
@@ -126,29 +145,35 @@ type Bucket struct {
 
 	bolt         *bolt.Bucket
 	badgerPrefix []byte
+	nameLen      uint
 	remote       *remote.Bucket
 }
 
 type Cursor struct {
+	opts   CursorOpts
 	bucket *Bucket
 
 	bolt   *bolt.Cursor
 	badger *badger.Iterator
 	remote *remote.Cursor
+
+	k []byte
+	v []byte
 }
 
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
-	t := &Tx{}
+	t := &Tx{db: db}
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.View(func(tx *bolt.Tx) error {
+			defer t.cleanup()
 			t.bolt = tx
 			return f(t)
 		})
 	case Badger:
 		return db.badger.View(func(tx *badger.Txn) error {
+			defer t.cleanup()
 			t.badger = tx
-			// TODO: call iterators.Close()
 			return f(t)
 		})
 	case Remote:
@@ -165,13 +190,14 @@ func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.Update(func(tx *bolt.Tx) error {
+			defer t.cleanup()
 			t.bolt = tx
 			return f(t)
 		})
 	case Badger:
 		return db.badger.Update(func(tx *badger.Txn) error {
+			defer t.cleanup()
 			t.badger = tx
-			// TODO: call iterators.Close()
 			return f(t)
 		})
 	case Remote:
@@ -181,7 +207,7 @@ func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
 }
 
 func (tx *Tx) Bucket(name []byte) (b *Bucket, err error) {
-	b = &Bucket{tx: tx}
+	b = &Bucket{tx: tx, nameLen: uint(len(name))}
 	switch tx.db.opts.provider {
 	case Bolt:
 		b.bolt = tx.bolt.Bucket(name)
@@ -191,6 +217,19 @@ func (tx *Tx) Bucket(name []byte) (b *Bucket, err error) {
 		b.remote, err = tx.remote.Bucket(name)
 	}
 	return b, err
+}
+
+func (tx *Tx) cleanup() {
+	switch tx.db.opts.provider {
+	case Bolt:
+		// nothing to cleanup
+	case Badger:
+		for _, it := range tx.badgerIterators {
+			it.Close()
+		}
+	case Remote:
+		// nothing to cleanup
+	}
 }
 
 type CursorOpts struct {
@@ -231,7 +270,7 @@ func (b *Bucket) CursorOpts() CursorOpts {
 		// nothing to do
 	case Badger:
 		opts := badger.DefaultIteratorOptions
-		opts.Prefix = b.badgerPrefix
+		opts.Prefix = b.badgerPrefix[:b.nameLen]
 		c.badger = opts
 	case Remote:
 		c.remote = remote.DefaultCursorOpts
@@ -240,92 +279,213 @@ func (b *Bucket) CursorOpts() CursorOpts {
 	return c
 }
 
-func (b *Bucket) Get(key []byte) (res *Item, err error) {
-	res = &Item{K: key, tx: b.tx, db: b.tx.db} // TODO: use pool or pin object to bucket/cursor
+func (b *Bucket) Get(key []byte) (val []byte, err error) {
 	switch b.tx.db.opts.provider {
 	case Bolt:
-		v, _ := b.bolt.Get(key)
-		res.v = v
+		val, _ = b.bolt.Get(key)
 	case Badger:
-		res.badgerItem, err = b.tx.badger.Get(append(b.badgerPrefix, key...))
+		var item *badger.Item
+		b.badgerPrefix = append(b.badgerPrefix[:b.nameLen], key...)
+		item, err = b.tx.badger.Get(b.badgerPrefix)
+		if item != nil {
+			val, err = item.ValueCopy(nil) // can improve this by using pool
+		}
 	case Remote:
-		res.v, err = b.remote.Get(key)
+		val, err = b.remote.Get(key)
 	}
-	return res, err
+	return val, err
+}
+
+func (b *Bucket) Put(key []byte, value []byte) error {
+	switch b.tx.db.opts.provider {
+	case Bolt:
+		return b.bolt.Put(key, value)
+	case Badger:
+		b.badgerPrefix = append(b.badgerPrefix[:b.nameLen], key...)
+		return b.tx.badger.Set(b.badgerPrefix, value)
+	case Remote:
+		panic("not supported")
+	}
+	return nil
+}
+
+func (b *Bucket) Delete(key []byte) error {
+	switch b.tx.db.opts.provider {
+	case Bolt:
+		return b.bolt.Delete(key)
+	case Badger:
+		b.badgerPrefix = append(b.badgerPrefix[:b.nameLen], key...)
+		return b.tx.badger.Delete(b.badgerPrefix)
+	case Remote:
+		panic("not supported")
+	}
+	return nil
 }
 
 func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
-	c = &Cursor{bucket: b}
+	c = &Cursor{bucket: b, opts: opts}
 	switch c.bucket.tx.db.opts.provider {
 	case Bolt:
 		c.bolt = b.bolt.Cursor()
 	case Badger:
-		opts.badger.Prefix = b.badgerPrefix
+		opts.badger.Prefix = b.badgerPrefix[:b.nameLen] // set bucket
 		c.badger = b.tx.badger.NewIterator(opts.badger)
+		// add to auto-cleanup on end of transactions
+		if b.tx.badgerIterators == nil {
+			b.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
+		}
+		b.tx.badgerIterators = append(b.tx.badgerIterators, c.badger)
+
 	case Remote:
 		c.remote, err = b.remote.Cursor(opts.remote)
 	}
 	return c, err
 }
 
-type Item struct {
-	K []byte
-	v []byte
-
-	badgerItem *badger.Item
-	db         *DB
-	tx         *Tx
-}
-
-func (item *Item) KeyCopy(dst *[]byte) {
-	switch item.db.opts.provider {
+func (c *Cursor) First() ([]byte, []byte, error) {
+	var err error
+	switch c.bucket.tx.db.opts.provider {
 	case Bolt:
-		*dst = append((*dst)[:0], item.K...)
+		c.k, c.v = c.bolt.First()
 	case Badger:
-		*dst = item.badgerItem.KeyCopy(*dst)
+		c.badger.Rewind()
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		c.k = item.Key()
+		if c.opts.badger.PrefetchValues {
+			c.v, err = item.ValueCopy(c.v)
+		}
 	case Remote:
-		*dst = append((*dst)[:0], item.K...)
+		c.k, c.v, err = c.remote.First()
 	}
+	return c.k, c.v, err
 }
 
-func (item *Item) ValueCopy(dst *[]byte) (err error) {
-	switch item.db.opts.provider {
+func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
+	var err error
+	switch c.bucket.tx.db.opts.provider {
 	case Bolt:
-		*dst = append((*dst)[:0], item.v...)
+		c.k, c.v = c.bolt.Seek(seek)
 	case Badger:
-		*dst, err = item.badgerItem.ValueCopy(*dst)
+		c.bucket.badgerPrefix = append(c.bucket.badgerPrefix[:c.bucket.nameLen], seek...)
+		c.badger.Seek(c.bucket.badgerPrefix)
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		c.k = item.Key()
+		if c.opts.badger.PrefetchValues {
+			c.v, err = item.ValueCopy(c.v)
+		}
 	case Remote:
-		*dst = append((*dst)[:0], item.v...)
+		c.k, c.v, err = c.remote.Seek(seek)
 	}
-	return err
+	return c.k, c.v, err
 }
 
-//func (c *Cursor) First() ([]byte, []byte, error) {
-//	switch c.bucket.tx.db.opts.provider {
-//	case Bolt:
-//		c.bolt.First()
-//	case Badger:
-//
-//		// Problems: how to return err?
-//		// Badger returns item.err when calling .Value or .ValueCopy
-//		// It's not enough for remoteDb
-//		// can change remoteBb, but need to decide API of abstract iterator
-//
-//		it := c.bucket.tx.badger.NewIterator()
-//		for it.Rewind(); it.Valid(); it.Next() {
-//			item := it.Item()
-//			k := item.Key()
-//			err := item.Value(func(v []byte) error {
-//				fmt.Printf("key=%s, value=%s\n", k, v)
-//				return nil
-//			})
-//		}
-//
-//		c.badger.Rewind()
-//		item := c.badger.Item()
-//		item.ValueCopy()
-//	case Remote:
-//		c.remote.First()
-//	}
-//	return nil, nil, nil
-//}
+func (c *Cursor) Next() ([]byte, []byte, error) {
+	var err error
+	switch c.bucket.tx.db.opts.provider {
+	case Bolt:
+		c.k, c.v = c.bolt.Next()
+	case Badger:
+		c.badger.Next()
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		c.k = item.Key()
+		if c.opts.badger.PrefetchValues {
+			c.v, err = item.ValueCopy(c.v)
+		}
+	case Remote:
+		return c.remote.Next()
+	}
+	return c.k, c.v, err
+}
+
+func (c *Cursor) FirstKey() (k []byte, vSize uint64, err error) {
+	switch c.bucket.tx.db.opts.provider {
+	case Bolt:
+		var v []byte
+		k, v = c.bolt.First()
+		vSize = uint64(len(v))
+	case Badger:
+		c.badger.Rewind()
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		k = item.Key()
+		vSize = uint64(item.ValueSize())
+	case Remote:
+		var vIsEmpty bool
+		k, vIsEmpty, err = c.remote.FirstKey()
+		if !vIsEmpty {
+			vSize = 1
+		}
+	}
+	return k, vSize, err
+}
+
+func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
+	var vSize uint64
+	var err error
+	switch c.bucket.tx.db.opts.provider {
+	case Bolt:
+		var v []byte
+		c.k, v = c.bolt.Seek(seek)
+		vSize = uint64(len(v))
+	case Badger:
+		c.bucket.badgerPrefix = append(c.bucket.badgerPrefix[:c.bucket.nameLen], seek...)
+		c.badger.Seek(c.bucket.badgerPrefix)
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		c.k = item.Key()
+		vSize = uint64(item.ValueSize())
+	case Remote:
+		var vIsEmpty bool
+		c.k, vIsEmpty, err = c.remote.SeekKey(seek)
+		if !vIsEmpty {
+			vSize = 1
+		}
+	}
+	return c.k, vSize, err
+}
+
+func (c *Cursor) NextKey() ([]byte, uint64, error) {
+	var vSize uint64
+	var err error
+
+	switch c.bucket.tx.db.opts.provider {
+	case Bolt:
+		var v []byte
+		c.k, v = c.bolt.Next()
+		vSize = uint64(len(v))
+	case Badger:
+		c.badger.Next()
+		if !c.badger.Valid() {
+			c.k = nil
+			break
+		}
+		item := c.badger.Item()
+		c.k = item.Key()
+		vSize = uint64(item.ValueSize())
+	case Remote:
+		var vIsEmpty bool
+		c.k, vIsEmpty, err = c.remote.NextKey()
+		if !vIsEmpty {
+			vSize = 1
+		}
+	}
+	return c.k, vSize, err
+}

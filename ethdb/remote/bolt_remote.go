@@ -663,7 +663,12 @@ func (b *Bucket) Cursor(opts CursorOpts) (*Cursor, error) {
 }
 
 func (c *Cursor) First() (key []byte, value []byte, err error) {
-	if err := c.fetchPage(CmdCursorFirst); err != nil {
+	cmd := CmdCursorFirstKey
+	if c.opts.prefetchValues {
+		cmd = CmdCursorFirst
+	}
+
+	if err := c.fetchPage(cmd); err != nil {
 		return nil, nil, err
 	}
 	c.cacheIdx = 0
