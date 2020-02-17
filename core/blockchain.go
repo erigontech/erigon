@@ -1436,7 +1436,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	}
 	idealBatchSize := bc.db.IdealBatchSize()
 	if bc.cacheConfig.DownloadOnly {
-		idealBatchSize /= 1024
+		idealBatchSize /= 64
 		if idealBatchSize == 0 {
 			idealBatchSize = 64
 		}
