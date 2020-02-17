@@ -653,7 +653,7 @@ func execToBlock(block uint64, fromScratch bool) {
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
-		if len(blocks) >= 100 || i == block {
+		if len(blocks) >= 10 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
 				panic(err)

@@ -165,6 +165,7 @@ func pruneMap(t *Trie, m map[string]struct{}) bool {
 	for i, hex := range hexes {
 		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes pruned, there is no need to prune descendants
 			t.unload([]byte(hex))
+			fmt.Printf("Prune: %x\n", []byte(hex))
 			if len(hex) == 0 {
 				empty = true
 			}

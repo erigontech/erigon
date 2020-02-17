@@ -79,6 +79,14 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	}); err != nil {
 		return nil, err
 	}
+
+	if debug.IsIntermediateTrieHash() {
+		_ = db.Update(func(tx *bolt.Tx) error {
+			_, _ = tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
+			return nil
+		})
+	}
+
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
