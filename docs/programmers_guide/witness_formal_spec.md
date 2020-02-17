@@ -81,7 +81,6 @@ The execution continues until there are no substitution rules left to execute.
 Here is how the execution code might look like in Go for building a single trie.
 
 ```go
-
 witness := GetInitialWitness()
 rules := GetSubstitutionRules()
 numberOfRulesApplied := 1 // initial state
@@ -98,22 +97,24 @@ if len(witness) == 1 {
 
 ```
 
+
 And here is an example of the execution process (we will use the set of rules
 form the **Substitution Rules** section of this document):
 
-Step 1. Witness: `(HASH h1 HASH h2 BRANCH 0b101 HASH h3 BRANCH 0b11)`
+* **Step 1**. Witness: `(HASH h1 HASH h2 BRANCH 0b101 HASH h3 BRANCH 0b11)`
 
-Step 2. Applying `HASH` substitution rules.
+* **Step 2**. Apply `HASH` substitution rules.
 Witness: `(HashNode{h1} HashNode{h2} BRANCH 0b101 HashNode{h3} BRANCH 0b11)`
 
-Step 3. Applying `BRANCH` substitution rules (only once, because `BRANCH 0b11`
+* **Step 3**. Apply `BRANCH` substitution rules (only once, because `BRANCH 0b11`
 doesn't pass its `GUARD` statements just yet).
 Witness: `(BranchNode{0: HashNode{h1} 2:HashNode{h2}} HashNode{h3} BRANCH 0b11)`
 
-Step 4: Applying `BRANCH` substitution rules again.
+* **Step 4**. Apply `BRANCH` substitution rules again.
 Witness: `(BranchNode{0: BranchNode{0: HashNode{h1} 2:HashNode{h2}} 1:HashNode{h3}})`
 
-Step 5: No more rules are applicable, the execution ends successfully.
+* **Step 5**. No more rules are applicable, the witness contains only one
+    element, the execution ends successfully.
 
 
 ## End Criteria
@@ -168,7 +169,7 @@ A substitution rule consists of 3 parts:
 
     - optional `GUARD` statements;
 
-    - the pattern to match agains;
+    - the pattern to match against;
 
 - result, to the right of the `|=>` sign.
 
@@ -186,13 +187,32 @@ For a substitution rule to be applicable, the `<CONDITION>` in its `GUARD` state
 
 If a substitution rule has multiple `GUARD` statements, all of them MUST BE satisfied.
 
-If there are no `GUARD` statements, the substitution rule is always applicable.
+If there are no `GUARD` statements, the substitution rule's applicability is
+only defined by the PATTERN.
 
-### Pattern
+Example:
+```
+ GUARD NBITSET(mask) == 2
+|---- GUARD STATEMENT ---|
+
+ Node(n0) Node(n1) BRANCH(mask) |=> 
+ BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)}
+```
+
+For the example rule to be applicable both facts MUST be true:
+
+1. `mask` contains only 2 bits set to 1 (the rest are set to 0);
+
+2. to the left of `BRANCH` instruction there is at least 2 `Node`s.
+
+Fact (1) comes from the `GUARD` statement.
+
+
+### PATTERN
 
 `[NodeType(boundVar1)... NodeType(boundVarN)] Instruction[(param1... paramN)]`
 
-A pattern MUST contain an instruction.
+A pattern MUST contain a single instruction.
 A pattern MAY contain one or more `Node`s to the left of the instruction to
 match.
 An instruction MAY have one or more parameters.
@@ -261,11 +281,6 @@ any non-nil node.
 Substitution rules MUST be non-ambiguous. Even though, there can be multiple
 substitution rules applicable to the whole witness at the same time, there MUST
 be only one rule that is applicable to a certain position in the witness.
-The substitution rule MAY have one or more GUARD statements.
-The substitution rule MAY have one or more STACK statements before the instruction.
-The substitution rule MUST have exactly one instruction.
-The substitution rule MAY have parameters for the instruction.
-The substitution rule MUST have at least one STACK statement after the arrow.
 
 So, the minimal substitution rule is the one for the `HASH` instruction that pushes one hash to the stack:
 ```
@@ -391,7 +406,7 @@ Replaces `NBITSET(mask)` `Node`s to the left of the instruction with a single
 **Substitution rules**
 ```
 
-GUARD NBITSET(mask) == 2 
+GUARD NBITSET(mask) == 2
 
 Node(n0) Node(n1) BRANCH(mask) |=> 
 BranchNode{MAKE_VALUES_ARRAY(mask, n0, n1)}
