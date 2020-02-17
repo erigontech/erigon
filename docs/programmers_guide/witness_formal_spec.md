@@ -14,6 +14,8 @@ The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "S
 the overflow behaviour or mapping to the actual data types is undefined
 in this spec and should be up to implementation.
 
+`Byte` - a single byte.
+
 `Hash` - 32 byte value, representing a result of Keccak256 hashing.
 
 ### Composite
