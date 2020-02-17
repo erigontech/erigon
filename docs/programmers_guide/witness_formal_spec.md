@@ -18,9 +18,17 @@ in this spec and should be up to implementation.
 
 `ByteArray` - a byte array of arbitrary size. MUST NOT be empty.
 
+### Composite
+
 `()` - an empty array of arbitrary type.
 
-`(Type1 Type1 Type1)` - an array of a type `Type1`.
+`(Type...)` - an array of a type `Type`.
+
+`{field:Type}` - an object with a field `field` of type `Type`.
+
+  - full notation: `type T = {field:Type}`
+
+  - inline `type TBase = T1{field:Type}|T2{field2:Type2}`
 
 ### Nodes
 
@@ -40,7 +48,8 @@ Witness MUST have at least 1 element.
 
 ```
 type WitnessHeader = {version:Int}
-type Witness = (Node|Instruction{code:Int parameter:Any...} ...)
+type Instruction = {code:Int parameter:Any...}
+type Witness = (Node|Instruction...)
 ```
 
 
@@ -72,7 +81,7 @@ witness := GetInitialWitness()
 rules := GetSubstitutionRules()
 numberOfRulesApplied := 1 // initial state
 
-for rulesApplied {
+for numberOfRulesApplied > 0 {
     witness, numberOfRulesApplied := ApplyRules(witness, rules)
 }
 
@@ -136,11 +145,10 @@ Every other end state is considered a FAILURE.
 
 ## Instructions & Parameters
 
-A single instruction is consists of substitution rules and parameters.
+A single instruction consists of substitution rules and parameters.
 
 Each instruction MAY have one or more parameters.
-The parameters values MUST be situated in the witness.
-The parameter values MUST NOT be taken from the stack.
+The parameters values MUST be encoded in the witness.
 
 That makes it different from the helper function parameters that MAY come from the stack or MAY come from the witness.
 
@@ -187,7 +195,7 @@ An instruction MAY have one or more parameters.
 Pattern matching is happening by the types. `Node` type means any node is
 matched, some specific node type will require a specific match.
 
-Pattern can have bound variable names for both matched nodes and instuction
+Pattern can have bound variable names for both matched nodes and instruction
 parameters (if present).
 
 Match:
@@ -208,7 +216,7 @@ HASH h0 HASH h1 HashNode{h2} BRANCH 0b11
 
 ### Result
 
-`NodeType(HELPER_FUNCTION(arguments)`
+`NodeType(HELPER_FUNCTION(arguments))`
 
 The result is a single `Node` statement that replaces the pattern in the
 witness if it matches and the guards are passed.
@@ -311,7 +319,7 @@ CODE(raw_code) |=> CodeNode{raw_code}
 
 ### `ACCOUNT_LEAF key nonce balance has_code has_storage`
 
-Replaces the instuction and, optionally, up to 2 nodes to the left of the
+Replaces the instruction and, optionally, up to 2 nodes to the left of the
 instructon with a single `AccountNode` wrapped with a `LeafNode`.
 
 **Substitution rules**
@@ -475,7 +483,7 @@ bytes
 
 ### Block Witness Format
 
-Each block witness consists of a header followed by a list of operators.
+Each block witness consists of a header followed by a list of instructions.
 
 There is no length of witness specified anywhere, the code expects to just reach `EOF`.
 
@@ -558,8 +566,8 @@ format: `ACCOUNT_LEAF key:[]byte flags [nonce:uint64] [balance:[]byte]`
 encoded as `[ 0x05 CBOR(ENCODE_KEY(key))... flags /CBOR(nonce).../ /CBOR(balance).../ ]`
 
 *flags* is a bitset encoded in a single bit (see [`witness_operators_test.go`](../../trie/witness_operators_test.go) to see flags in action).
-* bit 0 defines if **code** is present; if set to 1 it assumes that either `OpCode` or `OpHash` already put something on the stack;
-* bit 1 defines if **storage** is present; if set to 1, the operators preceeding `OpAccountLeaf` will reconstruct a storage trie;
+* bit 0 defines if **code** is present; if set to 1, then `has_code=true`;
+* bit 1 defines if **storage** is present; if set to 1, then `has_storage=true`;
 * bit 2 defines if **nonce** is not 0; if set to 0, *nonce* field is not encoded;
 * bit 3 defines if **balance** is not 0; if set to 0, *balance* field is not encoded;
 
