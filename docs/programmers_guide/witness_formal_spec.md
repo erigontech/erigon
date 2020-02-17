@@ -16,13 +16,11 @@ in this spec and should be up to implementation.
 
 `Hash` - 32 byte value, representing a result of Keccak256 hashing.
 
-`ByteArray` - a byte array of arbitrary non-zero size.
-
 ### Composite
 
 `()` - an empty array of arbitrary type.
 
-`(Type...)` - an array of a type `Type`.
+`(Type...)` - an array of a type `Type`. MUST NOT be empty.
 
 `{field:Type}` - an object with a field `field` of type `Type`.
 
@@ -34,12 +32,12 @@ in this spec and should be up to implementation.
 
 ```
 type Node = HashNode{raw_hash:Hash}
-          | ValueNode{raw_value:ByteArray}
+          | ValueNode{raw_value:(Byte...)}
           | AccountNode{nonce:Int balance:Int storage:nil|Node code:nil|CodeNode|HashNode}
-          | LeafNode{key:ByteArray value:ValueNode|AccountNode}
-          | ExtensionNode{key:ByteArray child:Node}
+          | LeafNode{key:(Byte...) value:ValueNode|AccountNode}
+          | ExtensionNode{key:(Byte...) child:Node}
           | BranchNode{child0:nil|Node child1:nil|Node child3:nil|Node ... child15:nil|Node}
-          | CodeNode{code:ByteArray}
+          | CodeNode{code:(Byte... )}
 ```
 
 ### Witness
