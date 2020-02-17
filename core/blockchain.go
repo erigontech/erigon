@@ -696,7 +696,7 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 
 	// Add the block to the canonical chain number scheme and mark as the head
 	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
-	if bc.enableTxLookupIndex {
+	if bc.enableTxLookupIndex && !bc.cacheConfig.DownloadOnly {
 		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
 	rawdb.WriteHeadBlockHash(bc.db, block.Hash())
