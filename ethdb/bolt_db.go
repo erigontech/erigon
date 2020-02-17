@@ -152,14 +152,11 @@ func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 			if err != nil {
 				return err
 			}
-			l := (bucketEnd - bucketStart) / 3
-			pairs := make([][]byte, 2*l)
-			for i := 0; i < l; i++ {
-				pairs[2*i] = tuples[bucketStart+3*i+1]
-				pairs[2*i+1] = tuples[bucketStart+3*i+2]
-			}
-			if err := b.MultiPut(pairs...); err != nil {
-				return err
+			l := (bucketEnd - bucketStart)
+			for i := 0; i < l; i += 3 {
+				if err := b.Put(tuples[bucketStart+i+1], tuples[bucketStart+i+2]); err != nil {
+					return err
+				}
 			}
 			bucketStart = bucketEnd
 		}
