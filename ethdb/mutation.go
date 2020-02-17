@@ -182,10 +182,6 @@ func (m *mutation) DiskSize() int64 {
 func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	bb := make([]byte, len(bucket))
 	copy(bb, bucket)
-	k := make([]byte, len(key))
-	copy(k, key)
-	v := make([]byte, len(value))
-	copy(v, value)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
