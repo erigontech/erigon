@@ -1800,7 +1800,7 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
-	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
+	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= idealBatchSize {
 		return true
 	}
 	return false
