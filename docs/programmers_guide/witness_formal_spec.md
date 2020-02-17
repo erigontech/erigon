@@ -16,7 +16,7 @@ in this spec and should be up to implementation.
 
 `Hash` - 32 byte value, representing a result of Keccak256 hashing.
 
-`ByteArray` - a byte array of arbitrary size. MUST NOT be empty.
+`ByteArray` - a byte array of arbitrary non-zero size.
 
 ### Composite
 
