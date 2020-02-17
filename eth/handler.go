@@ -633,6 +633,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		if err != nil {
 			return err
 		}
+		if tds == nil {
+			return fmt.Errorf("download-only mode, no support for GetNodeData")
+		}
 
 		// Gather state data until the fetch or network limits is reached
 		var (
