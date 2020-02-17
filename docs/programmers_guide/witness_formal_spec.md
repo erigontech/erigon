@@ -30,6 +30,11 @@ in this spec and should be up to implementation.
 
   - inline `type TBase = T1{field:Type}|T2{field2:Type2}`
 
+### Type Definitions
+
+The type definitions are a bit similar to [Haskell](https://en.wikibooks.org/wiki/Haskell/Type_declarations).
+The key differences are how the arrays and type fields are defined.
+
 ### Nodes
 
 ```
