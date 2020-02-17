@@ -1434,6 +1434,13 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 	if bc.getProcInterrupt() {
 		return 0, nil
 	}
+	idealBatchSize := bc.db.IdealBatchSize()
+	if bc.cacheConfig.DownloadOnly {
+		idealBatchSize /= 1024
+		if idealBatchSize == 0 {
+			idealBatchSize = 64
+		}
+	}
 	// Start a parallel signature recovery (signer will fluke on fork transition, minimal perf loss)
 	senderCacher.recoverFromBlocks(types.MakeSigner(bc.chainConfig, chain[0].Number()), chain)
 
@@ -1763,7 +1770,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		stats.processed++
 		stats.usedGas += usedGas
-		toCommit := stats.needToCommit(chain, bc.db, i)
+		toCommit := stats.needToCommit(chain, bc.db, i, idealBatchSize)
 		stats.report(chain, i, bc.db, toCommit)
 		if toCommit {
 			var written uint64
@@ -1788,7 +1795,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 const statsReportLimit = 8 * time.Second
 const commitLimit = 60 * time.Second
 
-func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPendingMutations, index int) bool {
+func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPendingMutations, index int, idealBatchSize int) bool {
 	var (
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
