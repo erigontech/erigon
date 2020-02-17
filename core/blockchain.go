@@ -1763,8 +1763,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		stats.processed++
 		stats.usedGas += usedGas
-		stats.report(chain, i, bc.db)
-		if stats.needToCommit(chain, bc.db, i) {
+		toCommit := stats.needToCommit(chain, bc.db, i)
+		stats.report(chain, i, bc.db, toCommit)
+		if toCommit {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
@@ -1793,7 +1794,6 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
 	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
-		*st = insertStats{startTime: now, lastIndex: index + 1}
 		return true
 	}
 	return false
@@ -1801,14 +1801,14 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations) {
+func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations, toCommit bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
 	// If we're at the last block of the batch or report period reached, log
-	if index == len(chain)-1 || elapsed >= statsReportLimit {
+	if index == len(chain)-1 || elapsed >= statsReportLimit || toCommit {
 		// Count the number of transactions in this segment
 		var txs int
 		for _, block := range chain[st.lastIndex : index+1] {
