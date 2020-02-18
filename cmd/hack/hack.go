@@ -11,12 +11,12 @@ import (
 	"log"
 	"math/big"
 	"os"
+	"os/signal"
 	"runtime/pprof"
 	"strconv"
 	"strings"
-	"time"
-	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1403,6 +1403,9 @@ func GenerateTxLookups(chaindata string) {
 			break
 		}
 		blockNum++
+		if blockNum%100000 == 0 {
+			fmt.Printf("Processed %d blocks\n", blockNum)
+		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
