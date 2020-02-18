@@ -18,13 +18,14 @@ package eth
 
 import (
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -88,12 +89,11 @@ func init() {
 }
 
 type StorageMode struct {
-	History              bool
-	Receipts             bool
-	TxIndex              bool
-	Preimages            bool
-	IntermediateTrieHash bool
-	ThinHistory          bool
+	History     bool
+	Receipts    bool
+	TxIndex     bool
+	Preimages   bool
+	ThinHistory bool
 }
 
 var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true, ThinHistory: false}
@@ -111,9 +111,6 @@ func (m StorageMode) ToString() string {
 	}
 	if m.TxIndex {
 		modeString += "t"
-	}
-	if m.IntermediateTrieHash {
-		modeString += "i"
 	}
 	if m.ThinHistory {
 		modeString += "n"
@@ -135,8 +132,6 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.Preimages = true
 		case 'n':
 			mode.ThinHistory = true
-		case 'i':
-			mode.IntermediateTrieHash = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}

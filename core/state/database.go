@@ -287,7 +287,7 @@ func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
 		return
 	}
 
-	var key = make([]byte, 64)
+	key := make([]byte, len(prefixAsNibbles)/2)
 	trie.CompressNibbles(prefixAsNibbles, &key)
 
 	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {

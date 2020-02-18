@@ -433,8 +433,7 @@ var (
 * h - write history to the DB
 * p - write preimages to the DB
 * r - write receipts to the DB
-* t - write tx lookup index to the DB
-* i - write intermediate trie hashes to the DB`,
+* t - write tx lookup index to the DB`,
 		Value: eth.DefaultStorageMode.ToString(),
 	}
 	ArchiveSyncInterval = cli.IntFlag{
