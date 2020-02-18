@@ -233,13 +233,14 @@ func (tx *Tx) cleanup() {
 }
 
 type CursorOpts struct {
+	bucket   *Bucket
 	provider DbProvider
 
 	remote remote.CursorOpts
 	badger badger.IteratorOptions
 }
 
-func (opts CursorOpts) PrefetchSize(v uint) CursorOpts {
+func (opts CursorOpts) Prefetch(v uint) CursorOpts {
 	switch opts.provider {
 	case Bolt:
 		// nothing to do
@@ -251,20 +252,32 @@ func (opts CursorOpts) PrefetchSize(v uint) CursorOpts {
 	return opts
 }
 
-func (opts CursorOpts) PrefetchValues(v bool) CursorOpts {
+func (opts CursorOpts) NoValues() CursorOpts {
 	switch opts.provider {
 	case Bolt:
 		// nothing to do
 	case Badger:
-		opts.badger.PrefetchValues = v
+		opts.badger.PrefetchValues = false
 	case Remote:
-		opts.remote.PrefetchValues(v)
+		opts.remote.PrefetchValues(false)
+	}
+	return opts
+}
+
+func (opts CursorOpts) From() CursorOpts {
+	switch opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts.badger.PrefetchValues = false
+	case Remote:
+		opts.remote.PrefetchValues(false)
 	}
 	return opts
 }
 
 func (b *Bucket) CursorOpts() CursorOpts {
-	c := CursorOpts{}
+	c := CursorOpts{bucket: b}
 	switch b.tx.db.opts.provider {
 	case Bolt:
 		// nothing to do
@@ -340,6 +353,10 @@ func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
 		c.remote, err = b.remote.Cursor(opts.remote)
 	}
 	return c, err
+}
+
+func (opts CursorOpts) Cursor() (c *Cursor, err error) {
+	return opts.bucket.Cursor(opts)
 }
 
 func (c *Cursor) First() ([]byte, []byte, error) {
@@ -488,4 +505,7 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 		}
 	}
 	return c.k, vSize, err
+}
+
+func (c *Cursor) ForEach() {
 }

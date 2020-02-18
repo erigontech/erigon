@@ -42,7 +42,7 @@ func TestManagedTx(t *testing.T) {
 				return err
 			}
 
-			c, err := b.Cursor(b.CursorOpts().PrefetchSize(1000))
+			c, err := b.CursorOpts().Prefetch(1000).Cursor()
 			if err != nil {
 				return err
 			}
@@ -97,13 +97,26 @@ func TestManagedTx(t *testing.T) {
 		}); err != nil {
 			assert.NoError(t, err)
 		}
+
 		if err := db.View(ctx, func(tx *ethdb.Tx) error {
 			b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 			if err != nil {
 				return err
 			}
 
-			c, err := b.Cursor(b.CursorOpts().PrefetchSize(1000))
+			//err := b.Iter().From(key).MatchBits(common.HashLength * 8).ForEach()
+			//err := b.Cursor().From(key).MatchBits(common.HashLength * 8).ForEach(func(k, v []byte) (bool, error) {
+			//})
+
+			//err := b.Cursor().From(key).To(common.HashLength * 8).ForEach(func(k, v []byte) (bool, error) {
+			//})
+
+			//
+			//c, err := b.IterOpts().From(key).MatchBits(common.HashLength * 8).Iter()
+			//c, err := tx.Bucket(dbutil.AccountBucket).CursorOpts().From(key).Cursor()
+			//
+			//c, err := b.Cursor(b.CursorOpts().From(key).MatchBits(common.HashLength * 8))
+			c, err := b.Cursor(b.CursorOpts())
 			if err != nil {
 				return err
 			}

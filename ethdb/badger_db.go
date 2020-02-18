@@ -74,22 +74,6 @@ func NewBadgerDatabase(dir string) (*BadgerDatabase, error) {
 		}
 	}()
 
-	//if err := db.View(func(txn *badger.Txn) error {
-	//	opts := badger.DefaultIteratorOptions
-	//	opts.Prefix = bucketKey(dbutils.ChangeSetBucket, nil)
-	//	opts.PrefetchValues = false
-	//	it := txn.NewIterator(opts)
-	//	for it.Rewind(); it.Valid(); it.Next() {
-	//		item := it.Item()
-	//		k := item.Value()
-	//		k := item.ValueCopy()
-	//		fmt.Printf("key=%s\n", k)
-	//	}
-	//	return nil
-	//}); err != nil {
-	//	panic(err)
-	//}
-
 	return &BadgerDatabase{
 		db:       db,
 		log:      logger,
