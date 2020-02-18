@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"os/signal"
+	"syscall"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1380,6 +1382,38 @@ func printBucket(chaindata string) {
 	fb.Flush()
 }
 
+func GenerateTxLookups(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	startTime := time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	var interrupt bool
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		if body == nil {
+			break
+		}
+		blockNum++
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			fmt.Println("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	fmt.Printf("Processed %d blocks\n", blockNum)
+	fmt.Printf("Generation of tx lookup took %s\n", time.Since(startTime))
+}
+
 func main() {
 	flag.Parse()
 	if *cpuprofile != "" {
@@ -1467,5 +1501,7 @@ func main() {
 	if *action == "bucket" {
 		printBucket(*chaindata)
 	}
-	fmt.Printf("%x\n", ^uint64(1))
+	if *action == "gen-tx-lookup" {
+		GenerateTxLookups(*chaindata)
+	}
 }
