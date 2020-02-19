@@ -1431,7 +1431,7 @@ func GenerateTxLookups(chaindata string, block int) {
 			log.Info("interrupted, please wait for cleanup...")
 		default:
 		}
-		if int(blockNum) > block {
+		if block != 1 && int(blockNum) > block {
 			log.Info("Reached specified block count")
 			break
 		}
@@ -1508,6 +1508,68 @@ func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, star
 	sort.Slice(lookups[start:end], func(i, j int) bool {
 		return lookups[i] < lookups[j]
 	})
+}
+
+func GenerateTxLookups1(chaindata string, block int) {
+	startTime := time.Now()
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	//nolint: errcheck
+	db.DeleteBucket(dbutils.TxLookupPrefix)
+	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
+	startTime = time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	var interrupt bool
+	var txcount int
+	var n big.Int
+	batch := db.NewBatch()
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		if body == nil {
+			break
+		}
+		for _, tx := range body.Transactions {
+			txcount++
+			n.SetInt64(int64(blockNum))
+			err = batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
+			check(err)
+			if txcount%1000000 == 0 {
+				_, err = batch.Commit()
+				check(err)
+				log.Info("Commited", "transactions", txcount)
+			}
+		}
+		blockNum++
+		if blockNum%100000 == 0 {
+			log.Info("Processed", "blocks", blockNum)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		}
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+		if block != 1 && int(blockNum) > block {
+			log.Info("Reached specified block count")
+			break
+		}
+	}
+	_, err = batch.Commit()
+	check(err)
+	log.Info("Commited", "transactions", txcount)
+	log.Info("Processed", "blocks", blockNum)
+	log.Info("Tx committing done", "duration", time.Since(startTime))
 }
 
 func main() {
@@ -1616,5 +1678,8 @@ func main() {
 	}
 	if *action == "gen-tx-lookup" {
 		GenerateTxLookups(*chaindata, *block)
+	}
+	if *action == "gen-tx-lookup-1" {
+		GenerateTxLookups1(*chaindata, *block)
 	}
 }
