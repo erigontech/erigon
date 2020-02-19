@@ -1391,6 +1391,7 @@ func GenerateTxLookups(chaindata string, block int) {
 	startTime := time.Now()
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
+	//nolint: errcheck
 	db.DeleteBucket(dbutils.TxLookupPrefix)
 	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
 	startTime = time.Now()
