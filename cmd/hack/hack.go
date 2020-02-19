@@ -1492,7 +1492,7 @@ func GenerateTxLookups(chaindata string, block int) {
 	log.Info("Commited", "transactions", len(lookups))
 }
 
-func fillSortRange(db ethdb.Database, lookups []uint64, entry []byte, start, end int) {
+func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
 	for j := start; j < end; j++ {
 		binary.BigEndian.PutUint64(entry[:], lookups[j])
 		blockNum := uint64(binary.BigEndian.Uint32(entry[2:6]))
