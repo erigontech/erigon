@@ -7,11 +7,14 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
+	"io"
 	"io/ioutil"
-	"log"
 	"math/big"
 	"os"
 	"os/signal"
+	"runtime"
 	"runtime/pprof"
 	"strconv"
 	"strings"
@@ -30,6 +33,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -1394,6 +1398,8 @@ func GenerateTxLookups(chaindata string) {
 		<-sigs
 		interruptCh <- true
 	}()
+	var lookups []uint64
+	var entry [8]byte
 	var blockNum uint64 = 1
 	var interrupt bool
 	for !interrupt {
@@ -1402,30 +1408,56 @@ func GenerateTxLookups(chaindata string) {
 		if body == nil {
 			break
 		}
+		for txIndex, tx := range body.Transactions {
+			copy(entry[:2], tx.Hash().Bytes()[:2])
+			binary.BigEndian.PutUint32(entry[2:6], uint32(blockNum))
+			binary.BigEndian.PutUint16(entry[6:8], uint16(txIndex))
+			lookups = append(lookups, binary.BigEndian.Uint64(entry[:]))
+		}
 		blockNum++
 		if blockNum%100000 == 0 {
-			fmt.Printf("Processed %d blocks\n", blockNum)
+			log.Info("Processed", "blocks", blockNum)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:
-			fmt.Println("interrupted, please wait for cleanup...")
+			log.Info("interrupted, please wait for cleanup...")
 		default:
 		}
 	}
-	fmt.Printf("Processed %d blocks\n", blockNum)
-	fmt.Printf("Generation of tx lookup took %s\n", time.Since(startTime))
+	log.Info("Processed", "blocks", blockNum)
+	log.Info("Generation of tx lookup finished", "duration", time.Since(startTime))
 }
 
 func main() {
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.LvlInfo)
+
 	flag.Parse()
 	if *cpuprofile != "" {
 		f, err := os.Create(*cpuprofile)
 		if err != nil {
-			log.Fatal("could not create CPU profile: ", err)
+			log.Error("could not create CPU profile", "error", err)
+			return
 		}
 		if err := pprof.StartCPUProfile(f); err != nil {
-			log.Fatal("could not start CPU profile: ", err)
+			log.Error("could not start CPU profile", "error", err)
+			return
 		}
 		defer pprof.StopCPUProfile()
 	}
