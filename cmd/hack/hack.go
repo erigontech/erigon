@@ -1491,6 +1491,7 @@ func GenerateTxLookups(chaindata string, block int) {
 	_, err = batch.Commit()
 	check(err)
 	log.Info("Commited", "transactions", len(lookups))
+	log.Info("Tx committing done", "duration", time.Since(startTime))
 }
 
 func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
