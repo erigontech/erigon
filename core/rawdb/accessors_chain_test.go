@@ -18,7 +18,6 @@ package rawdb
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -28,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"golang.org/x/crypto/sha3"
-	"io"
 	"math/big"
 	"testing"
 )
@@ -362,36 +360,4 @@ func checkReceiptsRLP(have, want types.Receipts) error {
 		}
 	}
 	return nil
-}
-
-func TestName(t *testing.T) {
-	someData := []byte("some data")
-	var buf bytes.Buffer
-	zw := gzip.NewWriter(&buf)
-
-	_, err := zw.Write(someData)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println(len(someData), len(buf.Bytes()))
-
-	var buf2 bytes.Buffer
-
-	zr, err := gzip.NewReader(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = io.Copy(&buf2, zr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := zr.Close(); err != nil {
-		t.Fatal(err)
-	}
-	fmt.Println(buf2.String())
 }
