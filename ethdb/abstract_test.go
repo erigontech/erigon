@@ -195,6 +195,7 @@ func TestFilterTest(t *testing.T) {
 		assert.NoError(t, err)
 
 		c, err := b.CursorOpts().Prefix(common.FromHex("2")).Cursor()
+		require.NoError(t, err)
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			require.NoError(t, err)
@@ -211,6 +212,7 @@ func TestFilterTest(t *testing.T) {
 		assert.Equal(t, 1, counter)
 
 		c, err = b.CursorOpts().Cursor()
+		require.NoError(t, err)
 		counter = 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			require.NoError(t, err)

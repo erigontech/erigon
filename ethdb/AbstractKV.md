@@ -88,7 +88,7 @@ Does nothing if i.PrefetchValues = false.
 - Nested Buckets
 - Backups, tx.WriteTo
 
-Naming: 
+## Naming: 
 - `Iter` shorter `Cursor` is shorter than `Iterator`
 - `Opts` shorter `Options`
 - `Walk` shorter `ForEach`
