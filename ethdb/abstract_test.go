@@ -3,6 +3,7 @@ package ethdb_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -148,6 +149,37 @@ func TestManagedTx(t *testing.T) {
 	})
 }
 
+func TestCancelTest(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+	defer cancel()
+
+	db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+	assert.NoError(t, err)
+	err = db.Update(ctx, func(tx *ethdb.Tx) error {
+		b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		if err != nil {
+			return err
+		}
+		err = b.Put([]byte{1}, []byte{1})
+		if err != nil {
+			return err
+		}
+
+		c, err := b.Cursor(b.CursorOpts())
+		for {
+			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		panic(err)
+	}
+
+}
 func TestUnmanagedTx(t *testing.T) {
 	ctx := context.Background()
 

@@ -131,7 +131,8 @@ func (db *DB) Close() error {
 }
 
 type Tx struct {
-	db *DB
+	ctx context.Context
+	db  *DB
 
 	bolt   *bolt.Tx
 	badger *badger.Txn
@@ -151,18 +152,20 @@ type Bucket struct {
 
 type Cursor struct {
 	opts   CursorOpts
+	ctx    context.Context
 	bucket *Bucket
 
 	bolt   *bolt.Cursor
 	badger *badger.Iterator
 	remote *remote.Cursor
 
-	k []byte
-	v []byte
+	k   []byte
+	v   []byte
+	err error
 }
 
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
-	t := &Tx{db: db}
+	t := &Tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.View(func(tx *bolt.Tx) error {
@@ -186,7 +189,7 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 }
 
 func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
-	t := &Tx{db: db}
+	t := &Tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.Update(func(tx *bolt.Tx) error {
@@ -235,9 +238,22 @@ func (tx *Tx) cleanup() {
 type CursorOpts struct {
 	bucket   *Bucket
 	provider DbProvider
+	prefix   []byte
 
 	remote remote.CursorOpts
 	badger badger.IteratorOptions
+}
+
+func (opts CursorOpts) Prefix(v uint) CursorOpts {
+	switch opts.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		opts.badger.PrefetchSize = int(v)
+	case Remote:
+		opts.remote.PrefetchSize(uint64(v))
+	}
+	return opts
 }
 
 func (opts CursorOpts) Prefetch(v uint) CursorOpts {
@@ -277,8 +293,8 @@ func (opts CursorOpts) From() CursorOpts {
 }
 
 func (b *Bucket) CursorOpts() CursorOpts {
-	c := CursorOpts{bucket: b}
-	switch b.tx.db.opts.provider {
+	c := CursorOpts{bucket: b, provider: b.tx.db.opts.provider}
+	switch c.provider {
 	case Bolt:
 		// nothing to do
 	case Badger:
@@ -293,6 +309,12 @@ func (b *Bucket) CursorOpts() CursorOpts {
 }
 
 func (b *Bucket) Get(key []byte) (val []byte, err error) {
+	select {
+	case <-b.tx.ctx.Done():
+		return nil, b.tx.ctx.Err()
+	default:
+	}
+
 	switch b.tx.db.opts.provider {
 	case Bolt:
 		val, _ = b.bolt.Get(key)
@@ -310,6 +332,12 @@ func (b *Bucket) Get(key []byte) (val []byte, err error) {
 }
 
 func (b *Bucket) Put(key []byte, value []byte) error {
+	select {
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
+	default:
+	}
+
 	switch b.tx.db.opts.provider {
 	case Bolt:
 		return b.bolt.Put(key, value)
@@ -323,6 +351,12 @@ func (b *Bucket) Put(key []byte, value []byte) error {
 }
 
 func (b *Bucket) Delete(key []byte) error {
+	select {
+	case <-b.tx.ctx.Done():
+		return b.tx.ctx.Err()
+	default:
+	}
+
 	switch b.tx.db.opts.provider {
 	case Bolt:
 		return b.bolt.Delete(key)
@@ -336,8 +370,8 @@ func (b *Bucket) Delete(key []byte) error {
 }
 
 func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
-	c = &Cursor{bucket: b, opts: opts}
-	switch c.bucket.tx.db.opts.provider {
+	c = &Cursor{bucket: b, opts: opts, ctx: b.tx.ctx}
+	switch c.opts.provider {
 	case Bolt:
 		c.bolt = b.bolt.Cursor()
 	case Badger:
@@ -360,8 +394,13 @@ func (opts CursorOpts) Cursor() (c *Cursor, err error) {
 }
 
 func (c *Cursor) First() ([]byte, []byte, error) {
-	var err error
-	switch c.bucket.tx.db.opts.provider {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
+	switch c.opts.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.First()
 	case Badger:
@@ -373,17 +412,22 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
-			c.v, err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
+			c.v, c.err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 		}
 	case Remote:
-		c.k, c.v, err = c.remote.First()
+		c.k, c.v, c.err = c.remote.First()
 	}
-	return c.k, c.v, err
+	return c.k, c.v, c.err
 }
 
 func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
-	var err error
-	switch c.bucket.tx.db.opts.provider {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
+	switch c.opts.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.Seek(seek)
 	case Badger:
@@ -396,17 +440,22 @@ func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
-			c.v, err = item.ValueCopy(c.v)
+			c.v, c.err = item.ValueCopy(c.v)
 		}
 	case Remote:
-		c.k, c.v, err = c.remote.Seek(seek)
+		c.k, c.v, c.err = c.remote.Seek(seek)
 	}
-	return c.k, c.v, err
+	return c.k, c.v, c.err
 }
 
 func (c *Cursor) Next() ([]byte, []byte, error) {
-	var err error
-	switch c.bucket.tx.db.opts.provider {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
+	switch c.opts.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.Next()
 	case Badger:
@@ -418,19 +467,26 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
-			c.v, err = item.ValueCopy(c.v)
+			c.v, c.err = item.ValueCopy(c.v)
 		}
 	case Remote:
-		return c.remote.Next()
+		c.k, c.v, c.err = c.remote.Next()
 	}
-	return c.k, c.v, err
+	return c.k, c.v, c.err
 }
 
-func (c *Cursor) FirstKey() (k []byte, vSize uint64, err error) {
-	switch c.bucket.tx.db.opts.provider {
+func (c *Cursor) FirstKey() ([]byte, uint64, error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
+
+	var vSize uint64
+	switch c.opts.provider {
 	case Bolt:
 		var v []byte
-		k, v = c.bolt.First()
+		c.k, v = c.bolt.First()
 		vSize = uint64(len(v))
 	case Badger:
 		c.badger.Rewind()
@@ -443,18 +499,23 @@ func (c *Cursor) FirstKey() (k []byte, vSize uint64, err error) {
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
-		k, vIsEmpty, err = c.remote.FirstKey()
+		c.k, vIsEmpty, c.err = c.remote.FirstKey()
 		if !vIsEmpty {
 			vSize = 1
 		}
 	}
-	return k, vSize, err
+	return c.k, vSize, c.err
 }
 
 func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
+
 	var vSize uint64
-	var err error
-	switch c.bucket.tx.db.opts.provider {
+	switch c.opts.provider {
 	case Bolt:
 		var v []byte
 		c.k, v = c.bolt.Seek(seek)
@@ -471,19 +532,23 @@ func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
-		c.k, vIsEmpty, err = c.remote.SeekKey(seek)
+		c.k, vIsEmpty, c.err = c.remote.SeekKey(seek)
 		if !vIsEmpty {
 			vSize = 1
 		}
 	}
-	return c.k, vSize, err
+	return c.k, vSize, c.err
 }
 
 func (c *Cursor) NextKey() ([]byte, uint64, error) {
-	var vSize uint64
-	var err error
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
 
-	switch c.bucket.tx.db.opts.provider {
+	var vSize uint64
+	switch c.opts.provider {
 	case Bolt:
 		var v []byte
 		c.k, v = c.bolt.Next()
@@ -499,13 +564,14 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
-		c.k, vIsEmpty, err = c.remote.NextKey()
+		c.k, vIsEmpty, c.err = c.remote.NextKey()
 		if !vIsEmpty {
 			vSize = 1
 		}
 	}
-	return c.k, vSize, err
+	return c.k, vSize, c.err
 }
 
 func (c *Cursor) ForEach() {
+
 }

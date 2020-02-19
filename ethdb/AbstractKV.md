@@ -33,7 +33,9 @@ Known problems: mutation.Put does copy internally.
 #### Transactions: db.Update, db.Batch, db.View transactions
 
 #### Context:
-- only for transactions, not in .Next() methods
+- For transactions - yes
+- For .First() and .Next() methods - yes
+- 
 
 #### Cursor/Iterator: 
 - Badger iterator require i.Close() call - abstraction can hide it, not user. 
