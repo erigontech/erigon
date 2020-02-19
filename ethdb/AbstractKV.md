@@ -87,3 +87,8 @@ Does nothing if i.PrefetchValues = false.
 - Monotonic int DB.GetSequence 
 - Nested Buckets
 - Backups, tx.WriteTo
+
+Naming: 
+- `Iter` shorter `Cursor` is shorter than `Iterator`
+- `Opts` shorter `Options`
+- `Walk` shorter `ForEach`
