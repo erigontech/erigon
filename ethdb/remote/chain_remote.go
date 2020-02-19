@@ -2,8 +2,11 @@ package remote
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"io"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -129,6 +132,32 @@ func ReadBodyRLP(tx *Tx, hash common.Hash, number uint64) (rlp.RawValue, error) 
 	if bucket == nil {
 		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
 	}
+
+	if debug.IsThinHistory() {
+		data, err := bucket.Get(dbutils.BlockBodyKey(number, hash))
+		if err != nil {
+			return nil, err
+		}
+
+		var rlpBuf bytes.Buffer
+		gzReader, err := gzip.NewReader(bytes.NewBuffer(data))
+		if err != nil {
+			return nil, err
+		}
+
+		_, err = io.Copy(&rlpBuf, gzReader)
+		if err != nil {
+			return nil, err
+		}
+
+		err = gzReader.Close()
+		if err != nil {
+			return nil, err
+		}
+		return rlpBuf.Bytes(), nil
+
+	}
+
 	return bucket.Get(dbutils.BlockBodyKey(number, hash))
 }
 

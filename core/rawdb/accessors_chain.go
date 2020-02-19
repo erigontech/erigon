@@ -18,8 +18,11 @@ package rawdb
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/binary"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"io"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -239,6 +242,22 @@ func deleteHeaderWithoutNumber(db DatabaseDeleter, hash common.Hash, number uint
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValue {
 	data, _ := db.Get(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash))
+	if debug.IsThinHistory() && len(data) > 0 {
+		var rlpBuf bytes.Buffer
+		gzReader, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			log.Crit("Failed to create gzip reader", "err", err)
+		}
+		_, err = io.Copy(&rlpBuf, gzReader)
+		if err != nil {
+			log.Crit("Failed to read gzip data", "err", err)
+		}
+		err = gzReader.Close()
+		if err != nil {
+			log.Crit("Failed to close gzip reader", "err", err)
+		}
+		data = rlpBuf.Bytes()
+	}
 	return data
 }
 
@@ -246,6 +265,22 @@ func ReadBodyRLP(db DatabaseReader, hash common.Hash, number uint64) rlp.RawValu
 func WriteBodyRLP(ctx context.Context, db DatabaseWriter, hash common.Hash, number uint64, rlp rlp.RawValue) {
 	if common.IsCanceled(ctx) {
 		return
+	}
+	if debug.IsThinHistory() {
+		var rlpBuf bytes.Buffer
+		gzrlp, err := gzip.NewWriterLevel(&rlpBuf, gzip.BestSpeed)
+		if err != nil {
+			log.Crit("Failed to create gzip writer", "err", err)
+		}
+		_, err = gzrlp.Write(rlp)
+		if err != nil {
+			log.Crit("Failed to write block body to gzip writer", "err", err)
+		}
+		err = gzrlp.Close()
+		if err != nil {
+			log.Crit("Failed to close gzip writer", "err", err)
+		}
+		rlp = rlpBuf.Bytes()
 	}
 	if err := db.Put(dbutils.BlockBodyPrefix, dbutils.BlockBodyKey(number, hash), rlp); err != nil {
 		log.Crit("Failed to store block body", "err", err)
