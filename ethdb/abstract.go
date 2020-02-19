@@ -618,3 +618,19 @@ func (c *Cursor) ForEach(walker func(k, v []byte) (bool, error)) error {
 	}
 	return nil
 }
+
+func (c *Cursor) ForEachKey(walker func(k []byte, vSize uint64) (bool, error)) error {
+	for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, vSize)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	return nil
+}
