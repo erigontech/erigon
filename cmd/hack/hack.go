@@ -20,6 +20,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"sort"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1393,7 +1394,6 @@ func GenerateTxLookups(chaindata string) {
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
 	go func() {
 		<-sigs
 		interruptCh <- true
@@ -1428,8 +1428,52 @@ func GenerateTxLookups(chaindata string) {
 		default:
 		}
 	}
-	log.Info("Processed", "blocks", blockNum)
-	log.Info("Generation of tx lookup finished", "duration", time.Since(startTime))
+	log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
+	log.Info("Filling up lookup array done", "duration", time.Since(startTime))
+	startTime = time.Now()
+	sort.Slice(lookups, func(i, j int) bool {
+		return lookups[i] < lookups[j]
+	})
+	log.Info("Sorting lookup array done", "duration", time.Since(startTime))
+	if len(lookups) == 0 {
+		return
+	}
+	startTime = time.Now()
+	var rangeStartIdx int
+	var range2Bytes uint64
+	for i, lookup := range lookups {
+		// Find the range where lookups entries share the same first two bytes
+		if i == 0 {
+			rangeStartIdx = 0
+			range2Bytes = lookup & 0xffff000000000000
+			continue
+		}
+		twoBytes := lookup & 0xffff000000000000
+		if range2Bytes != twoBytes {
+			// Range finished
+			fillSortRange(db, lookups, entry[:], rangeStartIdx, i)
+			rangeStartIdx = i
+			range2Bytes = twoBytes
+		}
+	}
+	fillSortRange(db, lookups, entry[:], rangeStartIdx, len(lookups))
+	log.Info("Second roung of sorting done", "duration", time.Since(startTime))
+}
+
+func fillSortRange(db ethdb.Database, lookups []uint64, entry []byte, start, end int) {
+	for j := start; j < end; j++ {
+		binary.BigEndian.PutUint64(entry[:], lookups[j])
+		blockNum := uint64(binary.BigEndian.Uint32(entry[2:6]))
+		txIndex := int(binary.BigEndian.Uint16(entry[6:8]))
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		tx := body.Transactions[txIndex]
+		copy(entry[:2], tx.Hash().Bytes()[2:4])
+		lookups[j] = binary.BigEndian.Uint64(entry[:])
+	}
+	sort.Slice(lookups[start: end], func(i, j int) bool {
+		return lookups[i] < lookups[j]
+	})
 }
 
 func main() {
