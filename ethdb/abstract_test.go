@@ -2,12 +2,14 @@ package ethdb_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestManagedTx(t *testing.T) {
@@ -175,11 +177,9 @@ func TestCancelTest(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil {
-		panic(err)
-	}
-
+	require.True(t, errors.Is(context.DeadlineExceeded, err))
 }
+
 func TestUnmanagedTx(t *testing.T) {
 	ctx := context.Background()
 
