@@ -1416,7 +1416,7 @@ func GenerateTxLookups(chaindata string) {
 		}
 		blockNum++
 		if blockNum%100000 == 0 {
-			log.Info("Processed", "blocks", blockNum)
+			log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
