@@ -108,11 +108,11 @@ func TestManagedTx(t *testing.T) {
 				return err
 			}
 
-			//err := b.Iter().From(key).MatchBits(common.HashLength * 8).ForEach()
-			//err := b.Cursor().From(key).MatchBits(common.HashLength * 8).ForEach(func(k, v []byte) (bool, error) {
+			//err := b.Iter().From(key).MatchBits(common.HashLength * 8).Walk()
+			//err := b.Cursor().From(key).MatchBits(common.HashLength * 8).Walk(func(k, v []byte) (bool, error) {
 			//})
 
-			//err := b.Cursor().From(key).To(common.HashLength * 8).ForEach(func(k, v []byte) (bool, error) {
+			//err := b.Cursor().From(key).MatchBits(common.HashLength * 8).Walk(func(k, v []byte) (bool, error) {
 			//})
 
 			//
@@ -203,7 +203,7 @@ func TestFilterTest(t *testing.T) {
 		assert.Equal(t, 1, counter)
 
 		counter = 0
-		err = c.ForEach(func(_, _ []byte) (bool, error) {
+		err = c.Walk(func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		})
@@ -219,7 +219,7 @@ func TestFilterTest(t *testing.T) {
 		assert.Equal(t, 2, counter)
 
 		counter = 0
-		err = c.ForEach(func(_, _ []byte) (bool, error) {
+		err = c.Walk(func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
 		})

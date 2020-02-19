@@ -603,7 +603,7 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *Cursor) ForEach(walker func(k, v []byte) (bool, error)) error {
+func (c *Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -619,7 +619,7 @@ func (c *Cursor) ForEach(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (c *Cursor) ForEachKey(walker func(k []byte, vSize uint64) (bool, error)) error {
+func (c *Cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
 	for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
 		if err != nil {
 			return err
