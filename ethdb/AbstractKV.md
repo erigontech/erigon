@@ -34,8 +34,8 @@ Known problems: mutation.Put does copy internally.
 
 #### Context:
 - For transactions - yes
-- For .First() and .Next() methods - yes
-- 
+- For .First() and .Next() methods - no
+
 
 #### Cursor/Iterator: 
 - Badger iterator require i.Close() call - abstraction can hide it, not user. 
@@ -45,6 +45,7 @@ also useful for RemoteDb.
 - Badger iterator has AllVersions=true by default - why?
 - i.PrefetchSize - expose
 - For Badger - auto-remove bucket prefix from key
+- Bucket and Cursor can't be nil - means they must not be pointers???
 
 #### Concept of Item:
 - i.PrefetchValues - expose, default=true. 

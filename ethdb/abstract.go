@@ -1,6 +1,7 @@
 package ethdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strconv"
@@ -244,15 +245,8 @@ type CursorOpts struct {
 	badger badger.IteratorOptions
 }
 
-func (opts CursorOpts) Prefix(v uint) CursorOpts {
-	switch opts.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		opts.badger.PrefetchSize = int(v)
-	case Remote:
-		opts.remote.PrefetchSize(uint64(v))
-	}
+func (opts CursorOpts) Prefix(v []byte) CursorOpts {
+	opts.prefix = v
 	return opts
 }
 
@@ -375,7 +369,7 @@ func (b *Bucket) Cursor(opts CursorOpts) (c *Cursor, err error) {
 	case Bolt:
 		c.bolt = b.bolt.Cursor()
 	case Badger:
-		opts.badger.Prefix = b.badgerPrefix[:b.nameLen] // set bucket
+		opts.badger.Prefix = append(b.badgerPrefix[:b.nameLen], opts.prefix...) // set bucket
 		c.badger = b.tx.badger.NewIterator(opts.badger)
 		// add to auto-cleanup on end of transactions
 		if b.tx.badgerIterators == nil {
@@ -402,7 +396,11 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 
 	switch c.opts.provider {
 	case Bolt:
-		c.k, c.v = c.bolt.First()
+		if c.opts.prefix != nil {
+			c.k, c.v = c.bolt.Seek(c.opts.prefix)
+		} else {
+			c.k, c.v = c.bolt.First()
+		}
 	case Badger:
 		c.badger.Rewind()
 		if !c.badger.Valid() {
@@ -415,7 +413,11 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 			c.v, c.err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 		}
 	case Remote:
-		c.k, c.v, c.err = c.remote.First()
+		if c.opts.prefix != nil {
+			c.k, c.v, c.err = c.remote.Seek(c.opts.prefix)
+		} else {
+			c.k, c.v, c.err = c.remote.First()
+		}
 	}
 	return c.k, c.v, c.err
 }
@@ -458,6 +460,9 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 	switch c.opts.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.Next()
+		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+			return nil, nil, nil
+		}
 	case Badger:
 		c.badger.Next()
 		if !c.badger.Valid() {
@@ -471,6 +476,13 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 		}
 	case Remote:
 		c.k, c.v, c.err = c.remote.Next()
+		if c.err != nil {
+			return nil, nil, c.err
+		}
+
+		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+			return nil, nil, nil
+		}
 	}
 	return c.k, c.v, c.err
 }
@@ -486,7 +498,11 @@ func (c *Cursor) FirstKey() ([]byte, uint64, error) {
 	switch c.opts.provider {
 	case Bolt:
 		var v []byte
-		c.k, v = c.bolt.First()
+		if c.opts.prefix != nil {
+			c.k, v = c.bolt.Seek(c.opts.prefix)
+		} else {
+			c.k, v = c.bolt.First()
+		}
 		vSize = uint64(len(v))
 	case Badger:
 		c.badger.Rewind()
@@ -499,6 +515,12 @@ func (c *Cursor) FirstKey() ([]byte, uint64, error) {
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
+		if c.opts.prefix != nil {
+			c.k, vIsEmpty, c.err = c.remote.SeekKey(c.opts.prefix)
+		} else {
+			c.k, vIsEmpty, c.err = c.remote.FirstKey()
+		}
+
 		c.k, vIsEmpty, c.err = c.remote.FirstKey()
 		if !vIsEmpty {
 			vSize = 1
@@ -553,6 +575,9 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 		var v []byte
 		c.k, v = c.bolt.Next()
 		vSize = uint64(len(v))
+		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+			return nil, 0, nil
+		}
 	case Badger:
 		c.badger.Next()
 		if !c.badger.Valid() {
@@ -568,10 +593,28 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 		if !vIsEmpty {
 			vSize = 1
 		}
+		if c.err != nil {
+			return nil, 0, c.err
+		}
+		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+			return nil, 0, nil
+		}
 	}
 	return c.k, vSize, c.err
 }
 
-func (c *Cursor) ForEach() {
-
+func (c *Cursor) ForEach(walker func(k, v []byte) (bool, error)) error {
+	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, v)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	return nil
 }
