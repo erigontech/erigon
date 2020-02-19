@@ -1433,6 +1433,7 @@ func GenerateTxLookups(chaindata string, block int) {
 		}
 		if int(blockNum) > block {
 			log.Info("Reached specified block count")
+			break
 		}
 	}
 	log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
