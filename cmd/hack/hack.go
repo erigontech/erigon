@@ -16,11 +16,11 @@ import (
 	"os/signal"
 	"runtime"
 	"runtime/pprof"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
-	"sort"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1387,10 +1387,14 @@ func printBucket(chaindata string) {
 	fb.Flush()
 }
 
-func GenerateTxLookups(chaindata string) {
+func GenerateTxLookups(chaindata string, block int) {
+	startTime := time.Now()
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	startTime := time.Now()
+	err = db.DeleteBucket(dbutils.TxLookupPrefix)
+	check(err)
+	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
+	startTime = time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
@@ -1427,6 +1431,9 @@ func GenerateTxLookups(chaindata string) {
 			log.Info("interrupted, please wait for cleanup...")
 		default:
 		}
+		if int(blockNum) > block {
+			log.Info("Reached specified block count")
+		}
 	}
 	log.Info("Processed", "blocks", blockNum, "tx count", len(lookups))
 	log.Info("Filling up lookup array done", "duration", time.Since(startTime))
@@ -1455,9 +1462,34 @@ func GenerateTxLookups(chaindata string) {
 			rangeStartIdx = i
 			range2Bytes = twoBytes
 		}
+		if i%1000000 == 0 {
+			log.Info("Processed", "transactions", i)
+		}
 	}
 	fillSortRange(db, lookups, entry[:], rangeStartIdx, len(lookups))
 	log.Info("Second roung of sorting done", "duration", time.Since(startTime))
+	startTime = time.Now()
+	batch := db.NewBatch()
+	var n big.Int
+	for i, lookup := range lookups {
+		binary.BigEndian.PutUint64(entry[:], lookup)
+		blockNum := uint64(binary.BigEndian.Uint32(entry[2:6]))
+		txIndex := int(binary.BigEndian.Uint16(entry[6:8]))
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		tx := body.Transactions[txIndex]
+		n.SetInt64(int64(blockNum))
+		err = batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
+		check(err)
+		if i != 0 && i%1000000 == 0 {
+			_, err = batch.Commit()
+			check(err)
+			log.Info("Commited", "transactions", i)
+		}
+	}
+	_, err = batch.Commit()
+	check(err)
+	log.Info("Commited", "transactions", len(lookups))
 }
 
 func fillSortRange(db ethdb.Database, lookups []uint64, entry []byte, start, end int) {
@@ -1471,7 +1503,7 @@ func fillSortRange(db ethdb.Database, lookups []uint64, entry []byte, start, end
 		copy(entry[:2], tx.Hash().Bytes()[2:4])
 		lookups[j] = binary.BigEndian.Uint64(entry[:])
 	}
-	sort.Slice(lookups[start: end], func(i, j int) bool {
+	sort.Slice(lookups[start:end], func(i, j int) bool {
 		return lookups[i] < lookups[j]
 	})
 }
@@ -1581,6 +1613,6 @@ func main() {
 		printBucket(*chaindata)
 	}
 	if *action == "gen-tx-lookup" {
-		GenerateTxLookups(*chaindata)
+		GenerateTxLookups(*chaindata, *block)
 	}
 }
