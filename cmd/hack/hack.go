@@ -1541,9 +1541,11 @@ func GenerateTxLookups1(chaindata string, block int) {
 			n.SetInt64(int64(blockNum))
 			err = batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
 			check(err)
-			if txcount%1000000 == 0 {
+			if txcount%20000 == 0 {
 				_, err = batch.Commit()
 				check(err)
+			}
+			if txcount%1000000 == 0 {
 				log.Info("Commited", "transactions", txcount)
 			}
 		}
