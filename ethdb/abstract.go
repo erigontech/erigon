@@ -40,9 +40,9 @@ func (opts Options) Path(path string) Options {
 	case Bolt:
 		// nothing to do
 	case Badger:
-		opts.Badger.WithDir(path).WithValueDir(path)
+		opts.Badger = opts.Badger.WithDir(path).WithValueDir(path)
 	case Remote:
-		opts.Remote.Addr(path)
+		opts.Remote = opts.Remote.Addr(path)
 	}
 	return opts
 }
@@ -52,7 +52,7 @@ func (opts Options) InMemory(val bool) Options {
 	case Bolt:
 		opts.Bolt.MemOnly = val
 	case Badger:
-		opts.Badger.WithInMemory(val)
+		opts.Badger = opts.Badger.WithInMemory(val)
 	case Remote:
 		panic("not supported")
 	}
@@ -60,7 +60,7 @@ func (opts Options) InMemory(val bool) Options {
 }
 
 func ProviderOpts(provider DbProvider) Options {
-	opts := Options{}
+	opts := Options{provider: provider}
 	switch opts.provider {
 	case Bolt:
 		opts.Bolt = bolt.DefaultOptions
@@ -373,7 +373,7 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 		item := c.badger.Item()
 		c.k = item.Key()
 		if c.opts.badger.PrefetchValues {
-			c.v, err = item.ValueCopy(c.v)
+			c.v, err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 		}
 	case Remote:
 		c.k, c.v, err = c.remote.First()
