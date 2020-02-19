@@ -371,7 +371,7 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 			break
 		}
 		item := c.badger.Item()
-		c.k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
 			c.v, err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 		}
@@ -394,7 +394,7 @@ func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 			break
 		}
 		item := c.badger.Item()
-		c.k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
 			c.v, err = item.ValueCopy(c.v)
 		}
@@ -416,7 +416,7 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 			break
 		}
 		item := c.badger.Item()
-		c.k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		if c.opts.badger.PrefetchValues {
 			c.v, err = item.ValueCopy(c.v)
 		}
@@ -439,7 +439,7 @@ func (c *Cursor) FirstKey() (k []byte, vSize uint64, err error) {
 			break
 		}
 		item := c.badger.Item()
-		k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
@@ -467,7 +467,7 @@ func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 			break
 		}
 		item := c.badger.Item()
-		c.k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
@@ -495,7 +495,7 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 			break
 		}
 		item := c.badger.Item()
-		c.k = item.Key()
+		c.k = item.Key()[c.bucket.nameLen:]
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool

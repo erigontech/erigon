@@ -20,29 +20,33 @@ var boltDb *ethdb.DB
 var badgerDb *ethdb.DB
 
 func TestMain(m *testing.M) {
+	setupDatabases()
+	result := m.Run()
+	os.Remove("test")
+	os.RemoveAll("test2")
+	os.Remove("test3")
+	os.RemoveAll("test4")
+	os.Exit(result)
+}
+func setupDatabases() {
 	vsize := 100
-	keysAmount := 1_000_00
+	keysAmount := 1_000_0
 	ctx := context.Background()
 	var err error
-	os.Remove("test")
 	boltDb, err = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).Path("test"))
 	if err != nil {
 		panic(err)
 	}
-
-	os.Remove("test2")
 	badgerDb, err = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).Path("test2"))
 	if err != nil {
 		panic(err)
 	}
 
-	os.Remove("test3")
 	boltOriginDb, err = bolt.Open("test3", 0600, &bolt.Options{})
 	if err != nil {
 		panic(err)
 	}
 
-	os.Remove("test4")
 	badgerOriginDb, err = badger.Open(badger.DefaultOptions("test4"))
 	if err != nil {
 		panic(err)
@@ -127,9 +131,6 @@ func TestMain(m *testing.M) {
 	}); err != nil {
 		panic(err)
 	}
-	fmt.Println("pure badger filled: ", time.Since(now))
-
-	os.Exit(m.Run())
 }
 
 func BenchmarkCursor(b *testing.B) {
