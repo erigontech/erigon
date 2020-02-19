@@ -1402,10 +1402,21 @@ func GenerateTxLookups(chaindata string, block int) {
 		<-sigs
 		interruptCh <- true
 	}()
+	var blockNum uint64 = 1
+	var finished bool
+	for !finished {
+		blockNum, finished = generateLoop(db, blockNum, interruptCh)
+	}
+	log.Info("All done", "duration", time.Since(startTime))
+}
+
+func generateLoop(db ethdb.Database, startBlock uint64, interruptCh chan bool) (uint64, bool) {
+	startTime := time.Now()
 	var lookups []uint64
 	var entry [8]byte
-	var blockNum uint64 = 1
+	var blockNum = startBlock
 	var interrupt bool
+	var finished = true
 	for !interrupt {
 		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
@@ -1431,8 +1442,9 @@ func GenerateTxLookups(chaindata string, block int) {
 			log.Info("interrupted, please wait for cleanup...")
 		default:
 		}
-		if block != 1 && int(blockNum) > block {
-			log.Info("Reached specified block count")
+		if len(lookups) >= 100000000 {
+			log.Info("Reached specified number of transactions")
+			finished = false
 			break
 		}
 	}
@@ -1444,7 +1456,7 @@ func GenerateTxLookups(chaindata string, block int) {
 	})
 	log.Info("Sorting lookup array done", "duration", time.Since(startTime))
 	if len(lookups) == 0 {
-		return
+		return blockNum, true
 	}
 	startTime = time.Now()
 	var rangeStartIdx int
@@ -1480,7 +1492,7 @@ func GenerateTxLookups(chaindata string, block int) {
 		body := rawdb.ReadBody(db, blockHash, blockNum)
 		tx := body.Transactions[txIndex]
 		n.SetInt64(int64(blockNum))
-		err = batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
+		err := batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
 		check(err)
 		if i != 0 && i%1000000 == 0 {
 			_, err = batch.Commit()
@@ -1488,10 +1500,11 @@ func GenerateTxLookups(chaindata string, block int) {
 			log.Info("Commited", "transactions", i)
 		}
 	}
-	_, err = batch.Commit()
+	_, err := batch.Commit()
 	check(err)
 	log.Info("Commited", "transactions", len(lookups))
 	log.Info("Tx committing done", "duration", time.Since(startTime))
+	return blockNum, finished
 }
 
 func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
