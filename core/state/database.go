@@ -26,6 +26,7 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -695,18 +696,27 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
-
 			if debug.IsIntermediateTrieHash() {
-				buf := pool.GetBuffer(common.HashLength * 2)
-				copy(buf.B, addrHash[:])
+				now := time.Now()
+				toPrint := false
 
-				v, _ := tds.db.Get(dbutils.IntermediateTrieHashBucket, buf.B)
-				if len(v) == 0 {
-					_ = tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B)
-					for i := uint8(0); i <= 255; i++ {
-						buf.B[common.HashLength+1] = i
-						_ = tds.db.Put(dbutils.IntermediateTrieHashBucket, buf.B, nil)
-					}
+				buf := pool.GetBuffer(common.HashLength * 2)
+				addrHashBytes := addrHash[:]
+				copy(buf.B, addrHashBytes)
+
+				v, _ := tds.db.Get(dbutils.IntermediateTrieHashBucket, addrHashBytes)
+				if v != nil && len(v) == 0 {
+					_ = tds.db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
+					_ = tds.db.Walk(dbutils.StorageBucket, addrHashBytes, common.HashLength*8, func(k, v []byte) (bool, error) {
+						toPrint = true
+						for i := common.HashLength + 1; i < len(k); i++ {
+							_ = tds.db.Put(dbutils.IntermediateTrieHashBucket, k[:i], []byte{})
+						}
+						return true, nil
+					})
+				}
+				if toPrint {
+					fmt.Println("database.go:734", time.Since(now))
 				}
 
 				pool.PutBuffer(buf)
