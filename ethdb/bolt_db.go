@@ -19,10 +19,8 @@ package ethdb
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"path"
-	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -70,41 +68,6 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	if debug.IsIntermediateTrieHash() {
-		_ = db.Update(func(tx *bolt.Tx) error {
-			_, _ = tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
-			return nil
-		})
-
-		ticker := time.Tick(5 * time.Second)
-		go func() {
-			for range ticker {
-				counters := map[int]int{}
-				amountOfDestructed := 0
-				if err1 := db.View(func(tx *bolt.Tx) error {
-					if err2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
-						if len(v) == 0 {
-							amountOfDestructed++
-						}
-						if val, ok := counters[len(k)]; ok {
-							counters[len(k)] = val + 1
-						} else {
-							counters[len(k)] = 1
-						}
-						return nil
-					}); err2 != nil {
-						return err2
-					}
-					return nil
-				}); err1 != nil {
-					panic(err1)
-				}
-				logger.Info(fmt.Sprintf("IntermediateBucketStats: %+v %d\n", counters, amountOfDestructed))
-			}
-		}()
-	}
-
 	return &BoltDatabase{
 		db:  db,
 		log: logger,

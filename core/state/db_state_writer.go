@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -94,10 +93,6 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if *original == *value {
 		return nil
 	}
-	if original == nil {
-		fmt.Println("Alex")
-	}
-
 	seckey, err := dsw.tds.HashKey(key, true /*save*/)
 	if err != nil {
 		return err
