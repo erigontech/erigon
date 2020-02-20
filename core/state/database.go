@@ -31,6 +31,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -267,7 +268,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 		return
 	}
 
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, nil); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
@@ -694,6 +695,22 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
+
+			if debug.IsIntermediateTrieHash() {
+				buf := pool.GetBuffer(common.HashLength * 2)
+				copy(buf.B, addrHash[:])
+
+				v, _ := tds.db.Get(dbutils.IntermediateTrieHashBucket, buf.B)
+				if len(v) == 0 {
+					_ = tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B)
+					for i := uint8(0); i <= 255; i++ {
+						buf.B[common.HashLength+1] = i
+						_ = tds.db.Put(dbutils.IntermediateTrieHashBucket, buf.B, nil)
+					}
+				}
+
+				pool.PutBuffer(buf)
+			}
 		}
 
 		for addrHash, account := range b.accountUpdates {
