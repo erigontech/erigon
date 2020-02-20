@@ -268,7 +268,7 @@ func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
 		return
 	}
 
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, nil); err != nil {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
