@@ -286,12 +286,16 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	chain, _ := core.NewBlockChain(db2, nil, b.chain.Config(), engine, vm.Config{}, nil)
 	defer chain.Stop()
 
-	loopErr := make(chan error)
-	newBlock := make(chan struct{})
+	var (
+		loopErr   = make(chan error)
+		newBlock  = make(chan struct{})
+		subscribe = make(chan struct{})
+	)
 	listenNewBlock := func() {
 		sub := w.mux.Subscribe(core.NewMinedBlockEvent{})
 		defer sub.Unsubscribe()
 
+		subscribe <- struct{}{}
 		for item := range sub.Chan() {
 			block := item.Data.(core.NewMinedBlockEvent).Block
 			_, err := chain.InsertChain(context.Background(), []*types.Block{block})
@@ -305,8 +309,10 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	w.skipSealHook = func(task *task) bool {
 		return len(task.receipts) == 0
 	}
-	w.start() // Start mining!
 	go listenNewBlock()
+
+	<-subscribe // Ensure the subscription is created
+	w.start()   // Start mining!
 
 	for i := 0; i < 5; i++ {
 		if err := b.txPool.AddLocal(b.newRandomTx(testCase, true)); err != nil {
