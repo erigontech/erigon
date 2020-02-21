@@ -719,7 +719,12 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						if debug.IsIntermediateTrieHash() {
 							val, ok := tds.t.Get(cKey)
 							isNew := ok && val == nil
-							ClearTombstonesForNewStorage(tds.t, tds.db, isNew, cKey)
+
+							someStorageExistsInThisSubtree := func(prefix []byte) bool {
+								val, ok := tds.t.Get(prefix)
+								return !ok || val != nil
+							}
+							ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, isNew, cKey)
 						}
 
 						tds.t.Update(cKey, v)
@@ -849,12 +854,12 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	i := common.HashLength + 1
 	for j := 0; j < 256; j++ {
 		buf.B[i] = uint8(j)
-		_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
+		_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{})
 	}
 	_ = db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
 }
 
-func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.MinDatabase, isNew bool, compositeKey []byte) {
+func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, isNew bool, compositeKey []byte) {
 	if !isNew {
 		return
 	}
@@ -875,9 +880,9 @@ func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.MinDatabase, isNew boo
 		return
 	}
 
-	// clear the path by moving thom
-	for i := common.HashLength + 2; i < len(compositeKey); i++ {
-		buf.Reset()
+	buf.B = buf.B[:cap(buf.B)]
+	// clear the path by moving tombstones down
+	for i := common.HashLength + 2; i < len(compositeKey); i++ { // +2 because: +1 happened during account re-creation
 		copy(buf.B, compositeKey[:i])
 
 		for j := 0; j < 256; j++ {
@@ -887,16 +892,14 @@ func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.MinDatabase, isNew boo
 
 			buf.B[i] = uint8(j)
 
-			val, ok := tr.Get(buf.B[:i])
-			noStorageInThisSubtree := ok && val == nil
-			if !noStorageInThisSubtree {
+			if someStorageExistsInThisSubtree(buf.B[:i+1]) {
 				continue
 			}
 
 			toPrint = true
-			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
+			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{})
 		}
-		_ = db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i-1])
+		_ = db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i])
 	}
 }
 
