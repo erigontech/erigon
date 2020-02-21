@@ -842,33 +842,53 @@ func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.Database, isNew bool, 
 	buf := pool.GetBuffer(128)
 	defer pool.PutBuffer(buf)
 
-	_ = db.Walk(dbutils.IntermediateTrieHashBucket, compositeKey, (common.HashLength+1)*8, func(k, v []byte) (bool, error) {
-		if !bytes.HasPrefix(compositeKey, k) {
-			return true, nil
-		}
-
-		_ = db.Delete(dbutils.IntermediateTrieHashBucket, k)
-
+	for i := common.HashLength + 1; i < len(compositeKey); i++ {
 		buf.Reset()
 		copy(buf.B, compositeKey)
+
 		for j := 0; j < 256; j++ {
-			if buf.B[len(k)] == uint8(j) {
-				_ = db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)])
+			if compositeKey[i] == uint8(j) {
 				continue
 			}
 
-			buf.B[len(k)] = uint8(j)
+			buf.B[i] = uint8(j)
 
-			val, ok := tr.Get(buf.B[:len(k)])
+			val, ok := tr.Get(buf.B[:i])
 			noStorageInThisSubtree := ok && val == nil
 			if noStorageInThisSubtree {
-				_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)], []byte{})
+				toPrint = true
+				_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
 			}
 		}
+		_ = db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i])
+	}
 
-		toPrint = true
-		return true, nil
-	})
+	//_ = db.Walk(dbutils.IntermediateTrieHashBucket, compositeKey, (common.HashLength+1)*8, func(k, v []byte) (bool, error) {
+	//	if len(v) != 0 || !bytes.HasPrefix(compositeKey, k) {
+	//		return true, nil
+	//	}
+	//
+	//	buf.Reset()
+	//	copy(buf.B, compositeKey)
+	//	for j := 0; j < 256; j++ {
+	//		if buf.B[len(k)] == uint8(j) {
+	//			_ = db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)])
+	//			continue
+	//		}
+	//
+	//		buf.B[len(k)] = uint8(j)
+	//
+	//		val, ok := tr.Get(buf.B[:len(k)])
+	//		noStorageInThisSubtree := ok && val == nil
+	//		if noStorageInThisSubtree {
+	//			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)], []byte{})
+	//		}
+	//	}
+	//	_ = db.Delete(dbutils.IntermediateTrieHashBucket, k)
+	//
+	//	toPrint = true
+	//	return true, nil
+	//})
 }
 
 func ClearTombstonesForReCreatedAccount(db ethdb.Database, addrHash common.Hash) {
