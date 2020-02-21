@@ -824,74 +824,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
-// nonCreatedStorageHash it's fixed size array of zeroes. can use == operator to compare.
-var nonExistingStorageHash common.Hash
-
-func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.Database, isNew bool, compositeKey []byte) {
-	if !isNew {
-		return
-	}
-
-	toPrint := false
-	defer func(t time.Time) {
-		if toPrint {
-			fmt.Printf("Storage ReCreated: %s\n", time.Since(t))
-		}
-	}(time.Now())
-
-	buf := pool.GetBuffer(128)
-	defer pool.PutBuffer(buf)
-
-	for i := common.HashLength + 1; i < len(compositeKey); i++ {
-		buf.Reset()
-		copy(buf.B, compositeKey)
-
-		for j := 0; j < 256; j++ {
-			if compositeKey[i] == uint8(j) {
-				continue
-			}
-
-			buf.B[i] = uint8(j)
-
-			val, ok := tr.Get(buf.B[:i])
-			noStorageInThisSubtree := ok && val == nil
-			if noStorageInThisSubtree {
-				toPrint = true
-				_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
-			}
-		}
-		_ = db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i])
-	}
-
-	//_ = db.Walk(dbutils.IntermediateTrieHashBucket, compositeKey, (common.HashLength+1)*8, func(k, v []byte) (bool, error) {
-	//	if len(v) != 0 || !bytes.HasPrefix(compositeKey, k) {
-	//		return true, nil
-	//	}
-	//
-	//	buf.Reset()
-	//	copy(buf.B, compositeKey)
-	//	for j := 0; j < 256; j++ {
-	//		if buf.B[len(k)] == uint8(j) {
-	//			_ = db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)])
-	//			continue
-	//		}
-	//
-	//		buf.B[len(k)] = uint8(j)
-	//
-	//		val, ok := tr.Get(buf.B[:len(k)])
-	//		noStorageInThisSubtree := ok && val == nil
-	//		if noStorageInThisSubtree {
-	//			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)], []byte{})
-	//		}
-	//	}
-	//	_ = db.Delete(dbutils.IntermediateTrieHashBucket, k)
-	//
-	//	toPrint = true
-	//	return true, nil
-	//})
-}
-
-func ClearTombstonesForReCreatedAccount(db ethdb.Database, addrHash common.Hash) {
+func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) {
 	toPrint := false
 
 	defer func(t time.Time) {
@@ -912,14 +845,59 @@ func ClearTombstonesForReCreatedAccount(db ethdb.Database, addrHash common.Hash)
 		return
 	}
 
+	toPrint = true
+	i := common.HashLength + 1
+	for j := 0; j < 256; j++ {
+		buf.B[i] = uint8(j)
+		_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
+	}
 	_ = db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
-	_ = db.Walk(dbutils.StorageBucket, addrHashBytes, common.HashLength*8, func(k, v []byte) (bool, error) {
-		toPrint = true
-		for i := common.HashLength + 1; i < len(k); i++ {
-			_ = db.Put(dbutils.IntermediateTrieHashBucket, k[:i], []byte{})
+}
+
+func ClearTombstonesForNewStorage(tr *trie.Trie, db ethdb.MinDatabase, isNew bool, compositeKey []byte) {
+	if !isNew {
+		return
+	}
+
+	toPrint := false
+	defer func(t time.Time) {
+		if toPrint {
+			fmt.Printf("Storage ReCreated: %s\n", time.Since(t))
 		}
-		return true, nil
-	})
+	}(time.Now())
+
+	buf := pool.GetBuffer(128)
+	defer pool.PutBuffer(buf)
+
+	v, _ := db.Get(dbutils.IntermediateTrieHashBucket, compositeKey[:common.HashLength+1])
+	hasTombstone := v != nil && len(v) == 0
+	if !hasTombstone {
+		return
+	}
+
+	// clear the path by moving thom
+	for i := common.HashLength + 2; i < len(compositeKey); i++ {
+		buf.Reset()
+		copy(buf.B, compositeKey[:i])
+
+		for j := 0; j < 256; j++ {
+			if compositeKey[i] == uint8(j) {
+				continue
+			}
+
+			buf.B[i] = uint8(j)
+
+			val, ok := tr.Get(buf.B[:i])
+			noStorageInThisSubtree := ok && val == nil
+			if !noStorageInThisSubtree {
+				continue
+			}
+
+			toPrint = true
+			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i], []byte{})
+		}
+		_ = db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i-1])
+	}
 }
 
 func (tds *TrieDbState) clearUpdates() {
