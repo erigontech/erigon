@@ -1,5 +1,0 @@
-commit 6a62fe399b68ab9e3625ef5e7900394f389adc3a
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Feb 18 13:26:00 2020 +0200
-
-    params: release Geth v1.9.11 stable

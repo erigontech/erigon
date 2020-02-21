@@ -58,7 +58,7 @@ func prettyPrint(vm *goja.Runtime, value goja.Value, w io.Writer) {
 }
 
 // prettyError writes err to standard output.
-func prettyError(vm *goja.Runtime, err error, w io.Writer) {
+func prettyError(_ *goja.Runtime, err error, w io.Writer) {
 	failure := err.Error()
 	if gojaErr, ok := err.(*goja.Exception); ok {
 		failure = gojaErr.String()
@@ -294,7 +294,7 @@ func toString(obj *goja.Object) string {
 
 func constructorPrototype(vm *goja.Runtime, obj *goja.Object) *goja.Object {
 	if v := obj.Get("constructor"); v != nil {
-		if v := v.ToObject(vm).Get("prototype"); v != nil {
+		if v := v.ToObject(vm).Get("prototype"); v != nil { //nolint:govet
 			return v.ToObject(vm)
 		}
 	}

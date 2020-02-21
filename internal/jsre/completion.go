@@ -25,9 +25,9 @@ import (
 
 // CompleteKeywords returns potential continuations for the given line. Since line is
 // evaluated, callers need to make sure that evaluating line does not have side effects.
-func (jsre *JSRE) CompleteKeywords(line string) []string {
+func (re *JSRE) CompleteKeywords(line string) []string {
 	var results []string
-	jsre.Do(func(vm *goja.Runtime) {
+	re.Do(func(vm *goja.Runtime) {
 		results = getCompletions(vm, line)
 	})
 	return results

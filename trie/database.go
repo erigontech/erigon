@@ -245,39 +245,6 @@ func (db *Database) InsertBlob(hash common.Hash, blob []byte) {
 	// Turbo-Geth: Intentionally left blank
 }
 
-// insert inserts a collapsed trie node into the memory database. This method is
-// a more generic version of InsertBlob, supporting both raw blob insertions as
-// well ex trie node insertions. The blob size must be specified to allow proper
-// size tracking.
-func (db *Database) insert(hash common.Hash, size int, node node) {
-	// If the node's already cached, skip
-	if _, ok := db.dirties[hash]; ok {
-		return
-	}
-	memcacheDirtyWriteMeter.Mark(int64(size))
-
-	// Create the cached entry for this node
-	entry := &cachedNode{
-		node:      simplifyNode(node),
-		size:      uint16(size),
-		flushPrev: db.newest,
-	}
-	entry.forChilds(func(child common.Hash) {
-		if c := db.dirties[child]; c != nil {
-			c.parents++
-		}
-	})
-	db.dirties[hash] = entry
-
-	// Update the flush-list endpoints
-	if db.oldest == (common.Hash{}) {
-		db.oldest, db.newest = hash, hash
-	} else {
-		db.dirties[db.newest].flushNext, db.newest = hash, hash
-	}
-	db.dirtiesSize += common.StorageSize(common.HashLength + entry.size)
-}
-
 // insertPreimage writes a new trie node pre-image to the memory database if it's
 // yet unknown. The method will make a copy of the slice.
 //

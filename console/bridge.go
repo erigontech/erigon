@@ -27,7 +27,8 @@ import (
 	"github.com/dop251/goja"
 	"github.com/ledgerwatch/turbo-geth/accounts/scwallet"
 	"github.com/ledgerwatch/turbo-geth/accounts/usbwallet"
-	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
+	"github.com/ledgerwatch/turbo-geth/internal/jsre"
 	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
@@ -75,7 +76,7 @@ func (b *bridge) NewAccount(call jsre.Call) (goja.Value, error) {
 			return nil, err
 		}
 		if password != confirm {
-			return nil, fmt.Errorf("passwords don't match!")
+			return nil, fmt.Errorf("passwords don't match")
 		}
 	// A single string password was specified, use that
 	case len(call.Arguments) == 1 && call.Argument(0).ToString() != nil:
@@ -134,7 +135,8 @@ func (b *bridge) OpenWallet(call jsre.Call) (goja.Value, error) {
 
 	case strings.HasSuffix(err.Error(), scwallet.ErrPairingPasswordNeeded.Error()):
 		// PUK input requested, fetch from the user and call open again
-		input, err := b.prompter.PromptPassword("Please enter the pairing password: ")
+		var input string
+		input, err = b.prompter.PromptPassword("Please enter the pairing password: ")
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +146,7 @@ func (b *bridge) OpenWallet(call jsre.Call) (goja.Value, error) {
 				return nil, err
 			} else {
 				// PIN input requested, fetch from the user and call open again
-				input, err := b.prompter.PromptPassword("Please enter current PIN: ")
+				input, err = b.prompter.PromptPassword("Please enter current PIN: ")
 				if err != nil {
 					return nil, err
 				}
@@ -157,7 +159,8 @@ func (b *bridge) OpenWallet(call jsre.Call) (goja.Value, error) {
 	case strings.HasSuffix(err.Error(), scwallet.ErrPINUnblockNeeded.Error()):
 		// PIN unblock requested, fetch PUK and new PIN from the user
 		var pukpin string
-		input, err := b.prompter.PromptPassword("Please enter current PUK: ")
+		var input string
+		input, err = b.prompter.PromptPassword("Please enter current PUK: ")
 		if err != nil {
 			return nil, err
 		}
@@ -174,7 +177,8 @@ func (b *bridge) OpenWallet(call jsre.Call) (goja.Value, error) {
 
 	case strings.HasSuffix(err.Error(), scwallet.ErrPINNeeded.Error()):
 		// PIN input requested, fetch from the user and call open again
-		input, err := b.prompter.PromptPassword("Please enter current PIN: ")
+		var input string
+		input, err = b.prompter.PromptPassword("Please enter current PIN: ")
 		if err != nil {
 			return nil, err
 		}
@@ -393,11 +397,11 @@ func (b *bridge) Send(call jsre.Call) (goja.Value, error) {
 	}
 
 	// Execute the requests.
-	var resps []*goja.Object
+	resps := make([]*goja.Object, 0, len(reqs))
 	for _, req := range reqs {
 		resp := call.VM.NewObject()
-		resp.Set("jsonrpc", "2.0")
-		resp.Set("id", req.ID)
+		resp.Set("jsonrpc", "2.0") //nolint:errcheck
+		resp.Set("id", req.ID)     //nolint:errcheck
 
 		var result json.RawMessage
 		err = b.client.Call(&result, req.Method, req.Params...)
@@ -406,7 +410,7 @@ func (b *bridge) Send(call jsre.Call) (goja.Value, error) {
 			if result == nil {
 				// Special case null because it is decoded as an empty
 				// raw message for some reason.
-				resp.Set("result", goja.Null())
+				resp.Set("result", goja.Null()) // nolint:errcheck
 			} else {
 				JSON := call.VM.Get("JSON").ToObject(call.VM)
 				parse, callable := goja.AssertFunction(JSON.Get("parse"))
@@ -437,8 +441,8 @@ func (b *bridge) Send(call jsre.Call) (goja.Value, error) {
 		result = resps[0]
 	}
 	if fn, isFunc := goja.AssertFunction(call.Argument(1)); isFunc {
-		fn(goja.Null(), goja.Null(), result)
-		return goja.Undefined(), nil
+		_, err := fn(goja.Null(), goja.Null(), result)
+		return goja.Undefined(), err
 	}
 	return result, nil
 }

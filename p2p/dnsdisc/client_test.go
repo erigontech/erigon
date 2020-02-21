@@ -232,7 +232,7 @@ func TestIteratorRootRecheckOnFail(t *testing.T) {
 }
 
 // updateSomeNodes applies ENR updates to some of the given nodes.
-func updateSomeNodes(keySeed int64, nodes []*enode.Node) {
+func updateSomeNodes(_ int64, nodes []*enode.Node) {
 	keys := testKeys(nodesSeed1, len(nodes))
 	for i, n := range nodes[:len(nodes)/2] {
 		r := n.Record()

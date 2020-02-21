@@ -21,8 +21,6 @@ package p2p
 import (
 	"net"
 
-	"github.com/ledgerwatch/turbo-geth/event"
-	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 )
 

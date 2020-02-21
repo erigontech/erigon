@@ -152,7 +152,9 @@ func (cfg dialConfig) withDefaults() dialConfig {
 	}
 	if cfg.rand == nil {
 		seedb := make([]byte, 8)
-		crand.Read(seedb)
+		if _, err := crand.Read(seedb); err != nil {
+			panic(err)
+		}
 		seed := int64(binary.BigEndian.Uint64(seedb))
 		cfg.rand = mrand.New(mrand.NewSource(seed))
 	}
@@ -485,7 +487,7 @@ func (t *dialTask) run(d *dialScheduler) {
 		// Try resolving the ID of static nodes if dialing failed.
 		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
 			if t.resolve(d) {
-				t.dial(d, t.dest)
+				t.dial(d, t.dest) //nolint:errcheck
 			}
 		}
 	}

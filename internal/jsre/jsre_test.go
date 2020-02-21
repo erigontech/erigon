@@ -105,7 +105,9 @@ func TestBind(t *testing.T) {
 	jsre := New("", os.Stdout)
 	defer jsre.Stop(false)
 
-	jsre.Set("no", &testNativeObjectBinding{vm: jsre.vm})
+	if err := jsre.Set("no", &testNativeObjectBinding{vm: jsre.vm}); err != nil {
+		t.Errorf("error=%v", err)
+	}
 
 	_, err := jsre.Run(`no.TestMethod("testMsg")`)
 	if err != nil {

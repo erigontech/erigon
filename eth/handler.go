@@ -273,7 +273,7 @@ func (pm *ProtocolManager) removePeer(id string) {
 
 	// Unregister the peer from the downloader and Ethereum peer set
 	pm.downloader.UnregisterPeer(id)
-	pm.txFetcher.Drop(id)
+	pm.txFetcher.Drop(id) // nolint:errcheck
 
 	if err := pm.peers.Unregister(id); err != nil {
 		log.Error("Peer removal failed", "peer", id, "err", err)
@@ -738,7 +738,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 		for _, block := range unknown {
-			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies)
+			pm.blockFetcher.Notify(p.id, block.Hash, block.Number, time.Now(), p.RequestOneHeader, p.RequestBodies) //nolint:errcheck
 		}
 
 	case msg.Code == NewBlockMsg:
@@ -763,7 +763,9 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 
 		// Mark the peer as owning the block and schedule it for import
 		p.MarkBlock(request.Block.Hash())
-		pm.blockFetcher.Enqueue(p.id, request.Block)
+		if err := pm.blockFetcher.Enqueue(p.id, request.Block); err != nil {
+			return err
+		}
 
 		// Assuming the block is importable by the peer, but possibly not yet done so,
 		// calculate the head hash and TD that the peer truly must have.
@@ -798,7 +800,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		for _, hash := range hashes {
 			p.MarkTransaction(hash)
 		}
-		pm.txFetcher.Notify(p.id, hashes)
+		pm.txFetcher.Notify(p.id, hashes) // nolint:errcheck
 
 	case msg.Code == GetPooledTransactionsMsg && p.version >= eth65:
 		// Decode the retrieval message
@@ -853,7 +855,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 			p.MarkTransaction(tx.Hash())
 		}
-		pm.txFetcher.Enqueue(p.id, txs, msg.Code == PooledTransactionsMsg)
+		pm.txFetcher.Enqueue(p.id, txs, msg.Code == PooledTransactionsMsg) // nolint:errcheck
 
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)

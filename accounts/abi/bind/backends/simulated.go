@@ -183,15 +183,18 @@ func (b *SimulatedBackend) prependingState() (*state.IntraBlockState, error) {
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
-func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *big.Int) (*state.StateDB, error) {
+func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *big.Int) (*state.IntraBlockState, error) {
 	if blockNumber == nil || blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) == 0 {
-		return b.blockchain.State()
+		s, _, err := b.blockchain.State()
+		return s, err
 	}
 	block, err := b.BlockByNumber(ctx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
-	return b.blockchain.StateAt(block.Hash())
+	var state *state.IntraBlockState
+	state, _, err = b.blockchain.StateAt(block.Hash(), uint64(blockNumber.Int64()))
+	return state, err
 }
 
 // CodeAt returns the code associated with a certain account in the blockchain.
@@ -200,10 +203,6 @@ func (b *SimulatedBackend) CodeAt(ctx context.Context, contract common.Address, 
 	defer b.mu.Unlock()
 
 	statedb, err := b.stateByBlockNumber(ctx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	statedb, err := b.prependingState()
 	if err != nil {
 		return nil, err
 	}
@@ -219,10 +218,6 @@ func (b *SimulatedBackend) BalanceAt(ctx context.Context, contract common.Addres
 	if err != nil {
 		return nil, err
 	}
-	statedb, err := b.prependingState()
-	if err != nil {
-		return nil, err
-	}
 	return statedb.GetBalance(contract), nil
 }
 
@@ -235,10 +230,6 @@ func (b *SimulatedBackend) NonceAt(ctx context.Context, contract common.Address,
 	if err != nil {
 		return 0, err
 	}
-	statedb, err := b.prependingState()
-	if err != nil {
-		return 0, err
-	}
 	return statedb.GetNonce(contract), nil
 }
 
@@ -248,10 +239,6 @@ func (b *SimulatedBackend) StorageAt(ctx context.Context, contract common.Addres
 	defer b.mu.Unlock()
 
 	statedb, err := b.stateByBlockNumber(ctx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	statedb, err := b.prependingState()
 	if err != nil {
 		return nil, err
 	}

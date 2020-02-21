@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
-	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -64,6 +63,7 @@ const (
 )
 
 // max is a helper function which returns the larger of the two given integers.
+// nolint:unparam
 func max(a, b int) int {
 	if a > b {
 		return a

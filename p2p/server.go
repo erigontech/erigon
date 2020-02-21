@@ -156,7 +156,8 @@ type Config struct {
 	// Logger is a custom logger to use with the p2p.Server.
 	Logger log.Logger `toml:",omitempty"`
 
-	clock mclock.Clock
+	// it is actually used but a linter got confused
+	clock mclock.Clock //nolint:structcheck
 }
 
 // Server manages all peer connections.

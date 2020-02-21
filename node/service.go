@@ -52,21 +52,21 @@ func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, freezer string) 
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
 func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
-	if ctx.config.DataDir == "" {
+	if ctx.Config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
 
-	if ctx.config.BadgerDB {
+	if ctx.Config.BadgerDB {
 		log.Info("Opening Database (Badger)")
-		return ethdb.NewBadgerDatabase(ctx.config.ResolvePath(name + "_badger"))
+		return ethdb.NewBadgerDatabase(ctx.Config.ResolvePath(name + "_badger"))
 	}
 
 	log.Info("Opening Database (Bolt)")
-	boltDb, err := ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
+	boltDb, err := ethdb.NewBoltDatabase(ctx.Config.ResolvePath(name))
 	if err != nil {
 		return nil, err
 	}
-	if ctx.config.RemoteDbListenAddress != "" {
+	if ctx.Config.RemoteDbListenAddress != "" {
 		// TODO: implement node.Service, then Stop() will called on SIGINT | SIGTERM and we can call cancel() there
 		tcpCtx, cancel := context.WithCancel(context.Background())
 		go func() {
@@ -83,7 +83,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 			cancel()
 		}()
 
-		go remote.Listener(tcpCtx, boltDb.DB(), ctx.config.RemoteDbListenAddress)
+		go remote.Listener(tcpCtx, boltDb.DB(), ctx.Config.RemoteDbListenAddress)
 	}
 	return boltDb, nil
 	/*

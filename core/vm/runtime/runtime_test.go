@@ -295,7 +295,7 @@ func TestBlockhash(t *testing.T) {
 	ret, _, err := Execute(data, input, &Config{
 		GetHashFn:   core.GetHashFn(header, chain),
 		BlockNumber: new(big.Int).Set(header.Number),
-	})
+	}, header.Number.Uint64())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}

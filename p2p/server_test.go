@@ -217,9 +217,13 @@ func TestServerRemovePeerDisconnect(t *testing.T) {
 		ListenAddr:  "127.0.0.1:0",
 		Logger:      testlog.Logger(t, log.LvlTrace).New("server", "2"),
 	}}
-	srv1.Start()
+	if err := srv1.Start(); err != nil {
+		t.Fatal("cant start srv1")
+	}
 	defer srv1.Stop()
-	srv2.Start()
+	if err := srv2.Start(); err != nil {
+		t.Fatal("cant start srv2")
+	}
 	defer srv2.Stop()
 
 	if !syncAddPeer(srv1, srv2.Self()) {

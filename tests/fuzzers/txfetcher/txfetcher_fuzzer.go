@@ -23,10 +23,10 @@ import (
 	"math/rand"
 	"time"
 
-	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/common/mclock"
-	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/eth/fetcher"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/mclock"
+	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 )
 
 var (
@@ -152,7 +152,8 @@ func Fuzz(input []byte) int {
 			)
 			for i := 0; i < len(deliveries); i++ {
 				deliverBuf := make([]byte, 2)
-				if n, err := r.Read(deliverBuf); err != nil || n != 2 {
+				n := 0
+				if n, err = r.Read(deliverBuf); err != nil || n != 2 {
 					return 0
 				}
 				deliverIdxs[i] = (int(deliverBuf[0])*256 + int(deliverBuf[1])) % len(txs)

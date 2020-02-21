@@ -69,7 +69,7 @@ func (ct *clientTree) syncAll(dest map[string]entry) error {
 // is non-nil if the entry was a node.
 func (ct *clientTree) syncRandom(ctx context.Context) (n *enode.Node, err error) {
 	if ct.rootUpdateDue() {
-		if err := ct.updateRoot(ctx); err != nil {
+		if err = ct.updateRoot(ctx); err != nil {
 			return nil, err
 		}
 	}
