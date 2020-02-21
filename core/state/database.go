@@ -697,29 +697,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
 			if debug.IsIntermediateTrieHash() {
-				now := time.Now()
-				toPrint := false
-
-				buf := pool.GetBuffer(common.HashLength * 2)
-				addrHashBytes := addrHash[:]
-				copy(buf.B, addrHashBytes)
-
-				v, _ := tds.db.Get(dbutils.IntermediateTrieHashBucket, addrHashBytes)
-				if v != nil && len(v) == 0 {
-					_ = tds.db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
-					_ = tds.db.Walk(dbutils.StorageBucket, addrHashBytes, common.HashLength*8, func(k, v []byte) (bool, error) {
-						toPrint = true
-						for i := common.HashLength + 1; i < len(k); i++ {
-							_ = tds.db.Put(dbutils.IntermediateTrieHashBucket, k[:i], []byte{})
-						}
-						return true, nil
-					})
-				}
-				if toPrint {
-					fmt.Println("database.go:734", time.Since(now))
-				}
-
-				pool.PutBuffer(buf)
+				ClearPathForReCreatedAccount(tds.db, addrHash)
 			}
 		}
 
@@ -737,6 +715,13 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
+
+						if debug.IsIntermediateTrieHash() {
+							val, ok := tds.t.Get(cKey)
+							isNew := ok && val == nil
+							ClearPathForNewStorage(tds.db, isNew, cKey)
+						}
+
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -837,6 +822,92 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	}
 
 	return roots, nil
+}
+
+// nonCreatedStorageHash it's fixed size array of zeroes. can use == operator to compare.
+var nonExistingStorageHash common.Hash
+
+func ClearPathForNewStorage(db ethdb.Database, isNew bool, compositeKey []byte) {
+	if !isNew {
+		return
+	}
+
+	now := time.Now()
+	toPrint := false
+
+	buf := pool.GetBuffer(128)
+	defer pool.PutBuffer(buf)
+
+	_ = db.Walk(dbutils.IntermediateTrieHashBucket, compositeKey, (common.HashLength+1)*8, func(k, v []byte) (bool, error) {
+		if !bytes.HasPrefix(compositeKey, k) {
+			return true, nil
+		}
+
+		_ = db.Delete(dbutils.IntermediateTrieHashBucket, k)
+
+		buf.Reset()
+		copy(buf.B, compositeKey)
+		for j := 0; j < 256; j++ {
+			if buf.B[len(k)] == uint8(j) {
+				_ = db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)])
+				continue
+			}
+			buf.B[len(k)] = uint8(j)
+			_ = db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)], []byte{})
+		}
+
+		toPrint = true
+		return true, nil
+	})
+
+	//for i := common.HashLength + 1; i < len(compositeKey); i++ {
+	//	val, _ := dsw.tds.db.Get(dbutils.IntermediateTrieHashBucket, buf.B[:i])
+	//	if val == nil || len(val) > 0 {
+	//		continue
+	//	}
+	//	fmt.Printf("ReCreated storage: %x\n", compositeKey)
+	//	_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:i])
+	//	for j := 0; j < 256; j++ {
+	//		if buf.B[i+1] == uint8(j) {
+	//			_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:i+1])
+	//			continue
+	//		}
+	//		buf.B[i+1] = uint8(j)
+	//		_ = dsw.tds.db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{})
+	//	}
+	//}
+	if toPrint {
+		fmt.Printf("Storage recreate time: %s\n", time.Since(now))
+	}
+}
+
+func ClearPathForReCreatedAccount(db ethdb.Database, addrHash common.Hash) {
+	now := time.Now()
+	toPrint := false
+
+	buf := pool.GetBuffer(common.HashLength * 2)
+	defer pool.PutBuffer(buf)
+
+	addrHashBytes := addrHash[:]
+	copy(buf.B, addrHashBytes)
+
+	v, _ := db.Get(dbutils.IntermediateTrieHashBucket, addrHashBytes)
+	isSelfDestructed := v != nil && len(v) == 0
+	if !isSelfDestructed {
+		return
+	}
+
+	_ = db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
+	_ = db.Walk(dbutils.StorageBucket, addrHashBytes, common.HashLength*8, func(k, v []byte) (bool, error) {
+		toPrint = true
+		for i := common.HashLength + 1; i < len(k); i++ {
+			_ = db.Put(dbutils.IntermediateTrieHashBucket, k[:i], []byte{})
+		}
+		return true, nil
+	})
+	if toPrint {
+		fmt.Println("database.go:734", time.Since(now))
+	}
 }
 
 func (tds *TrieDbState) clearUpdates() {

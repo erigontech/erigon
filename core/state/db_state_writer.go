@@ -3,13 +3,10 @@ package state
 import (
 	"bytes"
 	"context"
-	"fmt"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -92,9 +89,6 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 	return nil
 }
 
-// nonCreatedStorageHash it's fixed size array of zeroes. can use == operator to compare.
-var nonExistingStorageHash common.Hash
-
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
 	if *original == *value {
 		return nil
@@ -116,56 +110,6 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
-		if debug.IsIntermediateTrieHash() {
-			now := time.Now()
-			toPrint := false
-			if original == nil || *original == nonExistingStorageHash {
-				buf := pool.GetBuffer(128)
-				defer pool.PutBuffer(buf)
-
-				_ = dsw.tds.db.Walk(dbutils.IntermediateTrieHashBucket, compositeKey, (common.HashLength+1)*8, func(k, v []byte) (bool, error) {
-					if !bytes.HasPrefix(compositeKey, k) {
-						return true, nil
-					}
-
-					_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, k)
-
-					buf.Reset()
-					copy(buf.B, compositeKey)
-					for j := 0; j < 256; j++ {
-						if buf.B[len(k)] == uint8(j) {
-							_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)])
-							continue
-						}
-						buf.B[len(k)] = uint8(j)
-						_ = dsw.tds.db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:len(k)], []byte{})
-					}
-
-					toPrint = true
-					return true, nil
-				})
-
-				//for i := common.HashLength + 1; i < len(compositeKey); i++ {
-				//	val, _ := dsw.tds.db.Get(dbutils.IntermediateTrieHashBucket, buf.B[:i])
-				//	if val == nil || len(val) > 0 {
-				//		continue
-				//	}
-				//	fmt.Printf("ReCreated storage: %x\n", compositeKey)
-				//	_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:i])
-				//	for j := 0; j < 256; j++ {
-				//		if buf.B[i+1] == uint8(j) {
-				//			_ = dsw.tds.db.Delete(dbutils.IntermediateTrieHashBucket, buf.B[:i+1])
-				//			continue
-				//		}
-				//		buf.B[i+1] = uint8(j)
-				//		_ = dsw.tds.db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{})
-				//	}
-				//}
-			}
-			if toPrint {
-				fmt.Printf("Storage recreate time: %s\n", time.Since(now))
-			}
-		}
 
 		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
 	}
