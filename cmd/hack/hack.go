@@ -1387,7 +1387,7 @@ func printBucket(chaindata string) {
 	fb.Flush()
 }
 
-func GenerateTxLookups(chaindata string, block int) {
+func GenerateTxLookups(chaindata string) {
 	startTime := time.Now()
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
@@ -1692,7 +1692,7 @@ func main() {
 		printBucket(*chaindata)
 	}
 	if *action == "gen-tx-lookup" {
-		GenerateTxLookups(*chaindata, *block)
+		GenerateTxLookups(*chaindata)
 	}
 	if *action == "gen-tx-lookup-1" {
 		GenerateTxLookups1(*chaindata, *block)
