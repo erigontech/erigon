@@ -1486,12 +1486,12 @@ func generateLoop(db ethdb.Database, startBlock uint64, interruptCh chan bool) (
 	var n big.Int
 	for i, lookup := range lookups {
 		binary.BigEndian.PutUint64(entry[:], lookup)
-		blockNum := uint64(binary.BigEndian.Uint32(entry[2:6]))
+		blockNumber := uint64(binary.BigEndian.Uint32(entry[2:6]))
 		txIndex := int(binary.BigEndian.Uint16(entry[6:8]))
-		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
-		body := rawdb.ReadBody(db, blockHash, blockNum)
+		blockHash := rawdb.ReadCanonicalHash(db, blockNumber)
+		body := rawdb.ReadBody(db, blockHash, blockNumber)
 		tx := body.Transactions[txIndex]
-		n.SetInt64(int64(blockNum))
+		n.SetInt64(int64(blockNumber))
 		err := batch.Put(dbutils.TxLookupPrefix, tx.Hash().Bytes(), common.CopyBytes(n.Bytes()))
 		check(err)
 		if i != 0 && i%1000000 == 0 {
