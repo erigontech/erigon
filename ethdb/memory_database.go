@@ -18,7 +18,8 @@ package ethdb
 
 import (
 	"github.com/ledgerwatch/bolt"
-
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -30,6 +31,14 @@ func NewMemDatabase() *BoltDatabase {
 	if err != nil {
 		panic(err)
 	}
+
+	if debug.IsIntermediateTrieHash() {
+		_ = db.Update(func(tx *bolt.Tx) error {
+			_, _ = tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
+			return nil
+		})
+	}
+
 	b := &BoltDatabase{
 		db:  db,
 		log: logger,

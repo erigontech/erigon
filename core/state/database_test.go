@@ -18,27 +18,29 @@ package state_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/state/contracts"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Create revival problem
@@ -1153,4 +1155,100 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation", acc.Incarnation)
 	}
 
+}
+
+func TestClearTombstonesForReCreatedAccount(t *testing.T) {
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+
+	accKey := fmt.Sprintf("11%062x", 0)
+	k1 := fmt.Sprintf("11%062x", 0)
+	k2 := fmt.Sprintf("2211%062x", 0)
+	k3 := fmt.Sprintf("2233%062x", 0)
+	prefix := dbutils.GenerateStoragePrefix(common.HexToHash(accKey), 1)
+
+	storageKey := func(storageKey string) []byte {
+		return append(prefix, common.Hex2Bytes(storageKey)...)
+	}
+	putStorage := func(k string, v string) {
+		require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), common.Hex2Bytes(v)))
+	}
+	putCache := func(k string, v string) {
+		require.NoError(db.Put(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(k), common.Hex2Bytes(v)))
+	}
+
+	putStorage(k1, "hi")
+	putStorage(k2, "hi")
+	putStorage(k3, "hi")
+	// don't put k4 yet
+
+	putCache(accKey, "")
+
+	// step 1: re-create account
+	err := state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	require.NoError(err)
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(accKey))
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	v, err := db.Get(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(accKey+"11"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(accKey+"22"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.Hex2Bytes(accKey+"77"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	// step 2: re-create storage
+	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
+		return false
+	}
+
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, true, storageKey(k2))
+	require.NoError(err)
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2))
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2200"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2233"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2299"))
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
+
+	// step 3: create one new storage
+	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
+		return bytes.HasPrefix(storageKey(k2), prefix)
+	}
+
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, true, storageKey(k3))
+	require.NoError(err)
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2)) // results of step2 was preserved
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("22")) // results of step2 was preserved
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2211")) // results of step2 was preserved
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("221100")) // results of step2 was preserved
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k3))
+	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
+
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("223399")) // one of k3 prefix siblings
+	assert.NoError(err)
+	assert.Equal([]byte{}, v)
 }
