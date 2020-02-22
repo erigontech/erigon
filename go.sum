@@ -198,6 +198,7 @@ github.com/kr/text v0.1.0 h1:45sCR5RtlFHMR4UwH9sdQ5TC8v0qDQCHnXt+kaKSTVE=
 github.com/kr/text v0.1.0/go.mod h1:4Jbv+DJW3UT/LiOwJeYQe1efqtUx/iVham/4vfdArNI=
 github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0SNc=
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
+github.com/ledgerwatch/bolt v1.4.4-0.20200222020226-c1340d6122f1 h1:/bhWdaSSbvb+V+1EdIWJmWb4g5JNrzmxBnvHfJLDX4w=
 github.com/ledgerwatch/bolt v1.4.3 h1:7YJRPodbZOoYA6f61E4wnP/tkPx2L8LxoZ/KHdXndp8=
 github.com/ledgerwatch/bolt v1.4.3/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
 github.com/leodido/go-urn v1.1.0 h1:Sm1gr51B1kKyfD2BlRcLSiEkffoG96g6TPv6eRoEiB8=

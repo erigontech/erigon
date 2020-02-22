@@ -279,7 +279,7 @@ func testWalk(db Database, t *testing.T) {
 	var gotKeys [][]byte
 
 	err := db.Walk(testBucket, startKey, fixedBits, func(key, val []byte) (bool, error) {
-		gotKeys = append(gotKeys, key)
+		gotKeys = append(gotKeys, common.CopyBytes(key))
 		return true, nil
 	})
 	assert.NoError(t, err)
