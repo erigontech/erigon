@@ -860,12 +860,12 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		buf.B[i] = uint8(j)
 		a := buf.B[:i+1]
 		_ = a
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
-			return err
+		if err2 := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err2 != nil {
+			return err2
 		}
 	}
-	err = db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes)
-	if err != nil {
+
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
 		return err
 	}
 	return nil
