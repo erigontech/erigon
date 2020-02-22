@@ -697,7 +697,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
 			if debug.IsIntermediateTrieHash() {
-				ClearTombstonesForReCreatedAccount(tds.db, addrHash)
+				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
 			}
 		}
 
@@ -724,7 +724,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 								val, ok := tds.t.Get(prefix)
 								return !ok || val != nil
 							}
-							ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, isNew, cKey)
+							_ = ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, isNew, cKey)
 						}
 
 						tds.t.Update(cKey, v)
