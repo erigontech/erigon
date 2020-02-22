@@ -156,6 +156,7 @@ github.com/ledgerwatch/bolt v1.4.2 h1:UdouTBMi89CQC9dH+1w2AmsCu9uNtQoT2Dvf4vWdVB
 github.com/ledgerwatch/bolt v1.4.2/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
 github.com/ledgerwatch/bolt v1.4.3-0.20200221123500-d9dc425cdc5c h1:zO3kzThh2eDJP/61pqesx30I0dZvpjbFT6Xx8jfEnhU=
 github.com/ledgerwatch/bolt v1.4.3-0.20200221123500-d9dc425cdc5c/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
+github.com/ledgerwatch/bolt v1.4.3-0.20200222015645-16f69285a0f0/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
 github.com/leodido/go-urn v1.1.0 h1:Sm1gr51B1kKyfD2BlRcLSiEkffoG96g6TPv6eRoEiB8=
 github.com/leodido/go-urn v1.1.0/go.mod h1:+cyI34gQWZcE1eQU7NVgKkkzdXDQHr1dBMtdAPozLkw=
 github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0 h1:2vp6ESimuT8pCuZHThVyV0hlfa9oPL06HnGCL9pbUgc=
