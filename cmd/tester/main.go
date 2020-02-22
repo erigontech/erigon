@@ -86,12 +86,12 @@ func tester(ctx *cli.Context) error {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
 	tp.blockFeeder = blockGen
-	tp.forkFeeder, err = NewForkGenerator(blockGen, "forkblocks", 900, 120)
+	tp.forkFeeder, err = NewForkGenerator(blockGen, "forkblocks", 49990, 120)
 	defer tp.forkFeeder.Close()
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
 	}
-	tp.protocolVersion = uint32(eth.ProtocolVersions[0])
+	tp.protocolVersion = uint32(eth.ProtocolVersions[1])
 	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = params.MainnetGenesisHash
 	serverKey, err := crypto.GenerateKey()
@@ -105,8 +105,8 @@ func tester(ctx *cli.Context) error {
 	p2pConfig.Protocols = []p2p.Protocol{
 		{
 			Name:    eth.ProtocolName,
-			Version: eth.ProtocolVersions[0],
-			Length:  eth.ProtocolLengths[0],
+			Version: eth.ProtocolVersions[1],
+			Length:  eth.ProtocolLengths[eth.ProtocolVersions[1]],
 			Run:     tp.protocolRun,
 		},
 	}

@@ -48,6 +48,7 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 
 func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	fmt.Printf("Ethereum peer connected: %s\n", peer.Name())
+	fmt.Printf("Protocol version: %d\n", tp.protocolVersion)
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
 		ProtocolVersion: tp.protocolVersion,
@@ -274,7 +275,10 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 			if !tp.markBlockSent(uint(block.NumberU64())) {
 				newSentBlocks++
 			}
-			data, err := rlp.EncodeToBytes(block.Body())
+			body := block.Body()
+			// Need to transform because our blocks also contain list of tx senders
+			smallBody := types.SmallBody{Transactions: body.Transactions, Uncles: body.Uncles}
+			data, err := rlp.EncodeToBytes(smallBody)
 			if err != nil {
 				fmt.Printf("Failed to encode body: %v", err)
 				return newSentBlocks, fmt.Errorf("Failed to encode body: %v", err)

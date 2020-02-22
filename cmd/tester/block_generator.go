@@ -165,7 +165,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 			receipts = append(receipts, receipt)
 			nonce++
 		} else {
-			fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
+			//fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
 		}
 
 		if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
@@ -195,12 +195,11 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		}
 		// Generate an empty block
 		block := types.NewBlock(header, signedTxs, []*types.Header{}, receipts)
-		//fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
-		if buffer, err := rlp.EncodeToBytes(block); err != nil {
+		buffer, err := rlp.EncodeToBytes(block)
+		if err != nil {
 			return nil, err
 		} else {
 			output.Write(buffer)
-			pos += uint64(len(buffer))
 		}
 		header = block.Header()
 		hash := header.Hash()
@@ -208,6 +207,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		bg.headersByNumber[block.NumberU64()] = header
 		bg.blockOffsetByHash[hash] = pos
 		bg.blockOffsetByNumber[block.NumberU64()] = pos
+		pos += uint64(len(buffer))
 		td = new(big.Int).Add(td, block.Difficulty())
 		parent = block
 	}
@@ -291,7 +291,7 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		}
 		// Generate an empty block
 		block := types.NewBlock(header, []*types.Transaction{}, []*types.Header{}, []*types.Receipt{})
-		fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
+		//fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
 		if buffer, err := rlp.EncodeToBytes(block); err != nil {
 			return nil, err
 		} else {
