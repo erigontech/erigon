@@ -50,11 +50,7 @@ func NewRemoteBoltDatabase(db *remote.DB) *RemoteBoltDatabase {
 func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
 	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			has = false
 		} else {
@@ -77,11 +73,7 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
 	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			return fmt.Errorf("bucket not found, %s", bucket)
 		}
@@ -110,18 +102,11 @@ func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uin
 func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
 	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts)
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -153,18 +138,11 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
 	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts)
 
 		k, v, err := c.Seek(startkey)
 		if err != nil {
@@ -228,31 +206,16 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
 		var err error
 
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		hB, err := tx.Bucket(hBucket)
-		if err != nil {
-			return err
-		}
-
+		hB := tx.Bucket(hBucket)
 		if hB == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
-
-		hC, err := hB.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts)
+		hC := hB.Cursor(remote.DefaultCursorOpts)
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -343,36 +306,17 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(EndSuffix))
 	if err := db.db.View(context.Background(), func(tx *remote.Tx) error {
-		b, err := tx.Bucket(bucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		hB, err := tx.Bucket(hBucket)
-		if err != nil {
-			return err
-		}
-
+		hB := tx.Bucket(hBucket)
 		if hB == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
-
-		hC, err := hB.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
-
-		hC1, err := hB.Cursor(remote.DefaultCursorOpts)
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts)
+		hC := hB.Cursor(remote.DefaultCursorOpts)
+		hC1 := hB.Cursor(remote.DefaultCursorOpts)
 
 		k, v, err := c.Seek(startkey)
 		if err != nil {

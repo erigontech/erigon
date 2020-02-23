@@ -239,17 +239,11 @@ beginTx:
 			}
 		}
 
-		b, err := tx.Bucket(dbutils.AccountsHistoryBucket)
-		if err != nil {
-			return err
-		}
+		b := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 
 		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
@@ -300,26 +294,15 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-		pre, err := tx.Bucket(dbutils.PreimagePrefix)
-		if err != nil {
-			return err
-		}
-
+		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
 		}
-		b, err := tx.Bucket(dbutils.AccountsBucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 
 		for k, _, err := c.SeekKey(r.AccountKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
@@ -487,18 +470,11 @@ beginTx:
 			}
 		}
 
-		b, err := tx.Bucket(dbutils.StorageHistoryBucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(dbutils.StorageHistoryBucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 
 		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
 			if err != nil {
@@ -554,19 +530,11 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-		b, err := tx.Bucket(dbutils.StorageBucket)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
 			return nil
 		}
-		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		if err != nil {
-			return err
-		}
-
+		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 		for k, _, err := c.SeekKey(r.StorageKey); k != nil || err != nil; k, _, err = c.NextKey() {
 			if err != nil {
 				return err
@@ -742,19 +710,12 @@ beginTx:
 			}
 		}
 
-		b, err := tx.Bucket(dbutils.HeaderPrefix)
-		if err != nil {
-			return err
-		}
-
+		b := tx.Bucket(dbutils.HeaderPrefix)
 		if b == nil {
 			return nil
 		}
 
-		c, err := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		if err != nil {
-			return err
-		}
+		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
 
 		fmt.Println("Preloading block numbers...")
 

@@ -26,7 +26,8 @@ Known problems: mutation.Put does copy internally.
 ## Abstraction to support: 
 
 #### Buckets concept:
-- Bucket’s can’t be null - abstraction will create bucket automatically on app start (if need)
+- Bucket can’t be nil (create on app start) 
+- Cursor can’t be nil
 
 #### InMemory and ReadOnly modes 
 
@@ -45,7 +46,7 @@ also useful for RemoteDb.
 - Badger iterator has AllVersions=true by default - why?
 - i.PrefetchSize - expose
 - For Badger - auto-remove bucket prefix from key
-- Bucket and Cursor can't be nil - means they must not be pointers???
+- .Bucket() and .Cursor() returning non-pointers and can't return error
 
 #### Concept of Item:
 - i.PrefetchValues - expose, default=true. 

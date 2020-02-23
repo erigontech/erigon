@@ -210,17 +210,17 @@ func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
 	return err
 }
 
-func (tx *Tx) Bucket(name []byte) (b Bucket, err error) {
-	b = Bucket{tx: tx, nameLen: uint(len(name))}
+func (tx *Tx) Bucket(name []byte) Bucket {
+	b := Bucket{tx: tx, nameLen: uint(len(name))}
 	switch tx.db.opts.provider {
 	case Bolt:
 		b.bolt = tx.bolt.Bucket(name)
 	case Badger:
 		b.badgerPrefix = name
 	case Remote:
-		b.remote, err = tx.remote.Bucket(name)
+		b.remote = tx.remote.Bucket(name)
 	}
-	return b, err
+	return b
 }
 
 func (tx *Tx) cleanup() {
@@ -363,8 +363,8 @@ func (b Bucket) Delete(key []byte) error {
 	return nil
 }
 
-func (b Bucket) Cursor(opts CursorOpts) (c Cursor, err error) {
-	c = Cursor{bucket: b, opts: opts, ctx: b.tx.ctx}
+func (b Bucket) Cursor(opts CursorOpts) Cursor {
+	c := Cursor{bucket: b, opts: opts, ctx: b.tx.ctx}
 	switch c.opts.provider {
 	case Bolt:
 		c.bolt = b.bolt.Cursor()
@@ -378,12 +378,12 @@ func (b Bucket) Cursor(opts CursorOpts) (c Cursor, err error) {
 		b.tx.badgerIterators = append(b.tx.badgerIterators, c.badger)
 
 	case Remote:
-		c.remote, err = b.remote.Cursor(opts.remote)
+		c.remote = b.remote.Cursor(opts.remote)
 	}
-	return c, err
+	return c
 }
 
-func (opts CursorOpts) Cursor() (c Cursor, err error) {
+func (opts CursorOpts) Cursor() Cursor {
 	return opts.bucket.Cursor(opts)
 }
 

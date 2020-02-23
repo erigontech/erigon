@@ -52,8 +52,8 @@ func setupDatabases() {
 		panic(err)
 	}
 
-	boltOriginDb.Update(func(tx *bolt.Tx) error {
-		tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
+	_ = boltOriginDb.Update(func(tx *bolt.Tx) error {
+		_, _ = tx.CreateBucketIfNotExists(dbutils.AccountsBucket, false)
 		return nil
 	})
 
@@ -62,7 +62,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+			bucket := tx.Bucket(dbutils.AccountsBucket)
 
 			err1 := bucket.Put(k, v)
 			if err1 != nil {
@@ -80,12 +80,9 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket, err1 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err1 != nil {
-				panic(err)
-			}
+			bucket := tx.Bucket(dbutils.AccountsBucket)
 
-			err1 = bucket.Put(k, v)
+			err1 := bucket.Put(k, v)
 			if err1 != nil {
 				panic(err)
 			}
@@ -102,12 +99,8 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket, err1 := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err1 != nil {
-				panic(err)
-			}
-
-			err1 = bucket.Put(k, v)
+			bucket := tx.Bucket(dbutils.AccountsBucket)
+			err1 := bucket.Put(k, v)
 			if err1 != nil {
 				panic(err)
 			}
@@ -124,7 +117,7 @@ func setupDatabases() {
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
-			tx.Set(append(dbutils.IntermediateTrieHashBucket, k...), v)
+			_ = tx.Set(append(dbutils.AccountsBucket, k...), v)
 		}
 
 		return nil
@@ -140,15 +133,8 @@ func BenchmarkCursor(b *testing.B) {
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := boltDb.View(ctx, func(tx *ethdb.Tx) error {
-				bucket, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-				if err != nil {
-					return err
-				}
-
-				c, err := bucket.CursorOpts().Cursor()
-				if err != nil {
-					return err
-				}
+				bucket := tx.Bucket(dbutils.AccountsBucket)
+				c := bucket.CursorOpts().Cursor()
 
 				for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 					if err != nil {
@@ -166,7 +152,7 @@ func BenchmarkCursor(b *testing.B) {
 	//b.Run("abstract badger", func(b *testing.B) {
 	//	for i := 0; i < b.N; i++ {
 	//		if err := badgerDb.View(ctx, func(tx *ethdb.Tx) error {
-	//			bucket, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+	//			bucket, err := tx.Bucket(dbutils.AccountsBucket)
 	//			if err != nil {
 	//				return err
 	//			}
@@ -193,7 +179,7 @@ func BenchmarkCursor(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 
 			if err := boltOriginDb.View(func(tx *bolt.Tx) error {
-				c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
 
 				for k, v := c.First(); k != nil; k, v = c.Next() {
 					_ = v
@@ -213,7 +199,7 @@ func BenchmarkCursor(b *testing.B) {
 	//	for i := 0; i < b.N; i++ {
 	//		if err := badgerOriginDb.View(func(tx *badger.Txn) error {
 	//			opts := badger.DefaultIteratorOptions
-	//			opts.Prefix = dbutils.IntermediateTrieHashBucket
+	//			opts.Prefix = dbutils.AccountsBucket
 	//			it := tx.NewIterator(opts)
 	//
 	//			for it.Rewind(); it.Valid(); it.Next() {

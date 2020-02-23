@@ -16,11 +16,7 @@ import (
 
 // ReadTd reimplemented rawdb.ReadTd
 func ReadTd(tx *remote.Tx, hash common.Hash, number uint64) (*hexutil.Big, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return nil, err
-	}
-
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
 		return nil, nil
 	}
@@ -41,11 +37,7 @@ func ReadTd(tx *remote.Tx, hash common.Hash, number uint64) (*hexutil.Big, error
 
 // ReadCanonicalHash reimplementation of rawdb.ReadCanonicalHash
 func ReadCanonicalHash(tx *remote.Tx, number uint64) (common.Hash, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return common.Hash{}, err
-	}
-
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
 		return common.Hash{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
 	}
@@ -93,11 +85,7 @@ func ReadBlock(tx *remote.Tx, hash common.Hash, number uint64) (*types.Block, er
 
 // ReadHeaderRLP reimplementation of rawdb.ReadHeaderRLP
 func ReadHeaderRLP(tx *remote.Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	bucket, err := tx.Bucket(dbutils.HeaderPrefix)
-	if err != nil {
-		return nil, err
-	}
-
+	bucket := tx.Bucket(dbutils.HeaderPrefix)
 	if bucket == nil {
 		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
 	}
@@ -122,10 +110,7 @@ func ReadHeader(tx *remote.Tx, hash common.Hash, number uint64) (*types.Header, 
 
 // ReadBodyRLP retrieves the block body (transactions and uncles) in RLP encoding.
 func ReadBodyRLP(tx *remote.Tx, hash common.Hash, number uint64) (rlp.RawValue, error) {
-	bucket, err := tx.Bucket(dbutils.BlockBodyPrefix)
-	if err != nil {
-		return nil, err
-	}
+	bucket := tx.Bucket(dbutils.BlockBodyPrefix)
 
 	if bucket == nil {
 		return rlp.RawValue{}, fmt.Errorf("bucket %s not found", dbutils.HeaderPrefix)
@@ -153,10 +138,7 @@ func ReadBody(tx *remote.Tx, hash common.Hash, number uint64) (*types.Body, erro
 }
 
 func ReadLastBlockNumber(tx *remote.Tx) (uint64, error) {
-	b, err := tx.Bucket(dbutils.HeadHeaderKey)
-	if err != nil {
-		return 0, err
-	}
+	b := tx.Bucket(dbutils.HeadHeaderKey)
 
 	if b == nil {
 		return 0, fmt.Errorf("bucket %s not found", dbutils.HeadHeaderKey)
@@ -168,10 +150,7 @@ func ReadLastBlockNumber(tx *remote.Tx) (uint64, error) {
 	if len(blockHashData) != common.HashLength {
 		return 0, fmt.Errorf("head header hash not found or wrong size: %x", blockHashData)
 	}
-	b1, err := tx.Bucket(dbutils.HeaderNumberPrefix)
-	if err != nil {
-		return 0, err
-	}
+	b1 := tx.Bucket(dbutils.HeaderNumberPrefix)
 
 	if b1 == nil {
 		return 0, fmt.Errorf("bucket %s not found", dbutils.HeaderNumberPrefix)

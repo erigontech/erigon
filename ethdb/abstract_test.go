@@ -21,11 +21,7 @@ func TestManagedTx(t *testing.T) {
 		assert.NoError(t, err)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
-			b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err != nil {
-				return err
-			}
-
+			b := tx.Bucket(dbutils.AccountsBucket)
 			err = b.Put([]byte("key1"), []byte("val1"))
 			if err != nil {
 				return err
@@ -41,15 +37,11 @@ func TestManagedTx(t *testing.T) {
 		}
 
 		if err := db.View(ctx, func(tx *ethdb.Tx) error {
-			b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err != nil {
-				return err
-			}
+			b := tx.Bucket(dbutils.AccountsBucket)
+			c := b.CursorOpts().Prefetch(1000).Cursor()
 
-			c, err := b.CursorOpts().Prefetch(1000).Cursor()
-			if err != nil {
-				return err
-			}
+			// b.Cursor().Prefetch(1000)
+			// c := tx.Bucket(dbutils.AccountsBucket).Cursor().Prefetch(1000)
 
 			for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 				if err != nil {
@@ -83,11 +75,7 @@ func TestManagedTx(t *testing.T) {
 		assert.NoError(t, err)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
-			b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err != nil {
-				return err
-			}
-
+			b := tx.Bucket(dbutils.AccountsBucket)
 			err = b.Put([]byte("key1"), []byte("val1"))
 			if err != nil {
 				return err
@@ -103,10 +91,7 @@ func TestManagedTx(t *testing.T) {
 		}
 
 		if err := db.View(ctx, func(tx *ethdb.Tx) error {
-			b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-			if err != nil {
-				return err
-			}
+			b := tx.Bucket(dbutils.AccountsBucket)
 
 			//err := b.Iter().From(key).MatchBits(common.HashLength * 8).Walk()
 			//err := b.Cursor().From(key).MatchBits(common.HashLength * 8).Walk(func(k, v []byte) (bool, error) {
@@ -120,10 +105,7 @@ func TestManagedTx(t *testing.T) {
 			//c, err := tx.Bucket(dbutil.AccountBucket).CursorOpts().From(key).Cursor()
 			//
 			//c, err := b.Cursor(b.CursorOpts().From(key).MatchBits(common.HashLength * 8))
-			c, err := b.Cursor(b.CursorOpts())
-			if err != nil {
-				return err
-			}
+			c := b.Cursor(b.CursorOpts())
 
 			for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 				if err != nil {
@@ -159,16 +141,13 @@ func TestCancelTest(t *testing.T) {
 	db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
 	assert.NoError(t, err)
 	err = db.Update(ctx, func(tx *ethdb.Tx) error {
-		b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		if err != nil {
-			return err
-		}
+		b := tx.Bucket(dbutils.AccountsBucket)
 		err = b.Put([]byte{1}, []byte{1})
 		if err != nil {
 			return err
 		}
 
-		c, err := b.Cursor(b.CursorOpts())
+		c := b.Cursor(b.CursorOpts())
 		for {
 			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -187,15 +166,13 @@ func TestFilterTest(t *testing.T) {
 	db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
 	assert.NoError(t, err)
 	err = db.Update(ctx, func(tx *ethdb.Tx) error {
-		b, err := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		assert.NoError(t, err)
+		b := tx.Bucket(dbutils.AccountsBucket)
 		err = b.Put(common.FromHex("10"), []byte{1})
 		assert.NoError(t, err)
 		err = b.Put(common.FromHex("20"), []byte{1})
 		assert.NoError(t, err)
 
-		c, err := b.CursorOpts().Prefix(common.FromHex("2")).Cursor()
-		require.NoError(t, err)
+		c := b.CursorOpts().Prefix(common.FromHex("2")).Cursor()
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			require.NoError(t, err)
@@ -211,8 +188,7 @@ func TestFilterTest(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, 1, counter)
 
-		c, err = b.CursorOpts().Cursor()
-		require.NoError(t, err)
+		c = b.CursorOpts().Cursor()
 		counter = 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			require.NoError(t, err)
