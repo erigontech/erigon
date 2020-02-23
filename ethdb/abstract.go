@@ -48,7 +48,7 @@ func (opts Options) Path(path string) Options {
 	return opts
 }
 
-func (opts Options) InMemory(val bool) Options {
+func (opts Options) InMem(val bool) Options {
 	switch opts.provider {
 	case Bolt:
 		opts.Bolt.MemOnly = val
@@ -85,6 +85,10 @@ type DB struct {
 
 var buckets = [][]byte{
 	dbutils.IntermediateTrieHashBucket,
+}
+
+func (opts Options) Open(ctx context.Context) (db *DB, err error) {
+	return Open(ctx, opts)
 }
 
 func Open(ctx context.Context, opts Options) (db *DB, err error) {

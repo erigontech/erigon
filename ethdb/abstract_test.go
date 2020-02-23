@@ -17,7 +17,7 @@ func TestManagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Bolt", func(t *testing.T) {
-		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMem(true))
 		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
@@ -71,7 +71,7 @@ func TestManagedTx(t *testing.T) {
 	})
 
 	t.Run("Badger", func(t *testing.T) {
-		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).InMemory(true))
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).InMem(true))
 		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
@@ -136,7 +136,7 @@ func TestCancelTest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
-	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMem(true))
 	assert.NoError(t, errOpen)
 	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
@@ -160,7 +160,7 @@ func TestCancelTest(t *testing.T) {
 func TestFilterTest(t *testing.T) {
 	ctx := context.Background()
 
-	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMem(true))
 	assert.NoError(t, errOpen)
 	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
@@ -219,7 +219,7 @@ func TestUnmanagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Bolt", func(t *testing.T) {
-		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMem(true))
 		assert.NoError(t, errOpen)
 		_ = db
 		// db.Begin()

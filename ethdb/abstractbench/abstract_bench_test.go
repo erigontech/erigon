@@ -33,11 +33,12 @@ func setupDatabases() {
 	keysAmount := 1_000
 	ctx := context.Background()
 	var errOpen error
-	boltDb, errOpen = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).Path("test"))
+
+	boltDb, errOpen = ethdb.ProviderOpts(ethdb.Bolt).Path("test").Open(ctx)
 	if errOpen != nil {
 		panic(errOpen)
 	}
-	badgerDb, errOpen = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).Path("test2"))
+	badgerDb, errOpen = ethdb.ProviderOpts(ethdb.Badger).Path("test2").Open(ctx)
 	if errOpen != nil {
 		panic(errOpen)
 	}
