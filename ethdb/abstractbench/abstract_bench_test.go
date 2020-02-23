@@ -32,24 +32,24 @@ func setupDatabases() {
 	vsize := 100
 	keysAmount := 1_000
 	ctx := context.Background()
-	var err error
-	boltDb, err = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).Path("test"))
-	if err != nil {
-		panic(err)
+	var errOpen error
+	boltDb, errOpen = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).Path("test"))
+	if errOpen != nil {
+		panic(errOpen)
 	}
-	badgerDb, err = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).Path("test2"))
-	if err != nil {
-		panic(err)
-	}
-
-	boltOriginDb, err = bolt.Open("test3", 0600, &bolt.Options{})
-	if err != nil {
-		panic(err)
+	badgerDb, errOpen = ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).Path("test2"))
+	if errOpen != nil {
+		panic(errOpen)
 	}
 
-	badgerOriginDb, err = badger.Open(badger.DefaultOptions("test4"))
-	if err != nil {
-		panic(err)
+	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{})
+	if errOpen != nil {
+		panic(errOpen)
+	}
+
+	badgerOriginDb, errOpen = badger.Open(badger.DefaultOptions("test4"))
+	if errOpen != nil {
+		panic(errOpen)
 	}
 
 	_ = boltOriginDb.Update(func(tx *bolt.Tx) error {
@@ -58,50 +58,31 @@ func setupDatabases() {
 	})
 
 	now := time.Now()
-	if err = boltOriginDb.Update(func(tx *bolt.Tx) error {
+	if err := boltOriginDb.Update(func(tx *bolt.Tx) error {
+		defer fmt.Println("origin bolt filled: ", time.Since(now))
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.AccountsBucket)
-
-			err1 := bucket.Put(k, v)
-			if err1 != nil {
-				panic(err)
+			if err := bucket.Put(k, v); err != nil {
+				return err
 			}
 		}
 		return nil
 	}); err != nil {
 		panic(err)
 	}
-	fmt.Println("origin bolt filled: ", time.Since(now))
 	now = time.Now()
 
-	if err = boltDb.Update(ctx, func(tx *ethdb.Tx) error {
+	if err := boltDb.Update(ctx, func(tx *ethdb.Tx) error {
+		defer fmt.Println("abstract bolt filled: ", time.Since(now))
+
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))
 			bucket := tx.Bucket(dbutils.AccountsBucket)
 
-			err1 := bucket.Put(k, v)
-			if err1 != nil {
-				panic(err)
-			}
-		}
-
-		return nil
-	}); err != nil {
-		panic(err)
-	}
-	fmt.Println("abstract bolt filled: ", time.Since(now))
-	now = time.Now()
-
-	if err = badgerDb.Update(ctx, func(tx *ethdb.Tx) error {
-		v := make([]byte, vsize)
-		for i := 0; i < keysAmount; i++ {
-			k := common.FromHex(fmt.Sprintf("%064x", i))
-			bucket := tx.Bucket(dbutils.AccountsBucket)
-			err1 := bucket.Put(k, v)
-			if err1 != nil {
+			if err := bucket.Put(k, v); err != nil {
 				panic(err)
 			}
 		}
@@ -110,10 +91,29 @@ func setupDatabases() {
 	}); err != nil {
 		panic(err)
 	}
-	fmt.Println("abstract badger filled: ", time.Since(now))
 	now = time.Now()
 
-	if err = badgerOriginDb.Update(func(tx *badger.Txn) error {
+	if err := badgerDb.Update(ctx, func(tx *ethdb.Tx) error {
+		defer fmt.Println("abstract badger filled: ", time.Since(now))
+
+		v := make([]byte, vsize)
+		for i := 0; i < keysAmount; i++ {
+			k := common.FromHex(fmt.Sprintf("%064x", i))
+			bucket := tx.Bucket(dbutils.AccountsBucket)
+			if err := bucket.Put(k, v); err != nil {
+				panic(err)
+			}
+		}
+
+		return nil
+	}); err != nil {
+		panic(err)
+	}
+	now = time.Now()
+
+	if err := badgerOriginDb.Update(func(tx *badger.Txn) error {
+		defer fmt.Println("pure badger filled: ", time.Since(now))
+
 		v := make([]byte, vsize)
 		for i := 0; i < keysAmount; i++ {
 			k := common.FromHex(fmt.Sprintf("%064x", i))

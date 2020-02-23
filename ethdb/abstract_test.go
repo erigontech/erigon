@@ -17,17 +17,17 @@ func TestManagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Bolt", func(t *testing.T) {
-		db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
-		assert.NoError(t, err)
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
-			err = b.Put([]byte("key1"), []byte("val1"))
-			if err != nil {
+
+			if err := b.Put([]byte("key1"), []byte("val1")); err != nil {
 				return err
 			}
-			err = b.Put([]byte("key2"), []byte("val2"))
-			if err != nil {
+
+			if err := b.Put([]byte("key2"), []byte("val2")); err != nil {
 				return err
 			}
 
@@ -71,17 +71,15 @@ func TestManagedTx(t *testing.T) {
 	})
 
 	t.Run("Badger", func(t *testing.T) {
-		db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).InMemory(true))
-		assert.NoError(t, err)
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Badger).InMemory(true))
+		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
-			err = b.Put([]byte("key1"), []byte("val1"))
-			if err != nil {
+			if err := b.Put([]byte("key1"), []byte("val1")); err != nil {
 				return err
 			}
-			err = b.Put([]byte("key2"), []byte("val2"))
-			if err != nil {
+			if err := b.Put([]byte("key2"), []byte("val2")); err != nil {
 				return err
 			}
 
@@ -138,12 +136,11 @@ func TestCancelTest(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
 	defer cancel()
 
-	db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
-	assert.NoError(t, err)
-	err = db.Update(ctx, func(tx *ethdb.Tx) error {
+	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+	assert.NoError(t, errOpen)
+	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
-		err = b.Put([]byte{1}, []byte{1})
-		if err != nil {
+		if err := b.Put([]byte{1}, []byte{1}); err != nil {
 			return err
 		}
 
@@ -155,66 +152,75 @@ func TestCancelTest(t *testing.T) {
 				}
 			}
 		}
-		return nil
-	})
-	require.True(t, errors.Is(context.DeadlineExceeded, err))
+	}); err != nil {
+		require.True(t, errors.Is(context.DeadlineExceeded, err))
+	}
 }
 
 func TestFilterTest(t *testing.T) {
 	ctx := context.Background()
 
-	db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
-	assert.NoError(t, err)
-	err = db.Update(ctx, func(tx *ethdb.Tx) error {
+	db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+	assert.NoError(t, errOpen)
+	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
-		err = b.Put(common.FromHex("10"), []byte{1})
-		assert.NoError(t, err)
-		err = b.Put(common.FromHex("20"), []byte{1})
-		assert.NoError(t, err)
+		if err := b.Put(common.FromHex("10"), []byte{1}); err != nil {
+			return err
+		}
+		if err := b.Put(common.FromHex("20"), []byte{1}); err != nil {
+			return nil
+		}
 
 		c := b.CursorOpts().Prefix(common.FromHex("2")).Cursor()
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
-			require.NoError(t, err)
+			if err != nil {
+				return err
+			}
 			counter++
 		}
 		assert.Equal(t, 1, counter)
 
 		counter = 0
-		err = c.Walk(func(_, _ []byte) (bool, error) {
+		if err := c.Walk(func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
-		})
-		require.NoError(t, err)
+		}); err != nil {
+			return err
+		}
 		assert.Equal(t, 1, counter)
 
 		c = b.CursorOpts().Cursor()
 		counter = 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
-			require.NoError(t, err)
+			if err != nil {
+				return err
+			}
 			counter++
 		}
 		assert.Equal(t, 2, counter)
 
 		counter = 0
-		err = c.Walk(func(_, _ []byte) (bool, error) {
+		if err := c.Walk(func(_, _ []byte) (bool, error) {
 			counter++
 			return true, nil
-		})
-		require.NoError(t, err)
+		}); err != nil {
+			return err
+		}
 		assert.Equal(t, 2, counter)
 
 		return nil
-	})
-	require.NoError(t, err)
+	}); err != nil {
+		require.NoError(t, err)
+	}
 }
 
 func TestUnmanagedTx(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Bolt", func(t *testing.T) {
-		db, err := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
-		assert.NoError(t, err)
+		db, errOpen := ethdb.Open(ctx, ethdb.ProviderOpts(ethdb.Bolt).InMemory(true))
+		assert.NoError(t, errOpen)
 		_ = db
 		// db.Begin()
 	})

@@ -520,8 +520,6 @@ func (c Cursor) FirstKey() ([]byte, uint64, error) {
 		} else {
 			c.k, vIsEmpty, c.err = c.remote.FirstKey()
 		}
-
-		c.k, vIsEmpty, c.err = c.remote.FirstKey()
 		if !vIsEmpty {
 			vSize = 1
 		}
