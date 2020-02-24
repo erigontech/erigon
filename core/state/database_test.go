@@ -1207,7 +1207,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		return false
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, true, storageKey(k2))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, storageKey(k2))
 	require.NoError(err)
 
 	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2))
@@ -1230,7 +1230,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		return bytes.HasPrefix(storageKey(k2), prefix)
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, true, storageKey(k3))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, storageKey(k3))
 	require.NoError(err)
 
 	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2)) // results of step2 was preserved

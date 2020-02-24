@@ -717,14 +717,11 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					if forward {
 
 						if debug.IsIntermediateTrieHash() {
-							val, ok := tds.t.Get(cKey)
-							isNew := ok && val == nil
-
 							someStorageExistsInThisSubtree := func(prefix []byte) bool {
 								val, ok := tds.t.Get(prefix)
-								return !ok || val != nil
+								return !(ok && val == nil)
 							}
-							_ = ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, isNew, cKey)
+							_ = ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, cKey)
 						}
 
 						tds.t.Update(cKey, v)
@@ -829,6 +826,14 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
+func hasTombstone(db ethdb.MinDatabase, addrHash []byte) (bool, error) {
+	v, err := db.Get(dbutils.IntermediateTrieHashBucket, addrHash)
+	if err != nil {
+		return false, err
+	}
+	return v != nil && len(v) == 0, nil
+}
+
 func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
 	toPrint := false
 
@@ -844,24 +849,16 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	addrHashBytes := addrHash[:]
 	copy(buf.B, addrHashBytes)
 
-	v, err := db.Get(dbutils.IntermediateTrieHashBucket, addrHashBytes)
-	if err != nil {
+	if ok, err := hasTombstone(db, addrHashBytes); err != nil || !ok {
 		return err
-	}
-
-	isSelfDestructed := v != nil && len(v) == 0
-	if !isSelfDestructed {
-		return nil
 	}
 
 	toPrint = true
 	i := common.HashLength
 	for j := 0; j < 256; j++ {
 		buf.B[i] = uint8(j)
-		a := buf.B[:i+1]
-		_ = a
-		if err2 := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err2 != nil {
-			return err2
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
+			return err
 		}
 	}
 
@@ -871,8 +868,8 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	return nil
 }
 
-func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, isNew bool, compositeKey []byte) error {
-	if !isNew {
+func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
+	if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
 		return nil
 	}
 
