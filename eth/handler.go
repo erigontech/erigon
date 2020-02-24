@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -178,7 +179,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 			log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
 			return 0, nil
 		}
-		n, err := manager.blockchain.InsertChain(blocks)
+		n, err := manager.blockchain.InsertChain(context.Background(), blocks)
 		if err == nil {
 			atomic.StoreUint32(&manager.acceptTxs, 1) // Mark initial sync done on any fetcher import
 		}
@@ -620,6 +621,53 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 		}
 
+	case p.version >= eth63 && msg.Code == GetNodeDataMsg:
+		// Decode the retrieval message
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		if _, err := msgStream.List(); err != nil {
+			return err
+		}
+
+		// Obtain the TrieDbState
+		tds, err := pm.blockchain.GetTrieDbState()
+		if err != nil {
+			return err
+		}
+
+		// Gather state data until the fetch or network limits is reached
+		var (
+			hash  common.Hash
+			bytes int
+			data  [][]byte
+		)
+		for bytes < softResponseLimit && len(data) < downloader.MaxStateFetch {
+			// Retrieve the hash of the next node
+			if err := msgStream.Decode(&hash); err == rlp.EOL {
+				break
+			} else if err != nil {
+				return errResp(ErrDecode, "msg %v: %v", msg, err)
+			}
+
+			// First try to get the trie node
+			node := tds.GetNodeByHash(hash)
+			if len(node) != 0 {
+				data = append(data, node)
+				bytes += len(node)
+				continue
+			}
+
+			// Now attempt to get the byte code
+			var zeroAddress common.Address
+			code, err := tds.ReadAccountCode(zeroAddress, hash)
+			if err == nil {
+				data = append(data, code)
+				bytes += len(code)
+			} else {
+				data = append(data, nil)
+			}
+		}
+		return p.SendNodeData(data)
+
 	case p.version >= eth63 && msg.Code == GetReceiptsMsg:
 		// Decode the retrieval message
 		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
@@ -692,6 +740,14 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 		var request newBlockData
 		if err := msg.Decode(&request); err != nil {
 			return errResp(ErrDecode, "%v: %v", msg, err)
+		}
+		if hash := types.CalcUncleHash(request.Block.Uncles()); hash != request.Block.UncleHash() {
+			log.Warn("Propagated block has invalid uncles", "have", hash, "exp", request.Block.UncleHash())
+			break // TODO(karalabe): return error eventually, but wait a few releases
+		}
+		if hash := types.DeriveSha(request.Block.Transactions()); hash != request.Block.TxHash() {
+			log.Warn("Propagated block has invalid body", "have", hash, "exp", request.Block.TxHash())
+			break // TODO(karalabe): return error eventually, but wait a few releases
 		}
 		if err := request.sanityCheck(); err != nil {
 			return err

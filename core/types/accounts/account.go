@@ -17,12 +17,12 @@ import (
 // DESCRIBED: docs/programmers_guide/guide.md#ethereum-state
 type Account struct {
 	Initialised    bool
+	HasStorageSize bool
 	Nonce          uint64
 	Balance        big.Int
 	Root           common.Hash // merkle root of the storage trie
 	CodeHash       common.Hash // hash of the bytecode
 	Incarnation    uint64
-	HasStorageSize bool
 	StorageSize    uint64
 }
 
@@ -344,12 +344,13 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 	}
 }
 
+// Copy makes `a` a full, independent (meaning that if the `image` changes in any way, it does not affect `a`) copy of the account `image`.
 func (a *Account) Copy(image *Account) {
 	a.Initialised = image.Initialised
 	a.Nonce = image.Nonce
 	a.Balance.Set(&image.Balance)
-	a.Root = image.Root
-	a.CodeHash = image.CodeHash
+	copy(a.Root[:], image.Root[:])
+	copy(a.CodeHash[:], image.CodeHash[:])
 	a.Incarnation = image.Incarnation
 	a.HasStorageSize = image.HasStorageSize
 	a.StorageSize = image.StorageSize
@@ -531,15 +532,19 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	return nil
 }
 
-func (a *Account) DecodeForStorage(enc []byte) error {
+func (a *Account) Reset() {
 	a.Initialised = true
 	a.Nonce = 0
 	a.Incarnation = 0
 	a.Balance.SetInt64(0)
-	a.Root = emptyRoot
-	a.CodeHash = emptyCodeHash
+	copy(a.Root[:], emptyRoot[:])
+	copy(a.CodeHash[:], emptyCodeHash[:])
 	a.StorageSize = 0
 	a.HasStorageSize = false
+}
+
+func (a *Account) DecodeForStorage(enc []byte) error {
+	a.Reset()
 
 	var fieldSet = enc[0]
 	var pos = 1

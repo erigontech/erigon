@@ -57,8 +57,8 @@ const (
 	BlockBodiesMsg     = 0x06
 	NewBlockMsg        = 0x07
 	// Protocol messages belonging to eth/63
-	GetNodeDataMsg = 0x0d // NOT IMPLEMENTED
-	NodeDataMsg    = 0x0e // NOT IMPLEMENTED
+	GetNodeDataMsg = 0x0d
+	NodeDataMsg    = 0x0e
 	GetReceiptsMsg = 0x0f
 	ReceiptsMsg    = 0x10
 )

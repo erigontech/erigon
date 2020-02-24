@@ -183,13 +183,14 @@ func (n *cachedNode) obj(hash common.Hash, cachegen uint16) node {
 
 // childs returns all the tracked children of this node, both the implicit ones
 // from inside the node as well as the explicit ones from outside the node.
-func (n *cachedNode) childs() []common.Hash {
-	return nil
+func (n *cachedNode) forChilds(onChild func(hash common.Hash)) {
+	// FIXME: why is this method does nothing?
 }
 
-// gatherChildren traverses the node hierarchy of a collapsed storage node and
+// gatherChildj
 // retrieves all the hashnode children.
 func gatherChildren(n node, children *[]common.Hash) {
+	// intentinally left blank to simplify further rebasing
 }
 
 // simplifyNode traverses the hierarchy of an expanded memory node and discards
@@ -260,11 +261,11 @@ func (db *Database) insert(hash common.Hash, blob []byte, node node) {
 		size:      uint16(len(blob)),
 		flushPrev: db.newest,
 	}
-	for _, child := range entry.childs() {
+	entry.forChilds(func(child common.Hash) {
 		if c := db.dirties[child]; c != nil {
 			c.parents++
 		}
-	}
+	})
 	db.dirties[hash] = entry
 
 	// Update the flush-list endpoints
@@ -403,9 +404,9 @@ func (db *Database) dereference(child common.Hash, parent common.Hash) {
 			db.dirties[node.flushNext].flushPrev = node.flushPrev
 		}
 		// Dereference all children and delete the node
-		for _, hash := range node.childs() {
+		node.forChilds(func(hash common.Hash) {
 			db.dereference(hash, child)
-		}
+		})
 		delete(db.dirties, child)
 		db.dirtiesSize -= common.StorageSize(common.HashLength + int(node.size))
 		if node.children != nil {

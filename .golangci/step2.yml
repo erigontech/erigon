@@ -12,3 +12,7 @@ linters:
 linters-settings:
   govet:
     check-shadowing: true
+
+issues:
+  exclude:
+    - composites

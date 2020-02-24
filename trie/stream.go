@@ -31,8 +31,10 @@ import (
 type StreamItem uint8
 
 const (
+	// NoItem is used to signal the end of iterator
+	NoItem StreamItem = iota
 	// AccountStreamItem used for marking a key-value pair in the stream as belonging to an account
-	AccountStreamItem StreamItem = iota
+	AccountStreamItem
 	// StorageStreamItem used for marking a key-value pair in the stream as belonging to a storage item leaf
 	StorageStreamItem
 	// AHashStreamItem used for marking a key-value pair in the stream as belonging to an intermediate hash
@@ -46,171 +48,563 @@ const (
 // Stream represents the collection of key-value pairs, sorted by keys, where values may belong
 // to three different types - accounts, strage item leaves, and intermediate hashes
 type Stream struct {
-	hexes     [][]byte
+	keyBytes  []byte
+	keySizes  []uint8
 	itemTypes []StreamItem
 	aValues   []*accounts.Account
 	sValues   [][]byte
-	hashes    []common.Hash
+	hashes    []byte
 }
 
-// ToStream generates the stream of key hexes, and corresponding values, with branch nodes
-// folded into hashes according to givin ResolveSet `rs`
-func ToStream(t *Trie, rs *ResolveSet, trace bool) *Stream {
-	hr := newHasher(false)
-	defer returnHasherToPool(hr)
-	var st Stream
-	toStream(t.root, []byte{}, true, rs, hr, true, &st, trace)
-	return &st
+// Reset sets all slices to zero sizes, without de-allocating
+func (s *Stream) Reset() {
+	if len(s.keyBytes) > 0 {
+		s.keyBytes = s.keyBytes[:0]
+	}
+	if len(s.keySizes) > 0 {
+		s.keySizes = s.keySizes[:0]
+	}
+	if len(s.itemTypes) > 0 {
+		s.itemTypes = s.itemTypes[:0]
+	}
+	if len(s.aValues) > 0 {
+		s.aValues = s.aValues[:0]
+	}
+	if len(s.sValues) > 0 {
+		s.sValues = s.sValues[:0]
+	}
+	if len(s.hashes) > 0 {
+		s.hashes = s.hashes[:0]
+	}
 }
 
-func toStream(nd node, hex []byte, accounts bool, rs *ResolveSet, hr *hasher, force bool, s *Stream, trace bool) {
-	switch n := nd.(type) {
-	case nil:
-	case valueNode:
-		if trace {
-			fmt.Printf("valueNode %x\n", hex)
+// Iterator helps iterate over a trie according to a given resolve set
+type Iterator struct {
+	rs           *ResolveSet
+	hex          []byte
+	nodeStack    []node
+	iStack       []int
+	goDeepStack  []bool
+	lenStack     []int
+	accountStack []bool
+	top          int // Top of the stack
+	trace        bool
+}
+
+// NewIterator creates a new iterator from scratch from a given trie and resolve set
+func NewIterator(t *Trie, rs *ResolveSet, trace bool) *Iterator {
+	return &Iterator{
+		rs:           rs,
+		hex:          []byte{},
+		nodeStack:    []node{t.root},
+		iStack:       []int{0},
+		goDeepStack:  []bool{true},
+		lenStack:     []int{0},
+		accountStack: []bool{true},
+		top:          1,
+		trace:        trace,
+	}
+}
+
+// Reset prepares iterator to be reused
+func (it *Iterator) Reset(t *Trie, rs *ResolveSet, trace bool) {
+	it.rs = rs
+	it.hex = it.hex[:0]
+	if len(it.nodeStack) > 0 {
+		it.nodeStack = it.nodeStack[:0]
+	}
+	it.nodeStack = append(it.nodeStack, t.root)
+	if len(it.iStack) > 0 {
+		it.iStack = it.iStack[:0]
+	}
+	it.lenStack = append(it.lenStack, 0)
+	if len(it.goDeepStack) > 0 {
+		it.goDeepStack = it.goDeepStack[:0]
+	}
+	it.goDeepStack = append(it.goDeepStack, true)
+	if len(it.accountStack) > 0 {
+		it.accountStack = it.accountStack[:0]
+	}
+	it.accountStack = append(it.accountStack, true)
+	it.top = 1
+	it.trace = trace
+}
+
+// Next delivers the next item from the iterator
+func (it *Iterator) Next() (itemType StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
+	for {
+		if it.top == 0 {
+			return NoItem, nil, nil, nil, nil
 		}
-		s.hexes = append(s.hexes, hex)
-		s.sValues = append(s.sValues, []byte(n))
-		s.itemTypes = append(s.itemTypes, StorageStreamItem)
-	case *shortNode:
-		if trace {
-			fmt.Printf("shortNode %x\n", hex)
-		}
-		hexVal := concat(hex, n.Key...)
-		toStream(n.Val, hexVal, accounts, rs, hr, false, s, trace)
-	case *duoNode:
-		if trace {
-			fmt.Printf("duoNode %x\n", hex)
-		}
-		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
-		if hashOnly {
-			var hn common.Hash
-			if _, err := hr.hash(n, force, hn[:]); err != nil {
-				panic(fmt.Sprintf("could not hash duoNode: %v", err))
+		l := it.top - 1
+		nd := it.nodeStack[l]
+		hexLen := it.lenStack[l]
+		hex := it.hex[:hexLen]
+		goDeep := it.goDeepStack[l]
+		accounts := it.accountStack[l]
+		switch n := nd.(type) {
+		case nil:
+			return NoItem, nil, nil, nil, nil
+		case valueNode:
+			if it.trace {
+				fmt.Printf("valueNode %x\n", hex)
 			}
-			s.hexes = append(s.hexes, hex)
-			s.hashes = append(s.hashes, hn)
-			if accounts {
-				s.itemTypes = append(s.itemTypes, AHashStreamItem)
-			} else {
-				s.itemTypes = append(s.itemTypes, SHashStreamItem)
+			it.top--
+			return StorageStreamItem, hex, nil, nil, []byte(n)
+		case *shortNode:
+			if it.trace {
+				fmt.Printf("shortNode %x\n", hex)
 			}
-		} else {
+			hex = append(hex, n.Key...)
+			switch v := n.Val.(type) {
+			case hashNode:
+				it.top--
+				if accounts {
+					return AHashStreamItem, hex, nil, []byte(v), nil
+				}
+				return SHashStreamItem, hex, nil, []byte(v), nil
+			case valueNode:
+				it.top--
+				return StorageStreamItem, hex, nil, nil, []byte(v)
+			case *accountNode:
+				if !it.rs.HashOnly(hex) && v.storage != nil {
+					it.hex = hex
+					it.nodeStack[l] = v.storage
+					it.iStack[l] = 0
+					it.goDeepStack[l] = true
+					it.lenStack[l] = len(hex)
+					it.accountStack[l] = false
+				} else {
+					it.top--
+				}
+				return AccountStreamItem, hex, &v.Account, nil, nil
+			}
+			it.hex = hex
+			it.nodeStack[l] = n.Val
+			it.iStack[l] = 0
+			it.goDeepStack[l] = !it.rs.HashOnly(hex)
+			it.lenStack[l] = len(hex)
+			it.accountStack[l] = accounts
+		case *duoNode:
+			if it.trace {
+				fmt.Printf("duoNode %x\n", hex)
+			}
+			if !goDeep {
+				it.top--
+				if accounts {
+					return AHashStreamItem, hex, nil, n.reference(), nil
+				}
+				return SHashStreamItem, hex, nil, n.reference(), nil
+			}
 			i1, i2 := n.childrenIdx()
-			hex1 := make([]byte, len(hex)+1)
-			copy(hex1, hex)
-			hex1[len(hex)] = i1
-			hex2 := make([]byte, len(hex)+1)
-			copy(hex2, hex)
-			hex2[len(hex)] = i2
-			toStream(n.child1, hex1, accounts, rs, hr, false, s, trace)
-			toStream(n.child2, hex2, accounts, rs, hr, false, s, trace)
-		}
-	case *fullNode:
-		if trace {
-			fmt.Printf("fullNode %x\n", hex)
-		}
-		hashOnly := rs.HashOnly(hex) // Save this because rs can move on to other keys during the recursive invocation
-		if hashOnly {
-			var hn common.Hash
-			if _, err := hr.hash(n, force, hn[:]); err != nil {
-				panic(fmt.Sprintf("could not hash duoNode: %v", err))
-			}
-			s.hexes = append(s.hexes, hex)
-			s.hashes = append(s.hashes, hn)
-			if accounts {
-				s.itemTypes = append(s.itemTypes, AHashStreamItem)
+			index := it.iStack[l]
+			if index <= int(i1) {
+				it.iStack[l] = int(i2)
+				hex = append(hex, i1)
+				var childGoDeep bool
+				switch v := n.child1.(type) {
+				case hashNode:
+					if accounts {
+						return AHashStreamItem, hex, nil, []byte(v), nil
+					}
+					return SHashStreamItem, hex, nil, []byte(v), nil
+				case *duoNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				case *fullNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				}
+				it.hex = hex
+				l++
+				it.top++
+				if l >= len(it.nodeStack) {
+					it.nodeStack = append(it.nodeStack, n.child1)
+					it.iStack = append(it.iStack, 0)
+					it.goDeepStack = append(it.goDeepStack, childGoDeep)
+					it.lenStack = append(it.lenStack, len(hex))
+					it.accountStack = append(it.accountStack, accounts)
+				} else {
+					it.nodeStack[l] = n.child1
+					it.iStack[l] = 0
+					it.goDeepStack[l] = childGoDeep
+					it.lenStack[l] = len(hex)
+					it.accountStack[l] = accounts
+				}
 			} else {
-				s.itemTypes = append(s.itemTypes, SHashStreamItem)
+				hex = append(hex, i2)
+				var childGoDeep bool
+				switch v := n.child2.(type) {
+				case hashNode:
+					it.top--
+					if accounts {
+						return AHashStreamItem, hex, nil, []byte(v), nil
+					}
+					return SHashStreamItem, hex, nil, []byte(v), nil
+				case *duoNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						it.top--
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				case *fullNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						it.top--
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				}
+				it.hex = hex
+				it.nodeStack[l] = n.child2
+				it.iStack[l] = 0
+				it.goDeepStack[l] = childGoDeep
+				it.lenStack[l] = len(hex)
+				it.accountStack[l] = accounts
 			}
+		case *fullNode:
+			if it.trace {
+				fmt.Printf("fullNode %x\n", hex)
+			}
+			if !goDeep {
+				it.top--
+				if accounts {
+					return AHashStreamItem, hex, nil, n.reference(), nil
+				}
+				return SHashStreamItem, hex, nil, n.reference(), nil
+			}
+			var i1, i2 int
+			i1Found := false
+			i2Found := false
+			index := it.iStack[l]
+			for i := index; i < len(n.Children); i++ {
+				if n.Children[i] != nil {
+					if i1Found {
+						i2 = i
+						i2Found = true
+						break
+					} else {
+						i1 = i
+						i1Found = true
+					}
+				}
+			}
+			if i2Found {
+				it.iStack[l] = i2
+				hex = append(hex, byte(i1))
+				var childGoDeep bool
+				switch v := n.Children[i1].(type) {
+				case hashNode:
+					if accounts {
+						return AHashStreamItem, hex, nil, []byte(v), nil
+					}
+					return SHashStreamItem, hex, nil, []byte(v), nil
+				case *duoNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				case *fullNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				}
+				it.hex = hex
+				l++
+				it.top++
+				if l >= len(it.nodeStack) {
+					it.nodeStack = append(it.nodeStack, n.Children[i1])
+					it.iStack = append(it.iStack, 0)
+					it.goDeepStack = append(it.goDeepStack, childGoDeep)
+					it.lenStack = append(it.lenStack, len(hex))
+					it.accountStack = append(it.accountStack, accounts)
+				} else {
+					it.nodeStack[l] = n.Children[i1]
+					it.iStack[l] = 0
+					it.goDeepStack[l] = childGoDeep
+					it.lenStack[l] = len(hex)
+					it.accountStack[l] = accounts
+				}
+			} else {
+				hex = append(hex, byte(i1))
+				var childGoDeep bool
+				switch v := n.Children[i1].(type) {
+				case hashNode:
+					it.top--
+					if accounts {
+						return AHashStreamItem, hex, nil, []byte(v), nil
+					}
+					return SHashStreamItem, hex, nil, []byte(v), nil
+				case *duoNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						it.top--
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				case *fullNode:
+					childGoDeep = !it.rs.HashOnly(hex)
+					if !childGoDeep {
+						it.top--
+						if accounts {
+							return AHashStreamItem, hex, nil, v.reference(), nil
+						}
+						return SHashStreamItem, hex, nil, v.reference(), nil
+					}
+				}
+				it.hex = hex
+				it.nodeStack[l] = n.Children[i1]
+				it.iStack[l] = 0
+				it.goDeepStack[l] = childGoDeep
+				it.lenStack[l] = len(hex)
+				it.accountStack[l] = accounts
+			}
+		case *accountNode:
+			if it.trace {
+				fmt.Printf("accountNode %x\n", hex)
+			}
+			if !it.rs.HashOnly(hex) && n.storage != nil {
+				it.hex = hex
+				it.nodeStack[l] = n.storage
+				it.iStack[l] = 0
+				it.goDeepStack[l] = true
+				it.lenStack[l] = len(hex)
+				it.accountStack[l] = false
+			} else {
+				it.top--
+			}
+			return AccountStreamItem, hex, &n.Account, nil, nil
+		case hashNode:
+			if it.trace {
+				fmt.Printf("hashNode %x\n", hex)
+			}
+			it.top--
+			if accounts {
+				return AHashStreamItem, hex, nil, []byte(n), nil
+			}
+			return SHashStreamItem, hex, nil, []byte(n), nil
+		default:
+			panic(fmt.Errorf("unexpected node: %T", nd))
+		}
+	}
+}
+
+// StreamMergeIterator merges an Iterator and a Stream
+type StreamMergeIterator struct {
+	it          *Iterator
+	s           *Stream
+	trace       bool
+	ki, ai, si  int
+	offset      int
+	hex         []byte
+	itemType    StreamItem
+	oldItemType StreamItem
+	oldHex      []byte
+	oldHexCopy  []byte
+	oldAVal     *accounts.Account
+	oldHash     []byte
+	oldHashCopy []byte
+	oldVal      []byte
+}
+
+// NewStreamMergeIterator create a brand new StreamMergeIterator
+func NewStreamMergeIterator(it *Iterator, s *Stream, trace bool) *StreamMergeIterator {
+	smi := &StreamMergeIterator{
+		it:    it,
+		s:     s,
+		trace: trace,
+	}
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = it.Next()
+	return smi
+}
+
+// Reset prepares StreamMergeIterator for reuse
+func (smi *StreamMergeIterator) Reset(it *Iterator, s *Stream, trace bool) {
+	smi.it = it
+	smi.s = s
+	smi.trace = trace
+	smi.ki = 0
+	smi.ai = 0
+	smi.si = 0
+	smi.offset = 0
+	smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = it.Next()
+}
+
+// Next returns the next item in the merged iterator
+func (smi *StreamMergeIterator) Next() (itemType1 StreamItem, hex1 []byte, aValue *accounts.Account, hash []byte, value []byte) {
+	for {
+		if smi.trace {
+			fmt.Printf("smi.hex %x, smi.ki %d, len(smi.s.keySizes) %d, smi.oldItemType %d smi.oldHex %x\n", smi.hex, smi.ki, len(smi.s.keySizes), smi.oldItemType, smi.oldHex)
+		}
+		if smi.hex == nil && smi.ki >= len(smi.s.keySizes) && smi.oldItemType == NoItem {
+			return NoItem, nil, nil, nil, nil
+		}
+		if smi.hex == nil && smi.ki < len(smi.s.keySizes) {
+			size := int(smi.s.keySizes[smi.ki])
+			smi.hex = smi.s.keyBytes[smi.offset : smi.offset+size]
+			smi.itemType = smi.s.itemTypes[smi.ki]
+			smi.ki++
+			smi.offset += size
+		}
+		hex := smi.hex // Save it to be able to use it even after assigning to nil
+		if smi.oldHex == nil {
+			smi.hex = nil // To be consumed
+			switch smi.itemType {
+			case AccountStreamItem:
+				ai := smi.ai
+				smi.ai++
+				if smi.s.aValues[ai] != nil {
+					return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+				}
+			case StorageStreamItem:
+				si := smi.si
+				smi.si++
+				if len(smi.s.sValues[si]) > 0 {
+					return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+				}
+			default:
+				panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+			}
+		} else if hex == nil {
+			if len(smi.oldHexCopy) > 0 {
+				smi.oldHexCopy = smi.oldHexCopy[:0]
+			}
+			smi.oldHexCopy = append(smi.oldHexCopy, smi.oldHex...)
+			oldItemType := smi.oldItemType
+			oldAVal := smi.oldAVal
+			if len(smi.oldHashCopy) > 0 {
+				smi.oldHashCopy = smi.oldHashCopy[:0]
+			}
+			smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
+			oldVal := smi.oldVal
+			smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+			return oldItemType, smi.oldHexCopy, oldAVal, smi.oldHashCopy, oldVal
 		} else {
-			for i, child := range n.Children {
-				if child != nil {
-					toStream(child, concat(hex, byte(i)), accounts, rs, hr, false, s, trace)
+			// Special case - account gets deleted
+			if smi.itemType == AccountStreamItem && smi.s.aValues[smi.ai] == nil && bytes.HasPrefix(smi.oldHex, hex) {
+				smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+			} else {
+				switch bytes.Compare(smi.oldHex, hex) {
+				case -1:
+					if len(smi.oldHexCopy) > 0 {
+						smi.oldHexCopy = smi.oldHexCopy[:0]
+					}
+					smi.oldHexCopy = append(smi.oldHexCopy, smi.oldHex...)
+					oldItemType := smi.oldItemType
+					oldAVal := smi.oldAVal
+					if len(smi.oldHashCopy) > 0 {
+						smi.oldHashCopy = smi.oldHashCopy[:0]
+					}
+					smi.oldHashCopy = append(smi.oldHashCopy, smi.oldHash...)
+					oldVal := smi.oldVal
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+					return oldItemType, smi.oldHexCopy, oldAVal, smi.oldHashCopy, oldVal
+				case 1:
+					smi.hex = nil // To be consumed
+					switch smi.itemType {
+					case AccountStreamItem:
+						ai := smi.ai
+						smi.ai++
+						if smi.s.aValues[ai] != nil {
+							return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+						}
+					case StorageStreamItem:
+						si := smi.si
+						smi.si++
+						if len(smi.s.sValues[si]) > 0 {
+							return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+						}
+					default:
+						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+					}
+				case 0:
+					smi.hex = nil // To be consumed
+					smi.oldItemType, smi.oldHex, smi.oldAVal, smi.oldHash, smi.oldVal = smi.it.Next()
+					switch smi.itemType {
+					case AccountStreamItem:
+						ai := smi.ai
+						smi.ai++
+						if smi.s.aValues[ai] != nil {
+							return AccountStreamItem, hex, smi.s.aValues[ai], nil, nil
+						}
+					case StorageStreamItem:
+						si := smi.si
+						smi.si++
+						if len(smi.s.sValues[si]) > 0 {
+							return StorageStreamItem, hex, nil, nil, smi.s.sValues[si]
+						}
+					default:
+						panic(fmt.Errorf("unexpected stream item type (oldHex == nil): %d", smi.itemType))
+					}
 				}
 			}
 		}
-	case *accountNode:
-		if trace {
-			fmt.Printf("accountNode %x\n", hex)
-		}
-		s.hexes = append(s.hexes, hex)
-		s.aValues = append(s.aValues, &n.Account)
-		s.itemTypes = append(s.itemTypes, AccountStreamItem)
-		hashOnly := rs.HashOnly(hex)
-		if !n.IsEmptyRoot() && !hashOnly {
-			if n.storage != nil {
-				toStream(n.storage, hex, false /*accounts*/, rs, hr, true /*force*/, s, trace)
-			}
-		}
-	case hashNode:
-		if trace {
-			fmt.Printf("hashNode %x\n", hex)
-		}
-		hashOnly := rs.HashOnly(hex)
-		if !hashOnly {
-			if c := rs.Current(); len(c) == len(hex)+1 && c[len(c)-1] == 16 {
-				hashOnly = true
-			}
-		}
-		if hashOnly {
-			var hn common.Hash
-			copy(hn[:], []byte(n))
-			s.hexes = append(s.hexes, hex)
-			s.hashes = append(s.hashes, hn)
-			if accounts {
-				s.itemTypes = append(s.itemTypes, AHashStreamItem)
-			} else {
-				s.itemTypes = append(s.itemTypes, SHashStreamItem)
-			}
-		} else {
-			panic(fmt.Errorf("unexpected hashNode: %s, at hex: %x (%d)", n, hex, len(hex)))
-		}
-	default:
-		panic(fmt.Errorf("unexpected node: %T", nd))
 	}
 }
 
 // StreamHash computes the hash of a stream, as if it was a trie
-func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error) {
-	hb := NewHashBuilder(trace)
+func StreamHash(it *StreamMergeIterator, storagePrefixLen int, hb *HashBuilder, trace bool) (common.Hash, error) {
 	var succ bytes.Buffer
 	var curr bytes.Buffer
 	var succStorage bytes.Buffer
 	var currStorage bytes.Buffer
 	var value bytes.Buffer
-	var hashRef *common.Hash
+	var hashBuf common.Hash
+	var hashBufStorage common.Hash
+	var hashRef []byte
+	var hashRefStorage []byte
 	var groups, sGroups []uint16 // Separate groups slices for storage items and for accounts
-	var a accounts.Account
+	var aRoot common.Hash
+	var aEmptyRoot = true
 	var fieldSet uint32
-	var ki, ai, si, hi int
 	var itemType, sItemType StreamItem
+	var hashData GenStructStepHashData
+	var leafData GenStructStepLeafData
+	var accData GenStructStepAccountData
 
 	hb.Reset()
 	curr.Reset()
 	currStorage.Reset()
 
-	makeData := func(fieldSet uint32, hashRef *common.Hash) GenStructStepData {
+	makeData := func(fieldSet uint32, hashRef []byte) GenStructStepData {
 		if hashRef != nil {
-			return GenStructStepHashData{*hashRef}
-		} else if fieldSet == 0 {
-			return GenStructStepLeafData{Value: rlphacks.RlpSerializableBytes(value.Bytes())}
+			copy(hashData.Hash[:], hashRef)
+			return &hashData
+		} else if fieldSet == AccountFieldSetNotAccount {
+			leafData.Value = rlphacks.RlpSerializableBytes(value.Bytes())
+			return &leafData
 		} else {
-			return GenStructStepAccountData{
-				FieldSet:    fieldSet,
-				StorageSize: a.StorageSize,
-				Balance:     &a.Balance,
-				Nonce:       a.Nonce,
-				Incarnation: a.Incarnation,
-			}
+			accData.FieldSet = fieldSet
+			return &accData
 		}
 	}
 
 	hashOnly := func(_ []byte) bool { return !trace }
-	for ki < len(s.hexes) {
-		hex := s.hexes[ki]
-		newItemType := s.itemTypes[ki]
+	for newItemType, hex, aVal, hash, val := it.Next(); newItemType != NoItem; newItemType, hex, aVal, hash, val = it.Next() {
 		if newItemType == AccountStreamItem || newItemType == AHashStreamItem {
 			// If there was an open storage "sub-stream", close it and set the storage flag on
 			if succStorage.Len() > 0 {
@@ -219,15 +613,15 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 				succStorage.Reset()
 				if currStorage.Len() > 0 {
 					var err error
-					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+					sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 					if err != nil {
 						return common.Hash{}, err
 					}
 					currStorage.Reset()
 					fieldSet += AccountFieldRootOnly
 				}
-			} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-				if err := hb.hash(a.Root); err != nil {
+			} else if itemType == AccountStreamItem && !aEmptyRoot {
+				if err := hb.hash(aRoot[:]); err != nil {
 					return common.Hash{}, err
 				}
 				fieldSet += AccountFieldRootOnly
@@ -238,7 +632,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succ.Write(hex)
 			if curr.Len() > 0 {
 				var err error
-				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
+				groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -246,25 +640,27 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			itemType = newItemType
 			switch itemType {
 			case AccountStreamItem:
-				if s.aValues[ai] == nil {
-					return common.Hash{}, fmt.Errorf("s.aValues[%d] == nil", ai)
-				}
-				a.Copy(s.aValues[ai])
-				ai++
+				var a *accounts.Account = aVal
+				accData.StorageSize = a.StorageSize
+				accData.Balance.Set(&a.Balance)
+				accData.Nonce = a.Nonce
+				accData.Incarnation = a.Incarnation
+				aEmptyRoot = a.IsEmptyRoot()
+				copy(aRoot[:], a.Root[:])
 				fieldSet = AccountFieldSetNotContract // base level - nonce and balance
 				if a.HasStorageSize {
 					fieldSet += AccountFieldSSizeOnly
 				}
 				if !a.IsEmptyCodeHash() {
 					fieldSet += AccountFieldCodeHashOnly
-					if err := hb.hash(a.CodeHash); err != nil {
+					if err := hb.hash(a.CodeHash[:]); err != nil {
 						return common.Hash{}, err
 					}
 				}
+				hashRef = nil
 			case AHashStreamItem:
-				h := s.hashes[hi]
-				hi++
-				hashRef = &h
+				copy(hashBuf[:], hash)
+				hashRef = hashBuf[:]
 			}
 		} else {
 			currStorage.Reset()
@@ -273,7 +669,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			succStorage.Write(hex[2*storagePrefixLen+1:])
 			if currStorage.Len() > 0 {
 				var err error
-				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+				sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 				if err != nil {
 					return common.Hash{}, err
 				}
@@ -281,17 +677,14 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			sItemType = newItemType
 			switch sItemType {
 			case StorageStreamItem:
-				v := s.sValues[si]
-				si++
 				value.Reset()
-				value.Write(v)
+				value.Write(val)
+				hashRefStorage = nil
 			case SHashStreamItem:
-				h := s.hashes[hi]
-				hi++
-				hashRef = &h
+				copy(hashBufStorage[:], hash)
+				hashRefStorage = hashBufStorage[:]
 			}
 		}
-		ki++
 	}
 	// If there was an open storage "sub-stream", close it and set the storage flag on
 	if succStorage.Len() > 0 {
@@ -300,15 +693,15 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 		succStorage.Reset()
 		if currStorage.Len() > 0 {
 			var err error
-			sGroups, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRef), sGroups)
+			_, err = GenStructStep(hashOnly, currStorage.Bytes(), succStorage.Bytes(), hb, makeData(AccountFieldSetNotAccount, hashRefStorage), sGroups, trace)
 			if err != nil {
 				return common.Hash{}, err
 			}
 			currStorage.Reset()
 			fieldSet += AccountFieldRootOnly
 		}
-	} else if itemType == AccountStreamItem && !a.IsEmptyRoot() {
-		if err := hb.hash(a.Root); err != nil {
+	} else if itemType == AccountStreamItem && !aEmptyRoot {
+		if err := hb.hash(aRoot[:]); err != nil {
 			return common.Hash{}, err
 		}
 		fieldSet += AccountFieldRootOnly
@@ -318,7 +711,7 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 	succ.Reset()
 	if curr.Len() > 0 {
 		var err error
-		groups, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups)
+		_, err = GenStructStep(hashOnly, curr.Bytes(), succ.Bytes(), hb, makeData(fieldSet, hashRef), groups, trace)
 		if err != nil {
 			return common.Hash{}, err
 		}
@@ -331,7 +724,10 @@ func StreamHash(s *Stream, storagePrefixLen int, trace bool) (common.Hash, error
 			hb.root().print(f)
 		}
 	}
-	return hb.rootHash(), nil
+	if hb.hasRoot() {
+		return hb.rootHash(), nil
+	}
+	return EmptyRoot, nil
 }
 
 // HashWithModifications computes the hash of the would-be modified trie, but without any modifications
@@ -340,13 +736,14 @@ func HashWithModifications(
 	aKeys common.Hashes, aValues []*accounts.Account,
 	sKeys common.StorageKeys, sValues [][]byte,
 	storagePrefixLen int,
+	newStream *Stream, // Streams that will be reused for old and new stream
+	hb *HashBuilder, // HashBuilder will be reused
 	trace bool,
 ) (common.Hash, error) {
-	hr := newHasher(false)
-	defer returnHasherToPool(hr)
 	keyCount := len(aKeys) + len(sKeys)
 	var stream = Stream{
-		hexes:     make([][]byte, keyCount),
+		keyBytes:  make([]byte, len(aKeys)*(2*common.HashLength+1)+len(sKeys)*(4*common.HashLength+2)),
+		keySizes:  make([]uint8, keyCount),
 		itemTypes: make([]StreamItem, keyCount),
 		aValues:   aValues,
 		sValues:   sValues,
@@ -356,6 +753,7 @@ func HashWithModifications(
 	var ki, ai, si int
 	// Convert all account keys and storage keys to HEX encoding and merge them into one sorted list
 	// when we merge, the keys are never equal
+	offset := 0
 	for ki < keyCount {
 		if accountKeyHex == nil && ai < len(aKeys) {
 			accountKeyHex = keybytesToHex(aKeys[ai][:])
@@ -366,190 +764,54 @@ func HashWithModifications(
 			si++
 		}
 		if accountKeyHex == nil {
-			stream.hexes[ki] = storageKeyHex
+			copy(stream.keyBytes[offset:], storageKeyHex)
+			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
-			storageKeyHex = nil // consumed
 			ki++
+			offset += len(storageKeyHex)
+			storageKeyHex = nil // consumed
 		} else if storageKeyHex == nil {
-			stream.hexes[ki] = accountKeyHex
+			copy(stream.keyBytes[offset:], accountKeyHex)
+			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
-			accountKeyHex = nil // consumed
 			ki++
+			offset += len(accountKeyHex)
+			accountKeyHex = nil // consumed
 		} else if bytes.Compare(accountKeyHex, storageKeyHex) < 0 {
-			stream.hexes[ki] = accountKeyHex
+			copy(stream.keyBytes[offset:], accountKeyHex)
+			stream.keySizes[ki] = uint8(len(accountKeyHex))
 			stream.itemTypes[ki] = AccountStreamItem
+			ki++
+			offset += len(accountKeyHex)
 			accountKeyHex = nil // consumed
-			ki++
 		} else {
-			stream.hexes[ki] = storageKeyHex
+			copy(stream.keyBytes[offset:], storageKeyHex)
+			stream.keySizes[ki] = uint8(len(storageKeyHex))
 			stream.itemTypes[ki] = StorageStreamItem
-			storageKeyHex = nil // consumed
 			ki++
+			offset += len(storageKeyHex)
+			storageKeyHex = nil // consumed
 		}
 	}
 	if trace {
-		fmt.Printf("len(stream.hexes)=%d\n", len(stream.hexes))
-		for _, hex := range stream.hexes {
-			fmt.Printf("%x\n", hex)
+		fmt.Printf("len(stream.hexes)=%d\n", keyCount)
+		printOffset := 0
+		for _, size := range stream.keySizes {
+			fmt.Printf("%x\n", stream.keyBytes[printOffset:printOffset+int(size)])
+			printOffset += int(size)
 		}
 	}
-	rs := &ResolveSet{minLength: 0, hexes: sortable(stream.hexes), inited: true, lteIndex: 0}
-	oldStream := ToStream(t, rs, false)
-	if trace {
-		fmt.Printf("len(oldStream.hexes)=%d\n", len(oldStream.hexes))
-		for _, hex := range oldStream.hexes {
-			fmt.Printf("%x\n", hex)
-		}
+	rs := NewResolveSet(0)
+	offset = 0
+	for _, size := range stream.keySizes {
+		rs.AddHex(stream.keyBytes[offset : offset+int(size)])
+		offset += int(size)
 	}
 	// Now we merge old and new streams, preferring the new
-	var oldKi, oldAi, oldSi, oldHi int
-	ki = 0
-	ai = 0
-	si = 0
-	var oldHex, hex []byte
-	var oldItemType, itemType StreamItem
-	var newStream Stream
+	newStream.Reset()
 
-	oldKeyCount := len(oldStream.hexes)
-	for hex != nil || oldHex != nil || oldKi < oldKeyCount || ki < keyCount {
-		if oldHex == nil && oldKi < oldKeyCount {
-			oldHex = oldStream.hexes[oldKi]
-			oldItemType = oldStream.itemTypes[oldKi]
-			oldKi++
-		}
-		if hex == nil && ki < keyCount {
-			hex = stream.hexes[ki]
-			itemType = stream.itemTypes[ki]
-			ki++
-		}
-		if oldHex == nil {
-			switch itemType {
-			case AccountStreamItem:
-				if stream.aValues[ai] != nil {
-					newStream.hexes = append(newStream.hexes, hex)
-					newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-					newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-				}
-				ai++
-			case StorageStreamItem:
-				if len(stream.sValues[si]) > 0 {
-					newStream.hexes = append(newStream.hexes, hex)
-					newStream.sValues = append(newStream.sValues, stream.sValues[si])
-					newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-				}
-				si++
-			default:
-				return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == nil): %d", itemType)
-			}
-			hex = nil // consumed
-		} else if hex == nil {
-			newStream.hexes = append(newStream.hexes, oldHex)
-			switch oldItemType {
-			case AccountStreamItem:
-				newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
-				oldAi++
-				newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-			case StorageStreamItem:
-				newStream.sValues = append(newStream.sValues, oldStream.sValues[oldSi])
-				oldSi++
-				newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-			case AHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-				oldHi++
-				newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-			case SHashStreamItem:
-				newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-				oldHi++
-				newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
-			}
-			oldHex = nil // consumed
-		} else {
-			// Special case - account gets deleted
-			if itemType == AccountStreamItem && stream.aValues[ai] == nil && bytes.HasPrefix(oldHex, hex) {
-				switch oldItemType {
-				case AccountStreamItem:
-					oldAi++
-				case StorageStreamItem:
-					oldSi++
-				case AHashStreamItem, SHashStreamItem:
-					oldHi++
-				}
-				oldHex = nil
-			} else {
-				switch bytes.Compare(oldHex, hex) {
-				case -1:
-					newStream.hexes = append(newStream.hexes, oldHex)
-					switch oldItemType {
-					case AccountStreamItem:
-						newStream.aValues = append(newStream.aValues, oldStream.aValues[oldAi])
-						oldAi++
-						newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-					case StorageStreamItem:
-						newStream.sValues = append(newStream.sValues, oldStream.sValues[oldSi])
-						oldSi++
-						newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-					case AHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-						oldHi++
-						newStream.itemTypes = append(newStream.itemTypes, AHashStreamItem)
-					case SHashStreamItem:
-						newStream.hashes = append(newStream.hashes, oldStream.hashes[oldHi])
-						oldHi++
-						newStream.itemTypes = append(newStream.itemTypes, SHashStreamItem)
-					}
-					oldHex = nil // consumed
-				case 1:
-					switch itemType {
-					case AccountStreamItem:
-						if stream.aValues[ai] != nil {
-							newStream.hexes = append(newStream.hexes, hex)
-							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-						}
-						ai++
-					case StorageStreamItem:
-						if len(stream.sValues[si]) > 0 {
-							newStream.hexes = append(newStream.hexes, hex)
-							newStream.sValues = append(newStream.sValues, stream.sValues[si])
-							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-						}
-						si++
-					default:
-						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex > hex): %d", itemType)
-					}
-					hex = nil // consumed
-				case 0:
-					switch itemType {
-					case AccountStreamItem:
-						if stream.aValues[ai] != nil {
-							newStream.hexes = append(newStream.hexes, hex)
-							newStream.aValues = append(newStream.aValues, stream.aValues[ai])
-							newStream.itemTypes = append(newStream.itemTypes, AccountStreamItem)
-						}
-						ai++
-						oldAi++ // Discard old values
-					case StorageStreamItem:
-						if len(stream.sValues[si]) > 0 {
-							newStream.hexes = append(newStream.hexes, hex)
-							newStream.sValues = append(newStream.sValues, stream.sValues[si])
-							newStream.itemTypes = append(newStream.itemTypes, StorageStreamItem)
-						}
-						si++
-						oldSi++ // Discard old values
-					default:
-						return common.Hash{}, fmt.Errorf("unexpected stream item type (oldHex == hex): %d", itemType)
-					}
-					hex = nil    // consumed
-					oldHex = nil // consumed
-				}
-			}
-		}
-	}
-	if trace {
-		fmt.Printf("len(newStream.hexes)=%d\n", len(newStream.hexes))
-		for _, hex := range newStream.hexes {
-			fmt.Printf("%x\n", hex)
-		}
-	}
-	return StreamHash(&newStream, storagePrefixLen, trace)
+	oldIt := NewIterator(t, rs, trace)
+
+	it := NewStreamMergeIterator(oldIt, &stream, trace)
+	return StreamHash(it, storagePrefixLen, hb, trace)
 }

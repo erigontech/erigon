@@ -138,7 +138,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -148,7 +148,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	var it *contracts.ReviveDeployEventIterator
@@ -173,7 +173,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 3
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
@@ -182,7 +182,7 @@ func TestCreate2Revive(t *testing.T) {
 	}
 
 	// BLOCK 4
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 	it, err = revive.FilterDeployEvent(nil)
@@ -306,7 +306,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -319,7 +319,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	correctValueX := st.GetState(contractAddress, common.Hash{})
 
 	// BLOCKS 2 + 3
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1], blocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1], blocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -329,7 +329,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2], longerBlocks[3]}); err != nil {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
@@ -438,7 +438,7 @@ func TestReorgOverStateChange(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -452,13 +452,13 @@ func TestReorgOverStateChange(t *testing.T) {
 
 	fmt.Println("Insert block 2")
 	// BLOCK 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
 	fmt.Println("Insert long blocks 2,3")
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 	st, _, _ = blockchain.State()
@@ -573,7 +573,7 @@ func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 		contractBackend.Commit()
 	})
 
-	if _, err = blockchain.InsertChain(blocks); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), blocks); err != nil {
 		t.Fatal(err)
 	}
 
@@ -724,7 +724,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -871,7 +871,7 @@ func TestEip2200Gas(t *testing.T) {
 	balanceBefore := st.GetBalance(address)
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -956,7 +956,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -983,7 +983,7 @@ func TestWrongIncarnation(t *testing.T) {
 	}
 
 	// BLOCKS 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 	addrHash = crypto.Keccak256(contractAddress[:])
@@ -1106,12 +1106,12 @@ func TestWrongIncarnation2(t *testing.T) {
 	}
 
 	// BLOCK 1
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[0]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		t.Fatal(err)
 	}
 
 	// BLOCKS 2
-	if _, err = blockchain.InsertChain(types.Blocks{blocks[1]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1134,7 +1134,7 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation")
 	}
 	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
-	if _, err = blockchain.InsertChain(types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
+	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{longerBlocks[1], longerBlocks[2]}); err != nil {
 		t.Fatal(err)
 	}
 

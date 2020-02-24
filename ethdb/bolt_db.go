@@ -19,16 +19,14 @@ package ethdb
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"os"
 	"path"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/log"
-
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var OpenFileLimit = 64
@@ -63,6 +61,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	}
 	// Open the db and recover any potential corruptions
 	db, err := bolt.Open(file, 0600, &bolt.Options{})
+
 	// (Re)check for errors and abort if opening of the db failed
 	if err != nil {
 		return nil, err
@@ -312,7 +311,7 @@ func (db *BoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker fun
 		}
 		c := b.Cursor()
 		k, v := c.Seek(startkey)
-		for k != nil && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
+		for k != nil && len(k) >= fixedbytes && (fixedbits == 0 || bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) && (k[fixedbytes-1]&mask) == (startkey[fixedbytes-1]&mask)) {
 			goOn, err := walker(k, v)
 			if err != nil {
 				return err
@@ -709,6 +708,7 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 // IdealBatchSize defines the size of the data batches should ideally add in one write.
 func (db *BoltDatabase) IdealBatchSize() int {
 	return 100 * 1024
+	//return 128
 }
 
 // [TURBO-GETH] Freezer support (not implemented yet)

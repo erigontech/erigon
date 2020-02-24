@@ -26,14 +26,12 @@ import (
 	"sort"
 	"sync"
 	"sync/atomic"
-	"unsafe"
-
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	lru "github.com/hashicorp/golang-lru"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -160,67 +158,29 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                 *trie.Trie
-	tMu               *sync.Mutex
-	db                ethdb.Database
-	blockNr           uint64
-	buffers           []*Buffer
-	aggregateBuffer   *Buffer // Merge of all buffers
-	currentBuffer     *Buffer
-	codeCache         *lru.Cache
-	codeSizeCache     *lru.Cache
-	historical        bool
-	noHistory         bool
-	resolveReads      bool
-	savePreimages     bool
-	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TriePruning
-}
-
-var (
-	trieObj   = make(map[uint64]uintptr)
-	trieObjMu sync.RWMutex
-)
-
-func getTrieDBState(db ethdb.Database) *TrieDbState {
-	if db == nil {
-		return nil
-	}
-	trieObjMu.RLock()
-	tr, ok := trieObj[db.ID()]
-	trieObjMu.RUnlock()
-
-	if !ok {
-		return nil
-	}
-
-	return (*TrieDbState)(unsafe.Pointer(tr))
-}
-
-func setTrieDBState(tds *TrieDbState, id uint64) {
-	if tds == nil {
-		return
-	}
-
-	ptr := unsafe.Pointer(tds)
-
-	trieObjMu.Lock()
-	trieObj[id] = uintptr(ptr)
-	trieObjMu.Unlock()
+	t                      *trie.Trie
+	tMu                    *sync.Mutex
+	db                     ethdb.Database
+	blockNr                uint64
+	buffers                []*Buffer
+	aggregateBuffer        *Buffer // Merge of all buffers
+	currentBuffer          *Buffer
+	codeCache              *lru.Cache
+	codeSizeCache          *lru.Cache
+	historical             bool
+	noHistory              bool
+	resolveReads           bool
+	savePreimages          bool
+	enableIntermediateHash bool
+	resolveSetBuilder      *trie.ResolveSetBuilder
+	tp                     *trie.TriePruning
+	newStream              trie.Stream
+	hashBuilder            *trie.HashBuilder
+	resolver               *trie.Resolver
+	incarnationMap         map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	tds, err := newTrieDbState(root, db, blockNr)
-	if err != nil {
-		return nil, err
-	}
-
-	setTrieDBState(tds, db.ID())
-
-	return tds, nil
-}
-
-func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
 	csc, err := lru.New(100000)
 	if err != nil {
 		return nil, err
@@ -242,22 +202,18 @@ func newTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
 		savePreimages:     true,
+		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Hash]uint64),
 	}
-	t.SetTouchFunc(func(hex []byte, del bool) {
-		tp.Touch(hex, del)
-	})
+	t.SetTouchFunc(tp.Touch)
+
+	if debug.IsIntermediateTrieHash() {
+		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
+		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
+		tp.SetCreateNodeFunc(tds.delIntermediateHash)
+	}
 
 	return tds, nil
-}
-
-func GetTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	if tr := getTrieDBState(db); tr != nil {
-		if tr.getBlockNr() == blockNr && tr.LastRoot() == root {
-			return tr, nil
-		}
-	}
-
-	return newTrieDbState(root, db, blockNr)
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {
@@ -276,6 +232,10 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
 
+func (tds *TrieDbState) EnableIntermediateHash(v bool) {
+	tds.enableIntermediateHash = v
+}
+
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Lock()
 	tcopy := *tds.t
@@ -285,13 +245,58 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tp := trie.NewTriePruning(n)
 
 	cpy := TrieDbState{
-		t:       &tcopy,
-		tMu:     new(sync.Mutex),
-		db:      tds.db,
-		blockNr: n,
-		tp:      tp,
+		t:              &tcopy,
+		tMu:            new(sync.Mutex),
+		db:             tds.db,
+		blockNr:        n,
+		tp:             tp,
+		hashBuilder:    trie.NewHashBuilder(false),
+		incarnationMap: make(map[common.Hash]uint64),
 	}
+
+	if debug.IsIntermediateTrieHash() {
+		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
+		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
+		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
+	}
+
 	return &cpy
+}
+
+func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
+	if len(prefix) != common.HashLength {
+		return
+	}
+
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+		log.Warn("could not put intermediate trie hash", "err", err)
+	}
+}
+
+func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
+	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, key, nodeHash); err != nil {
+		log.Warn("could not put intermediate trie hash", "err", err)
+	}
+}
+
+func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
+	if len(prefixAsNibbles) == 0 {
+		return
+	}
+
+	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of nibbles
+		return
+	}
+
+	key := pool.GetBuffer(64)
+	defer pool.PutBuffer(key)
+
+	trie.CompressNibbles(prefixAsNibbles, &key.B)
+
+	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key.Bytes())); err != nil {
+		log.Warn("could not delete intermediate trie hash", "err", err)
+		return
+	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
@@ -341,6 +346,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveReads:      tds.resolveReads,
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
+		hashBuilder:       trie.NewHashBuilder(false),
 	}
 	tds.tMu.Unlock()
 
@@ -348,6 +354,9 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 }
 
 func (tds *TrieDbState) LastRoot() common.Hash {
+	if tds == nil || tds.tMu == nil {
+		return common.Hash{}
+	}
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	return tds.t.Hash()
@@ -356,7 +365,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	if err := tds.ResolveStateTrie(); err != nil {
+	if _, err := tds.ResolveStateTrie(false); err != nil {
 		return nil, err
 	}
 	return tds.UpdateStateTrie()
@@ -432,21 +441,22 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 
 // Expands the storage tries (by loading data from the database) if it is required
 // for accessing storage slots containing in the storageTouches map
-func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys) error {
-	var resolver *trie.Resolver
+func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys, resolveFunc func(*trie.Resolver) error) error {
+	var firstRequest = true
 	for _, storageKey := range storageTouches {
 		if need, req := tds.t.NeedResolution(storageKey[:common.HashLength], storageKey[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, false, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, false, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, false, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return err
-		}
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
 	}
 	return nil
 }
@@ -505,22 +515,22 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes) error {
-	var resolver *trie.Resolver
+func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc func(*trie.Resolver) error) error {
+	var firstRequest = true
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
-			if resolver == nil {
-				resolver = trie.NewResolver(0, true, tds.blockNr)
-				resolver.SetHistorical(tds.historical)
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
 			}
-			resolver.AddRequest(req)
+			firstRequest = false
+			tds.resolver.AddRequest(req)
 		}
 	}
-	if resolver != nil {
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
-			return err
-		}
-		resolver = nil
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
 	}
 	return nil
 }
@@ -539,9 +549,7 @@ func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouche
 	return tds.resolveSetBuilder.ExtractTouches()
 }
 
-// ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
-// (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie() error {
+func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc func(*trie.Resolver) error) error {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -562,7 +570,9 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
-	if err := tds.resolveAccountTouches(accountTouches); err != nil {
+	var err error
+
+	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -570,15 +580,74 @@ func (tds *TrieDbState) ResolveStateTrie() error {
 		tds.populateAccountBlockProof(accountTouches)
 	}
 
-	if err := tds.resolveStorageTouches(storageTouches); err != nil {
+	if err = tds.resolveStorageTouches(storageTouches, resolveFunc); err != nil {
 		return err
 	}
+
 	if tds.resolveReads {
 		if err := tds.populateStorageBlockProof(storageTouches); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
+// (and reads, if `resolveReads` is set).
+func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness, error) {
+	var witnesses []*trie.Witness
+
+	resolveFunc := func(resolver *trie.Resolver) error {
+		if resolver == nil {
+			return nil
+		}
+		resolver.CollectWitnesses(extractWitnesses)
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+			return err
+		}
+
+		if !extractWitnesses {
+			return nil
+		}
+
+		resolverWitnesses := resolver.PopCollectedWitnesses()
+		if len(resolverWitnesses) == 0 {
+			return nil
+		}
+
+		if witnesses == nil {
+			witnesses = resolverWitnesses
+		} else {
+			witnesses = append(witnesses, resolverWitnesses...)
+		}
+
+		return nil
+	}
+	if err := tds.resolveStateTrieWithFunc(resolveFunc); err != nil {
+		return nil, err
+	}
+
+	return witnesses, nil
+}
+
+// ResolveStateTrieStateless uses a witness DB to resolve subtries
+func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) error {
+	var startPos int64
+	resolveFunc := func(resolver *trie.Resolver) error {
+		if resolver == nil {
+			return nil
+		}
+
+		pos, err := resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen, startPos)
+		if err != nil {
+			return err
+		}
+
+		startPos = pos
+		return nil
+	}
+
+	return tds.resolveStateTrieWithFunc(resolveFunc)
 }
 
 // CalcTrieRoots calculates trie roots without modifying the state trie
@@ -596,7 +665,7 @@ func (tds *TrieDbState) CalcTrieRoots(trace bool) (common.Hash, error) {
 	if trace {
 		fmt.Printf("len(accountKeys)=%d, len(aValues)=%d\n", len(accountKeys), len(aValues))
 	}
-	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, trace)
+	return trie.HashWithModifications(tds.t, accountKeys, aValues, storageKeys, sValues, common.HashLength, &tds.newStream, tds.hashBuilder, trace)
 }
 
 // forward is `true` if the function is used to progress the state forward (by adding blocks)
@@ -623,17 +692,19 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
 				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
 			}
+			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
+
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+			tds.t.DeleteSubtree(addrHash[:])
 		}
 
 		for addrHash, account := range b.accountUpdates {
 			if account != nil {
-				//fmt.Println("b.accountUpdates",addrHash.String(), account.Incarnation)
+				//fmt.Println("updateTrieRoots b.accountUpdates", addrHash.String(), account.Incarnation)
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
-				tds.t.Delete(addrHash[:], tds.blockNr)
+				tds.t.Delete(addrHash[:])
 			}
 		}
 		for addrHash, m := range b.storageUpdates {
@@ -642,7 +713,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-						tds.t.Update(cKey, v, tds.blockNr)
+						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
 						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
@@ -650,13 +721,12 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						// will not bring back the full storage trie. Instead there will be one hashNode.
 						// So we probe for this situation first
 						if _, ok := tds.t.Get(cKey); ok {
-							tds.t.Update(cKey, v, tds.blockNr)
+							tds.t.Update(cKey, v)
 						}
 					}
 				} else {
-					//fmt.Printf("Delete storage trie addrHash %x, keyHash %x\n", addrHash, keyHash)
 					if forward {
-						tds.t.Delete(cKey, tds.blockNr)
+						tds.t.Delete(cKey)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
 						// If we rewind from the state where a contract does not exist anymore (it was self-destructed)
@@ -664,7 +734,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 						// will not bring back the full storage trie. Instead there will be one hashNode.
 						// So we probe for this situation first
 						if _, ok := tds.t.Get(cKey); ok {
-							tds.t.Delete(cKey, tds.blockNr)
+							tds.t.Delete(cKey)
 						}
 					}
 				}
@@ -737,10 +807,11 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
-			tds.t.DeleteSubtree(addrHash[:], tds.blockNr)
+			tds.t.DeleteSubtree(addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
+
 	return roots, nil
 }
 
@@ -831,7 +902,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if err := tds.ResolveStateTrie(); err != nil {
+	if _, err := tds.ResolveStateTrie(false); err != nil {
 		return err
 	}
 
@@ -983,8 +1054,8 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	}
 
 	tds.tMu.Lock()
-	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	defer tds.tMu.Unlock()
+	enc, ok := tds.t.Get(dbutils.GenerateCompositeTrieKey(addrHash, seckey))
 	if !ok {
 		// Not present in the trie, try database
 		if tds.historical {
@@ -1080,6 +1151,9 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 			return 0, err
 		}
 	} else {
+		if inc, ok := tds.incarnationMap[addrHash]; ok {
+			return inc + 1, nil
+		}
 		startkey := make([]byte, common.HashLength+common.IncarnationLength+common.HashLength)
 		var fixedbits uint = 8 * common.HashLength
 		copy(startkey, addrHash[:])
@@ -1092,7 +1166,7 @@ func (tds *TrieDbState) nextIncarnation(addrHash common.Hash) (uint64, error) {
 		}
 	}
 	if found {
-		return (^uint64(0) ^ binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
+		return (^binary.BigEndian.Uint64(incarnationBytes[:])) + 1, nil
 	}
 	return FirstContractIncarnation, nil
 }
@@ -1106,6 +1180,7 @@ type TrieStateWriter struct {
 func (tds *TrieDbState) PruneTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
+	tds.incarnationMap = make(map[common.Hash]uint64)
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
@@ -1120,7 +1195,8 @@ func (tds *TrieDbState) PruneTries(print bool) {
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Memory", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+	log.Info("Memory", "nodes", tds.tp.NodeCount(), "hashes", tds.t.HashMapSize(),
+		"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	if print {
 		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
@@ -1240,12 +1316,13 @@ func (tsw *TrieStateWriter) CreateContract(address common.Address) error {
 		return err
 	}
 	tsw.tds.currentBuffer.created[addrHash] = struct{}{}
-	incarnation, err := tsw.tds.nextIncarnation(addrHash)
-	if err != nil {
-		return err
-	}
 	if account, ok := tsw.tds.currentBuffer.accountUpdates[addrHash]; ok && account != nil {
+		incarnation, err := tsw.tds.nextIncarnation(addrHash)
+		if err != nil {
+			return err
+		}
 		account.SetIncarnation(incarnation)
+		tsw.tds.incarnationMap[addrHash] = incarnation
 	}
 	return nil
 }
@@ -1260,4 +1337,12 @@ func (tds *TrieDbState) getBlockNr() uint64 {
 
 func (tds *TrieDbState) setBlockNr(n uint64) {
 	atomic.StoreUint64(&tds.blockNr, n)
+}
+
+// GetNodeByHash gets node's RLP by hash.
+func (tds *TrieDbState) GetNodeByHash(hash common.Hash) []byte {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	return tds.t.GetNodeByHash(hash)
 }

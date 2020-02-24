@@ -18,10 +18,11 @@ package ethdb
 
 import (
 	"errors"
+
+	"github.com/ledgerwatch/bolt"
 )
 
-// TODO [Andrew] Add some comments about historical buckets & AccountChangeSet.
-// https://github.com/AlexeyAkhunov/papers/blob/master/TurboGeth-Devcon4.pdf
+// DESCRIBED: For info on database buckets see docs/programmers_guide/db_walkthrough.MD
 
 // ErrKeyNotFound is returned when key isn't found in the database.
 var ErrKeyNotFound = errors.New("db: key not found")
@@ -32,7 +33,7 @@ type Putter interface {
 	Put(bucket, key, value []byte) error
 
 	// PutS adds a new entry to the historical buckets:
-	// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
+	// hBucket (unless changeSetBucketOnly) and ChangeSet.
 	// timestamp == block number
 	PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error
 }
@@ -68,7 +69,7 @@ type Deleter interface {
 	// Delete removes a single entry.
 	Delete(bucket, key []byte) error
 
-	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. AccountChangeSet).
+	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
 	// timestamp == block number
 	DeleteTimestamp(timestamp uint64) error
 }
@@ -120,6 +121,14 @@ type DbWithPendingMutations interface {
 	Commit() (uint64, error)
 	Rollback()
 	BatchSize() int
+}
+
+type HasDb interface {
+	DB() Database
+}
+
+type HasBolt interface {
+	DB() *bolt.DB
 }
 
 var errNotSupported = errors.New("not supported")

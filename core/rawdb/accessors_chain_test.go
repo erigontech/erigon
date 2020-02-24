@@ -18,6 +18,7 @@ package rawdb
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"math/big"
@@ -41,7 +42,7 @@ func TestHeaderStorage(t *testing.T) {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
-	WriteHeader(db, header)
+	WriteHeader(context.Background(), db, header)
 	if entry := ReadHeader(db, header.Hash(), header.Number.Uint64()); entry == nil {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
@@ -79,7 +80,7 @@ func TestBodyStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the body in the database
-	WriteBody(db, hash, 0, body)
+	WriteBody(context.Background(), db, hash, 0, body)
 	if entry := ReadBody(db, hash, 0); entry == nil {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
@@ -123,7 +124,7 @@ func TestBlockStorage(t *testing.T) {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	// Write and verify the block in the database
-	WriteBlock(db, block)
+	WriteBlock(context.Background(), db, block)
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
@@ -161,23 +162,24 @@ func TestPartialBlockStorage(t *testing.T) {
 		TxHash:      types.EmptyRootHash,
 		ReceiptHash: types.EmptyRootHash,
 	})
+	ctx := context.Background()
 	// Store a header and check that it's not recognized as a block
-	WriteHeader(db, block.Header())
+	WriteHeader(ctx, db, block.Header())
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
 	DeleteHeader(db, block.Hash(), block.NumberU64())
 
 	// Store a body and check that it's not recognized as a block
-	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
+	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry != nil {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
 	DeleteBody(db, block.Hash(), block.NumberU64())
 
 	// Store a header and a body separately and check reassembly
-	WriteHeader(db, block.Header())
-	WriteBody(db, block.Hash(), block.NumberU64(), block.Body())
+	WriteHeader(ctx, db, block.Header())
+	WriteBody(ctx, db, block.Hash(), block.NumberU64(), block.Body())
 
 	if entry := ReadBlock(db, block.Hash(), block.NumberU64()); entry == nil {
 		t.Fatalf("Stored block not found")
@@ -270,6 +272,7 @@ func TestHeadStorage(t *testing.T) {
 // Tests that receipts associated with a single block can be stored and retrieved.
 func TestBlockReceiptStorage(t *testing.T) {
 	db := ethdb.NewMemDatabase()
+	ctx := context.Background()
 
 	// Create a live block since we need metadata to reconstruct the receipt
 	tx1 := types.NewTransaction(1, common.HexToAddress("0x1"), big.NewInt(1), 1, big.NewInt(1), nil)
@@ -311,7 +314,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		t.Fatalf("non existent receipts returned: %v", rs)
 	}
 	// Insert the body that corresponds to the receipts
-	WriteBody(db, hash, 0, body)
+	WriteBody(ctx, db, hash, 0, body)
 
 	// Insert the receipt slice into the database and check presence
 	WriteReceipts(db, hash, 0, receipts)
@@ -332,7 +335,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 		t.Fatalf(err.Error())
 	}
 	// Sanity check that body alone without the receipt is a full purge
-	WriteBody(db, hash, 0, body)
+	WriteBody(ctx, db, hash, 0, body)
 
 	DeleteReceipts(db, hash, 0)
 	if rs := ReadReceipts(db, hash, 0, params.TestChainConfig); len(rs) != 0 {

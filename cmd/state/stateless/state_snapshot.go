@@ -341,9 +341,11 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 				}
 				roots[addrHash] = &account
 				incarnationMap[account.Incarnation]++
+				if account.Incarnation == 0 {
+					fmt.Printf("Incarnation 0: %x\n", addrHash)
+				}
 			}
 		}
-
 		return true, nil
 	})
 	if err != nil {
@@ -357,7 +359,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			key := []byte{}
 			contractPrefix := make([]byte, common.HashLength+common.IncarnationLength)
 			copy(contractPrefix, addrHash[:])
-			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], account.Incarnation^^uint64(0))
+			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
 			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
 			sr.AddRequest(streq)
 			err = sr.ResolveWithDb(stateDb, blockNum)

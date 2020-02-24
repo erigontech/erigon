@@ -20,7 +20,7 @@ type Change struct {
 	Value []byte
 }
 
-// AccountChangeSet is a map with keys of the same size.
+// ChangeSet is a map with keys of the same size.
 // Both keys and values are byte strings.
 type ChangeSet struct {
 	// Invariant: all keys are of the same size.
@@ -45,7 +45,7 @@ func (s *ChangeSet) Less(i, j int) bool {
 // END sort.Interface
 
 /*
-AccountChangeSet is serialized in the following manner in order to facilitate binary search:
+ChangeSet is serialized in the following manner in order to facilitate binary search:
 1. The number of keys N (uint32, 4 bytes).
 2. The key size M (uint32, 4 bytes).
 3. Contiguous array of keys (N*M bytes).
@@ -57,7 +57,7 @@ len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})
 uint32 integers are serialized as big-endian.
 */
 
-// Encode sorts a AccountChangeSet by key and then serializes it.
+// Encode sorts a ChangeSet by key and then serializes it.
 func (s *ChangeSet) Encode() ([]byte, error) {
 	sort.Sort(s)
 	buf := new(bytes.Buffer)

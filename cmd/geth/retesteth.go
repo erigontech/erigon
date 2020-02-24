@@ -255,8 +255,8 @@ func (e *NoRewardEngine) FinalizeAndAssemble(chainConfig *params.ChainConfig, he
 	}
 }
 
-func (e *NoRewardEngine) Seal(chain consensus.ChainReader, block *types.Block, results chan<- *types.Block, stop <-chan struct{}) error {
-	return e.inner.Seal(chain, block, results, stop)
+func (e *NoRewardEngine) Seal(ctx consensus.Cancel, chain consensus.ChainReader, block *types.Block, results chan<- consensus.ResultWithContext, stop <-chan struct{}) error {
+	return e.inner.Seal(ctx, chain, block, results, stop)
 }
 
 func (e *NoRewardEngine) SealHash(header *types.Header) common.Hash {
@@ -554,7 +554,7 @@ func (api *RetestethAPI) mineBlock() error {
 }
 
 func (api *RetestethAPI) importBlock(block *types.Block) error {
-	if _, err := api.blockchain.InsertChain([]*types.Block{block}); err != nil {
+	if _, err := api.blockchain.InsertChain(context.Background(), []*types.Block{block}); err != nil {
 		return err
 	}
 	api.blockNumber = block.NumberU64()
@@ -748,7 +748,23 @@ func (api *RetestethAPI) GetCode(_ context.Context, address common.Address, bloc
 	if err != nil {
 		return nil, err
 	}
-	return statedb.GetCode(address), nil
+	return getCode(statedb.GetCode(address)), nil
+}
+
+func getCode(c hexutil.Bytes) hexutil.Bytes {
+	isNil := true
+	for _, nibble := range c {
+		if nibble != 0 {
+			isNil = false
+			break
+		}
+	}
+
+	if isNil {
+		return hexutil.Bytes{}
+	}
+
+	return c
 }
 
 func (api *RetestethAPI) GetTransactionCount(_ context.Context, address common.Address, blockNr math.HexOrDecimal64) (uint64, error) {

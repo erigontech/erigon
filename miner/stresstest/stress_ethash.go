@@ -16,27 +16,32 @@
 
 // +build none
 
-// This file contains a miner stress test based on the Clique consensus engine.
+// This file contains a miner stress test based on the Ethash consensus engine.
 package main
 
 import (
-	"bytes"
 	"crypto/ecdsa"
+	"fmt"
 	"io/ioutil"
 	"math/big"
 	"math/rand"
 	"os"
+	"path/filepath"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/fdlimit"
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
@@ -44,28 +49,28 @@ import (
 )
 
 func main() {
+	const n = 5
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StreamHandler(os.Stderr, log.TerminalFormat(true))))
-	fdlimit.Raise(2048)
+	fdlimit.Raise(512*n)
 
 	// Generate a batch of accounts to seal and fund with
 	faucets := make([]*ecdsa.PrivateKey, 128)
 	for i := 0; i < len(faucets); i++ {
 		faucets[i], _ = crypto.GenerateKey()
 	}
-	sealers := make([]*ecdsa.PrivateKey, 4)
-	for i := 0; i < len(sealers); i++ {
-		sealers[i], _ = crypto.GenerateKey()
-	}
-	// Create a Clique network based off of the Rinkeby config
-	genesis := makeGenesis(faucets, sealers)
+	// Pre-generate the ethash mining DAG so we don't race
+	ethash.MakeDataset(1, filepath.Join(os.Getenv("HOME"), ".ethash"))
+
+	// Create an Ethash network based off of the Ropsten config
+	genesis := makeGenesis(faucets)
 
 	var (
 		nodes  []*node.Node
 		enodes []*enode.Node
 	)
-	for _, sealer := range sealers {
+	for i := 0; i < n; i++ {
 		// Start the node and wait until it's up
-		node, err := makeSealer(genesis)
+		node, err := makeMiner(genesis)
 		if err != nil {
 			panic(err)
 		}
@@ -84,11 +89,7 @@ func main() {
 
 		// Inject the signer key and start sealing with it
 		store := node.AccountManager().Backends(keystore.KeyStoreType)[0].(*keystore.KeyStore)
-		signer, err := store.ImportECDSA(sealer, "")
-		if err != nil {
-			panic(err)
-		}
-		if err := store.Unlock(signer, ""); err != nil {
+		if _, err := store.NewAccount(""); err != nil {
 			panic(err)
 		}
 	}
@@ -106,7 +107,7 @@ func main() {
 	}
 	time.Sleep(3 * time.Second)
 
-	// Start injecting transactions from the faucet like crazy
+	// Start injecting transactions from the faucets like crazy
 	nonces := make([]uint64, len(faucets))
 	for {
 		index := rand.Intn(len(faucets))
@@ -117,7 +118,7 @@ func main() {
 			panic(err)
 		}
 		// Create a self transaction and inject into the pool
-		tx, err := types.SignTx(types.NewTransaction(nonces[index], crypto.PubkeyToAddress(faucets[index].PublicKey), new(big.Int), 21000, big.NewInt(100000000000), nil), types.HomesteadSigner{}, faucets[index])
+		tx, err := types.SignTx(types.NewTransaction(nonces[index], crypto.PubkeyToAddress(faucets[index].PublicKey), new(big.Int), 21000, big.NewInt(100000000000+rand.Int63n(65536)), nil), types.HomesteadSigner{}, faucets[index])
 		if err != nil {
 			panic(err)
 		}
@@ -127,21 +128,20 @@ func main() {
 		nonces[index]++
 
 		// Wait if we're too saturated
-		if pend, _ := ethereum.TxPool().Stats(); pend > 2048 {
+		if pend, _ := ethereum.TxPool().Stats(); pend > n*512 {
 			time.Sleep(100 * time.Millisecond)
 		}
 	}
 }
 
-// makeGenesis creates a custom Clique genesis block based on some pre-defined
-// signer and faucet accounts.
-func makeGenesis(faucets []*ecdsa.PrivateKey, sealers []*ecdsa.PrivateKey) *core.Genesis {
-	// Create a Clique network based off of the Rinkeby config
-	genesis := core.DefaultRinkebyGenesisBlock()
+// makeGenesis creates a custom Ethash genesis block based on some pre-defined
+// faucet accounts.
+func makeGenesis(faucets []*ecdsa.PrivateKey) *core.Genesis {
+	genesis := core.DefaultTestnetGenesisBlock()
+	//genesis.Difficulty = params.MinimumDifficulty
 	genesis.GasLimit = 25000000
 
 	genesis.Config.ChainID = big.NewInt(18)
-	genesis.Config.Clique.Period = 1
 	genesis.Config.EIP150Hash = common.Hash{}
 
 	genesis.Alloc = core.GenesisAlloc{}
@@ -150,27 +150,10 @@ func makeGenesis(faucets []*ecdsa.PrivateKey, sealers []*ecdsa.PrivateKey) *core
 			Balance: new(big.Int).Exp(big.NewInt(2), big.NewInt(128), nil),
 		}
 	}
-	// Sort the signers and embed into the extra-data section
-	signers := make([]common.Address, len(sealers))
-	for i, sealer := range sealers {
-		signers[i] = crypto.PubkeyToAddress(sealer.PublicKey)
-	}
-	for i := 0; i < len(signers); i++ {
-		for j := i + 1; j < len(signers); j++ {
-			if bytes.Compare(signers[i][:], signers[j][:]) > 0 {
-				signers[i], signers[j] = signers[j], signers[i]
-			}
-		}
-	}
-	genesis.ExtraData = make([]byte, 32+len(signers)*common.AddressLength+65)
-	for i, signer := range signers {
-		copy(genesis.ExtraData[32+i*common.AddressLength:], signer[:])
-	}
-	// Return the genesis block for initialization
 	return genesis
 }
 
-func makeSealer(genesis *core.Genesis) (*node.Node, error) {
+func makeMiner(genesis *core.Genesis) (*node.Node, error) {
 	// Define the basic configurations for the Ethereum node
 	datadir, _ := ioutil.TempDir("", "")
 
@@ -183,31 +166,39 @@ func makeSealer(genesis *core.Genesis) (*node.Node, error) {
 			NoDiscovery: true,
 			MaxPeers:    25,
 		},
-		NoUSB: true,
+		NoUSB:             true,
+		UseLightweightKDF: true,
 	}
 	// Start the node and configure a full Ethereum node on it
 	stack, err := node.New(config)
 	if err != nil {
 		return nil, err
 	}
+
+	ethConfig := &eth.Config{
+		Genesis:         genesis,
+		NetworkID:       genesis.Config.ChainID.Uint64(),
+		SyncMode:        downloader.FullSync,
+		DatabaseCache:   256,
+		DatabaseHandles: 256,
+		TxPool:          core.DefaultTxPoolConfig,
+		GPO:             eth.DefaultConfig.GPO,
+		Ethash:          eth.DefaultConfig.Ethash,
+		Miner: miner.Config{
+			GasFloor: genesis.GasLimit * 9 / 10,
+			GasCeil:  genesis.GasLimit * 11 / 10,
+			GasPrice: big.NewInt(1),
+			Recommit: time.Second,
+		},
+		BlocksBeforePruning: 100,
+		BlocksToPrune:  10,
+		PruningTimeout: time.Second,
+	}
+
 	if err := stack.Register(func(ctx *node.ServiceContext) (node.Service, error) {
-		return eth.New(ctx, &eth.Config{
-			Genesis:         genesis,
-			NetworkID:       genesis.Config.ChainID.Uint64(),
-			SyncMode:        downloader.FullSync,
-			DatabaseCache:   256,
-			DatabaseHandles: 256,
-			TxPool:          core.DefaultTxPoolConfig,
-			GPO:             eth.DefaultConfig.GPO,
-			Miner: Config{
-				GasFloor: genesis.GasLimit * 9 / 10,
-				GasCeil:  genesis.GasLimit * 11 / 10,
-				GasPrice: big.NewInt(1),
-				Recommit: time.Second,
-			},
-		})
+		return eth.New(ctx, ethConfig)
 	}); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, fmt.Sprintf("cannot register stress test miner. config %v", ethConfig))
 	}
 	// Start the node and return if successful
 	return stack, stack.Start()

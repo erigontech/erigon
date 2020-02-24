@@ -3,6 +3,7 @@ package stateless
 import (
 	"bytes"
 	"context"
+	"encoding/csv"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
@@ -152,7 +154,9 @@ func Stateless(
 	binary bool,
 	createDb CreateDbFunc,
 	starkBlocksFile string,
-	starkStatsBase string) {
+	starkStatsBase string,
+	useStatelessResolver bool,
+	witnessDatabasePath string) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -165,7 +169,12 @@ func Stateless(
 		interruptCh <- true
 	}()
 
-	witnessThreshold = 0
+	timeF, err := os.Create("timings.txt")
+	if err != nil {
+		panic(err)
+	}
+	defer timeF.Close()
+	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
 	ethDb, err := createDb(chaindata)
 	check(err)
@@ -220,6 +229,7 @@ func Stateless(
 	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(true)
+	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
 	var blockWitness []byte
 	var bw *trie.Witness
@@ -229,13 +239,48 @@ func Stateless(
 
 	defer func() { fmt.Printf("stoppped at block number: %d\n", blockNum) }()
 
+	var witnessDBWriter *WitnessDBWriter
+	var witnessDBReader *WitnessDBReader
+
+	if useStatelessResolver && witnessDatabasePath == "" {
+		panic("to use stateless resolver, set the witness DB path")
+	}
+
+	if witnessDatabasePath != "" {
+		var db ethdb.Database
+		db, err = createDb(witnessDatabasePath)
+		check(err)
+		defer db.Close()
+
+		if useStatelessResolver {
+			witnessDBReader = NewWitnessDBReader(db)
+			fmt.Printf("Will use the stateless resolver with DB: %s\n", witnessDatabasePath)
+		} else {
+			statsFilePath := fmt.Sprintf("%v.stats.csv", witnessDatabasePath)
+
+			var file *os.File
+			file, err = os.OpenFile(statsFilePath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+			check(err)
+			defer file.Close()
+
+			statsFileCsv := csv.NewWriter(file)
+			defer statsFileCsv.Flush()
+
+			witnessDBWriter, err = NewWitnessDBWriter(db, statsFileCsv)
+			check(err)
+			fmt.Printf("witnesses will be stored to a db at path: %s\n\tstats: %s\n", witnessDatabasePath, statsFilePath)
+		}
+
+	}
+
 	for !interrupt {
-		trace := blockNum == 50111 // false // blockNum == 545080
+		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
 			break
 		}
+		execStart := time.Now()
 		statedb := state.New(tds)
 		gp := new(core.GasPool).AddGas(block.GasLimit())
 		usedGas := new(uint64)
@@ -263,16 +308,34 @@ func Stateless(
 			return
 		}
 
+		execTime1 := time.Since(execStart)
+		execStart = time.Now()
+
 		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
 			return
 		}
 
-		if err = tds.ResolveStateTrie(); err != nil {
-			fmt.Printf("Failed to resolve state trie: %v\n", err)
-			return
+		if witnessDBReader != nil {
+			tds.SetBlockNr(blockNum)
+			err = tds.ResolveStateTrieStateless(witnessDBReader)
+			if err != nil {
+				fmt.Printf("Failed to statelessly resolve state trie: %v\n", err)
+				return
+			}
+		} else {
+			var resolveWitnesses []*trie.Witness
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil); err != nil {
+				fmt.Printf("Failed to resolve state trie: %v\n", err)
+				return
+			}
+
+			if len(resolveWitnesses) > 0 {
+				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+			}
 		}
+		execTime2 := time.Since(execStart)
 		blockWitness = nil
 		if blockNum >= witnessThreshold {
 			// Witness has to be extracted before the state trie is modified
@@ -294,6 +357,7 @@ func Stateless(
 			check(err)
 		}
 		finalRootFail := false
+		execStart = time.Now()
 		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
 			var s *state.Stateless
 			var w *trie.Witness
@@ -327,20 +391,24 @@ func Stateless(
 				finalRootFail = true
 			}
 		}
-
+		execTime3 := time.Since(execStart)
+		execStart = time.Now()
 		var preCalculatedRoot common.Hash
 		if tryPreRoot {
-			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 2703827)
+			preCalculatedRoot, err = tds.CalcTrieRoots(blockNum == 1)
 			if err != nil {
 				fmt.Printf("failed to calculate preRoot for block %d: %v\n", blockNum, err)
 				return
 			}
 		}
+		execTime4 := time.Since(execStart)
+		execStart = time.Now()
 		roots, err := tds.UpdateStateTrie()
 		if err != nil {
 			fmt.Printf("failed to calculate IntermediateRoot: %v\n", err)
 			return
 		}
+		execTime5 := time.Since(execStart)
 		if tryPreRoot && tds.LastRoot() != preCalculatedRoot {
 			filename := fmt.Sprintf("right_%d.txt", blockNum)
 			f, err1 := os.Create(filename)
@@ -413,6 +481,12 @@ func Stateless(
 
 			fmt.Printf("Processed %d blocks (%v blocks/sec)", blockNum, blocksPerSecond)
 		}
+		fmt.Fprintf(timeF, "%d,%d,%d,%d,%d,%d\n", blockNum,
+			execTime1.Nanoseconds(),
+			execTime2.Nanoseconds(),
+			execTime3.Nanoseconds(),
+			execTime4.Nanoseconds(),
+			execTime5.Nanoseconds())
 		// Check for interrupts
 		select {
 		case interrupt = <-interruptCh:

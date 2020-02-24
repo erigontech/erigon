@@ -17,6 +17,7 @@
 package trie
 
 import (
+	"bytes"
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -30,25 +31,27 @@ var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b
 type node interface {
 	print(io.Writer)
 	fstring(string) string
-	dirty() bool
-	hash() []byte
+
+	// if not empty, returns node's RLP or hash thereof
+	reference() []byte
 }
 
 type (
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	fullNode struct {
+		ref      nodeRef
 		Children [17]node // Actual trie node data to encode/decode (needs custom encoder)
-		flags    nodeFlag
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	duoNode struct {
+		ref    nodeRef
 		mask   uint32 // Bitmask. The set bits indicate the child is not nil
 		child1 node
 		child2 node
-		flags  nodeFlag
 	}
 	// DESCRIBED: docs/programmers_guide/guide.md#hexary-radix-patricia-tree
 	shortNode struct {
+		ref nodeRef
 		Key []byte // HEX encoding
 		Val node
 	}
@@ -58,13 +61,21 @@ type (
 	accountNode struct {
 		accounts.Account
 		storage     node
-		hashCorrect bool
+		rootCorrect bool
 	}
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
 // unset children need to serialize correctly.
 var nilValueNode = valueNode(nil)
+
+func EncodeAsValue(data []byte) ([]byte, error) {
+	tmp := new(bytes.Buffer)
+	if err := rlp.Encode(tmp, valueNode(data)); err != nil {
+		return nil, err
+	}
+	return tmp.Bytes(), nil
+}
 
 // EncodeRLP encodes a full node into the consensus RLP format.
 func (n *fullNode) EncodeRLP(w io.Writer) error {
@@ -126,29 +137,6 @@ func (n *fullNode) mask() uint32 {
 	return m
 }
 
-func (n *fullNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
-	hashes := []common.Hash{}
-	var mask uint32
-	var m map[byte]*shortNode
-	for i, child := range n.Children {
-		if child != nil && i != int(idx) {
-			short := false
-			if s, ok := child.(*shortNode); ok {
-				if m == nil {
-					m = make(map[byte]*shortNode)
-				}
-				m[byte(i)] = s
-				short = true
-			}
-			if !short {
-				mask |= (uint32(1) << uint(i))
-				hashes = append(hashes, common.BytesToHash(child.hash()))
-			}
-		}
-	}
-	return mask, hashes, m
-}
-
 func (n *fullNode) duoCopy() *duoNode {
 	c := duoNode{}
 	first := true
@@ -166,10 +154,10 @@ func (n *fullNode) duoCopy() *duoNode {
 			break
 		}
 	}
-	if !n.flags.dirty {
-		copy(c.flags.hash[:], n.flags.hash[:])
+	if n.ref.len > 0 {
+		copy(c.ref.data[:], n.ref.data[:])
 	}
-	c.flags.dirty = n.flags.dirty
+	c.ref.len = n.ref.len
 	return &c
 }
 
@@ -178,72 +166,11 @@ func (n *duoNode) fullCopy() *fullNode {
 	i1, i2 := n.childrenIdx()
 	c.Children[i1] = n.child1
 	c.Children[i2] = n.child2
-	if !n.flags.dirty {
-		copy(c.flags.hash[:], n.flags.hash[:])
+	if n.ref.len > 0 {
+		copy(c.ref.data[:], n.ref.data[:])
 	}
-	c.flags.dirty = n.flags.dirty
+	c.ref.len = n.ref.len
 	return &c
-}
-
-func (n *duoNode) hashesExcept(idx byte) (uint32, []common.Hash, map[byte]*shortNode) {
-	i1, i2 := n.childrenIdx()
-	var hash1, hash2 common.Hash
-	var short1, short2 *shortNode
-	if n.child1 != nil {
-		if s, ok := n.child1.(*shortNode); ok {
-			short1 = s
-		}
-		if short1 == nil {
-			hash1 = common.BytesToHash(n.child1.hash())
-		}
-	}
-	if n.child2 != nil {
-		if s, ok := n.child2.(*shortNode); ok {
-			short2 = s
-		}
-		if short2 == nil {
-			hash2 = common.BytesToHash(n.child2.hash())
-		}
-	}
-	switch idx {
-	case i1:
-		if short2 == nil {
-			return uint32(1) << i2, []common.Hash{hash2}, nil
-		} else {
-			m := make(map[byte]*shortNode)
-			m[i2] = short2
-			return 0, []common.Hash{}, m
-		}
-	case i2:
-		if short1 == nil {
-			return uint32(1) << i1, []common.Hash{hash1}, nil
-		} else {
-			m := make(map[byte]*shortNode)
-			m[i1] = short1
-			return 0, []common.Hash{}, m
-		}
-	default:
-		if short1 == nil {
-			if short2 == nil {
-				return (uint32(1) << i1) | (uint32(1) << i2), []common.Hash{hash1, hash2}, nil
-			} else {
-				m := make(map[byte]*shortNode)
-				m[i2] = short2
-				return (uint32(1) << i1), []common.Hash{hash1}, m
-			}
-		} else {
-			if short2 == nil {
-				m := make(map[byte]*shortNode)
-				m[i1] = short1
-				return (uint32(1) << i2), []common.Hash{hash2}, m
-			} else {
-				m := make(map[byte]*shortNode)
-				m[i1] = short1
-				m[i2] = short2
-				return 0, []common.Hash{}, m
-			}
-		}
-	}
 }
 
 func (n *duoNode) copy() *duoNode {
@@ -256,25 +183,19 @@ func (n *shortNode) copy() *shortNode {
 	return &c
 }
 
-// nodeFlag contains caching-related metadata about a node.
-type nodeFlag struct {
-	hash  common.Hash // cached hash of the node
-	dirty bool        // whether the hash field represent the true hash
+// nodeRef might contain node's RLP or hash thereof.
+// Used instead of []byte in order to reduce GC churn.
+type nodeRef struct {
+	data common.Hash // cached RLP of the node or hash thereof
+	len  byte        // length of the data (0 indicates invalid data)
 }
 
-func (n hashNode) dirty() bool      { return false }
-func (n valueNode) dirty() bool     { return true }
-func (n *fullNode) dirty() bool     { return n.flags.dirty }
-func (n *duoNode) dirty() bool      { return n.flags.dirty }
-func (n *shortNode) dirty() bool    { return true }
-func (an *accountNode) dirty() bool { return true }
-
-func (n hashNode) hash() []byte      { return n }
-func (n valueNode) hash() []byte     { return nil }
-func (n *fullNode) hash() []byte     { return n.flags.hash[:] }
-func (n *duoNode) hash() []byte      { return n.flags.hash[:] }
-func (n *shortNode) hash() []byte    { return nil }
-func (an *accountNode) hash() []byte { return nil }
+func (n hashNode) reference() []byte      { return n }
+func (n valueNode) reference() []byte     { return nil }
+func (n *fullNode) reference() []byte     { return n.ref.data[0:n.ref.len] }
+func (n *duoNode) reference() []byte      { return n.ref.data[0:n.ref.len] }
+func (n *shortNode) reference() []byte    { return n.ref.data[0:n.ref.len] }
+func (an *accountNode) reference() []byte { return nil }
 
 // Pretty printing.
 func (n fullNode) String() string     { return n.fstring("") }

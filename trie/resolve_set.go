@@ -26,11 +26,11 @@ import (
 // pairs
 // DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
 type ResolveSet struct {
-	minLength int // Mininum length of prefixes for which `HashOnly` function can return `true`
-	hexes     sortable
 	inited    bool // Whether keys are sorted and "LTE" and "GT" indices set
-	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
 	binary    bool // if true, use binary encoding instead of Hex
+	minLength int  // Mininum length of prefixes for which `HashOnly` function can return `true`
+	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+	hexes     sortable
 }
 
 // NewResolveSet creates new ResolveSet

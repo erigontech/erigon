@@ -22,8 +22,11 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 type TriePruning struct {
@@ -43,6 +46,9 @@ type TriePruning struct {
 
 	// Current timestamp
 	blockNr uint64
+
+	createNodeFunc func(prefixAsNibbles []byte)
+	unloadNodeFunc func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
 }
 
 func NewTriePruning(oldestGeneration uint64) *TriePruning {
@@ -52,6 +58,7 @@ func NewTriePruning(oldestGeneration uint64) *TriePruning {
 		accountTimestamps: make(map[string]uint64),
 		accounts:          make(map[uint64]map[string]struct{}),
 		generationCounts:  make(map[uint64]int),
+		createNodeFunc:    func([]byte) {},
 	}
 }
 
@@ -63,6 +70,14 @@ func (tp *TriePruning) BlockNr() uint64 {
 	return tp.blockNr
 }
 
+func (tp *TriePruning) SetCreateNodeFunc(f func(prefixAsNibbles []byte)) {
+	tp.createNodeFunc = f
+}
+
+func (tp *TriePruning) SetUnloadNodeFunc(f func(prefix []byte, nodeHash []byte)) {
+	tp.unloadNodeFunc = f
+}
+
 // Updates a node to the current timestamp
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
@@ -70,11 +85,15 @@ func (tp *TriePruning) BlockNr() uint64 {
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
 func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
-	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hex, exists, prevTimestamp, del, newTimestamp)
+	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hexS, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
 	}
 	if !del {
+		if !exists { // Created New node
+			tp.createNodeFunc([]byte(hexS))
+		}
+
 		var newMap map[string]struct{}
 		if m, ok := tp.accounts[newTimestamp]; ok {
 			newMap = m
@@ -116,7 +135,7 @@ func (tp *TriePruning) Timestamp(hex []byte) uint64 {
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
 // parent is the node that needs to be modified to unload the touched node
-func (tp *TriePruning) Touch(hex []byte, del bool) error {
+func (tp *TriePruning) Touch(hex []byte, del bool) {
 	var exists = false
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
@@ -133,7 +152,6 @@ func (tp *TriePruning) Touch(hex []byte, del bool) error {
 	}
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
-	return nil
 }
 
 func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
@@ -145,8 +163,9 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 	}
 	var empty = false
 	sort.Strings(hexes)
+
 	for i, hex := range hexes {
-		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes are pruned, there is no need to prune descendants
+		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes pruned, there is no need to prune descendants
 			t.unload([]byte(hex), h)
 			if len(hex) == 0 {
 				empty = true
@@ -172,6 +191,42 @@ func (tp *TriePruning) PruneToTimestamp(
 		}
 		delete(tp.accounts, gen)
 	}
+
+	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
+		key := pool.GetBuffer(64)
+		defer pool.PutBuffer(key)
+		fmt.Println("Alex: started", len(aggregateAccounts))
+		now := time.Now()
+		for prefix := range aggregateAccounts {
+			if len(prefix) == 0 || len(prefix)%2 == 1 {
+				continue
+			}
+
+			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
+			if !ok {
+				continue
+			}
+			switch nd.(type) {
+			case *duoNode, *fullNode:
+				// will work only with these types of nodes
+			default:
+				continue
+			}
+			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
+			case *duoNode, *fullNode:
+				// will work only with these types of nodes
+			default:
+				continue
+			}
+
+			CompressNibbles([]byte(prefix), &key.B)
+			tp.unloadNodeFunc(key.B, nd.reference())
+		}
+
+		fmt.Println("Alex: finished")
+		fmt.Println("trie_pruning.go:225", time.Since(now))
+	}
+
 	h := newHasher(false)
 	defer returnHasherToPool(h)
 	pruneMap(accountsTrie, aggregateAccounts, h)
