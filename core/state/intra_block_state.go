@@ -831,6 +831,42 @@ func (a *Addresses) Swap(i, j int) {
 	(*a)[i], (*a)[j] = (*a)[j], (*a)[i]
 }
 
+func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Address, stateObject *stateObject, isDirty bool) error {
+	if stateObject.suicided || (isDirty && params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
+		if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
+			return err
+		}
+		stateObject.deleted = true
+	} else if isDirty {
+		// Write any contract code associated with the state object
+		if stateObject.code != nil && stateObject.dirtyCode {
+			addrHash, err := common.HashData(addr.Bytes())
+			if err != nil {
+				log.Error("Hashing address error", "err", err)
+				return err
+			}
+			if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
+				return err
+			}
+		}
+
+		if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
+			return err
+		}
+
+		if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
+			return err
+		}
+
+		if stateObject.created {
+			if err := stateWriter.CreateContract(addr); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWriter) error {
 	sdb.Lock()
@@ -848,35 +884,10 @@ func (sdb *IntraBlockState) FinalizeTx(ctx context.Context, stateWriter StateWri
 			continue
 		}
 
-		if stateObject.suicided || (params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
-				return err
-			}
-			stateObject.deleted = true
-		} else {
-			// Write any contract code associated with the state object
-			if stateObject.code != nil && stateObject.dirtyCode {
-				addrHash, err := common.HashData(addr.Bytes())
-				if err != nil {
-					log.Error("Hashing address error", "err", err)
-					return err
-				}
-				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
-					return err
-				}
-			}
-			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
-				return err
-			}
-			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
-				return err
-			}
-			if stateObject.created {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-			}
+		if err := updateAccount(ctx, stateWriter, addr, stateObject, true); err != nil {
+			return err
 		}
+
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
@@ -898,39 +909,8 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 			return ctx.Err()
 		}
 		_, isDirty := sdb.stateObjectsDirty[addr]
-		//fmt.Printf("%x %d %x %x\n", addr[:], stateObject.data.Balance, stateObject.data.CodeHash, stateObject.data.Root[:])
-
-		if stateObject.suicided || (isDirty && params.GetForkFlag(ctx, params.IsEIP158Enabled) && stateObject.empty()) {
-			if err := stateWriter.DeleteAccount(ctx, addr, &stateObject.original); err != nil {
-				return err
-			}
-			stateObject.deleted = true
-		} else if isDirty {
-			// Write any contract code associated with the state object
-			if stateObject.code != nil && stateObject.dirtyCode {
-				addrHash, err := common.HashData(stateObject.Address().Bytes())
-				if err != nil {
-					log.Error("Hashing address error", "err", err)
-					return err
-				}
-				if err := stateWriter.UpdateAccountCode(addrHash, stateObject.data.Incarnation, common.BytesToHash(stateObject.CodeHash()), stateObject.code); err != nil {
-					return err
-				}
-			}
-
-			if err := stateObject.updateTrie(ctx, stateWriter); err != nil {
-				return err
-			}
-
-			if err := stateWriter.UpdateAccountData(ctx, addr, &stateObject.original, &stateObject.data); err != nil {
-				return err
-			}
-
-			if stateObject.created {
-				if err := stateWriter.CreateContract(addr); err != nil {
-					return err
-				}
-			}
+		if err := updateAccount(ctx, stateWriter, addr, stateObject, isDirty); err != nil {
+			return err
 		}
 	}
 	// Invalidate journal because reverting across transactions is not allowed.
