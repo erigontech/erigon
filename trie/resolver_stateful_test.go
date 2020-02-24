@@ -383,7 +383,7 @@ func TestApiDetails(t *testing.T) {
 				a.EncodeForStorage(v)
 
 				require.NoError(db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v))
-				//require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), storageV))
+				require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), storageV))
 			}
 		}
 	}
@@ -474,21 +474,29 @@ func TestApiDetails(t *testing.T) {
 
 	t.Run("storage resolver", func(t *testing.T) {
 		for _, resolverName := range []string{Stateful, StatefulCached} {
-			tr, resolver := New(common.Hash{}), NewResolver(0, false, 0)
-			expectRootHash := common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+			tr, resolver, accountResolver := New(common.Hash{}), NewResolver(1, false, 0), NewResolver(1, true, 0)
+			expectRootHash := common.HexToHash("3dea3f162dcc5d4a4104b055f7ca8a24930bacef16a62bebc90ce9b581641011")
 
-			resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000101"), 0, expectRootHash.Bytes()))
-			resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
+			expectAccRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
+			accountResolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectAccRootHash.Bytes()))
+
+			contract := common.Hex2Bytes(fmt.Sprintf("022%061x", 0))
+			hex := common.Hex2Bytes(fmt.Sprintf("000202%0122x", 0))
+			//resolver.AddRequest(tr.NewResolveRequest(contract, common.Hex2Bytes("000101"), 0, expectRootHash.Bytes()))
+			resolver.AddRequest(tr.NewResolveRequest(contract, hex, 0, expectRootHash.Bytes()))
 
 			if resolverName == Stateful {
-				err := resolver.ResolveStateful(db, 0)
-				//fmt.Printf("%s\n", tr.root.(*shortNode).Val.(*fullNode).Children[0])
+				err := accountResolver.ResolveStateful(db, 0)
+				require.NoError(err)
+				err = resolver.ResolveStateful(db, 0)
 				require.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0)
-				//fmt.Printf("%s\n", tr.root.(*shortNode).Val.(*fullNode).Children[0])
+				err := accountResolver.ResolveStatefulCached(db, 0)
+				require.NoError(err)
+				err = resolver.ResolveStatefulCached(db, 0)
 				require.NoError(err)
 			}
+			continue
 			assert.Equal(expectRootHash.String(), tr.Hash().String())
 
 			_, found := tr.Get(storageKey(fmt.Sprintf("000%061x", 0)))

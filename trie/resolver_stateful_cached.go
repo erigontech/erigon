@@ -136,7 +136,25 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		return true, k1
 	}
 
-	switch bytes.Compare(k1, k2) {
+	if len(k1) <= common.HashLength {
+		switch bytes.Compare(k1, k2) {
+		case -1, 0:
+			return true, k1
+		default:
+			return false, k2
+		}
+	}
+
+	switch bytes.Compare(k1[:common.HashLength], k2[:common.HashLength]) {
+	case -1:
+		return true, k1
+	case 1:
+		return false, k2
+	default:
+		// will compare second parts
+	}
+
+	switch bytes.Compare(k1[common.HashLength:], k2[common.HashLength+8:]) {
 	case -1, 0:
 		return true, k1
 	default:
@@ -233,6 +251,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
+		if fromCache && skip > common.HashLength*2 {
+			skip -= 8 // no incarnation in hash bucket
+		}
 		tr.succ.Write(kAsNibbles[skip:])
 
 		if !fromCache {

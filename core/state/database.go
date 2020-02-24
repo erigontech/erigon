@@ -455,7 +455,8 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 		}
 	}
 	if !firstRequest {
-		return resolveFunc(tds.resolver)
+		res := resolveFunc(tds.resolver)
+		return res
 	}
 	return nil
 }
@@ -839,7 +840,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 
 	defer func(t time.Time) {
 		if toPrint {
-			fmt.Println("Account ReCreated: ", time.Since(t))
+			//fmt.Println("Account ReCreated: ", time.Since(t))
 		}
 	}(time.Now())
 
@@ -876,7 +877,7 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 	toPrint := false
 	defer func(t time.Time) {
 		if toPrint {
-			fmt.Printf("Storage ReCreated: %s\n", time.Since(t))
+			//fmt.Printf("Storage ReCreated: %s\n", time.Since(t))
 		}
 	}(time.Now())
 
@@ -903,12 +904,17 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 				continue
 			}
 
+			//090bdc64a7e3632cde8f4689f47acfc0760e35bce43af50d4b1f5973463bde6210ea85226487be68d1e8fec8f5860aafbb2530fec6d2d820182417ef3cf768ff
+			//090bdc64a7e3632cde8f4689f47acfc0760e35bce43af50d4b1f5973463bde6210ea85226487be68d1e8fec8f5860aafbb2530fec6d2d820182417ef3cf768
+
 			toPrint = true
+			//fmt.Printf("St. Put: %x\n", buf.B[:i+1])
 			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
 				return err
 			}
 		}
 
+		//fmt.Printf("St. Del: %x\n", compositeKey[:i])
 		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
 			return err
 		}
