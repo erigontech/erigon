@@ -207,13 +207,13 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 			return errors.New("historical resolver not supported yet")
 		}
 		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
-		for _, req := range tr.requests {
-			fmt.Printf("A: %d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-			fmt.Printf("B: %x %x\n", req.contract, req.resolveHex)
-		}
-		for _, k := range startkeys {
-			fmt.Printf("C: %d %x\n", fixedbits, k)
-		}
+		//for _, req := range tr.requests {
+		//	fmt.Printf("A: %d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+		//	fmt.Printf("B: %x %x\n", req.contract, req.resolveHex)
+		//}
+		//for _, k := range startkeys {
+		//	fmt.Printf("C: %d %x\n", fixedbits, k)
+		//}
 	}
 	if err != nil {
 		return err
@@ -355,7 +355,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			fmt.Printf("For loop: %x %x\n", k, cacheK)
+			//fmt.Printf("For loop: %x %x\n", k, cacheK)
+
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
 				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])

@@ -423,10 +423,7 @@ func TestApiDetails(t *testing.T) {
 			resolver := NewResolver(0, true, 0)
 			expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
 
-			buf := pool.GetBuffer(128)
-			DecompressNibbles(common.Hex2Bytes(fmt.Sprintf("0%x%x%063x", 1, 1, 0)), &buf.B)
-
-			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(buf.B, 16), 0, expectRootHash.Bytes()))
+			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
 
@@ -480,8 +477,8 @@ func TestApiDetails(t *testing.T) {
 			contract := common.Hex2Bytes(fmt.Sprintf("022%061x", 0) + "fffffffffffffffe")
 			hex := common.Hex2Bytes(fmt.Sprintf("000202%0122x", 0))
 
-			//resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tr.NewResolveRequest(contract, append(hex, 16), 0, expectRootHash.Bytes()))
+
 			if resolverName == Stateful {
 				err := resolver.ResolveStateful(db, 0)
 				require.NoError(err)
