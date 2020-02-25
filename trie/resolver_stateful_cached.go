@@ -248,7 +248,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
 		if fromCache && skip > common.HashLength*2 {
-			skip -= 8 // no incarnation in hash bucket
+			skip -= 16 // no incarnation in hash bucket
 		}
 		tr.succ.Write(kAsNibbles[skip:])
 
