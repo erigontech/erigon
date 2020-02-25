@@ -173,6 +173,9 @@ func (tr *ResolverStateful) RebuildTrie(
 		if historical {
 			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerStorage)
 		} else {
+			for _, req := range tr.requests {
+				fmt.Printf("%d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+			}
 			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 		}
 	}
