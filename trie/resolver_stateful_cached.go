@@ -50,7 +50,7 @@ func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	tr.rss = nil
+	tr.rss = tr.rss[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
@@ -207,6 +207,13 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 			return errors.New("historical resolver not supported yet")
 		}
 		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+		for _, req := range tr.requests {
+			fmt.Printf("A: %d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+			fmt.Printf("B: %x %x\n", req.contract, req.resolveHex)
+		}
+		for _, k := range startkeys {
+			fmt.Printf("C: %d %x\n", fixedbits, k)
+		}
 	}
 	if err != nil {
 		return err
@@ -229,7 +236,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
 	//if bytes.Compare(common.FromHex("0808"), k) == 0 {
-	//	fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+	//fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, kAsNibbles, v, fromCache)
 	//}
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -273,7 +280,6 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
 			}
-
 			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
 				return fmt.Errorf("fail GenStructStep: %w", err)
@@ -349,6 +355,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
+			fmt.Printf("For loop: %x %x\n", k, cacheK)
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
 				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
