@@ -11,6 +11,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -30,6 +31,7 @@ type BlockGenerator struct {
 	blockOffsetByNumber map[uint64]uint64
 	headersByHash       map[common.Hash]*types.Header
 	headersByNumber     map[uint64]*types.Header
+	tdByNumber 			map[uint64]*big.Int
 	lastBlock           *types.Block
 	totalDifficulty     *big.Int
 }
@@ -44,6 +46,10 @@ func (bg *BlockGenerator) GetHeaderByHash(hash common.Hash) *types.Header {
 
 func (bg *BlockGenerator) GetHeaderByNumber(number uint64) *types.Header {
 	return bg.headersByNumber[number]
+}
+
+func (bg *BlockGenerator) GetTdByNumber(number uint64) *big.Int {
+	return bg.tdByNumber[number]
 }
 
 func (bg *BlockGenerator) readBlockFromOffset(offset uint64) (*types.Block, error) {
@@ -86,6 +92,95 @@ func randAddress(r *rand.Rand) common.Address {
 	return b
 }
 
+func generateBlock(
+	parent *types.Block,
+	extra []byte,
+	coinbase common.Address,
+	chainConfig *params.ChainConfig,
+	tds *state.TrieDbState,
+	height int,
+	r *rand.Rand,
+	nonce *uint64,
+	amount *big.Int,
+	gasPrice *big.Int,
+	coinbaseKey *ecdsa.PrivateKey,
+	engine consensus.Engine,
+) (*types.Block, error) {
+	var err error
+	num := parent.Number()
+	tstamp := parent.Time() + 15
+	gasLimit := core.CalcGasLimit(parent, 100000, 8000000)
+	header := &types.Header{
+		ParentHash: parent.Hash(),
+		Number:     num.Add(num, common.Big1),
+		GasLimit:   gasLimit,
+		Extra:      extra,
+		Time:       uint64(tstamp),
+		Coinbase:   coinbase,
+		Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
+	}
+	tds.SetBlockNr(parent.NumberU64())
+	statedb := state.New(tds)
+	// Add more transactions
+	signedTxs := []*types.Transaction{}
+	receipts := []*types.Receipt{}
+	usedGas := new(uint64)
+	tds.StartNewBuffer()
+	if height > 1 && gasLimit >= 21000 {
+		signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
+		gp := new(core.GasPool).AddGas(header.GasLimit)
+		vmConfig := vm.Config{}
+
+		to := randAddress(r)
+		tx := types.NewTransaction(*nonce, to, amount, 21000, gasPrice, []byte{})
+		signed_tx, err := types.SignTx(tx, signer, coinbaseKey)
+		if err != nil {
+			return nil, err
+		}
+		signedTxs = append(signedTxs, signed_tx)
+		receipt, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signed_tx, usedGas, vmConfig)
+		if err != nil {
+			return nil, fmt.Errorf("tx %x failed: %v", signed_tx.Hash(), err)
+		}
+		if !chainConfig.IsByzantium(header.Number) {
+			tds.StartNewBuffer()
+		}
+		receipts = append(receipts, receipt)
+		*nonce++
+	} else {
+		//fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
+	}
+
+	if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
+		return nil, err
+	}
+	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+		return nil, err
+	}
+
+	var roots []common.Hash
+	roots, err = tds.ComputeTrieRoots()
+	if err != nil {
+		return nil, err
+	}
+	if !chainConfig.IsByzantium(header.Number) {
+		for i, receipt := range receipts {
+			receipt.PostState = roots[i].Bytes()
+		}
+	}
+	header.Root = roots[len(roots)-1]
+	header.GasUsed = *usedGas
+	tds.SetBlockNr(uint64(height))
+	err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+	if err != nil {
+		return nil, err
+	}
+	// Generate an empty block
+	block := types.NewBlock(header, signedTxs, []*types.Header{}, receipts)
+	return block, nil
+}
+
 func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, error) {
 	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
@@ -99,10 +194,11 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	}
 	parent := genesisBlock
 	extra := []byte("BlockGenerator")
-	coinbaseKey, err := crypto.GenerateKey()
+	coinbaseKey, err := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
 	if err != nil {
 		return nil, err
 	}
+	fmt.Printf("Generated private key: %x\n", crypto.FromECDSA(coinbaseKey))
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 	chainConfig := params.MainnetChainConfig
 	var pos uint64
@@ -114,6 +210,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		blockOffsetByNumber: make(map[uint64]uint64),
 		headersByHash:       make(map[common.Hash]*types.Header),
 		headersByNumber:     make(map[uint64]*types.Header),
+		tdByNumber:          make(map[uint64]*big.Int),
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
@@ -124,91 +221,28 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	engine := ethash.NewFullFaker()
 
 	for height := 1; height <= initialHeight; height++ {
-		num := parent.Number()
-		tstamp := parent.Time() + 15
-		gasLimit := core.CalcGasLimit(parent, 100000, 8000000)
-		header := &types.Header{
-			ParentHash: parent.Hash(),
-			Number:     num.Add(num, common.Big1),
-			GasLimit:   gasLimit,
-			Extra:      extra,
-			Time:       uint64(tstamp),
-			Coinbase:   coinbase,
-			Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
-		}
-		tds.SetBlockNr(parent.NumberU64())
-		statedb := state.New(tds)
-		// Add more transactions
-		signedTxs := []*types.Transaction{}
-		receipts := []*types.Receipt{}
-		usedGas := new(uint64)
-		tds.StartNewBuffer()
-		if height > 1 && gasLimit >= 21000 {
-			signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
-			gp := new(core.GasPool).AddGas(header.GasLimit)
-			vmConfig := vm.Config{}
-
-			to := randAddress(r)
-			tx := types.NewTransaction(nonce, to, amount, 21000, gasPrice, []byte{})
-			signed_tx, err := types.SignTx(tx, signer, coinbaseKey)
-			if err != nil {
-				return nil, err
-			}
-			signedTxs = append(signedTxs, signed_tx)
-			receipt, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signed_tx, usedGas, vmConfig)
-			if err != nil {
-				return nil, fmt.Errorf("tx %x failed: %v", signed_tx.Hash(), err)
-			}
-			if !chainConfig.IsByzantium(header.Number) {
-				tds.StartNewBuffer()
-			}
-			receipts = append(receipts, receipt)
-			nonce++
-		} else {
-			//fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
-		}
-
-		if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
-			return nil, err
-		}
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-		if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-			return nil, err
-		}
-
-		var roots []common.Hash
-		roots, err = tds.ComputeTrieRoots()
+		block, err := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, coinbaseKey, engine)
 		if err != nil {
 			return nil, err
 		}
-		if !chainConfig.IsByzantium(header.Number) {
-			for i, receipt := range receipts {
-				receipt.PostState = roots[i].Bytes()
-			}
-		}
-		header.Root = roots[len(roots)-1]
-		header.GasUsed = *usedGas
-		tds.SetBlockNr(uint64(height))
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
-		if err != nil {
-			return nil, err
-		}
-		// Generate an empty block
-		block := types.NewBlock(header, signedTxs, []*types.Header{}, receipts)
 		buffer, err := rlp.EncodeToBytes(block)
 		if err != nil {
 			return nil, err
 		} else {
 			output.Write(buffer)
 		}
-		header = block.Header()
+		header := block.Header()
 		hash := header.Hash()
+		if (height > 1767 && height < 1777) || height >= 49990 {
+			fmt.Printf("bloc gen. Block %d, hash %x, parent: %x\n", block.NumberU64(), hash, header.ParentHash)
+		}
 		bg.headersByHash[hash] = header
 		bg.headersByNumber[block.NumberU64()] = header
 		bg.blockOffsetByHash[hash] = pos
 		bg.blockOffsetByNumber[block.NumberU64()] = pos
 		pos += uint64(len(buffer))
 		td = new(big.Int).Add(td, block.Difficulty())
+		bg.tdByNumber[block.NumberU64()] = td
 		parent = block
 	}
 	bg.lastBlock = parent
@@ -223,7 +257,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 }
 
 // Creates a fork from the existing block generator
-func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, forkHeight int) (*BlockGenerator, error) {
+func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, forkHeight uint64) (*BlockGenerator, error) {
 	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return nil, err
@@ -236,13 +270,13 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 	}
 	parent := genesisBlock
 	extra := []byte("BlockGenerator")
-	forkCoinbaseKey, err := crypto.GenerateKey()
+	forkCoinbaseKey, err := crypto.HexToECDSA("048d914460c9b5feb28d79df9c89a44465b1c9c0fa97d4bda32ede37fc178b8d")
 	if err != nil {
 		return nil, err
 	}
 	coinbase := crypto.PubkeyToAddress(base.coinbaseKey.PublicKey)
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
-	config := params.MainnetChainConfig
+	chainConfig := params.MainnetChainConfig
 	var pos uint64
 	td := new(big.Int)
 	bg := &BlockGenerator{
@@ -252,59 +286,41 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		blockOffsetByNumber: make(map[uint64]uint64),
 		headersByHash:       make(map[common.Hash]*types.Header),
 		headersByNumber:     make(map[uint64]*types.Header),
+		tdByNumber:          make(map[uint64]*big.Int),
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
-	for height := 1; height <= forkBase+forkHeight; height++ {
-		num := parent.Number()
-		tstamp := parent.Time() + 15
-		if height >= forkBase {
+	r := rand.New(rand.NewSource(4589489854))
+	var nonce uint64        // nonce of the sender (coinbase)
+	amount := big.NewInt(1) // 1 wei
+	gasPrice := big.NewInt(10000000)
+	engine := ethash.NewFullFaker()
+	for height := 1; height <= int(forkBase+forkHeight); height++ {
+		if height >= int(forkBase) {
 			coinbase = forkCoinbase
 		}
-		header := &types.Header{
-			ParentHash: parent.Hash(),
-			Number:     num.Add(num, common.Big1),
-			GasLimit:   core.CalcGasLimit(parent, 0, 8000000),
-			Extra:      extra,
-			Time:       uint64(tstamp),
-			Coinbase:   coinbase,
-			Difficulty: ethash.CalcDifficulty(config, uint64(tstamp), parent.Header()),
-		}
-		tds.SetBlockNr(parent.NumberU64())
-		statedb := state.New(tds)
-		tds.StartNewBuffer()
-		accumulateRewards(config, statedb, header, []*types.Header{})
-		ctx := config.WithEIPsFlags(context.Background(), header.Number)
-		if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-			return nil, err
-		}
-
-		var roots []common.Hash
-		roots, err = tds.ComputeTrieRoots()
+		block, err := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, base.coinbaseKey, engine)
 		if err != nil {
 			return nil, err
 		}
-		header.Root = roots[len(roots)-1]
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+		buffer, err := rlp.EncodeToBytes(block)
 		if err != nil {
-			return nil, err
-		}
-		// Generate an empty block
-		block := types.NewBlock(header, []*types.Transaction{}, []*types.Header{}, []*types.Receipt{})
-		//fmt.Printf("block hash for %d: %x\n", block.NumberU64(), block.Hash())
-		if buffer, err := rlp.EncodeToBytes(block); err != nil {
 			return nil, err
 		} else {
 			output.Write(buffer)
-			pos += uint64(len(buffer))
 		}
-		header = block.Header()
+		header := block.Header()
 		hash := header.Hash()
+		if (height > 1767 && height < 1777) || height >= 49990 {
+			fmt.Printf("fork gen. Block %d, hash %x, parent: %x\n", block.NumberU64(), hash, header.ParentHash)
+		}
 		bg.headersByHash[hash] = header
 		bg.headersByNumber[block.NumberU64()] = header
 		bg.blockOffsetByHash[hash] = pos
 		bg.blockOffsetByNumber[block.NumberU64()] = pos
+		pos += uint64(len(buffer))
 		td = new(big.Int).Add(td, block.Difficulty())
+		bg.tdByNumber[block.NumberU64()] = td
 		parent = block
 	}
 	bg.lastBlock = parent
@@ -316,35 +332,4 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase int, for
 		return nil, err
 	}
 	return bg, nil
-}
-
-// Some weird constants to avoid constant memory allocs for them.
-var (
-	big8  = big.NewInt(8)
-	big32 = big.NewInt(32)
-)
-
-// AccumulateRewards credits the coinbase of the given block with the mining
-// reward. The total reward consists of the static block reward and rewards for
-// included uncles. The coinbase of each uncle block is also rewarded.
-func accumulateRewards(config *params.ChainConfig, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
-	// Select the correct block reward based on chain progression
-	blockReward := ethash.FrontierBlockReward
-	if config.IsByzantium(header.Number) {
-		blockReward = ethash.ByzantiumBlockReward
-	}
-	// Accumulate the rewards for the miner and any included uncles
-	reward := new(big.Int).Set(blockReward)
-	r := new(big.Int)
-	for _, uncle := range uncles {
-		r.Add(uncle.Number, big8)
-		r.Sub(r, header.Number)
-		r.Mul(r, blockReward)
-		r.Div(r, big8)
-		state.AddBalance(uncle.Coinbase, r)
-
-		r.Div(blockReward, big32)
-		reward.Add(reward, r)
-	}
-	state.AddBalance(header.Coinbase, reward)
 }

@@ -73,20 +73,18 @@ func tester(ctx *cli.Context) error {
 		panic(fmt.Sprintf("Could not parse the node info: %v", err))
 	}
 	fmt.Printf("Parsed node: %s, IP: %s\n", nodeToConnect, nodeToConnect.IP())
-	_, err = NewBlockGenerator("emptyblocks", 100)
-	if err != nil {
-		return err
-	}
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
-	blockGen, err := NewBlockGenerator("emptyblocks", 50000)
+	blockGen, err := NewBlockGenerator("blocks", 50000)
 	defer blockGen.Close()
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
 	tp.blockFeeder = blockGen
-	tp.forkFeeder, err = NewForkGenerator(blockGen, "forkblocks", 49990, 120)
+	tp.forkBase = 49998
+	tp.forkHeight = 5
+	tp.forkFeeder, err = NewForkGenerator(blockGen, "forkblocks", tp.forkBase, tp.forkHeight)
 	defer tp.forkFeeder.Close()
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
