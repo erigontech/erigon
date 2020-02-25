@@ -136,7 +136,7 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		return true, k1
 	}
 
-	if len(k1) <= common.HashLength {
+	if len(k2) <= common.HashLength {
 		switch bytes.Compare(k1, k2) {
 		case -1, 0:
 			return true, k1
@@ -145,16 +145,12 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		}
 	}
 
-	switch bytes.Compare(k1[:common.HashLength], k2[:common.HashLength]) {
-	case -1:
-		return true, k1
-	case 1:
-		return false, k2
-	default:
-		// will compare second parts
-	}
+	buf := pool.GetBuffer(256)
+	defer pool.PutBuffer(buf)
+	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
+	buf.B = append(buf.B, k2[common.HashLength+8:]...)
 
-	switch bytes.Compare(k1[common.HashLength:], k2[common.HashLength+8:]) {
+	switch bytes.Compare(k1, buf.B) {
 	case -1, 0:
 		return true, k1
 	default:

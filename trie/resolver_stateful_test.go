@@ -532,36 +532,36 @@ func TestKeyIsBefore(t *testing.T) {
 
 	is, minKey := keyIsBefore([]byte("a"), []byte("b"))
 	assert.Equal(true, is)
-	assert.Equal("a", string(minKey))
+	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), []byte("a"))
 	assert.Equal(false, is)
-	assert.Equal("a", string(minKey))
+	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), []byte(""))
 	assert.Equal(false, is)
-	assert.Equal("", string(minKey))
+	assert.Equal("", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore(nil, []byte("b"))
 	assert.Equal(false, is)
-	assert.Equal("b", string(minKey))
+	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), nil)
 	assert.Equal(true, is)
-	assert.Equal("b", string(minKey))
+	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
 	contract := fmt.Sprintf("2%063x", 0)
 	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
 	cacheKey := common.Hex2Bytes(contract + "20")
 	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.False(is)
-	assert.Equal(storageKey, minKey)
+	assert.Equal(fmt.Sprintf("%x", storageKey), fmt.Sprintf("%x", minKey))
 
 	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
 	cacheKey = common.Hex2Bytes(contract + "10")
 	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.True(is)
-	assert.Equal(cacheKey, minKey)
+	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
 }
 
 func TestHexIncrement(t *testing.T) {
