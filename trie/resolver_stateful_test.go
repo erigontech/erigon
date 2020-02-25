@@ -549,6 +549,19 @@ func TestKeyIsBefore(t *testing.T) {
 	is, minKey = keyIsBefore([]byte("b"), nil)
 	assert.Equal(true, is)
 	assert.Equal("b", string(minKey))
+
+	contract := fmt.Sprintf("2%063x", 0)
+	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
+	cacheKey := common.Hex2Bytes(contract + "20")
+	is, minKey = keyIsBefore(cacheKey, storageKey)
+	assert.False(is)
+	assert.Equal(storageKey, minKey)
+
+	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
+	cacheKey = common.Hex2Bytes(contract + "10")
+	is, minKey = keyIsBefore(cacheKey, storageKey)
+	assert.True(is)
+	assert.Equal(cacheKey, minKey)
 }
 
 func TestHexIncrement(t *testing.T) {
