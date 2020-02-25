@@ -300,15 +300,15 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 }
 
 func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgReadWriter) {
-	var request newBlockHashesData
+	var request = make(newBlockHashesData, int(tp.forkHeight))
 	for fb := 0; fb < int(tp.forkHeight); fb++ {
-		fb := int(tp.forkHeight) - 1
 		blockNumber := tp.forkBase + uint64(fb)
 		block, err := tp.forkFeeder.GetBlockByNumber(blockNumber)
 		if err != nil {
 			panic(err)
 		}
-		request = append(request, struct{Hash common.Hash; Number uint64}{block.Hash(), blockNumber})
+		request[fb].Hash = block.Hash()
+		request[fb].Number = blockNumber
 	}
 	if err := p2p.Send(rw, eth.NewBlockHashesMsg, request); err != nil {
 		panic(err)
