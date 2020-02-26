@@ -1,12 +1,16 @@
 package stateless
 
 import (
+	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
+	"sort"
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -54,17 +58,40 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		intraBlockState := state.New(dbstate)
 		signer := types.MakeSigner(chainConfig, block.Number())
 
+		ctx := chainConfig.WithEIPsFlags(context.Background(), block.Number())
+
 		for _, tx := range block.Transactions() {
 			// Assemble the transaction call message and return if the requested offset
 			msg, _ := tx.AsMessage(signer)
-			context := core.NewEVMContext(msg, block.Header(), bc, nil)
+			evmCtx := core.NewEVMContext(msg, block.Header(), bc, nil)
 			// Not yet the searched for transaction, execute on top of the current state
-			vmenv := vm.NewEVM(context, intraBlockState, chainConfig, vmConfig)
+			vmenv := vm.NewEVM(evmCtx, intraBlockState, chainConfig, vmConfig)
 			if _, _, _, err := core.ApplyMessage(vmenv, msg, new(core.GasPool).AddGas(tx.Gas())); err != nil {
 				panic(fmt.Errorf("tx %x failed: %v", tx.Hash(), err))
 			}
 
-			// TODO [Andrew] generate change set from intraBlockState and compare against DB
+			var csw state.ChangeSetWriter
+			if err := intraBlockState.CommitBlock(ctx, &csw); err != nil {
+				return err
+			}
+
+			sort.Sort(&csw.AccountChanges)
+			expectedAccountChanges, err := csw.AccountChanges.Encode()
+			if err != nil {
+				return err
+			}
+
+			dbAccountChanges, err := ethDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
+			if err != nil {
+				return err
+			}
+
+			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
+				fmt.Printf("Unexpected account changes in block %d\n", blockNum)
+				return nil
+			}
+
+			// TODO [Andrew] storage changes
 		}
 
 		blockNum++
