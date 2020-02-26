@@ -18,7 +18,7 @@ package ethdb
 
 import (
 	"github.com/ledgerwatch/bolt"
-
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -30,6 +30,14 @@ func NewMemDatabase() *BoltDatabase {
 	if err != nil {
 		panic(err)
 	}
+
+	_ = db.Update(func(tx *bolt.Tx) error {
+		for _, bucket := range dbutils.Buckets {
+			_, _ = tx.CreateBucketIfNotExists(bucket, false)
+		}
+		return nil
+	})
+
 	b := &BoltDatabase{
 		db:  db,
 		log: logger,
@@ -66,7 +74,7 @@ func (db *BoltDatabase) MemCopy() Database {
 	if err := db.db.View(func(readTx *bolt.Tx) error {
 		return readTx.ForEach(func(name []byte, b *bolt.Bucket) error {
 			return mem.Update(func(writeTx *bolt.Tx) error {
-				newBucketToWrite, err := writeTx.CreateBucket(name, true)
+				newBucketToWrite, err := writeTx.CreateBucket(name, false)
 				if err != nil {
 					return err
 				}

@@ -83,3 +83,31 @@ var (
 	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
 )
+
+var Buckets = [][]byte{
+	AccountsBucket,
+	AccountsHistoryBucket,
+	StorageBucket,
+	StorageHistoryBucket,
+	CodeBucket,
+	ContractCodeBucket,
+	ChangeSetBucket,
+	IntermediateTrieHashBucket,
+	DatabaseVerisionKey,
+	HeadHeaderKey,
+	HeadBlockKey,
+	HeadFastBlockKey,
+	FastTrieProgressKey,
+	HeaderPrefix,
+	HeaderTDSuffix,
+	HeaderHashSuffix,
+	HeaderNumberPrefix,
+	BlockBodyPrefix,
+	BlockReceiptsPrefix,
+	TxLookupPrefix,
+	BloomBitsPrefix,
+	PreimagePrefix,
+	ConfigPrefix,
+	BloomBitsIndexPrefix,
+	LastPrunedBlockKey,
+}
