@@ -816,8 +816,11 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
+			acc, ok := tds.t.GetAccount(addrHash[:])
 			tds.t.DeleteSubtree(addrHash[:])
-			tds.markSubtreeEmptyInIntermediateHash(addrHash[:])
+			if ok && acc != nil && acc.Root != trie.EmptyRoot {
+				tds.markSubtreeEmptyInIntermediateHash(addrHash[:])
+			}
 		}
 		roots[i] = tds.t.Hash()
 	}
