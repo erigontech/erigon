@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -189,7 +190,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 
 		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, key)
 
-		innerErr := dbutils.Walk(v, func(cKey, _ []byte) error {
+		innerErr := changeset.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
 			keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
 			return nil
@@ -212,12 +213,20 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		}
 
 		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, key)
+		var innerErr error
+		if debug.IsThinHistory() {
+			innerErr = changeset.StorageChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
+				//todo implement pruning for thin history
+				return nil
+			})
+		} else {
+			innerErr = changeset.Walk(v, func(cKey, _ []byte) error {
+				compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
+				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
+				return nil
+			})
+		}
 
-		innerErr := dbutils.Walk(v, func(cKey, _ []byte) error {
-			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-			keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
-			return nil
-		})
 		if innerErr != nil {
 			return false, innerErr
 		}
