@@ -868,7 +868,10 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 	defer pool.PutBuffer(buf)
 
 	buf.B = buf.B[:cap(buf.B)]
-	// clear the path by moving tombstones down
+	if ok, err := hasTombstone(db, compositeKey[:common.HashLength+1]); err != nil || !ok {
+		return err
+	}
+
 	for i := common.HashLength + 1; i < len(compositeKey); i++ { // +1 because first step happened during account re-creation
 		copy(buf.B, compositeKey[:i+1])
 
