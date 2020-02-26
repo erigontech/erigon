@@ -209,7 +209,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 
 	if debug.IsIntermediateTrieHash() {
 		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
-		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		tp.SetCreateNodeFunc(tds.delIntermediateHash)
 	}
 
@@ -256,7 +255,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 
 	if debug.IsIntermediateTrieHash() {
 		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
-		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 	}
 
@@ -819,6 +817,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				account.Root = trie.EmptyRoot
 			}
 			tds.t.DeleteSubtree(addrHash[:])
+			tds.markSubtreeEmptyInIntermediateHash(addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -826,15 +825,18 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
-func hasTombstone(db ethdb.MinDatabase, addrHash []byte) (bool, error) {
-	v, err := db.Get(dbutils.IntermediateTrieHashBucket, addrHash)
+func hasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
+	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
 	if err != nil {
 		return false, err
+	}
+	if v != nil && len(v) == 0 {
+		fmt.Printf("hasTombstone: %x\n", prefix)
 	}
 	return v != nil && len(v) == 0, nil
 }
 
-func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
+func ClearTombstonesForReCreatedAccount(db ethdb.Database, addrHash common.Hash) error {
 	buf := pool.GetBuffer(common.HashLength * 2)
 	defer pool.PutBuffer(buf)
 
