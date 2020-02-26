@@ -392,7 +392,7 @@ func TestApiDetails(t *testing.T) {
 	putCache("ff", "ad4f92ca84a5980e14a356667eaf0db5d9ff78063630ebaa3d00a6634cd2a3fe")
 
 	// this cache key must not be used, because such key is in ResolveRequest
-	putCache("01", "")
+	putCache("01", "0000000000000000000000000000000000000000000000000000000000000000")
 
 	t.Run("account resolver from scratch", func(t *testing.T) {
 		tries := []*Trie{New(common.Hash{}), New(common.Hash{})}
@@ -472,6 +472,7 @@ func TestApiDetails(t *testing.T) {
 	t.Run("storage resolver", func(t *testing.T) {
 		putCache("00", "9e3571a3a3a75d023799452cfacea4d268b109bc685b9e8b63a50b55be81c7a3")
 		putCache("ff", "8d2b73f47eb0e6c79ca4f48ba551bfd62f058c9d1cff7e1ab72ba3b2d63aefed")
+		putCache("01", "")
 
 		for _, resolverName := range []string{Stateful, StatefulCached} {
 			tr, resolver := New(common.Hash{}), NewResolver(1, false, 0)

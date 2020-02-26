@@ -128,6 +128,14 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 
 // keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
 func keyIsBefore(k1, k2 []byte) (bool, []byte) {
+	if k1 == nil {
+		return false, k2
+	}
+
+	if k2 == nil {
+		return true, k1
+	}
+
 	switch cmpWithoutIncarnation(k1, k2) {
 	case -1, 0:
 		return true, k1
@@ -150,12 +158,14 @@ func cmpWithoutIncarnation(k1, k2 []byte) int {
 		return bytes.Compare(k1, k2)
 	}
 
+	if len(k2) <= common.HashLength+8 {
+		return bytes.Compare(k1, k2[:common.HashLength])
+	}
+
 	buf := pool.GetBuffer(256)
 	defer pool.PutBuffer(buf)
 	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
-	if len(k2) > common.HashLength+8 {
-		buf.B = append(buf.B, k2[common.HashLength+8:]...)
-	}
+	buf.B = append(buf.B, k2[common.HashLength+8:]...)
 
 	return bytes.Compare(k1, buf.B)
 }
@@ -375,14 +385,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-
 					minKeyIndex := minInt(len(minKey), fixedbytes-1)
 					if fromCache && fixedbytes > 32 {
 						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
 					}
 					startKeyIndex := minInt(len(startkey), fixedbytes-1)
-
-					cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					if fromCache {
+						cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					} else {
+						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
 						cmp = -1
