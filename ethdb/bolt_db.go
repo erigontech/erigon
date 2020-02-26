@@ -60,11 +60,11 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil, err
 	}
 	// Open the db and recover any potential corruptions
-	db, err := bolt.Open(file, 0600, &bolt.Options{})
+	db, errOpen := bolt.Open(file, 0600, &bolt.Options{})
 
 	// (Re)check for errors and abort if opening of the db failed
-	if err != nil {
-		return nil, err
+	if errOpen != nil {
+		return nil, errOpen
 	}
 
 	if err := db.Update(func(tx *bolt.Tx) error {
