@@ -153,7 +153,9 @@ func cmpWithoutIncarnation(k1, k2 []byte) int {
 	buf := pool.GetBuffer(256)
 	defer pool.PutBuffer(buf)
 	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
-	buf.B = append(buf.B, k2[common.HashLength+8:]...)
+	if len(k2) > common.HashLength+8 {
+		buf.B = append(buf.B, k2[common.HashLength+8:]...)
+	}
 
 	return bytes.Compare(k1, buf.B)
 }
@@ -373,6 +375,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
+
 					minKeyIndex := minInt(len(minKey), fixedbytes-1)
 					if fromCache && fixedbytes > 32 {
 						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
