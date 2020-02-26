@@ -472,14 +472,14 @@ func TestApiDetails(t *testing.T) {
 	t.Run("storage resolver", func(t *testing.T) {
 		for _, resolverName := range []string{Stateful, StatefulCached} {
 			tr, resolver := New(common.Hash{}), NewResolver(2, false, 0)
-			expectRootHash := common.HexToHash("b7861b26269e04ae4a865ed3900f56472ad248ffd2976cddef8018cc9700f846")
+			expectRootHash := common.HexToHash("abec4e141a9575d2a771d856bcafe0f38e064cf4bae432de4ecceadbdd05dc22")
 
-			//contract := common.Hex2Bytes(fmt.Sprintf("022%061x", 0) + "fffffffffffffffe")
-			//hex := common.Hex2Bytes(fmt.Sprintf("000202%0122x", 0))
+			contract := common.Hex2Bytes(fmt.Sprintf("021%061x", 0) + "fffffffffffffffe")
+			hex := common.Hex2Bytes(fmt.Sprintf("000201%0122x", 0))
+			hex2 := common.Hex2Bytes(fmt.Sprintf("000202%0122x", 0))
 
-			//resolver.AddRequest(tr.NewResolveRequest(contract, append(hex, 16), 0, expectRootHash.Bytes()))
-			resolver.AddRequest(tr.NewResolveRequest(nil, nil, 0, expectRootHash.Bytes()))
-			//resolver.AddRequest(tr.NewResolveRequest(contract, nil, 0, expectRootHash.Bytes()))
+			resolver.AddRequest(tr.NewResolveRequest(contract, append(hex, 16), 0, expectRootHash.Bytes()))
+			resolver.AddRequest(tr.NewResolveRequest(contract, append(hex2, 16), 0, expectRootHash.Bytes()))
 
 			if resolverName == Stateful {
 				err := resolver.ResolveStateful(db, 0)
