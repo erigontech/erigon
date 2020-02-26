@@ -66,6 +66,18 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	if err := db.Update(func(tx *bolt.Tx) error {
+		for _, bucket := range dbutils.Buckets {
+			if _, err := tx.CreateBucketIfNotExists(bucket, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
@@ -76,7 +88,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 // Put inserts or updates a single entry.
 func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucket, true)
+		b, err := tx.CreateBucketIfNotExists(bucket, false)
 		if err != nil {
 			return err
 		}
@@ -92,7 +104,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 	changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, hBucket)
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if !changeSetBucketOnly {
-			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
+			hb, err := tx.CreateBucketIfNotExists(hBucket, false)
 			if err != nil {
 				return err
 			}
@@ -124,7 +136,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 			}
 		}
 
-		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetBucket, true)
+		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetBucket, false)
 		if err != nil {
 			return err
 		}
