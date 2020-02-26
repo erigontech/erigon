@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"reflect"
 	"sort"
 )
 
@@ -141,6 +142,10 @@ func (s *ChangeSet) ChangedKeys() map[string]struct{} {
 		m[string(s.Changes[i].Key)] = struct{}{}
 	}
 	return m
+}
+
+func (s *ChangeSet) Equals(s2 *ChangeSet) bool {
+	return reflect.DeepEqual(s.Changes, s2.Changes)
 }
 
 // Encoded Method

@@ -93,7 +93,6 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	}
 
 	byt := buf.Bytes()
-	fmt.Println("enc storage", len(byt), len(s.Changes))
 	return byt, nil
 }
 
@@ -123,7 +122,7 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 
 	//parse not default incarnations
 	incarnationsLength := len(b[incarnationPosition:])
-	notDefaultIncarnation := make(map[uint32]uint64, 0)
+	notDefaultIncarnation := make(map[uint32]uint64)
 	var (
 		id  uint32
 		inc uint64
@@ -186,11 +185,10 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 
 	incarnationPosition := storageEnodingStartElem + numOfItems*(3*common.HashLength)
 	if uint32(len(b)) < incarnationPosition {
-		fmt.Println("WalkStorage", numOfItems)
 		return fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), incarnationPosition)
 	}
 	incarnationsLength := len(b[incarnationPosition:])
-	notDefaultIncarnation := make(map[uint32]uint64, 0)
+	notDefaultIncarnation := make(map[uint32]uint64)
 	var (
 		id  uint32
 		inc uint64
@@ -250,12 +248,11 @@ func (b StorageChangeSetBytes) FindLast(k []byte) ([]byte, error) {
 
 	incarnationPosition := storageEnodingStartElem + numOfItems*(3*common.HashLength)
 	if uint32(len(b)) < incarnationPosition {
-		fmt.Println("FindLast storage")
 		return nil, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), incarnationPosition)
 	}
 
 	incarnationsLength := len(b[incarnationPosition:])
-	notDefaultIncarnation := make(map[uint32]uint64, 0)
+	notDefaultIncarnation := make(map[uint32]uint64)
 	var (
 		id  uint32
 		inc uint64

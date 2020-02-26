@@ -2,8 +2,8 @@ package ethdb
 
 import (
 	"bytes"
-	"encoding/binary"
-	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 // Maximum length (in bytes of encoded timestamp)
@@ -86,57 +86,28 @@ func decode7to8(b []byte) []byte {
 // In the production settings, ChangeSets encodings are never modified.
 // In production settings (mutation.PutS) we always first populate AccountChangeSet object,
 // then encode it once, and then only work with the encoding
-func addToChangeSet(b []byte, key []byte, value []byte) ([]byte, error) {
-	var m int
-	var n int
+func addToChangeSet(hb, b []byte, key []byte, value []byte) ([]byte, error) {
+	var (
+		cs  *changeset.ChangeSet
+		err error
+	)
 
-	if len(b) == 0 {
-		m = len(key)
-		n = 0
+	if bytes.Equal(hb, dbutils.AccountsHistoryBucket) {
+		cs, err = changeset.DecodeAccounts(b)
 	} else {
-		n = int(binary.BigEndian.Uint32(b[0:4]))
-		m = int(binary.BigEndian.Uint32(b[4:8]))
-		if len(key) != m {
-			return nil, fmt.Errorf("wrong key size in AccountChangeSet: expected %d, actual %d", m, len(key))
-		}
+		cs, err = changeset.DecodeStorage(b)
 	}
-	pos := 4
-	var buffer bytes.Buffer
-	// Encode n
-	intArr := make([]byte, 4)
-	binary.BigEndian.PutUint32(intArr, uint32(n+1))
-	buffer.Write(intArr)
-	// KeySize should be the same
-	if n == 0 {
-		binary.BigEndian.PutUint32(intArr, uint32(len(key)))
-		buffer.Write(intArr)
-	} else {
-		buffer.Write(b[pos : pos+4])
+	if err != nil {
+		return nil, err
+	}
+	err = cs.Add(key, value)
+	if err != nil {
+		return nil, err
 	}
 
-	pos += 4
-	// append key
-	if n == 0 {
-		buffer.Write(key)
-		pos += len(key)
+	if bytes.Equal(hb, dbutils.AccountsHistoryBucket) {
+		return changeset.EncodeAccounts(cs)
 	} else {
-		buffer.Write(b[pos : pos+n*m])
-		buffer.Write(key)
-		pos += n * m
+		return changeset.EncodeStorage(cs)
 	}
-	// Append Index
-	if n == 0 {
-		binary.BigEndian.PutUint32(intArr, uint32(len(value)))
-		buffer.Write(intArr)
-	} else {
-		buffer.Write(b[pos : pos+4*n])
-		pos += 4 * n
-		prev := int(binary.BigEndian.Uint32(b[pos-4 : pos]))
-		binary.BigEndian.PutUint32(intArr, uint32(prev+len(value)))
-		buffer.Write(intArr)
-		buffer.Write(b[pos:])
-	}
-	// Append Value
-	buffer.Write(value)
-	return buffer.Bytes(), nil
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type puts map[string]putsBucket //map[bucket]putsBucket
@@ -313,20 +312,14 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 				if getErr != nil {
 					return nil
 				}
-				var (
-					v         []byte
-					isEmpty   bool
-					removeErr error
-				)
 
-				v, isEmpty, removeErr = RemoveFromIndex(indexBytes, timestamp)
-				if removeErr != nil {
-					return removeErr
-				}
-				if isEmpty {
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
 					m.puts.DeleteStr(string(dbutils.AccountsHistoryBucket), kk)
 				} else {
-					m.puts.SetStr(string(dbutils.AccountsHistoryBucket), kk, v)
+					m.puts.SetStr(string(dbutils.AccountsHistoryBucket), kk, *index)
 				}
 				return nil
 			})
@@ -342,20 +335,14 @@ func (m *mutation) DeleteTimestamp(timestamp uint64) error {
 				if getErr != nil {
 					return nil
 				}
-				var (
-					v         []byte
-					isEmpty   bool
-					removeErr error
-				)
 
-				v, isEmpty, removeErr = RemoveFromStorageIndex(indexBytes, timestamp)
-				if removeErr != nil {
-					return removeErr
-				}
-				if isEmpty {
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
 					m.puts.DeleteStr(string(dbutils.StorageHistoryBucket), kk)
 				} else {
-					m.puts.SetStr(string(dbutils.StorageHistoryBucket), kk, v)
+					m.puts.SetStr(string(dbutils.StorageHistoryBucket), kk, *index)
 				}
 				return nil
 			})
@@ -405,11 +392,7 @@ func (m *mutation) Commit() (uint64, error) {
 			if debug.IsThinHistory() {
 				changedKeys := changes.ChangedKeys()
 				for k := range changedKeys {
-					var (
-						v   []byte
-						key []byte
-						err error
-					)
+					key := []byte(k)
 					value, err := m.getNoLock(dbutils.AccountsHistoryBucket, key)
 					if err == ErrKeyNotFound {
 						if m.db != nil {
@@ -419,12 +402,9 @@ func (m *mutation) Commit() (uint64, error) {
 							}
 						}
 					}
-					v, err = AppendToIndex(value, timestamp)
-					if err != nil {
-						log.Error("mutation, append to index", "err", err, "timestamp", timestamp)
-						continue
-					}
-					m.puts.Set(dbutils.AccountsHistoryBucket, []byte(k), v)
+					index := dbutils.WrapHistoryIndex(value)
+					index.Append(timestamp)
+					m.puts.Set(dbutils.AccountsHistoryBucket, []byte(k), *index)
 				}
 			}
 			sort.Sort(changes)
@@ -433,11 +413,6 @@ func (m *mutation) Commit() (uint64, error) {
 				err error
 			)
 			if debug.IsThinHistory() {
-				fmt.Println("AccountCommit")
-				for _, vv := range changes.Changes {
-					fmt.Println(common.Bytes2Hex(vv.Key), " - ", common.Bytes2Hex(vv.Value))
-				}
-
 				dat, err = changeset.EncodeAccounts(changes)
 			} else {
 				dat, err = changeset.EncodeChangeSet(changes)
@@ -452,43 +427,30 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	if len(m.storageChangeSetByBlock) > 0 {
 		for timestamp, changes := range m.storageChangeSetByBlock {
-			if debug.IsThinHistory() {
-				changedKeys := changes.ChangedKeys()
-				for k := range changedKeys {
-					var (
-						v   []byte
-						key []byte
-						err error
-					)
-					key = []byte(k)[:common.HashLength+common.IncarnationLength]
-					value, err := m.getNoLock(dbutils.StorageHistoryBucket, key)
-					if err == ErrKeyNotFound {
-						if m.db != nil {
-							value, err = m.db.Get(dbutils.StorageHistoryBucket, key)
-							if err != nil && err != ErrKeyNotFound {
-								return 0, fmt.Errorf("db.Get failed: %w", err)
-							}
-						}
-					}
-
-					v, err = AppendToStorageIndex(value, []byte(k)[common.HashLength+common.IncarnationLength:common.HashLength+common.IncarnationLength+common.HashLength], timestamp)
-					if err != nil {
-						log.Error("mutation, append to storage index", "err", err, "timestamp", timestamp)
-						continue
-					}
-					m.puts.Set(dbutils.StorageHistoryBucket, key, v)
-				}
-			}
-			sort.Sort(changes)
 			var (
 				dat []byte
 				err error
 			)
+			sort.Sort(changes)
+
 			if debug.IsThinHistory() {
-				fmt.Println("StorageCommit")
-				for _, vv := range changes.Changes {
-					fmt.Println(common.Bytes2Hex(vv.Key), " - ", common.Bytes2Hex(vv.Value))
+				changedKeys := changes.ChangedKeys()
+				for k := range changedKeys {
+					key := []byte(k)
+					value, innerErr := m.getNoLock(dbutils.StorageHistoryBucket, key)
+					if innerErr == ErrKeyNotFound {
+						if m.db != nil {
+							value, innerErr = m.db.Get(dbutils.StorageHistoryBucket, key)
+							if innerErr != nil && innerErr != ErrKeyNotFound {
+								return 0, fmt.Errorf("db.Get failed: %w", innerErr)
+							}
+						}
+					}
+					index := dbutils.WrapHistoryIndex(value)
+					index.Append(timestamp)
+					m.puts.Set(dbutils.StorageHistoryBucket, key, *index)
 				}
+
 				dat, err = changeset.EncodeStorage(changes)
 				if err != nil {
 					return 0, err
@@ -621,7 +583,6 @@ type DBCounterStats struct {
 
 func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
 	atomic.AddUint64(&d.DBCounterStats.Put, 1)
-	fmt.Println("PUT", string(bucket), key)
 	return d.Database.Put(bucket, key, value)
 }
 
