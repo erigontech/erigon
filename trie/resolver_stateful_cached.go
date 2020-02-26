@@ -128,21 +128,26 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 
 // keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
 func keyIsBefore(k1, k2 []byte) (bool, []byte) {
-	if k1 == nil {
+	switch cmpWithoutIncarnation(k1, k2) {
+	case -1, 0:
+		return true, k1
+	default:
 		return false, k2
+	}
+}
+
+// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
+func cmpWithoutIncarnation(k1, k2 []byte) int {
+	if k1 == nil {
+		return 1
 	}
 
 	if k2 == nil {
-		return true, k1
+		return -1
 	}
 
 	if len(k2) <= common.HashLength {
-		switch bytes.Compare(k1, k2) {
-		case -1, 0:
-			return true, k1
-		default:
-			return false, k2
-		}
+		return bytes.Compare(k1, k2)
 	}
 
 	buf := pool.GetBuffer(256)
@@ -150,12 +155,7 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
 	buf.B = append(buf.B, k2[common.HashLength+8:]...)
 
-	switch bytes.Compare(k1, buf.B) {
-	case -1, 0:
-		return true, k1
-	default:
-		return false, k2
-	}
+	return bytes.Compare(k1, buf.B)
 }
 
 func (tr *ResolverStatefulCached) RebuildTrie(
@@ -373,10 +373,13 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					minKeyIndex := int(math.Min(float64(len(minKey)), float64(fixedbytes-1)))
-					startKeyIndex := int(math.Min(float64(len(startkey)), float64(fixedbytes-1)))
+					minKeyIndex := minInt(len(minKey), fixedbytes-1)
+					if fromCache && fixedbytes > 32 {
+						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
+					}
+					startKeyIndex := minInt(len(startkey), fixedbytes-1)
 
-					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
 						cmp = -1
@@ -475,4 +478,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		return nil
 	})
 	return err
+}
+
+func minInt(i1, i2 int) int {
+	return int(math.Min(float64(i1), float64(i2)))
 }
