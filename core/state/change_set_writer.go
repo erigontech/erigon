@@ -21,7 +21,9 @@ func NewChangeSetWriter() *ChangeSetWriter {
 func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
 	cs := new(dbutils.ChangeSet)
 	for key, val := range w.accountChanges {
-		cs.Add(crypto.Keccak256(key.Bytes()), val)
+		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
+			panic(err)
+		}
 	}
 	return cs
 }
