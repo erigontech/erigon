@@ -6,20 +6,27 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
-	AccountChanges dbutils.ChangeSet
-	StorageChanges dbutils.ChangeSet
+	accountChanges map[common.Address][]byte
 }
 
-func (w *ChangeSetWriter) addAccountChange(address common.Address, original *accounts.Account) error {
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return err
-	}
+func NewChangeSetWriter() *ChangeSetWriter {
+	return &ChangeSetWriter{accountChanges: make(map[common.Address][]byte)}
+}
 
+func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
+	cs := new(dbutils.ChangeSet)
+	for key, val := range w.accountChanges {
+		cs.Add(crypto.Keccak256(key.Bytes()), val)
+	}
+	return cs
+}
+
+func (w *ChangeSetWriter) addAccountChange(address common.Address, original *accounts.Account) {
 	var originalData []byte
 	if !original.Initialised {
 		originalData = []byte{}
@@ -29,11 +36,12 @@ func (w *ChangeSetWriter) addAccountChange(address common.Address, original *acc
 		original.EncodeForStorage(originalData)
 	}
 
-	return w.AccountChanges.Add(addrHash[:], originalData)
+	w.accountChanges[address] = originalData
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	return w.addAccountChange(address, original)
+	w.addAccountChange(address, original)
+	return nil
 }
 
 func (w *ChangeSetWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
@@ -41,7 +49,8 @@ func (w *ChangeSetWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 }
 
 func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	return w.addAccountChange(address, original)
+	w.addAccountChange(address, original)
+	return nil
 }
 
 func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
