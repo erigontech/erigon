@@ -385,7 +385,7 @@ func Stateless(
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {
-				if err := s.CheckRoot(header.Root); err != nil {
+				if err = s.CheckRoot(header.Root); err != nil {
 					fmt.Printf("Wrong block hash %x in block %d\n", block.Hash(), blockNum)
 					finalRootFail = true
 				}
