@@ -11,16 +11,28 @@ import (
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
-	accountChanges map[common.Address][]byte
+	accountChanges   map[common.Address][]byte
+	accountNoChanges map[common.Address][]byte
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
-	return &ChangeSetWriter{accountChanges: make(map[common.Address][]byte)}
+	return &ChangeSetWriter{
+		accountChanges:   make(map[common.Address][]byte),
+		accountNoChanges: make(map[common.Address][]byte),
+	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
+func (w *ChangeSetWriter) GetAccountChanges(inclNoChanges bool) *dbutils.ChangeSet {
 	cs := new(dbutils.ChangeSet)
 	for key, val := range w.accountChanges {
+		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
+			panic(err)
+		}
+	}
+	if !inclNoChanges {
+		return cs
+	}
+	for key, val := range w.accountNoChanges {
 		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
 			panic(err)
 		}
@@ -28,7 +40,7 @@ func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
 	return cs
 }
 
-func (w *ChangeSetWriter) addAccountChange(address common.Address, original *accounts.Account) {
+func accountData(original *accounts.Account) []byte {
 	var originalData []byte
 	if !original.Initialised {
 		originalData = []byte{}
@@ -37,12 +49,15 @@ func (w *ChangeSetWriter) addAccountChange(address common.Address, original *acc
 		originalData = make([]byte, originalDataLen)
 		original.EncodeForStorage(originalData)
 	}
-
-	w.accountChanges[address] = originalData
+	return originalData
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	w.addAccountChange(address, original)
+	if accountsEqual(original, account) {
+		w.accountNoChanges[address] = accountData(original)
+	} else {
+		w.accountChanges[address] = accountData(original)
+	}
 	return nil
 }
 
@@ -51,7 +66,7 @@ func (w *ChangeSetWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 }
 
 func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	w.addAccountChange(address, original)
+	w.accountChanges[address] = accountData(original)
 	return nil
 }
 

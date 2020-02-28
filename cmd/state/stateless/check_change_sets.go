@@ -60,7 +60,8 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return err
 		}
 
-		expectedAccountChanges, err := csw.GetAccountChanges().Encode()
+		inclNoChanges := false
+		expectedAccountChanges, err := csw.GetAccountChanges(inclNoChanges).Encode()
 		if err != nil {
 			return err
 		}
@@ -71,8 +72,19 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		}
 
 		if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
-			fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, common.ToHex(dbAccountChanges), common.ToHex(expectedAccountChanges))
-			return nil
+			// Now try to include no-changes
+			inclNoChanges = true
+			expectedAccountChanges, err := csw.GetAccountChanges(inclNoChanges).Encode()
+			if err != nil {
+				return err
+			}
+
+			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
+				fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, common.ToHex(dbAccountChanges), common.ToHex(expectedAccountChanges))
+				return nil
+			}
+
+			fmt.Printf("No-changes in block %d\n", blockNum)
 		}
 
 		// TODO [Andrew] storage changes
