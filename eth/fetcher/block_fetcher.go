@@ -398,7 +398,7 @@ func (f *BlockFetcher) loop() {
 			request := make(map[string][]common.Hash)
 
 			toForget := make(map[common.Hash]struct{})
-			var toFetch []*announce
+			var toFetch []*blockAnnounce
 			for _, announce := range f.announced {
 				if time.Since(announce.time) > arriveTimeout-gatherSlack {
 					toForget[announce.hash] = struct{}{}
@@ -726,7 +726,7 @@ func (f *BlockFetcher) insert(peer string, block *types.Block) {
 func (f *BlockFetcher) forgetHash(hash common.Hash) {
 	// Remove all pending announces and decrement DOS counters
 	if _, ok := f.announcedS[hash]; ok {
-		var newAnnounced []*announce
+		var newAnnounced []*blockAnnounce
 		for _, announce := range f.announced {
 			if announce.hash == hash {
 				f.announces[announce.origin]--
