@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -831,10 +832,10 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 func hasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
 	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
 	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return false, nil
+		}
 		return false, err
-	}
-	if v != nil && len(v) == 0 {
-		fmt.Printf("hasTombstone: %x\n", prefix)
 	}
 	return v != nil && len(v) == 0, nil
 }
@@ -873,14 +874,16 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 	defer pool.PutBuffer(buf)
 
 	buf.B = buf.B[:cap(buf.B)]
-	if ok, err := hasTombstone(db, compositeKey[:common.HashLength+1]); err != nil || !ok {
-		return err
-	}
-
 	for i := common.HashLength + 1; i < len(compositeKey); i++ { // +1 because first step happened during account re-creation
 		copy(buf.B, compositeKey[:i+1])
 
 		if someStorageExistsInThisSubtree(compositeKey[:i]) {
+			continue
+		}
+
+		if ok, err := hasTombstone(db, buf.B[:i]); err != nil {
+			return err
+		} else if !ok {
 			continue
 		}
 
@@ -890,10 +893,6 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 			}
 
 			buf.B[i] = uint8(j)
-
-			if someStorageExistsInThisSubtree(buf.B[:i+1]) {
-				continue
-			}
 
 			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
 				return err
