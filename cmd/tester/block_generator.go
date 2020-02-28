@@ -133,14 +133,14 @@ func generateBlock(
 
 		to := randAddress(r)
 		tx := types.NewTransaction(*nonce, to, amount, 21000, gasPrice, []byte{})
-		signedTx, err := types.SignTx(tx, signer, coinbaseKey)
-		if err != nil {
-			return nil, err
+		signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
+		if err1 != nil {
+			return nil, err1
 		}
 		signedTxs = append(signedTxs, signedTx)
-		receipt, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signedTx, usedGas, vmConfig)
-		if err != nil {
-			return nil, fmt.Errorf("tx %x failed: %v", signedTx.Hash(), err)
+		receipt, err2 := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signedTx, usedGas, vmConfig)
+		if err1 != nil {
+			return nil, fmt.Errorf("tx %x failed: %v", signedTx.Hash(), err2)
 		}
 		if !chainConfig.IsByzantium(header.Number) {
 			tds.StartNewBuffer()
@@ -186,15 +186,15 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	}
 	defer output.Close()
 	db := ethdb.NewMemDatabase()
-	genesisBlock, _, tds, err := core.DefaultGenesisBlock().ToBlock(db)
-	if err != nil {
-		return nil, err
+	genesisBlock, _, tds, err1 := core.DefaultGenesisBlock().ToBlock(db)
+	if err1 != nil {
+		return nil, err1
 	}
 	parent := genesisBlock
 	extra := []byte("BlockGenerator")
-	coinbaseKey, err := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
-	if err != nil {
-		return nil, err
+	coinbaseKey, err2 := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
+	if err2 != nil {
+		return nil, err2
 	}
 	fmt.Printf("Generated private key: %x\n", crypto.FromECDSA(coinbaseKey))
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
@@ -219,16 +219,15 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	engine := ethash.NewFullFaker()
 
 	for height := 1; height <= initialHeight; height++ {
-		block, err := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, coinbaseKey, engine)
-		if err != nil {
-			return nil, err
+		block, err3 := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, coinbaseKey, engine)
+		if err3 != nil {
+			return nil, err3
 		}
-		buffer, err := rlp.EncodeToBytes(block)
-		if err != nil {
-			return nil, err
-		} else {
-			output.Write(buffer)
+		buffer, err4 := rlp.EncodeToBytes(block)
+		if err4 != nil {
+			return nil, err4
 		}
+		output.Write(buffer)
 		header := block.Header()
 		hash := header.Hash()
 		bg.headersByHash[hash] = header
@@ -251,7 +250,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	return bg, nil
 }
 
-// Creates a fork from the existing block generator
+// NewForkGenerator Creates a fork from the existing block generator
 func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, forkHeight uint64) (*BlockGenerator, error) {
 	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
@@ -294,16 +293,15 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 		if height >= int(forkBase) {
 			coinbase = forkCoinbase
 		}
-		block, err := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, base.coinbaseKey, engine)
-		if err != nil {
-			return nil, err
+		block, err1 := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, base.coinbaseKey, engine)
+		if err1 != nil {
+			return nil, err1
 		}
-		buffer, err := rlp.EncodeToBytes(block)
-		if err != nil {
-			return nil, err
-		} else {
-			output.Write(buffer)
+		buffer, err2 := rlp.EncodeToBytes(block)
+		if err2 != nil {
+			return nil, err2
 		}
+		output.Write(buffer)
 		header := block.Header()
 		hash := header.Hash()
 		bg.headersByHash[hash] = header
