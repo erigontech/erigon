@@ -38,7 +38,7 @@ func TestManagedTx(t *testing.T) {
 
 		if err := db.View(ctx, func(tx *ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
-			c := b.CursorOpts().Prefetch(1000).Cursor()
+			c := b.Cursor().Prefetch(1000)
 
 			// b.Cursor().Prefetch(1000)
 			// c := tx.Bucket(dbutils.AccountsBucket).Cursor().Prefetch(1000)
@@ -76,10 +76,16 @@ func TestManagedTx(t *testing.T) {
 
 		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
-			if err := b.Put([]byte("key1"), []byte("val1")); err != nil {
+			if err := b.Put([]byte{0, 1}, []byte{1}); err != nil {
 				return err
 			}
-			if err := b.Put([]byte("key2"), []byte("val2")); err != nil {
+			if err := b.Put([]byte{0, 0, 1}, []byte{1}); err != nil {
+				return err
+			}
+			if err := b.Put([]byte{2}, []byte{1}); err != nil {
+				return err
+			}
+			if err := b.Put([]byte{1}, []byte{1}); err != nil {
 				return err
 			}
 
@@ -103,7 +109,7 @@ func TestManagedTx(t *testing.T) {
 			//c, err := tx.Bucket(dbutil.AccountBucket).CursorOpts().From(key).Cursor()
 			//
 			//c, err := b.Cursor(b.CursorOpts().From(key).MatchBits(common.HashLength * 8))
-			c := b.Cursor(b.CursorOpts())
+			c := b.Cursor()
 
 			for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 				if err != nil {
@@ -125,6 +131,20 @@ func TestManagedTx(t *testing.T) {
 				}
 				_ = v
 			}
+
+			k, _, err := c.First()
+			assert.NoError(t, err)
+			assert.Equal(t, []byte{0, 0, 1}, k)
+			k, _, err = c.Next()
+			assert.NoError(t, err)
+			assert.Equal(t, []byte{0, 1}, k)
+			k, _, err = c.Next()
+			assert.NoError(t, err)
+			assert.Equal(t, []byte{1}, k)
+			k, _, err = c.Next()
+			assert.NoError(t, err)
+			assert.Equal(t, []byte{2}, k)
+
 			return nil
 		}); err != nil {
 			assert.NoError(t, err)
@@ -144,7 +164,7 @@ func TestCancelTest(t *testing.T) {
 			return err
 		}
 
-		c := b.Cursor(b.CursorOpts())
+		c := b.Cursor()
 		for {
 			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -171,7 +191,7 @@ func TestFilterTest(t *testing.T) {
 			return nil
 		}
 
-		c := b.CursorOpts().Prefix(common.FromHex("2")).Cursor()
+		c := b.Cursor().Prefix(common.FromHex("2"))
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {
@@ -190,7 +210,7 @@ func TestFilterTest(t *testing.T) {
 		}
 		assert.Equal(t, 1, counter)
 
-		c = b.CursorOpts().Cursor()
+		c = b.Cursor()
 		counter = 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {

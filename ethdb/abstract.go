@@ -156,9 +156,13 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	opts   CursorOpts
-	ctx    context.Context
-	bucket Bucket
+	ctx      context.Context
+	bucket   Bucket
+	provider DbProvider
+	prefix   []byte
+
+	remoteOpts remote.CursorOpts
+	badgerOpts badger.IteratorOptions
 
 	bolt   *bolt.Cursor
 	badger *badger.Iterator
@@ -240,69 +244,44 @@ func (tx *Tx) cleanup() {
 	}
 }
 
-type CursorOpts struct {
-	bucket   Bucket
-	provider DbProvider
-	prefix   []byte
-
-	remote remote.CursorOpts
-	badger badger.IteratorOptions
+func (c *Cursor) Prefix(v []byte) *Cursor {
+	c.prefix = v
+	return c
 }
 
-func (opts CursorOpts) Prefix(v []byte) CursorOpts {
-	opts.prefix = v
-	return opts
-}
-
-func (opts CursorOpts) Prefetch(v uint) CursorOpts {
-	switch opts.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		opts.badger.PrefetchSize = int(v)
-	case Remote:
-		opts.remote.PrefetchSize(uint64(v))
-	}
-	return opts
-}
-
-func (opts CursorOpts) NoValues() CursorOpts {
-	switch opts.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		opts.badger.PrefetchValues = false
-	case Remote:
-		opts.remote.PrefetchValues(false)
-	}
-	return opts
-}
-
-func (opts CursorOpts) From() CursorOpts {
-	switch opts.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		opts.badger.PrefetchValues = false
-	case Remote:
-		opts.remote.PrefetchValues(false)
-	}
-	return opts
-}
-
-func (b Bucket) CursorOpts() CursorOpts {
-	c := CursorOpts{bucket: b, provider: b.tx.db.opts.provider}
+func (c *Cursor) Prefetch(v uint) *Cursor {
 	switch c.provider {
 	case Bolt:
 		// nothing to do
 	case Badger:
-		opts := badger.DefaultIteratorOptions
-		opts.Prefix = b.badgerPrefix[:b.nameLen]
-		c.badger = opts
+		c.badgerOpts.PrefetchSize = int(v)
 	case Remote:
-		c.remote = remote.DefaultCursorOpts
+		c.remoteOpts.PrefetchSize(uint64(v))
 	}
+	return c
+}
 
+func (c *Cursor) NoValues() *Cursor {
+	switch c.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		c.badgerOpts.PrefetchValues = false
+	case Remote:
+		c.remoteOpts.PrefetchValues(false)
+	}
+	return c
+}
+
+func (c *Cursor) From() *Cursor {
+	switch c.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		c.badgerOpts.PrefetchValues = false
+	case Remote:
+		c.remoteOpts.PrefetchValues(false)
+	}
 	return c
 }
 
@@ -367,41 +346,55 @@ func (b Bucket) Delete(key []byte) error {
 	return nil
 }
 
-func (b Bucket) Cursor(opts CursorOpts) Cursor {
-	c := Cursor{bucket: b, opts: opts, ctx: b.tx.ctx}
-	switch c.opts.provider {
+func (b Bucket) Cursor() *Cursor {
+	c := &Cursor{bucket: b, ctx: b.tx.ctx, provider: b.tx.db.opts.provider}
+	switch c.provider {
 	case Bolt:
-		c.bolt = b.bolt.Cursor()
+		// nothing to do
 	case Badger:
-		opts.badger.Prefix = append(b.badgerPrefix[:b.nameLen], opts.prefix...) // set bucket
-		c.badger = b.tx.badger.NewIterator(opts.badger)
-		// add to auto-cleanup on end of transactions
-		if b.tx.badgerIterators == nil {
-			b.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
-		}
-		b.tx.badgerIterators = append(b.tx.badgerIterators, c.badger)
-
+		c.badgerOpts = badger.DefaultIteratorOptions
+		c.badgerOpts.Prefix = append(b.badgerPrefix[:b.nameLen], c.prefix...) // set bucket
 	case Remote:
-		c.remote = b.remote.Cursor(opts.remote)
+		c.remoteOpts = remote.DefaultCursorOpts
 	}
 	return c
 }
 
-func (opts CursorOpts) Cursor() Cursor {
-	return opts.bucket.Cursor(opts)
+func (c *Cursor) initCursor() {
+	switch c.provider {
+	case Bolt:
+		if c.bolt == nil {
+			c.bolt = c.bucket.bolt.Cursor()
+		}
+	case Badger:
+		if c.badger == nil {
+			c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
+			// add to auto-cleanup on end of transactions
+			if c.bucket.tx.badgerIterators == nil {
+				c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
+			}
+			c.bucket.tx.badgerIterators = append(c.bucket.tx.badgerIterators, c.badger)
+		}
+	case Remote:
+		if c.remote == nil {
+			c.remote = c.bucket.remote.Cursor(c.remoteOpts)
+		}
+	}
 }
 
-func (c Cursor) First() ([]byte, []byte, error) {
+func (c *Cursor) First() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
 	default:
 	}
 
-	switch c.opts.provider {
+	c.initCursor()
+
+	switch c.provider {
 	case Bolt:
-		if c.opts.prefix != nil {
-			c.k, c.v = c.bolt.Seek(c.opts.prefix)
+		if c.prefix != nil {
+			c.k, c.v = c.bolt.Seek(c.prefix)
 		} else {
 			c.k, c.v = c.bolt.First()
 		}
@@ -413,12 +406,12 @@ func (c Cursor) First() ([]byte, []byte, error) {
 		}
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
-		if c.opts.badger.PrefetchValues {
+		if c.badgerOpts.PrefetchValues {
 			c.v, c.err = item.ValueCopy(c.v) // bech show: using .ValueCopy on same buffer has same speed as item.Value()
 		}
 	case Remote:
-		if c.opts.prefix != nil {
-			c.k, c.v, c.err = c.remote.Seek(c.opts.prefix)
+		if c.prefix != nil {
+			c.k, c.v, c.err = c.remote.Seek(c.prefix)
 		} else {
 			c.k, c.v, c.err = c.remote.First()
 		}
@@ -426,14 +419,16 @@ func (c Cursor) First() ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c Cursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
 	default:
 	}
 
-	switch c.opts.provider {
+	c.initCursor()
+
+	switch c.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.Seek(seek)
 	case Badger:
@@ -445,7 +440,7 @@ func (c Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 		}
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
-		if c.opts.badger.PrefetchValues {
+		if c.badgerOpts.PrefetchValues {
 			c.v, c.err = item.ValueCopy(c.v)
 		}
 	case Remote:
@@ -454,17 +449,17 @@ func (c Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c Cursor) Next() ([]byte, []byte, error) {
+func (c *Cursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
 	default:
 	}
 
-	switch c.opts.provider {
+	switch c.provider {
 	case Bolt:
 		c.k, c.v = c.bolt.Next()
-		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+		if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 			return nil, nil, nil
 		}
 	case Badger:
@@ -475,7 +470,7 @@ func (c Cursor) Next() ([]byte, []byte, error) {
 		}
 		item := c.badger.Item()
 		c.k = item.Key()[c.bucket.nameLen:]
-		if c.opts.badger.PrefetchValues {
+		if c.badgerOpts.PrefetchValues {
 			c.v, c.err = item.ValueCopy(c.v)
 		}
 	case Remote:
@@ -484,26 +479,28 @@ func (c Cursor) Next() ([]byte, []byte, error) {
 			return nil, nil, c.err
 		}
 
-		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+		if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 			return nil, nil, nil
 		}
 	}
 	return c.k, c.v, c.err
 }
 
-func (c Cursor) FirstKey() ([]byte, uint64, error) {
+func (c *Cursor) FirstKey() ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
 	default:
 	}
 
+	c.initCursor()
+
 	var vSize uint64
-	switch c.opts.provider {
+	switch c.provider {
 	case Bolt:
 		var v []byte
-		if c.opts.prefix != nil {
-			c.k, v = c.bolt.Seek(c.opts.prefix)
+		if c.prefix != nil {
+			c.k, v = c.bolt.Seek(c.prefix)
 		} else {
 			c.k, v = c.bolt.First()
 		}
@@ -519,8 +516,8 @@ func (c Cursor) FirstKey() ([]byte, uint64, error) {
 		vSize = uint64(item.ValueSize())
 	case Remote:
 		var vIsEmpty bool
-		if c.opts.prefix != nil {
-			c.k, vIsEmpty, c.err = c.remote.SeekKey(c.opts.prefix)
+		if c.prefix != nil {
+			c.k, vIsEmpty, c.err = c.remote.SeekKey(c.prefix)
 		} else {
 			c.k, vIsEmpty, c.err = c.remote.FirstKey()
 		}
@@ -531,15 +528,17 @@ func (c Cursor) FirstKey() ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
+func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
 	default:
 	}
 
+	c.initCursor()
+
 	var vSize uint64
-	switch c.opts.provider {
+	switch c.provider {
 	case Bolt:
 		var v []byte
 		c.k, v = c.bolt.Seek(seek)
@@ -564,7 +563,7 @@ func (c Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c Cursor) NextKey() ([]byte, uint64, error) {
+func (c *Cursor) NextKey() ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
@@ -572,12 +571,12 @@ func (c Cursor) NextKey() ([]byte, uint64, error) {
 	}
 
 	var vSize uint64
-	switch c.opts.provider {
+	switch c.provider {
 	case Bolt:
 		var v []byte
 		c.k, v = c.bolt.Next()
 		vSize = uint64(len(v))
-		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+		if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 			return nil, 0, nil
 		}
 	case Badger:
@@ -598,14 +597,14 @@ func (c Cursor) NextKey() ([]byte, uint64, error) {
 		if c.err != nil {
 			return nil, 0, c.err
 		}
-		if c.opts.prefix != nil && !bytes.HasPrefix(c.k, c.opts.prefix) {
+		if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
 			return nil, 0, nil
 		}
 	}
 	return c.k, vSize, c.err
 }
 
-func (c Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
+func (c *Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -621,7 +620,7 @@ func (c Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (c Cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
+func (c *Cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
 	for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
 		if err != nil {
 			return err
