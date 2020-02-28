@@ -330,7 +330,7 @@ func testConcurrentAnnouncements(t *testing.T, protocol int) {
 		return secondHeaderFetcher(hash)
 	}
 	// Iteratively announce blocks until all are imported
-	imported := make(chan *types.Block)
+	imported := make(chan *types.Block, 1)
 	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
 
 	for i := len(hashes) - 2; i >= 0; i-- {
