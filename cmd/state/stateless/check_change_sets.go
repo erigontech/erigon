@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -80,7 +80,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			}
 
 			if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
-				fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, common.ToHex(dbAccountChanges), common.ToHex(expectedAccountChanges))
+				fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbAccountChanges), hexutil.Encode(expectedAccountChanges))
 				return nil
 			}
 
