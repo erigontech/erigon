@@ -21,6 +21,7 @@ import (
 	"errors"
 	"math/rand"
 	"time"
+	//"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/prque"
@@ -118,13 +119,15 @@ type Fetcher struct {
 
 	// Announce states
 	announces  map[string]int              // Per peer announce counts to prevent memory exhaustion
-	announced  map[common.Hash][]*announce // Announced blocks, scheduled for fetching
+	announced  []*announce 				   // Announced blocks, scheduled for fetching
+	announcedS map[common.Hash]struct{}    // Announced blocks, scheduled for fetching (set)
 	fetching   map[common.Hash]*announce   // Announced blocks, currently fetching
 	fetched    map[common.Hash][]*announce // Blocks with headers fetched, scheduled for body retrieval
 	completing map[common.Hash]*announce   // Blocks with headers, currently body-completing
 
 	// Block cache
 	queue  *prque.Prque            // Queue containing the import operations (block number sorted)
+	queueCh chan struct{}          // Channel to signal that the queue is not yet empty
 	queues map[string]int          // Per peer block counts to prevent memory exhaustion
 	queued map[common.Hash]*inject // Set of already queued blocks (to dedupe imports)
 
@@ -154,13 +157,15 @@ func New(getBlock blockRetrievalFn, verifyHeader headerVerifierFn, broadcastBloc
 		done:           make(chan common.Hash),
 		quit:           make(chan struct{}),
 		announces:      make(map[string]int),
-		announced:      make(map[common.Hash][]*announce),
+		announced:      nil,
+		announcedS:     make(map[common.Hash]struct{}),
 		fetching:       make(map[common.Hash]*announce),
 		fetched:        make(map[common.Hash][]*announce),
 		completing:     make(map[common.Hash]*announce),
 		queue:          prque.New(nil),
 		queues:         make(map[string]int),
 		queued:         make(map[common.Hash]*inject),
+		queueCh:        make(chan struct{}, 1),
 		getBlock:       getBlock,
 		verifyHeader:   verifyHeader,
 		broadcastBlock: broadcastBlock,
@@ -288,7 +293,12 @@ func (f *Fetcher) loop() {
 		}
 		// Import any queued blocks that could potentially fit
 		height := f.chainHeight()
+		//fmt.Printf("Queue is empty: %t %d\n", f.queue.Empty(), f.queue.Size())
 		for !f.queue.Empty() {
+			select {
+				case <- f.queueCh:
+				default:
+			}
 			op := f.queue.PopItem().(*inject)
 			hash := op.block.Hash()
 			if f.queueChangeHook != nil {
@@ -301,10 +311,13 @@ func (f *Fetcher) loop() {
 				if f.queueChangeHook != nil {
 					f.queueChangeHook(hash, true)
 				}
+				//fmt.Printf("Break number (%d) > height+1 (%d)\n", number, height+1)
+				f.queueCh <- struct{}{}
 				break
 			}
 			// Otherwise if fresh and still unknown, try and import
 			if number+maxUncleDist < height || f.getBlock(hash) != nil {
+				//fmt.Printf("Forgetting %x because not fresh?\n", hash)
 				f.forgetBlock(hash)
 				continue
 			}
@@ -320,6 +333,7 @@ func (f *Fetcher) loop() {
 			// A block was announced, make sure the peer isn't DOSing us
 			propAnnounceInMeter.Mark(1)
 
+			//fmt.Printf("Notification received for block %d\n", notification.number)
 			count := f.announces[notification.origin] + 1
 			if count > hashLimit {
 				log.Debug("Peer exceeded outstanding announces", "peer", notification.origin, "limit", hashLimit)
@@ -342,11 +356,14 @@ func (f *Fetcher) loop() {
 				break
 			}
 			f.announces[notification.origin] = count
-			f.announced[notification.hash] = append(f.announced[notification.hash], notification)
-			if f.announceChangeHook != nil && len(f.announced[notification.hash]) == 1 {
-				f.announceChangeHook(notification.hash, true)
+			if _, ok := f.announcedS[notification.hash]; !ok {
+				f.announcedS[notification.hash] = struct{}{}
+				if f.announceChangeHook != nil {
+					f.announceChangeHook(notification.hash, true)
+				}
 			}
-			if len(f.announced) == 1 {
+			f.announced = append(f.announced, notification)
+			if len(f.announcedS) == 1 {
 				f.rescheduleFetch(fetchTimer)
 			}
 
@@ -355,27 +372,28 @@ func (f *Fetcher) loop() {
 			propBroadcastInMeter.Mark(1)
 			f.enqueue(op.origin, op.block)
 
-		case hash := <-f.done:
-			// A pending import finished, remove all traces of the notification
-			f.forgetHash(hash)
-			f.forgetBlock(hash)
-
 		case <-fetchTimer.C:
 			// At least one block's timer ran out, check for needing retrieval
 			request := make(map[string][]common.Hash)
 
-			for hash, announces := range f.announced {
-				if time.Since(announces[0].time) > arriveTimeout-gatherSlack {
-					// Pick a random peer to retrieve from, reset all others
-					announce := announces[rand.Intn(len(announces))]
-					f.forgetHash(hash)
+			toForget := make(map[common.Hash]struct{})
+			var toFetch []*announce
+			for _, announce := range f.announced {
+				if time.Since(announce.time) > arriveTimeout-gatherSlack {
+					toForget[announce.hash] = struct{}{}
 
 					// If the block still didn't arrive, queue for fetching
-					if f.getBlock(hash) == nil {
-						request[announce.origin] = append(request[announce.origin], hash)
-						f.fetching[hash] = announce
+					if f.getBlock(announce.hash) == nil {
+						request[announce.origin] = append(request[announce.origin], announce.hash)
+						toFetch = append(toFetch, announce)
 					}
 				}
+			}
+			for hash := range toForget {
+				f.forgetHash(hash)
+			}
+			for _, announce := range toFetch {
+				f.fetching[announce.hash] = announce
 			}
 			// Send out all block header requests
 			for peer, hashes := range request {
@@ -559,6 +577,7 @@ func (f *Fetcher) loop() {
 					f.enqueue(announce.origin, block)
 				}
 			}
+		case <- f.queueCh:
 		}
 	}
 }
@@ -566,14 +585,14 @@ func (f *Fetcher) loop() {
 // rescheduleFetch resets the specified fetch timer to the next announce timeout.
 func (f *Fetcher) rescheduleFetch(fetch *time.Timer) {
 	// Short circuit if no blocks are announced
-	if len(f.announced) == 0 {
+	if len(f.announcedS) == 0 {
 		return
 	}
 	// Otherwise find the earliest expiring announcement
 	earliest := time.Now()
-	for _, announces := range f.announced {
-		if earliest.After(announces[0].time) {
-			earliest = announces[0].time
+	for _, announce := range f.announced {
+		if earliest.After(announce.time) {
+			earliest = announce.time
 		}
 	}
 	fetch.Reset(arriveTimeout - time.Since(earliest))
@@ -639,12 +658,14 @@ func (f *Fetcher) insert(peer string, block *types.Block) {
 
 	// Run the import on a new thread
 	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash)
-	go func() {
+//	go func() {
 		defer func() {
-			select {
-			case <-f.quit:
-			case f.done <- hash:
-			}
+			f.forgetHash(hash)
+			f.forgetBlock(hash)
+			//select {
+			//case <-f.quit:
+			//case f.done <- hash:
+			//}
 		}()
 
 		// If the parent's unknown, abort insertion
@@ -682,20 +703,29 @@ func (f *Fetcher) insert(peer string, block *types.Block) {
 		if f.importedHook != nil {
 			f.importedHook(block)
 		}
-	}()
+		//fmt.Printf("Finished importing %d %x\n", block.Number(), hash)
+//	}()
 }
 
 // forgetHash removes all traces of a block announcement from the fetcher's
 // internal state.
 func (f *Fetcher) forgetHash(hash common.Hash) {
 	// Remove all pending announces and decrement DOS counters
-	for _, announce := range f.announced[hash] {
-		f.announces[announce.origin]--
-		if f.announces[announce.origin] <= 0 {
-			delete(f.announces, announce.origin)
+	if _, ok := f.announcedS[hash]; ok {
+		var newAnnounced []*announce
+		for _, announce := range f.announced {
+			if announce.hash == hash {
+				f.announces[announce.origin]--
+				if f.announces[announce.origin] <= 0 {
+					delete(f.announces, announce.origin)
+				}
+			} else {
+				newAnnounced = append(newAnnounced, announce)
+			}
 		}
+		f.announced = newAnnounced
+		delete(f.announcedS, hash)
 	}
-	delete(f.announced, hash)
 	if f.announceChangeHook != nil {
 		f.announceChangeHook(hash, false)
 	}

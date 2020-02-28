@@ -168,6 +168,7 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		// which would prevent full nodes from accepting it.
 		if manager.blockchain.CurrentBlock().NumberU64() < manager.checkpointNumber {
 			log.Warn("Unsynced yet, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
+			log.Warn("Context", "manager.blockchain.CurrentBlock().NumberU64()", manager.blockchain.CurrentBlock().NumberU64(), "manager.checkpointNumber", manager.checkpointNumber)
 			return 0, nil
 		}
 		// If fast sync is running, deny importing weird blocks. This is a problematic
