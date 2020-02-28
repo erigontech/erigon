@@ -115,9 +115,9 @@ func generateBlock(
 		Number:     num.Add(num, common.Big1),
 		GasLimit:   gasLimit,
 		Extra:      extra,
-		Time:       uint64(tstamp),
+		Time:       tstamp,
 		Coinbase:   coinbase,
-		Difficulty: ethash.CalcDifficulty(chainConfig, uint64(tstamp), parent.Header()),
+		Difficulty: ethash.CalcDifficulty(chainConfig, tstamp, parent.Header()),
 	}
 	tds.SetBlockNr(parent.NumberU64())
 	statedb := state.New(tds)
