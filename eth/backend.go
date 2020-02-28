@@ -47,6 +47,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -74,6 +75,7 @@ type Ethereum struct {
 	blockchain      *core.BlockChain
 	protocolManager *ProtocolManager
 	lesServer       LesServer
+	dialCandiates   enode.Iterator
 
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
@@ -236,6 +238,11 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+
+	eth.dialCandiates, err = eth.setupDiscovery(&ctx.Config.P2P)
+	if err != nil {
+		return nil, err
+	}
 
 	return eth, nil
 }
@@ -536,6 +543,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	for i, vsn := range ProtocolVersions {
 		protos[i] = s.protocolManager.makeProtocol(vsn)
 		protos[i].Attributes = []enr.Entry{s.currentEthEntry()}
+		protos[i].DialCandidates = s.dialCandiates
 	}
 
 	// Firehose
