@@ -149,7 +149,7 @@ func generateBlock(
 		*nonce++
 	}
 
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
+	if _, err = engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
 		return nil, err
 	}
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
