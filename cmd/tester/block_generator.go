@@ -31,7 +31,7 @@ type BlockGenerator struct {
 	blockOffsetByNumber map[uint64]uint64
 	headersByHash       map[common.Hash]*types.Header
 	headersByNumber     map[uint64]*types.Header
-	tdByNumber 			map[uint64]*big.Int
+	tdByNumber          map[uint64]*big.Int
 	lastBlock           *types.Block
 	totalDifficulty     *big.Int
 }
@@ -133,22 +133,20 @@ func generateBlock(
 
 		to := randAddress(r)
 		tx := types.NewTransaction(*nonce, to, amount, 21000, gasPrice, []byte{})
-		signed_tx, err := types.SignTx(tx, signer, coinbaseKey)
+		signedTx, err := types.SignTx(tx, signer, coinbaseKey)
 		if err != nil {
 			return nil, err
 		}
-		signedTxs = append(signedTxs, signed_tx)
-		receipt, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signed_tx, usedGas, vmConfig)
+		signedTxs = append(signedTxs, signedTx)
+		receipt, err := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signedTx, usedGas, vmConfig)
 		if err != nil {
-			return nil, fmt.Errorf("tx %x failed: %v", signed_tx.Hash(), err)
+			return nil, fmt.Errorf("tx %x failed: %v", signedTx.Hash(), err)
 		}
 		if !chainConfig.IsByzantium(header.Number) {
 			tds.StartNewBuffer()
 		}
 		receipts = append(receipts, receipt)
 		*nonce++
-	} else {
-		//fmt.Printf("Block %d: Gas limit too low for a transaction: %d\n", height, gasLimit)
 	}
 
 	if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
@@ -233,9 +231,6 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		}
 		header := block.Header()
 		hash := header.Hash()
-		if (height > 1767 && height < 1777) || height >= 49990 {
-			fmt.Printf("bloc gen. Block %d, hash %x, parent: %x\n", block.NumberU64(), hash, header.ParentHash)
-		}
 		bg.headersByHash[hash] = header
 		bg.headersByNumber[block.NumberU64()] = header
 		bg.blockOffsetByHash[hash] = pos
@@ -311,9 +306,6 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 		}
 		header := block.Header()
 		hash := header.Hash()
-		if (height > 1767 && height < 1777) || height >= 49990 {
-			fmt.Printf("fork gen. Block %d, hash %x, parent: %x\n", block.NumberU64(), hash, header.ParentHash)
-		}
 		bg.headersByHash[hash] = header
 		bg.headersByNumber[block.NumberU64()] = header
 		bg.blockOffsetByHash[hash] = pos

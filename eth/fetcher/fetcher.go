@@ -119,17 +119,17 @@ type Fetcher struct {
 
 	// Announce states
 	announces  map[string]int              // Per peer announce counts to prevent memory exhaustion
-	announced  []*announce 				   // Announced blocks, scheduled for fetching
+	announced  []*announce                 // Announced blocks, scheduled for fetching
 	announcedS map[common.Hash]struct{}    // Announced blocks, scheduled for fetching (set)
 	fetching   map[common.Hash]*announce   // Announced blocks, currently fetching
 	fetched    map[common.Hash][]*announce // Blocks with headers fetched, scheduled for body retrieval
 	completing map[common.Hash]*announce   // Blocks with headers, currently body-completing
 
 	// Block cache
-	queue  *prque.Prque            // Queue containing the import operations (block number sorted)
-	queueCh chan struct{}          // Channel to signal that the queue is not yet empty
-	queues map[string]int          // Per peer block counts to prevent memory exhaustion
-	queued map[common.Hash]*inject // Set of already queued blocks (to dedupe imports)
+	queue   *prque.Prque            // Queue containing the import operations (block number sorted)
+	queueCh chan struct{}           // Channel to signal that the queue is not yet empty
+	queues  map[string]int          // Per peer block counts to prevent memory exhaustion
+	queued  map[common.Hash]*inject // Set of already queued blocks (to dedupe imports)
 
 	// Callbacks
 	getBlock       blockRetrievalFn   // Retrieves a block from the local chain
@@ -296,8 +296,8 @@ func (f *Fetcher) loop() {
 		//fmt.Printf("Queue is empty: %t %d\n", f.queue.Empty(), f.queue.Size())
 		for !f.queue.Empty() {
 			select {
-				case <- f.queueCh:
-				default:
+			case <-f.queueCh:
+			default:
 			}
 			op := f.queue.PopItem().(*inject)
 			hash := op.block.Hash()
@@ -577,7 +577,7 @@ func (f *Fetcher) loop() {
 					f.enqueue(announce.origin, block)
 				}
 			}
-		case <- f.queueCh:
+		case <-f.queueCh:
 		}
 	}
 }
@@ -658,53 +658,53 @@ func (f *Fetcher) insert(peer string, block *types.Block) {
 
 	// Run the import on a new thread
 	log.Debug("Importing propagated block", "peer", peer, "number", block.Number(), "hash", hash)
-//	go func() {
-		defer func() {
-			f.forgetHash(hash)
-			f.forgetBlock(hash)
-			//select {
-			//case <-f.quit:
-			//case f.done <- hash:
-			//}
-		}()
+	//	go func() {
+	defer func() {
+		f.forgetHash(hash)
+		f.forgetBlock(hash)
+		//select {
+		//case <-f.quit:
+		//case f.done <- hash:
+		//}
+	}()
 
-		// If the parent's unknown, abort insertion
-		parent := f.getBlock(block.ParentHash())
-		if parent == nil {
-			log.Debug("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
-			return
-		}
-		// Quickly validate the header and propagate the block if it passes
-		switch err := f.verifyHeader(block.Header()); err {
-		case nil:
-			// All ok, quickly propagate to our peers
-			propBroadcastOutTimer.UpdateSince(block.ReceivedAt)
-			go f.broadcastBlock(block, true)
+	// If the parent's unknown, abort insertion
+	parent := f.getBlock(block.ParentHash())
+	if parent == nil {
+		log.Debug("Unknown parent of propagated block", "peer", peer, "number", block.Number(), "hash", hash, "parent", block.ParentHash())
+		return
+	}
+	// Quickly validate the header and propagate the block if it passes
+	switch err := f.verifyHeader(block.Header()); err {
+	case nil:
+		// All ok, quickly propagate to our peers
+		propBroadcastOutTimer.UpdateSince(block.ReceivedAt)
+		go f.broadcastBlock(block, true)
 
-		case consensus.ErrFutureBlock:
-			// Weird future block, don't fail, but neither propagate
+	case consensus.ErrFutureBlock:
+		// Weird future block, don't fail, but neither propagate
 
-		default:
-			// Something went very wrong, drop the peer
-			log.Debug("Propagated block verification failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
-			f.dropPeer(peer)
-			return
-		}
-		// Run the actual import and log any issues
-		if _, err := f.insertChain(types.Blocks{block}); err != nil {
-			log.Debug("Propagated block import failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
-			return
-		}
-		// If import succeeded, broadcast the block
-		propAnnounceOutTimer.UpdateSince(block.ReceivedAt)
-		go f.broadcastBlock(block, false)
+	default:
+		// Something went very wrong, drop the peer
+		log.Debug("Propagated block verification failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
+		f.dropPeer(peer)
+		return
+	}
+	// Run the actual import and log any issues
+	if _, err := f.insertChain(types.Blocks{block}); err != nil {
+		log.Debug("Propagated block import failed", "peer", peer, "number", block.Number(), "hash", hash, "err", err)
+		return
+	}
+	// If import succeeded, broadcast the block
+	propAnnounceOutTimer.UpdateSince(block.ReceivedAt)
+	go f.broadcastBlock(block, false)
 
-		// Invoke the testing hook if needed
-		if f.importedHook != nil {
-			f.importedHook(block)
-		}
-		//fmt.Printf("Finished importing %d %x\n", block.Number(), hash)
-//	}()
+	// Invoke the testing hook if needed
+	if f.importedHook != nil {
+		f.importedHook(block)
+	}
+	//fmt.Printf("Finished importing %d %x\n", block.Number(), hash)
+	//	}()
 }
 
 // forgetHash removes all traces of a block announcement from the fetcher's

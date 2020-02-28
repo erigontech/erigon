@@ -29,7 +29,7 @@ type TesterProtocol struct {
 	forkFeeder       BlockFeeder
 	blockMarkers     []uint64 // Bitmap to remember which blocks (or just header if the blocks are empty) have been sent already
 	// This is to prevent double counting them
-	forkBase uint64
+	forkBase   uint64
 	forkHeight uint64
 }
 
@@ -299,7 +299,7 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	return newSentBlocks, nil
 }
 
-func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgReadWriter) {
+func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgWriter) {
 	var request = make(newBlockHashesData, int(tp.forkHeight))
 	for fb := 0; fb < int(tp.forkHeight); fb++ {
 		blockNumber := tp.forkBase + uint64(fb)
@@ -315,7 +315,7 @@ func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgReadWriter) {
 	}
 }
 
-func (tp *TesterProtocol) announceForkBlocks(rw p2p.MsgReadWriter) {
+func (tp *TesterProtocol) announceForkBlocks(rw p2p.MsgWriter) {
 	for fb := 0; fb < int(tp.forkHeight); fb++ {
 		fb := int(tp.forkHeight) - 1
 		blockNumber := tp.forkBase + uint64(fb)
