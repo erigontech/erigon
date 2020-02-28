@@ -1169,6 +1169,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	storageKey := func(storageKey string) []byte {
 		return append(prefix, common.Hex2Bytes(storageKey)...)
 	}
+
 	putStorage := func(k string, v string) {
 		require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), common.Hex2Bytes(v)))
 	}
@@ -1207,48 +1208,58 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		return false
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, storageKey(k2))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, common.FromHex(accKey+k2))
 	require.NoError(err)
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2))
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+k2))
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2200"))
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"2200"))
 	assert.NoError(err)
 	assert.Equal([]byte{}, v)
 
-	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2233"))
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"2233"))
 	assert.NoError(err)
 	assert.Equal([]byte{}, v)
 
-	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2299"))
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"2299"))
 	assert.NoError(err)
 	assert.Equal([]byte{}, v)
 
 	// step 3: create one new storage
 	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
-		return bytes.HasPrefix(storageKey(k2), prefix)
+		if bytes.HasPrefix(common.FromHex(accKey+k3), prefix) {
+			return false
+		}
+		if bytes.HasPrefix(common.FromHex(accKey+k2), prefix) {
+			return true
+		}
+		return false
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, storageKey(k3))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k3))
 	require.NoError(err)
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k2)) // results of step2 was preserved
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+k2)) // results of step2 was preserved
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("22")) // results of step2 was preserved
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"22")) // results of step2 was preserved
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("2211")) // results of step2 was preserved
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"2211")) // results of step2 was preserved
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("221100")) // results of step2 was preserved
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"221100")) // results of step2 was preserved
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	_, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey(k3))
+	_, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+k3))
 	assert.True(errors.Is(err, ethdb.ErrKeyNotFound))
 
-	v, err = db.Get(dbutils.IntermediateTrieHashBucket, storageKey("223399")) // one of k3 prefix siblings
+	//db.Walk(dbutils.IntermediateTrieHashBucket, nil, 0, func(k, v []byte) (bool, error) {
+	//	fmt.Printf("%x %x\n", k, v)
+	//	return true, nil
+	//})
+	v, err = db.Get(dbutils.IntermediateTrieHashBucket, common.FromHex(accKey+"223399")) // one of k3 prefix siblings
 	assert.NoError(err)
 	assert.Equal([]byte{}, v)
 }
