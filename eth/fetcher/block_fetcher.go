@@ -401,12 +401,15 @@ func (f *BlockFetcher) loop() {
 			var toFetch []*blockAnnounce
 			for _, announce := range f.announced {
 				if time.Since(announce.time) > arriveTimeout-gatherSlack {
-					toForget[announce.hash] = struct{}{}
 
-					// If the block still didn't arrive, queue for fetching
-					if f.getBlock(announce.hash) == nil {
-						request[announce.origin] = append(request[announce.origin], announce.hash)
-						toFetch = append(toFetch, announce)
+					if _, ok := toForget[announce.hash]; !ok {
+						// If the block still didn't arrive, queue for fetching
+						if f.getBlock(announce.hash) == nil {
+							// TODO randomise?
+							request[announce.origin] = append(request[announce.origin], announce.hash)
+							toFetch = append(toFetch, announce)
+						}
+						toForget[announce.hash] = struct{}{}
 					}
 				}
 			}
