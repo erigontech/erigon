@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"math/big"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -31,11 +30,6 @@ type TesterProtocol struct {
 	// This is to prevent double counting them
 	forkBase   uint64
 	forkHeight uint64
-}
-
-type newBlockData struct {
-	Block *types.Block
-	TD    *big.Int
 }
 
 func NewTesterProtocol() *TesterProtocol {
@@ -312,25 +306,6 @@ func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgWriter) {
 	}
 	if err := p2p.Send(rw, eth.NewBlockHashesMsg, request); err != nil {
 		panic(err)
-	}
-}
-
-func (tp *TesterProtocol) announceForkBlocks(rw p2p.MsgWriter) {
-	for fb := 0; fb < int(tp.forkHeight); fb++ {
-		fb := int(tp.forkHeight) - 1
-		blockNumber := tp.forkBase + uint64(fb)
-		block, err := tp.forkFeeder.GetBlockByNumber(blockNumber)
-		if err != nil {
-			panic(err)
-		}
-		var request newBlockData
-		request.Block = block
-		request.TD = tp.forkFeeder.GetTdByNumber(blockNumber)
-		if err = p2p.Send(rw, eth.NewBlockMsg, request); err != nil {
-			panic(err)
-		}
-		fmt.Printf("Announced fork block %d with hash %x\n", blockNumber, block.Hash())
-		time.Sleep(1 * time.Second)
 	}
 }
 
