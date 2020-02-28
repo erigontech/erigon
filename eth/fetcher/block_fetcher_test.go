@@ -286,6 +286,7 @@ func testSequentialAnnouncements(t *testing.T, protocol int) {
 	hashes, blocks := makeChain(targetBlocks, 0, genesis)
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -313,6 +314,7 @@ func testConcurrentAnnouncements(t *testing.T, protocol int) {
 
 	// Assemble a tester with a built in counter for the requests
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	firstHeaderFetcher := tester.makeHeaderFetcher("first", blocks, -gatherSlack)
 	firstBodyFetcher := tester.makeBodyFetcher("first", blocks, 0)
 	secondHeaderFetcher := tester.makeHeaderFetcher("second", blocks, -gatherSlack)
@@ -357,6 +359,7 @@ func testOverlappingAnnouncements(t *testing.T, protocol int) {
 	hashes, blocks := makeChain(targetBlocks, 0, genesis)
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -391,6 +394,7 @@ func testPendingDeduplication(t *testing.T, protocol int) {
 
 	// Assemble a tester with a built in counter and delayed fetcher
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("repeater", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("repeater", blocks, 0)
 
@@ -435,6 +439,7 @@ func testRandomArrivalImport(t *testing.T, protocol int) {
 	skip := targetBlocks / 2
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -466,6 +471,7 @@ func testQueueGapFill(t *testing.T, protocol int) {
 	skip := targetBlocks / 2
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -496,6 +502,7 @@ func testImportDeduplication(t *testing.T, protocol int) {
 
 	// Create the tester and wrap the importer with a counter
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -538,6 +545,7 @@ func TestDistantPropagationDiscarding(t *testing.T) {
 
 	// Create a tester and simulate a head block being the middle of the above chain
 	tester := newTester()
+	defer tester.fetcher.Stop()
 
 	tester.lock.Lock()
 	tester.hashes = []common.Hash{head}
@@ -574,6 +582,7 @@ func testDistantAnnouncementDiscarding(t *testing.T, protocol int) {
 
 	// Create a tester and simulate a head block being the middle of the above chain
 	tester := newTester()
+	defer tester.fetcher.Stop()
 
 	tester.lock.Lock()
 	tester.hashes = []common.Hash{head}
@@ -613,6 +622,7 @@ func testInvalidNumberAnnouncement(t *testing.T, protocol int) {
 	hashes, blocks := makeChain(1, 0, genesis)
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	badHeaderFetcher := tester.makeHeaderFetcher("bad", blocks, -gatherSlack)
 	badBodyFetcher := tester.makeBodyFetcher("bad", blocks, 0)
 
@@ -658,6 +668,7 @@ func testEmptyBlockShortCircuit(t *testing.T, protocol int) {
 	hashes, blocks := makeChain(32, 0, genesis)
 
 	tester := newTester()
+	defer tester.fetcher.Stop()
 	headerFetcher := tester.makeHeaderFetcher("valid", blocks, -gatherSlack)
 	bodyFetcher := tester.makeBodyFetcher("valid", blocks, 0)
 
@@ -697,6 +708,7 @@ func TestHashMemoryExhaustionAttack64(t *testing.T) { testHashMemoryExhaustionAt
 func testHashMemoryExhaustionAttack(t *testing.T, protocol int) {
 	// Create a tester with instrumented import hooks
 	tester := newTester()
+	defer tester.fetcher.Stop()
 
 	imported, announces := make(chan *types.Block), int32(0)
 	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
@@ -744,6 +756,7 @@ func testHashMemoryExhaustionAttack(t *testing.T, protocol int) {
 func TestBlockMemoryExhaustionAttack(t *testing.T) {
 	// Create a tester with instrumented import hooks
 	tester := newTester()
+	defer tester.fetcher.Stop()
 
 	imported, enqueued := make(chan *types.Block), int32(0)
 	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
