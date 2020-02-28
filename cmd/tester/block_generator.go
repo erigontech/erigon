@@ -227,7 +227,9 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 		if err4 != nil {
 			return nil, err4
 		}
-		output.Write(buffer)
+		if _, err5 := output.Write(buffer); err5 != nil {
+			return nil, err5
+		}
 		header := block.Header()
 		hash := header.Hash()
 		bg.headersByHash[hash] = header
@@ -301,7 +303,9 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 		if err2 != nil {
 			return nil, err2
 		}
-		output.Write(buffer)
+		if _, err3 := output.Write(buffer); err3 != nil {
+			return nil, err3
+		}
 		header := block.Header()
 		hash := header.Hash()
 		bg.headersByHash[hash] = header
