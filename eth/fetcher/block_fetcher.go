@@ -140,17 +140,17 @@ type BlockFetcher struct {
 	quit chan struct{}
 
 	// Announce states
-	announces  map[string]int              // Per peer announce counts to prevent memory exhaustion
+	announces  map[string]int                   // Per peer announce counts to prevent memory exhaustion
 	announced  []*blockAnnounce                 // Announced blocks, scheduled for fetching
-	announcedS map[common.Hash]struct{}    // Announced blocks, scheduled for fetching (set)
+	announcedS map[common.Hash]struct{}         // Announced blocks, scheduled for fetching (set)
 	fetching   map[common.Hash]*blockAnnounce   // Announced blocks, currently fetching
 	fetched    map[common.Hash][]*blockAnnounce // Blocks with headers fetched, scheduled for body retrieval
 	completing map[common.Hash]*blockAnnounce   // Blocks with headers, currently body-completing
 
 	// Block cache
-	queue   *prque.Prque            // Queue containing the import operations (block number sorted)
-	queueCh chan struct{}           // Channel to signal that the queue is not yet empty
-	queues  map[string]int          // Per peer block counts to prevent memory exhaustion
+	queue   *prque.Prque                 // Queue containing the import operations (block number sorted)
+	queueCh chan struct{}                // Channel to signal that the queue is not yet empty
+	queues  map[string]int               // Per peer block counts to prevent memory exhaustion
 	queued  map[common.Hash]*blockInject // Set of already queued blocks (to dedupe imports)
 
 	// Callbacks
