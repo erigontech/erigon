@@ -242,39 +242,7 @@ func (db *Database) DiskDB() ethdb.Database {
 // reference counting, since trie nodes are garbage collected directly through
 // their embedded children.
 func (db *Database) InsertBlob(hash common.Hash, blob []byte) {
-}
-
-// insert inserts a collapsed trie node into the memory database. This method is
-// a more generic version of InsertBlob, supporting both raw blob insertions as
-// well ex trie node insertions. The blob must always be specified to allow proper
-// size tracking.
-func (db *Database) insert(hash common.Hash, blob []byte, node node) {
-	// If the node's already cached, skip
-	if _, ok := db.dirties[hash]; ok {
-		return
-	}
-	memcacheDirtyWriteMeter.Mark(int64(len(blob)))
-
-	// Create the cached entry for this node
-	entry := &cachedNode{
-		node:      simplifyNode(node),
-		size:      uint16(len(blob)),
-		flushPrev: db.newest,
-	}
-	entry.forChilds(func(child common.Hash) {
-		if c := db.dirties[child]; c != nil {
-			c.parents++
-		}
-	})
-	db.dirties[hash] = entry
-
-	// Update the flush-list endpoints
-	if db.oldest == (common.Hash{}) {
-		db.oldest, db.newest = hash, hash
-	} else {
-		db.dirties[db.newest].flushNext, db.newest = hash, hash
-	}
-	db.dirtiesSize += common.StorageSize(common.HashLength + entry.size)
+	// Turbo-Geth: Intentionally left blank
 }
 
 // insertPreimage writes a new trie node pre-image to the memory database if it's

@@ -36,10 +36,10 @@ import (
 // the protocol stack, that is passed to all constructors to be optionally used;
 // as well as utility methods to operate on the service environment.
 type ServiceContext struct {
-	config         *Config
 	services       map[reflect.Type]Service // Index of the already constructed services
-	EventMux       *event.TypeMux           // Event multiplexer used for decoupled notifications
-	AccountManager *accounts.Manager        // Account manager created by the node.
+	Config         Config
+	EventMux       *event.TypeMux    // Event multiplexer used for decoupled notifications
+	AccountManager *accounts.Manager // Account manager created by the node.
 }
 
 // OpenDatabaseWithFreezer
@@ -52,21 +52,21 @@ func (ctx *ServiceContext) OpenDatabaseWithFreezer(name string, freezer string) 
 // if no previous can be found) from within the node's data directory. If the
 // node is an ephemeral one, a memory database is returned.
 func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
-	if ctx.config.DataDir == "" {
+	if ctx.Config.DataDir == "" {
 		return ethdb.NewMemDatabase(), nil
 	}
 
-	if ctx.config.BadgerDB {
+	if ctx.Config.BadgerDB {
 		log.Info("Opening Database (Badger)")
-		return ethdb.NewBadgerDatabase(ctx.config.ResolvePath(name + "_badger"))
+		return ethdb.NewBadgerDatabase(ctx.Config.ResolvePath(name + "_badger"))
 	}
 
 	log.Info("Opening Database (Bolt)")
-	boltDb, err := ethdb.NewBoltDatabase(ctx.config.ResolvePath(name))
+	boltDb, err := ethdb.NewBoltDatabase(ctx.Config.ResolvePath(name))
 	if err != nil {
 		return nil, err
 	}
-	if ctx.config.RemoteDbListenAddress != "" {
+	if ctx.Config.RemoteDbListenAddress != "" {
 		// TODO: implement node.Service, then Stop() will called on SIGINT | SIGTERM and we can call cancel() there
 		tcpCtx, cancel := context.WithCancel(context.Background())
 		go func() {
@@ -83,7 +83,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 			cancel()
 		}()
 
-		go remote.Listener(tcpCtx, boltDb.DB(), ctx.config.RemoteDbListenAddress)
+		go remote.Listener(tcpCtx, boltDb.DB(), ctx.Config.RemoteDbListenAddress)
 	}
 	return boltDb, nil
 	/*
@@ -107,7 +107,7 @@ func (ctx *ServiceContext) OpenDatabase(name string) (ethdb.Database, error) {
 // and if the user actually uses persistent storage. It will return an empty string
 // for emphemeral storage and the user's own input for absolute paths.
 func (ctx *ServiceContext) ResolvePath(path string) string {
-	return ctx.config.ResolvePath(path)
+	return ctx.Config.ResolvePath(path)
 }
 
 // Service retrieves a currently running service registered of a specific type.
@@ -123,7 +123,7 @@ func (ctx *ServiceContext) Service(service interface{}) error {
 // ExtRPCEnabled returns the indicator whether node enables the external
 // RPC(http, ws or graphql).
 func (ctx *ServiceContext) ExtRPCEnabled() bool {
-	return ctx.config.ExtRPCEnabled()
+	return ctx.Config.ExtRPCEnabled()
 }
 
 // ServiceConstructor is the function signature of the constructors needed to be

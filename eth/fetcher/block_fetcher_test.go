@@ -79,7 +79,7 @@ func makeChain(n int, seed byte, parent *types.Block) ([]common.Hash, map[common
 
 // fetcherTester is a test simulator for mocking out local block chain.
 type fetcherTester struct {
-	fetcher *Fetcher
+	fetcher *BlockFetcher
 
 	hashes []common.Hash                // Hash chain belonging to the tester
 	blocks map[common.Hash]*types.Block // Blocks belonging to the tester
@@ -95,7 +95,7 @@ func newTester() *fetcherTester {
 		blocks: map[common.Hash]*types.Block{genesis.Hash(): genesis},
 		drops:  make(map[string]bool),
 	}
-	tester.fetcher = New(tester.getBlock, tester.verifyHeader, tester.broadcastBlock, tester.chainHeight, tester.insertChain, tester.dropPeer)
+	tester.fetcher = NewBlockFetcher(tester.getBlock, tester.verifyHeader, tester.broadcastBlock, tester.chainHeight, tester.insertChain, tester.dropPeer)
 	tester.fetcher.Start()
 
 	return tester
