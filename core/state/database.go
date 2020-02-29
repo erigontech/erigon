@@ -877,7 +877,7 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 
 	buf.B = buf.B[:cap(buf.B)]
 	foundTombStone := false
-	for i := common.HashLength + 1; i < len(compositeKey); i++ { // +1 because first step happened during account re-creation
+	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
 		if someStorageExistsInThisSubtree(compositeKey[:i]) {
 			continue
 		}
@@ -899,7 +899,6 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 
 			buf.B[i] = uint8(j)
 
-			//fmt.Printf("Put: %x\n", buf.B[:i+1])
 			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
 				return err
 			}

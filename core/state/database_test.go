@@ -1237,13 +1237,16 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k3))
 	require.NoError(err)
 	checks = map[string]bool{
-		accKey + k2:           false, // results of step2 preserved
-		accKey + "22":         false, // results of step2 preserved
-		accKey + "2211":       false, // results of step2 preserved
-		accKey + "22110000":   false, // results of step2 preserved
-		accKey + k3:           false,
-		accKey + "223399":     true,
-		accKey + "2233000099": true,
+		accKey + k2:                            false, // results of step2 preserved
+		accKey + "22":                          false, // results of step2 preserved
+		accKey + "2211":                        false, // results of step2 preserved
+		accKey + "22110000":                    false, // results of step2 preserved
+		accKey + k3:                            false,
+		accKey + "223399":                      true,
+		accKey + fmt.Sprintf("2233%04x99", 0):  true,
+		accKey + fmt.Sprintf("2233%058x99", 0): true,  // len=64
+		accKey + fmt.Sprintf("2233%060x99", 0): false, // len=66, too long key
+		accKey + fmt.Sprintf("2233%062x99", 0): false, // len=68, too long key
 	}
 
 	for k, expect := range checks {
