@@ -102,6 +102,7 @@ type DB struct {
 
 var buckets = [][]byte{
 	dbutils.IntermediateTrieHashBucket,
+	dbutils.AccountsBucket,
 }
 
 func (opts Options) Open(ctx context.Context) (db *DB, err error) {
@@ -370,7 +371,8 @@ func (b Bucket) Cursor() *Cursor {
 		// nothing to do
 	case Badger:
 		c.badgerOpts = badger.DefaultIteratorOptions
-		c.badgerOpts.Prefix = append(b.badgerPrefix[:b.nameLen], c.prefix...) // set bucket
+		b.badgerPrefix = append(b.badgerPrefix[:b.nameLen], c.prefix...) // set bucket
+		c.badgerOpts.Prefix = b.badgerPrefix                             // set bucket
 	case Remote:
 		c.remoteOpts = remote.DefaultCursorOpts
 	}
@@ -380,32 +382,29 @@ func (b Bucket) Cursor() *Cursor {
 func (c *Cursor) initCursor() {
 	switch c.provider {
 	case Bolt:
-		if c.bolt == nil {
-			c.bolt = c.bucket.bolt.Cursor()
+		if c.bolt != nil {
+			return
 		}
+		c.bolt = c.bucket.bolt.Cursor()
 	case Badger:
-		if c.badger == nil {
-			c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
-			// add to auto-cleanup on end of transactions
-			if c.bucket.tx.badgerIterators == nil {
-				c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
-			}
-			c.bucket.tx.badgerIterators = append(c.bucket.tx.badgerIterators, c.badger)
+		if c.badger != nil {
+			return
 		}
+		c.badger = c.bucket.tx.badger.NewIterator(c.badgerOpts)
+		// add to auto-cleanup on end of transactions
+		if c.bucket.tx.badgerIterators == nil {
+			c.bucket.tx.badgerIterators = make([]*badger.Iterator, 0, 1)
+		}
+		c.bucket.tx.badgerIterators = append(c.bucket.tx.badgerIterators, c.badger)
 	case Remote:
-		if c.remote == nil {
-			c.remote = c.bucket.remote.Cursor(c.remoteOpts)
+		if c.remote != nil {
+			return
 		}
+		c.remote = c.bucket.remote.Cursor(c.remoteOpts)
 	}
 }
 
 func (c *Cursor) First() ([]byte, []byte, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	default:
-	}
-
 	c.initCursor()
 
 	switch c.provider {
@@ -504,12 +503,6 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 }
 
 func (c *Cursor) FirstKey() ([]byte, uint64, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
-	default:
-	}
-
 	c.initCursor()
 
 	var vSize uint64
