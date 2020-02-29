@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
-const TraceFromBlock uint64 = 200355
+const TraceFromBlock uint64 = 258199
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
@@ -119,11 +119,7 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		err := tr.hookFunction(tr.currentReq, hbRoot, hbHash)
-		if err != nil {
-			return err
-		}
-		return nil
+		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 	}
 	return nil
 }
@@ -205,9 +201,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	//		fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
 	//		fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
 	//	}
-	//	for _, k := range startkeys {
-	//		fmt.Printf("fixedbits: %d, k: %x\n", fixedbits, k)
-	//	}
+	//	fmt.Printf("fixedbits: %d\n", fixedbits)
+	//	fmt.Printf("startkey: %x\n", startkeys)
 	//}
 
 	var err error
@@ -233,9 +228,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
 			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
 		}
-		for _, k := range startkeys {
-			fmt.Printf("fixedbits: %d, k: %x\n", fixedbits, k)
-		}
+		fmt.Printf("fixedbits: %d\n", fixedbits)
+		fmt.Printf("startkey: %x\n", startkeys)
 
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
@@ -302,7 +296,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 			}
 			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
-				return fmt.Errorf("fail GenStructStep: %w", err)
+				return err
 			}
 		}
 		// Remember the current key and value
@@ -376,7 +370,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			//if blockNr > TraceFromBlock {
-			//	fmt.Printf("For loop: %x %x\n", cacheK, k)
+			//	fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			//}
 
 			// for Address bucket, skip cache keys longer than 31 bytes

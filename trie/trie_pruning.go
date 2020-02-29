@@ -89,10 +89,6 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 		return
 	}
 	if !del {
-		if !exists { // Created New node
-			tp.createNodeFunc([]byte(hexS))
-		}
-
 		var newMap map[string]struct{}
 		if m, ok := tp.accounts[newTimestamp]; ok {
 			newMap = m
@@ -148,6 +144,9 @@ func (tp *TriePruning) Touch(hex []byte, del bool) {
 	}
 	if !del {
 		tp.accountTimestamps[hexS] = tp.blockNr
+	}
+	if !exists {
+		tp.createNodeFunc([]byte(hexS))
 	}
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)

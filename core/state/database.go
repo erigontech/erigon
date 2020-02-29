@@ -262,14 +262,83 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	return &cpy
 }
 
-func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
+func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
+	addrHashBytes := addrHash[:]
+	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
+		return err
+	} else if !ok {
+		return nil
+	}
+
+	buf := pool.GetBuffer(common.HashLength * 2)
+	defer pool.PutBuffer(buf)
+	copy(buf.B, addrHashBytes)
+
+	i := common.HashLength
+	for j := 0; j < 256; j++ {
+		buf.B[i] = uint8(j)
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
+			return err
+		}
+	}
+
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
+		return err
+	}
+	return nil
+}
+
+func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, prefix []byte) {
 	if len(prefix) != common.HashLength {
 		return
 	}
 
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
+}
+
+func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
+	if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
+		return nil
+	}
+
+	buf := pool.GetBuffer(128)
+	defer pool.PutBuffer(buf)
+
+	buf.B = buf.B[:cap(buf.B)]
+	foundTombStone := false
+	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
+		if someStorageExistsInThisSubtree(compositeKey[:i]) {
+			continue
+		}
+
+		if !foundTombStone {
+			if ok, err := HasTombstone(db, compositeKey[:i]); err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+			foundTombStone = true
+		}
+
+		copy(buf.B, compositeKey[:i+1])
+		for j := 0; j < 256; j++ {
+			if compositeKey[i] == uint8(j) {
+				continue
+			}
+
+			buf.B[i] = uint8(j)
+
+			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
+				return err
+			}
+		}
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
@@ -817,11 +886,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
-			acc, ok := tds.t.GetAccount(addrHash[:])
 			tds.t.DeleteSubtree(addrHash[:])
-			if ok && acc != nil && acc.Root != trie.EmptyRoot {
-				tds.markSubtreeEmptyInIntermediateHash(addrHash[:])
-			}
+			// TODO: how to check if account has storage?
+			PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -838,75 +905,6 @@ func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
 		return false, err
 	}
 	return v != nil && len(v) == 0, nil
-}
-
-func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
-	addrHashBytes := addrHash[:]
-	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
-		return err
-	} else if !ok {
-		return nil
-	}
-
-	buf := pool.GetBuffer(common.HashLength * 2)
-	defer pool.PutBuffer(buf)
-	copy(buf.B, addrHashBytes)
-
-	i := common.HashLength
-	for j := 0; j < 256; j++ {
-		buf.B[i] = uint8(j)
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
-			return err
-		}
-	}
-
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
-		return err
-	}
-	return nil
-}
-
-func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
-	if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
-		return nil
-	}
-
-	buf := pool.GetBuffer(128)
-	defer pool.PutBuffer(buf)
-
-	buf.B = buf.B[:cap(buf.B)]
-	foundTombStone := false
-	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
-		if someStorageExistsInThisSubtree(compositeKey[:i]) {
-			continue
-		}
-
-		if !foundTombStone {
-			if ok, err := HasTombstone(db, compositeKey[:i]); err != nil {
-				return err
-			} else if !ok {
-				continue
-			}
-			foundTombStone = true
-		}
-
-		copy(buf.B, compositeKey[:i+1])
-		for j := 0; j < 256; j++ {
-			if compositeKey[i] == uint8(j) {
-				continue
-			}
-
-			buf.B[i] = uint8(j)
-
-			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
-				return err
-			}
-		}
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (tds *TrieDbState) clearUpdates() {
