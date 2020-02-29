@@ -108,3 +108,31 @@ var (
 	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
 	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 )
+
+var Buckets = [][]byte{
+	AccountsBucket,
+	AccountsHistoryBucket,
+	StorageBucket,
+	StorageHistoryBucket,
+	CodeBucket,
+	ContractCodeBucket,
+	ChangeSetBucket,
+	IntermediateTrieHashBucket,
+	DatabaseVerisionKey,
+	HeadHeaderKey,
+	HeadBlockKey,
+	HeadFastBlockKey,
+	FastTrieProgressKey,
+	HeaderPrefix,
+	HeaderTDSuffix,
+	HeaderHashSuffix,
+	HeaderNumberPrefix,
+	BlockBodyPrefix,
+	BlockReceiptsPrefix,
+	TxLookupPrefix,
+	BloomBitsPrefix,
+	PreimagePrefix,
+	ConfigPrefix,
+	BloomBitsIndexPrefix,
+	LastPrunedBlockKey,
+}
