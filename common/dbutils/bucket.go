@@ -36,12 +36,21 @@ var (
 	//value - code hash
 	ContractCodeBucket = []byte("contractCode")
 
-	// key - encoded timestamp(block number) + history bucket(hAT/hST)
-	// value - encoded ChangeSet{k - addrHash|compositeKey(for storage) v - account(encoded) | originalValue(common.Hash)}
-	ChangeSetBucket = []byte("ChangeSet")
+	//AccountChangeSetBucket keeps changesets of accounts
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - addrHash v - account(encoded).
+	AccountChangeSetBucket = []byte("ACS")
+
+	// StorageChangeSetBucket keeps changesets of storage
+	// key - encoded timestamp(block number)
+	// value - encoded ChangeSet{k - compositeKey(for storage) v - originalValue(common.Hash)}.
+	StorageChangeSetBucket = []byte("SCS")
 
 	// some_prefix_of(hash_of_address_of_account) => hash_of_subtrie
 	IntermediateTrieHashBucket = []byte("iTh")
+
+	// DatabaseInfoBucket is used to store information about data layout.
+	DatabaseInfoBucket = []byte("DBINFO")
 
 	// databaseVerisionKey tracks the current database version.
 	DatabaseVerisionKey = []byte("DatabaseVersion")
@@ -82,4 +91,20 @@ var (
 	// last block that was pruned
 	// it's saved one in 5 minutes
 	LastPrunedBlockKey = []byte("LastPrunedBlock")
+
+	// LastAppliedMigration keep the name of tle last applied migration.
+	LastAppliedMigration = []byte("lastAppliedMigration")
+
+	//StorageModeHistory - does node save history.
+	StorageModeHistory = []byte("smHistory")
+	//StorageModeReceipts - does node save receipts.
+	StorageModeReceipts = []byte("smReceipts")
+	//StorageModeTxIndex - does node save transactions index.
+	StorageModeTxIndex = []byte("smTxIndex")
+	//StorageModePreImages - does node save hash to value mapping
+	StorageModePreImages = []byte("smPreImages")
+	//StorageModeThinHistory - does thin history mode enabled
+	StorageModeThinHistory = []byte("smThinHistory")
+	//StorageModeIntermediateTrieHash - does IntermediateTrieHash feature enabled
+	StorageModeIntermediateTrieHash = []byte("smIntermediateTrieHash")
 )
