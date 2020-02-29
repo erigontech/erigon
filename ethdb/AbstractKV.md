@@ -76,6 +76,6 @@ Known problems: mutation.Put does copy internally.
 - Backups, tx.WriteTo
 
 ## Naming: 
-- `Iter` shorter `Cursor` is shorter than `Iterator`
+- `Iter` shorter `Cursor` shorter `Iterator`
 - `Opts` shorter `Options`
 - `Walk` shorter `ForEach`
