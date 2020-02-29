@@ -808,6 +808,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 		roots[i] = tds.t.Hash()
 	}
+
 	return roots, nil
 }
 
