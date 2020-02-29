@@ -16,7 +16,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
-const TraceFromBlock uint64 = 1150454
+const TraceFromBlock uint64 = 200355
 
 type ResolverStatefulCached struct {
 	*ResolverStateful
@@ -230,11 +230,11 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	if err = tr.finaliseRoot(); err != nil {
 		fmt.Println("Err in finalize root, writing down resolve params")
 		for _, req := range tr.requests {
-			fmt.Printf("A: %d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-			fmt.Printf("B: %x %x\n", req.contract, req.resolveHex)
+			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
 		}
 		for _, k := range startkeys {
-			fmt.Printf("C: %d %x\n", fixedbits, k)
+			fmt.Printf("fixedbits: %d, k: %x\n", fixedbits, k)
 		}
 
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
