@@ -24,11 +24,44 @@ const DefaultProvider = Bolt
 
 type Options struct {
 	provider DbProvider
-	Remote   remote.DbOpts
-	Bolt     *bolt.Options
-	Badger   badger.Options
+
+	Remote remote.DbOpts
+	Bolt   *bolt.Options
+	Badger badger.Options
 
 	path string
+}
+
+func NewBolt() Options {
+	opts := Options{provider: Bolt, Bolt: bolt.DefaultOptions}
+	return opts
+}
+
+func NewBadger() Options {
+	opts := Options{provider: Badger, Badger: badger.DefaultOptions("")}
+	return opts
+}
+
+func NewRemote() Options {
+	opts := Options{provider: Badger, Remote: remote.DefaultOpts}
+	return opts
+}
+
+func NewMemDb() Options {
+	return Opts().InMem(true)
+}
+
+func ProviderOpts(provider DbProvider) Options {
+	switch provider {
+	case Bolt:
+		return NewBolt()
+	case Badger:
+		return NewBadger()
+	case Remote:
+		return NewRemote()
+	default:
+		panic("unknown db provider: " + strconv.Itoa(int(provider)))
+	}
 }
 
 func Opts() Options {
@@ -57,22 +90,6 @@ func (opts Options) InMem(val bool) Options {
 	case Remote:
 		panic("not supported")
 	}
-	return opts
-}
-
-func ProviderOpts(provider DbProvider) Options {
-	opts := Options{provider: provider}
-	switch opts.provider {
-	case Bolt:
-		opts.Bolt = bolt.DefaultOptions
-	case Badger:
-		opts.Badger = badger.DefaultOptions(opts.path)
-	case Remote:
-		opts.Remote = remote.DefaultOpts
-	default:
-		panic("unknown db provider: " + strconv.Itoa(int(provider)))
-	}
-
 	return opts
 }
 

@@ -34,11 +34,11 @@ func setupDatabases() {
 	ctx := context.Background()
 	var errOpen error
 
-	boltDb, errOpen = ethdb.ProviderOpts(ethdb.Bolt).Path("test").Open(ctx)
+	boltDb, errOpen = ethdb.NewBolt().Path("test").Open(ctx)
 	if errOpen != nil {
 		panic(errOpen)
 	}
-	badgerDb, errOpen = ethdb.ProviderOpts(ethdb.Badger).Path("test2").Open(ctx)
+	badgerDb, errOpen = ethdb.NewBadger().Path("test2").Open(ctx)
 	if errOpen != nil {
 		panic(errOpen)
 	}
