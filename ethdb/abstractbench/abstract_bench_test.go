@@ -75,7 +75,7 @@ func setupDatabases() {
 	}
 	now = time.Now()
 
-	if err := boltDb.Update(ctx, func(tx *ethdb.Tx) error {
+	if err := boltDb.Update(ctx, func(tx ethdb.Tx) error {
 		defer fmt.Println("abstract bolt filled: ", time.Since(now))
 
 		v := make([]byte, vsize)
@@ -94,7 +94,7 @@ func setupDatabases() {
 	}
 	now = time.Now()
 
-	if err := badgerDb.Update(ctx, func(tx *ethdb.Tx) error {
+	if err := badgerDb.Update(ctx, func(tx ethdb.Tx) error {
 		defer fmt.Println("abstract badger filled: ", time.Since(now))
 
 		v := make([]byte, vsize)
@@ -133,7 +133,7 @@ func BenchmarkCursor(b *testing.B) {
 	b.ResetTimer()
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			if err := boltDb.View(ctx, func(tx *ethdb.Tx) error {
+			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
 				bucket := tx.Bucket(dbutils.AccountsBucket)
 				c := bucket.Cursor()
 

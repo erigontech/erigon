@@ -20,7 +20,7 @@ func TestManagedTx(t *testing.T) {
 		db, errOpen := ethdb.Open(ctx, ethdb.NewBolt().InMem(true))
 		assert.NoError(t, errOpen)
 
-		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
+		if err := db.Update(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 
 			if err := b.Put([]byte("key1"), []byte("val1")); err != nil {
@@ -36,7 +36,7 @@ func TestManagedTx(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		if err := db.View(ctx, func(tx *ethdb.Tx) error {
+		if err := db.View(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 			c := b.Cursor().Prefetch(1000)
 
@@ -74,7 +74,7 @@ func TestManagedTx(t *testing.T) {
 		db, errOpen := ethdb.Open(ctx, ethdb.NewBadger().InMem(true))
 		assert.NoError(t, errOpen)
 
-		if err := db.Update(ctx, func(tx *ethdb.Tx) error {
+		if err := db.Update(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 			if err := b.Put([]byte{0, 1}, []byte{1}); err != nil {
 				return err
@@ -94,7 +94,7 @@ func TestManagedTx(t *testing.T) {
 			assert.NoError(t, err)
 		}
 
-		if err := db.View(ctx, func(tx *ethdb.Tx) error {
+		if err := db.View(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 
 			//err := b.Iter().From(key).MatchBits(common.HashLength * 8).Walk()
@@ -158,7 +158,7 @@ func TestCancelTest(t *testing.T) {
 
 	db, errOpen := ethdb.Open(ctx, ethdb.NewBolt().InMem(true))
 	assert.NoError(t, errOpen)
-	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
+	if err := db.Update(ctx, func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if err := b.Put([]byte{1}, []byte{1}); err != nil {
 			return err
@@ -182,7 +182,7 @@ func TestFilterTest(t *testing.T) {
 
 	db, errOpen := ethdb.Open(ctx, ethdb.NewBolt().InMem(true))
 	assert.NoError(t, errOpen)
-	if err := db.Update(ctx, func(tx *ethdb.Tx) error {
+	if err := db.Update(ctx, func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if err := b.Put(common.FromHex("10"), []byte{1}); err != nil {
 			return err

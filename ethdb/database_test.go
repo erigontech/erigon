@@ -59,7 +59,7 @@ func newTestBadgerDB() (*BadgerDatabase, func()) {
 	}
 }
 
-var bucket = []byte("TestBucket")
+var testBucket = []byte("TestBucket")
 var testValues = []string{"a", "1251", "\x00123\x00"}
 
 func TestBoltDB_PutGet(t *testing.T) {
@@ -82,14 +82,14 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	t.Parallel()
 
 	for _, k := range testValues {
-		err := db.Put(bucket, []byte(k), nil)
+		err := db.Put(testBucket, []byte(k), nil)
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
 	}
 
 	for _, k := range testValues {
-		data, err := db.Get(bucket, []byte(k))
+		data, err := db.Get(testBucket, []byte(k))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -98,20 +98,20 @@ func testPutGet(db MinDatabase, t *testing.T) {
 		}
 	}
 
-	_, err := db.Get(bucket, []byte("non-exist-key"))
+	_, err := db.Get(testBucket, []byte("non-exist-key"))
 	if err == nil {
 		t.Fatalf("expect to return a not found error")
 	}
 
 	for _, v := range testValues {
-		err := db.Put(bucket, []byte(v), []byte(v))
+		err := db.Put(testBucket, []byte(v), []byte(v))
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
 	}
 
 	for _, v := range testValues {
-		data, err := db.Get(bucket, []byte(v))
+		data, err := db.Get(testBucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -121,14 +121,14 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		err := db.Put(bucket, []byte(v), []byte("?"))
+		err := db.Put(testBucket, []byte(v), []byte("?"))
 		if err != nil {
 			t.Fatalf("put override failed: %v", err)
 		}
 	}
 
 	for _, v := range testValues {
-		data, err := db.Get(bucket, []byte(v))
+		data, err := db.Get(testBucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -138,12 +138,12 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		orig, err := db.Get(bucket, []byte(v))
+		orig, err := db.Get(testBucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
 		orig[0] = byte(0xff)
-		data, err := db.Get(bucket, []byte(v))
+		data, err := db.Get(testBucket, []byte(v))
 		if err != nil {
 			t.Fatalf("get failed: %v", err)
 		}
@@ -153,14 +153,14 @@ func testPutGet(db MinDatabase, t *testing.T) {
 	}
 
 	for _, v := range testValues {
-		err := db.Delete(bucket, []byte(v))
+		err := db.Delete(testBucket, []byte(v))
 		if err != nil {
 			t.Fatalf("delete %q failed: %v", v, err)
 		}
 	}
 
 	for _, v := range testValues {
-		_, err := db.Get(bucket, []byte(v))
+		_, err := db.Get(testBucket, []byte(v))
 		if err == nil {
 			t.Fatalf("got deleted value %q", v)
 		}
@@ -190,7 +190,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Put(bucket, []byte(key), []byte("v"+key))
+			err := db.Put(testBucket, []byte(key), []byte("v"+key))
 			if err != nil {
 				panic("put failed: " + err.Error())
 			}
@@ -202,7 +202,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			data, err := db.Get(bucket, []byte(key))
+			data, err := db.Get(testBucket, []byte(key))
 			if err != nil {
 				panic("get failed: " + err.Error())
 			}
@@ -217,7 +217,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			err := db.Delete(bucket, []byte(key))
+			err := db.Delete(testBucket, []byte(key))
 			if err != nil {
 				panic("delete failed: " + err.Error())
 			}
@@ -229,7 +229,7 @@ func testParallelPutGet(db MinDatabase) {
 	for i := 0; i < n; i++ {
 		go func(key string) {
 			defer pending.Done()
-			_, err := db.Get(bucket, []byte(key))
+			_, err := db.Get(testBucket, []byte(key))
 			if err == nil {
 				panic("get succeeded")
 			}
@@ -270,7 +270,7 @@ var keysInRange = [][]byte{common.FromHex("a8"), common.FromHex("bb"), common.Fr
 
 func testWalk(db Database, t *testing.T) {
 	for k, v := range hexEntries {
-		err := db.Put(bucket, common.FromHex(k), common.FromHex(v))
+		err := db.Put(testBucket, common.FromHex(k), common.FromHex(v))
 		if err != nil {
 			t.Fatalf("put failed: %v", err)
 		}
@@ -278,7 +278,7 @@ func testWalk(db Database, t *testing.T) {
 
 	var gotKeys [][]byte
 
-	err := db.Walk(bucket, startKey, fixedBits, func(key, val []byte) (bool, error) {
+	err := db.Walk(testBucket, startKey, fixedBits, func(key, val []byte) (bool, error) {
 		gotKeys = append(gotKeys, key)
 		return true, nil
 	})

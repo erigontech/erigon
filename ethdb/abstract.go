@@ -12,6 +12,32 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
+type Tx interface {
+	Bucket(name []byte) Bucket
+}
+
+type Bucket interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
+	Cursor() Cursor
+}
+
+type Cursor interface {
+	Prefix(v []byte) Cursor
+	Prefetch(v uint) Cursor
+	NoValues() Cursor
+
+	First() ([]byte, []byte, error)
+	Seek(seek []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
+	FirstKey() ([]byte, uint64, error)
+	SeekKey(seek []byte) ([]byte, uint64, error)
+	NextKey() ([]byte, uint64, error)
+	Walk(walker func(k, v []byte) (bool, error)) error
+	WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error
+}
+
 type DbProvider uint8
 
 const (
@@ -153,7 +179,7 @@ func (db *DB) Close() error {
 	return nil
 }
 
-type Tx struct {
+type tx struct {
 	ctx context.Context
 	db  *DB
 
@@ -164,8 +190,8 @@ type Tx struct {
 	badgerIterators []*badger.Iterator
 }
 
-type Bucket struct {
-	tx *Tx
+type bucket struct {
+	tx *tx
 
 	bolt         *bolt.Bucket
 	badgerPrefix []byte
@@ -173,9 +199,9 @@ type Bucket struct {
 	remote       *remote.Bucket
 }
 
-type Cursor struct {
+type cursor struct {
 	ctx      context.Context
-	bucket   Bucket
+	bucket   bucket
 	provider DbProvider
 	prefix   []byte
 
@@ -191,8 +217,8 @@ type Cursor struct {
 	err error
 }
 
-func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
-	t := &Tx{db: db, ctx: ctx}
+func (db *DB) View(ctx context.Context, f func(tx Tx) error) (err error) {
+	t := &tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.View(func(tx *bolt.Tx) error {
@@ -215,8 +241,8 @@ func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
 	return err
 }
 
-func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
-	t := &Tx{db: db, ctx: ctx}
+func (db *DB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+	t := &tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.Update(func(tx *bolt.Tx) error {
@@ -236,8 +262,8 @@ func (db *DB) Update(ctx context.Context, f func(tx *Tx) error) (err error) {
 	return err
 }
 
-func (tx *Tx) Bucket(name []byte) Bucket {
-	b := Bucket{tx: tx, nameLen: uint(len(name))}
+func (tx *tx) Bucket(name []byte) Bucket {
+	b := bucket{tx: tx, nameLen: uint(len(name))}
 	switch tx.db.opts.provider {
 	case Bolt:
 		b.bolt = tx.bolt.Bucket(name)
@@ -249,7 +275,7 @@ func (tx *Tx) Bucket(name []byte) Bucket {
 	return b
 }
 
-func (tx *Tx) cleanup() {
+func (tx *tx) cleanup() {
 	switch tx.db.opts.provider {
 	case Bolt:
 		// nothing to cleanup
@@ -262,12 +288,12 @@ func (tx *Tx) cleanup() {
 	}
 }
 
-func (c *Cursor) Prefix(v []byte) *Cursor {
+func (c *cursor) Prefix(v []byte) Cursor {
 	c.prefix = v
 	return c
 }
 
-func (c *Cursor) Prefetch(v uint) *Cursor {
+func (c *cursor) Prefetch(v uint) Cursor {
 	switch c.provider {
 	case Bolt:
 		// nothing to do
@@ -279,7 +305,7 @@ func (c *Cursor) Prefetch(v uint) *Cursor {
 	return c
 }
 
-func (c *Cursor) NoValues() *Cursor {
+func (c *cursor) NoValues() Cursor {
 	switch c.provider {
 	case Bolt:
 		// nothing to do
@@ -291,7 +317,7 @@ func (c *Cursor) NoValues() *Cursor {
 	return c
 }
 
-func (c *Cursor) From() *Cursor {
+func (c *cursor) From() Cursor {
 	switch c.provider {
 	case Bolt:
 		// nothing to do
@@ -303,7 +329,7 @@ func (c *Cursor) From() *Cursor {
 	return c
 }
 
-func (b Bucket) Get(key []byte) (val []byte, err error) {
+func (b bucket) Get(key []byte) (val []byte, err error) {
 	select {
 	case <-b.tx.ctx.Done():
 		return nil, b.tx.ctx.Err()
@@ -326,7 +352,7 @@ func (b Bucket) Get(key []byte) (val []byte, err error) {
 	return val, err
 }
 
-func (b Bucket) Put(key []byte, value []byte) error {
+func (b bucket) Put(key []byte, value []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -345,7 +371,7 @@ func (b Bucket) Put(key []byte, value []byte) error {
 	return nil
 }
 
-func (b Bucket) Delete(key []byte) error {
+func (b bucket) Delete(key []byte) error {
 	select {
 	case <-b.tx.ctx.Done():
 		return b.tx.ctx.Err()
@@ -364,8 +390,8 @@ func (b Bucket) Delete(key []byte) error {
 	return nil
 }
 
-func (b Bucket) Cursor() *Cursor {
-	c := &Cursor{bucket: b, ctx: b.tx.ctx, provider: b.tx.db.opts.provider}
+func (b bucket) Cursor() Cursor {
+	c := &cursor{bucket: b, ctx: b.tx.ctx, provider: b.tx.db.opts.provider}
 	switch c.provider {
 	case Bolt:
 		// nothing to do
@@ -379,7 +405,7 @@ func (b Bucket) Cursor() *Cursor {
 	return c
 }
 
-func (c *Cursor) initCursor() {
+func (c *cursor) initCursor() {
 	switch c.provider {
 	case Bolt:
 		if c.bolt != nil {
@@ -404,7 +430,7 @@ func (c *Cursor) initCursor() {
 	}
 }
 
-func (c *Cursor) First() ([]byte, []byte, error) {
+func (c *cursor) First() ([]byte, []byte, error) {
 	c.initCursor()
 
 	switch c.provider {
@@ -435,7 +461,7 @@ func (c *Cursor) First() ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
+func (c *cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
@@ -465,7 +491,7 @@ func (c *Cursor) Seek(seek []byte) ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c *Cursor) Next() ([]byte, []byte, error) {
+func (c *cursor) Next() ([]byte, []byte, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, nil, c.ctx.Err()
@@ -502,7 +528,7 @@ func (c *Cursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c *Cursor) FirstKey() ([]byte, uint64, error) {
+func (c *cursor) FirstKey() ([]byte, uint64, error) {
 	c.initCursor()
 
 	var vSize uint64
@@ -538,7 +564,7 @@ func (c *Cursor) FirstKey() ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
+func (c *cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
@@ -573,7 +599,7 @@ func (c *Cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *Cursor) NextKey() ([]byte, uint64, error) {
+func (c *cursor) NextKey() ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
@@ -614,7 +640,7 @@ func (c *Cursor) NextKey() ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
+func (c *cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 		if err != nil {
 			return err
@@ -630,7 +656,7 @@ func (c *Cursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-func (c *Cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
+func (c *cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
 	for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
 		if err != nil {
 			return err

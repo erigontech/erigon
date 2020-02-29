@@ -20,61 +20,47 @@ Make it part of contract - written clearly in docs, because it's unsafe (unsafe 
 Known problems: mutation.Put does copy internally. 
 - Low-level API: as close to original Bolt/Badger as possible.
 - Expose concept of transaction - app-level code can .Rollback() or .Commit() at once. 
-  
-
 
 ## Abstraction to support: 
 
 #### Buckets concept:
-- Bucket can’t be nil (create on app start) 
-- Cursor can’t be nil
+- Bucket is an interface, can’t be nil, can't return error
+- For Badger - auto-remove bucket from key prefix
 
-#### InMemory and ReadOnly modes 
-
-#### Transactions: db.Update, db.Batch, db.View transactions
+#### InMemory and ReadOnly modes: 
+- `db.InMemDb()` or `db.Opts().InMem(true)` 
 
 #### Context:
 - For transactions - yes
 - For .First() and .Next() methods - no
 
-
 #### Cursor/Iterator: 
-- Badger iterator require i.Close() call - abstraction can hide it, not user. 
-- i.Prefix - Badger using this option to understand which disk table need to touch… i.ValidForPrefix - is for 
-termination of iterator loop, not for filtering. Probably abstraction must expose i.Prefix settings - because it’s 
-also useful for RemoteDb. 
+- Cursor is an interface, can’t be nil, can't return error
+- `cursor.Prefix(prefix)` filtering keys by given prefix. Badger using i.Prefix. RemoteDb - to support server side filtering.
+- `cursor.PrefetchSize(prefix)` - useful for Badger and Remote
+- Badger iterator require i.Close() call - abstraction automated it.
 - Badger iterator has AllVersions=true by default - why?
-- i.PrefetchSize - expose
-- For Badger - auto-remove bucket prefix from key
-- .Bucket() and .Cursor() returning non-pointers and can't return error
 
 #### Concept of Item:
-- i.PrefetchValues - expose, default=true. 
-- No Lazy values. 
-- Badger has: `.Value = func ( func(val []byte) error) error` and `ValueCopy(dst []byte) ([]byte, error)`. Such 
-signature doesn't allow to have next common go pattern: 
-```go
-buf := make([]byte, 32)
-if buf, err := it.ValueCopy(buf); err != nil {
-    return err
-}
-```
-- Abstraction will provide `ValueCopy(dst *[]byte) error` version. 
-It will force user to make allocation by himself (I think it's good practice and json.Unmarshal follow this way). 
-Does nothing if i.PrefetchValues = false.
-- Badger metadata, ttl and version - don’t expose
+- Badger's concept of Item adding complexity, need hide it: `k,v,err := curor.First()`
+- No Lazy values, but can disable fetching values by: `.Cursor().PrefetchValues(false).FirstKey()`
+- Badger's metadata, ttl and version - don’t expose
 
-#### Managed/un-managed transactions  
+#### Managed/un-managed transactions
+- Tx is an interface
+- db.Update, db.View - yes
+- db.Batch - no
+  
+#### Errors: 
+- Lib-Errors must be properly wrapped to project: for example ethdb.ErrKeyNotFound
+
+#### Badger’s streaming:
+- Need more research: why it’s based on callback instead of  “for channel”? Is it ordered? Is it stoppable? 
+- Is it equal to Bolt’s ForEach?
+
+#### Yeld: abstraction leak from RemoteDb, but need investigate how Badger Streams working here
 #### i.SeekTo vs i.Rewind: TBD
 #### in-memory LRU cache: TBD
-#### Badger’s streaming:
--  Need more research: why it’s based on callback instead of  “for channel”? Is it ordered? Is it stoppable? 
-- Is it equal to Bolt’s ForEach?
-#### Errors:
-- Badger and RemoteDB can return error on any operation: .Get,.Put,.Next. Abstraction will expose this error. 
--  Lib-Errors must be properly wrapped to project: for example ethdb.ErrKeyNotFound
-#### Yeld: abstraction leak from RemoteDb, but need investigate how Badger Streams working here
-
 #### Copy of data: 
 - Bolt does copy keys inside .Put(), but doesn't copy values. How behave Badger here? 
 
