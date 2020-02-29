@@ -789,7 +789,7 @@ func TestBlockMemoryExhaustionAttack(t *testing.T) {
 	for i := 0; i < maxQueueDist-1; i++ {
 		tester.fetcher.Enqueue("valid", blocks[hashes[len(hashes)-3-i]])
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
 	if queued := atomic.LoadInt32(&enqueued); queued != blockLimit+maxQueueDist-1 {
 		t.Fatalf("queued block count mismatch: have %d, want %d", queued, blockLimit+maxQueueDist-1)
 	}
