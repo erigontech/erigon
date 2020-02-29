@@ -191,6 +191,10 @@ func (tp *TriePruning) PruneToTimestamp(
 		delete(tp.accounts, gen)
 	}
 
+	h := newHasher(false)
+	defer returnHasherToPool(h)
+	pruneMap(accountsTrie, aggregateAccounts, h)
+
 	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
 		key := pool.GetBuffer(64)
 		defer pool.PutBuffer(key)
@@ -199,31 +203,19 @@ func (tp *TriePruning) PruneToTimestamp(
 				continue
 			}
 
-			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
+			nd, _, ok := accountsTrie.getNode([]byte(prefix), false)
 			if !ok {
 				continue
 			}
 			switch nd.(type) {
 			case *duoNode, *fullNode:
-				// will work only with these types of nodes
+				CompressNibbles([]byte(prefix), &key.B)
+				tp.unloadNodeFunc(key.B, nd.reference())
 			default:
-				continue
 			}
-			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
-			case *duoNode, *fullNode:
-				// will work only with these types of nodes
-			default:
-				continue
-			}
-
-			CompressNibbles([]byte(prefix), &key.B)
-			tp.unloadNodeFunc(key.B, nd.reference())
 		}
 	}
 
-	h := newHasher(false)
-	defer returnHasherToPool(h)
-	pruneMap(accountsTrie, aggregateAccounts)
 	// Remove fom the timestamp structure
 	for hexS := range aggregateAccounts {
 		delete(tp.accountTimestamps, hexS)

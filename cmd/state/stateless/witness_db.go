@@ -6,6 +6,7 @@ import (
 	"encoding/csv"
 	"fmt"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
@@ -47,7 +48,7 @@ func (db *WitnessDBWriter) MustUpsert(blockNumber uint64, maxTrieSize uint32, re
 
 	batch := db.storage.NewBatch()
 
-	err := batch.Put(witnessesBucket, key, bytes)
+	err := batch.Put(witnessesBucket, common.CopyBytes(key), common.CopyBytes(bytes))
 
 	if err != nil {
 		panic(fmt.Errorf("error while upserting witness: %w", err))

@@ -841,17 +841,16 @@ func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
 }
 
 func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
-	buf := pool.GetBuffer(common.HashLength * 2)
-	defer pool.PutBuffer(buf)
-
 	addrHashBytes := addrHash[:]
-	copy(buf.B, addrHashBytes)
-
 	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
 		return err
 	} else if !ok {
 		return nil
 	}
+
+	buf := pool.GetBuffer(common.HashLength * 2)
+	defer pool.PutBuffer(buf)
+	copy(buf.B, addrHashBytes)
 
 	i := common.HashLength
 	for j := 0; j < 256; j++ {

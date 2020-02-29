@@ -200,15 +200,15 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
-	if blockNr == TraceFromBlock {
-		for _, req := range tr.requests {
-			fmt.Printf("A: %d %d %d %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
-			fmt.Printf("B: %x %x\n", req.contract, req.resolveHex)
-		}
-		for _, k := range startkeys {
-			fmt.Printf("C: %d %x\n", fixedbits, k)
-		}
-	}
+	//if blockNr > TraceFromBlock {
+	//	for _, req := range tr.requests {
+	//		fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+	//		fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+	//	}
+	//	for _, k := range startkeys {
+	//		fmt.Printf("fixedbits: %d, k: %x\n", fixedbits, k)
+	//	}
+	//}
 
 	var err error
 	if accounts {
@@ -252,11 +252,11 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	if blockNr == TraceFromBlock {
-		buf := pool.GetBuffer(256)
-		CompressNibbles(kAsNibbles, &buf.B)
-		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
-	}
+	//if blockNr > TraceFromBlock {
+	//	buf := pool.GetBuffer(256)
+	//	CompressNibbles(kAsNibbles, &buf.B)
+	//	fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
+	//}
 
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -375,9 +375,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			if blockNr == TraceFromBlock {
-				fmt.Printf("For loop: %x %x\n", cacheK, k)
-			}
+			//if blockNr > TraceFromBlock {
+			//	fmt.Printf("For loop: %x %x\n", cacheK, k)
+			//}
 
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
