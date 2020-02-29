@@ -2,10 +2,10 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sort"
-	"io"
 
 	"os/signal"
 	"syscall"
@@ -16,11 +16,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
 
 	"net/http"
