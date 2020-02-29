@@ -829,7 +829,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
-func hasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
+func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
 	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
 	if err != nil {
 		if errors.Is(err, ethdb.ErrKeyNotFound) {
@@ -847,8 +847,10 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	addrHashBytes := addrHash[:]
 	copy(buf.B, addrHashBytes)
 
-	if ok, err := hasTombstone(db, addrHashBytes); err != nil || !ok {
+	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
 		return err
+	} else if !ok {
+		return nil
 	}
 
 	i := common.HashLength
@@ -874,19 +876,22 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 	defer pool.PutBuffer(buf)
 
 	buf.B = buf.B[:cap(buf.B)]
+	foundTombStone := false
 	for i := common.HashLength + 1; i < len(compositeKey); i++ { // +1 because first step happened during account re-creation
-		copy(buf.B, compositeKey[:i+1])
-
 		if someStorageExistsInThisSubtree(compositeKey[:i]) {
 			continue
 		}
 
-		if ok, err := hasTombstone(db, buf.B[:i]); err != nil {
-			return err
-		} else if !ok {
-			continue
+		if !foundTombStone {
+			if ok, err := HasTombstone(db, compositeKey[:i]); err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+			foundTombStone = true
 		}
 
+		copy(buf.B, compositeKey[:i+1])
 		for j := 0; j < 256; j++ {
 			if compositeKey[i] == uint8(j) {
 				continue
@@ -894,11 +899,11 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 
 			buf.B[i] = uint8(j)
 
+			//fmt.Printf("Put: %x\n", buf.B[:i+1])
 			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
 				return err
 			}
 		}
-
 		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
 			return err
 		}
