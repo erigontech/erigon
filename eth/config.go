@@ -18,6 +18,7 @@ package eth
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"math/big"
 	"os"
 	"os/user"
@@ -92,9 +93,10 @@ type StorageMode struct {
 	TxIndex              bool
 	Preimages            bool
 	IntermediateTrieHash bool
+	ThinHistory          bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true}
+var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true, ThinHistory: false}
 
 func (m StorageMode) ToString() string {
 	modeString := ""
@@ -113,6 +115,9 @@ func (m StorageMode) ToString() string {
 	if m.IntermediateTrieHash {
 		modeString += "i"
 	}
+	if m.ThinHistory {
+		modeString += "n"
+	}
 	return modeString
 }
 
@@ -128,11 +133,20 @@ func StorageModeFromString(flags string) (StorageMode, error) {
 			mode.TxIndex = true
 		case 'p':
 			mode.Preimages = true
+		case 'n':
+			mode.ThinHistory = true
 		case 'i':
 			mode.IntermediateTrieHash = true
 		default:
 			return mode, fmt.Errorf("unexpected flag found: %c", flag)
 		}
+	}
+	if mode.ThinHistory {
+		debug.ThinHistory = true
+	}
+
+	if debug.IsThinHistory() {
+		mode.ThinHistory = true
 	}
 
 	return mode, nil
@@ -148,6 +162,10 @@ type Config struct {
 	// Protocol options
 	NetworkID uint64 // Network ID to use for selecting peers to connect to
 	SyncMode  downloader.SyncMode
+
+	// This can be set to list of enrtree:// URLs which will be queried for
+	// for nodes to connect to.
+	DiscoveryURLs []string
 
 	NoPruning  bool // Whether to disable pruning and flush everything to disk
 	NoPrefetch bool // Whether to disable prefetching and only load state on demand
@@ -220,8 +238,8 @@ type Config struct {
 	CheckpointOracle *params.CheckpointOracleConfig `toml:",omitempty"`
 
 	// Istanbul block override (TODO: remove after the fork)
-	OverrideIstanbul *big.Int
+	OverrideIstanbul *big.Int `toml:",omitempty"`
 
 	// MuirGlacier block override (TODO: remove after the fork)
-	OverrideMuirGlacier *big.Int
+	OverrideMuirGlacier *big.Int `toml:",omitempty"`
 }

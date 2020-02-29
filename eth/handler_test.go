@@ -29,7 +29,6 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -277,17 +276,9 @@ func testGetBlockBodies(t *testing.T, protocol int) {
 }
 
 // Tests that the node state database can be retrieved based on hashes.
-func TestGetNodeData63(t *testing.T) {
-	debug.OverrideGetNodeData(true)
-	defer debug.RestoreGetNodeData()
-	testGetNodeData(t, 63)
-}
+func TestGetNodeData63(t *testing.T) { testGetNodeData(t, 63) }
 
-func TestGetNodeData64(t *testing.T) {
-	debug.OverrideGetNodeData(true)
-	defer debug.RestoreGetNodeData()
-	testGetNodeData(t, 64)
-}
+func TestGetNodeData64(t *testing.T) { testGetNodeData(t, 64) }
 
 func testGetNodeData(t *testing.T, protocol int) {
 	// Assemble the test environment
@@ -466,7 +457,7 @@ func testCheckpointChallenge(t *testing.T, syncmode downloader.SyncMode, checkpo
 	if err != nil {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
-	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), new(testTxPool), ethash.NewFaker(), blockchain, db, nil)
+	pm, err := NewProtocolManager(config, cht, syncmode, DefaultConfig.NetworkID, new(event.TypeMux), &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, ethash.NewFaker(), blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -525,12 +516,12 @@ func TestBroadcastBlock(t *testing.T) {
 		broadcastExpected int
 	}{
 		{1, 1},
-		{2, 2},
-		{3, 3},
-		{4, 4},
-		{5, 4},
-		{9, 4},
-		{12, 4},
+		{2, 1},
+		{3, 1},
+		{4, 2},
+		{5, 2},
+		{9, 3},
+		{12, 3},
 		{16, 4},
 		{26, 5},
 		{100, 10},
@@ -554,7 +545,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 		t.Fatalf("failed to create new blockchain: %v", err)
 	}
 	cht := &params.TrustedCheckpoint{}
-	pm, err := NewProtocolManager(config, cht, downloader.FullSync, DefaultConfig.NetworkID, evmux, new(testTxPool), pow, blockchain, db, nil)
+	pm, err := NewProtocolManager(config, cht, downloader.FullSync, DefaultConfig.NetworkID, evmux, &testTxPool{pool: make(map[common.Hash]*types.Transaction)}, pow, blockchain, db, nil)
 	if err != nil {
 		t.Fatalf("failed to start test protocol manager: %v", err)
 	}
@@ -564,6 +555,7 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 	for i := 0; i < totalPeers; i++ {
 		peer, _ := newTestPeer(fmt.Sprintf("peer %d", i), eth63, pm, true)
 		defer peer.close()
+
 		peers = append(peers, peer)
 	}
 	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
@@ -581,30 +573,21 @@ func testBroadcastBlock(t *testing.T, totalPeers, broadcastExpected int) {
 			}
 		}(peer)
 	}
-	timeout := time.After(2 * time.Second)
-	var receivedCount int
-outer:
+	var received int
 	for {
 		select {
-		case err = <-errCh:
-			break outer
 		case <-doneCh:
-			receivedCount++
-			if receivedCount == totalPeers {
-				break outer
+			received++
+
+		case <-time.After(100 * time.Millisecond):
+			if received != broadcastExpected {
+				t.Errorf("broadcast count mismatch: have %d, want %d", received, broadcastExpected)
 			}
-		case <-timeout:
-			break outer
+			return
+
+		case err = <-errCh:
+			t.Fatalf("broadcast failed: %v", err)
 		}
-	}
-	for _, peer := range peers {
-		peer.close()
-	}
-	if err != nil {
-		t.Errorf("error matching block by peer: %v", err)
-	}
-	if receivedCount != broadcastExpected {
-		t.Errorf("block broadcast to %d peers, expected %d", receivedCount, broadcastExpected)
 	}
 }
 
@@ -1337,7 +1320,7 @@ func TestBroadcastMalformedBlock(t *testing.T) {
 	malformedEverything.TxHash[0]++
 
 	// Keep listening to broadcasts and notify if any arrives
-	notify := make(chan struct{})
+	notify := make(chan struct{}, 1)
 	go func() {
 		if _, err := sink.app.ReadMsg(); err == nil {
 			notify <- struct{}{}

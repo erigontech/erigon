@@ -7,6 +7,7 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"io/ioutil"
 	"log"
 	"math/big"
@@ -1020,20 +1021,34 @@ func relayoutKeys() {
 	db, err := bolt.Open(node.DefaultDataDir()+"/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	var count int
+	var accountChangeSetCount, storageChangeSetCount int
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.ChangeSetBucket)
+		b := tx.Bucket(dbutils.AccountChangeSetBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
-			count++
+			accountChangeSetCount++
 		}
 		return nil
 	})
 	check(err)
-	fmt.Printf("Records: %d\n", count)
+	err = db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageChangeSetBucket)
+		if b == nil {
+			return nil
+		}
+		c := b.Cursor()
+		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			storageChangeSetCount++
+		}
+		return nil
+	})
+	check(err)
+	fmt.Printf("Account changeset: %d\n", accountChangeSetCount)
+	fmt.Printf("Storage changeset: %d\n", storageChangeSetCount)
+	fmt.Printf("Total: %d\n", accountChangeSetCount+storageChangeSetCount)
 }
 
 func upgradeBlocks() {
@@ -1231,9 +1246,10 @@ func readAccount(chaindata string, account common.Address, block uint64, rewind 
 		var printed bool
 		encodedTS := dbutils.EncodeTimestamp(timestamp)
 		changeSetKey := dbutils.CompositeChangeSetKey(encodedTS, dbutils.StorageHistoryBucket)
-		v, err = ethDb.Get(dbutils.ChangeSetBucket, changeSetKey)
+		v, err = ethDb.Get(dbutils.StorageChangeSetBucket, changeSetKey)
+		check(err)
 		if v != nil {
-			err = dbutils.Walk(v, func(key, value []byte) error {
+			err = changeset.StorageChangeSetBytes(v).Walk(func(key, value []byte) error {
 				if bytes.HasPrefix(key, secKey) {
 					incarnation := ^binary.BigEndian.Uint64(key[common.HashLength : common.HashLength+common.IncarnationLength])
 					if !printed {

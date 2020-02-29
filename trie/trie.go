@@ -599,9 +599,13 @@ func (t *Trie) hook(hex []byte, n node) {
 	if !ok {
 		return
 	}
+	if _, ok := nd.(valueNode); ok {
+		return
+	}
 	if _, ok := nd.(hashNode); !ok && nd != nil {
 		return
 	}
+
 	t.touchAll(n, hex, false)
 	switch p := parent.(type) {
 	case nil:
@@ -627,7 +631,7 @@ func (t *Trie) hook(hex []byte, n node) {
 func (t *Trie) touchAll(n node, hex []byte, del bool) {
 	if del {
 		t.evictNodeFromHashMap(n)
-	} else if len(n.reference()) == common.HashLength {
+	} else if len(n.reference()) == common.HashLength && debug.IsGetNodeData() {
 		var key common.Hash
 		copy(key[:], n.reference())
 		t.hashMap[key] = n
@@ -1006,8 +1010,6 @@ func (t *Trie) unload(hex []byte, h *hasher) {
 		i1, i2 := p.childrenIdx()
 		switch hex[len(hex)-1] {
 		case i1:
-			p.child1 = hnode
-		case i2:
 			p.child1 = hnode
 		case i2:
 			p.child2 = hnode

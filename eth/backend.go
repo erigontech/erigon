@@ -20,7 +20,10 @@ package eth
 import (
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"math/big"
+	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -47,6 +50,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/p2p/enr"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
@@ -74,6 +78,7 @@ type Ethereum struct {
 	blockchain      *core.BlockChain
 	protocolManager *ProtocolManager
 	lesServer       LesServer
+	dialCandiates   enode.Iterator
 
 	// DB interfaces
 	chainDb ethdb.Database // Block chain database
@@ -171,6 +176,32 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			rawdb.WriteDatabaseVersion(chainDb, core.BlockChainVersion)
 		}
 	}
+
+	err = setStorageModeIfNotExist(chainDb, config.StorageMode)
+	if err != nil {
+		return nil, err
+	}
+
+	sm, err := getStorageModeFromDB(chainDb)
+	if err != nil {
+		return nil, err
+	}
+	if !reflect.DeepEqual(sm, config.StorageMode) {
+		return nil, errors.New("mode is " + config.StorageMode.ToString() + " original mode is " + sm.ToString())
+	}
+
+	err = migrations.NewMigrator().Apply(
+		chainDb,
+		config.StorageMode.History,
+		config.StorageMode.Receipts,
+		config.StorageMode.TxIndex,
+		config.StorageMode.Preimages,
+		config.StorageMode.ThinHistory,
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	var (
 		vmConfig = vm.Config{
 			EnablePreimageRecording: config.EnablePreimageRecording,
@@ -236,6 +267,11 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		gpoParams.Default = config.Miner.GasPrice
 	}
 	eth.APIBackend.gpo = gasprice.NewOracle(eth.APIBackend, gpoParams)
+
+	eth.dialCandiates, err = eth.setupDiscovery(&ctx.Config.P2P)
+	if err != nil {
+		return nil, err
+	}
 
 	return eth, nil
 }
@@ -536,6 +572,7 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	for i, vsn := range ProtocolVersions {
 		protos[i] = s.protocolManager.makeProtocol(vsn)
 		protos[i].Attributes = []enr.Entry{s.currentEthEntry()}
+		protos[i].DialCandidates = s.dialCandiates
 	}
 
 	// Firehose
@@ -591,4 +628,104 @@ func (s *Ethereum) Stop() error {
 	s.chainDb.Close()
 	close(s.shutdownChan)
 	return nil
+}
+
+func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
+	var (
+		err error
+	)
+
+	err = setModeOnEmpty(db, dbutils.StorageModeHistory, sm.History)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModePreImages, sm.Preimages)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeReceipts, sm.Receipts)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeTxIndex, sm.TxIndex)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeThinHistory, sm.ThinHistory)
+	if err != nil {
+		return err
+	}
+
+	err = setModeOnEmpty(db, dbutils.StorageModeIntermediateTrieHash, sm.IntermediateTrieHash)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func setModeOnEmpty(db ethdb.Database, key []byte, currentValue bool) error {
+	_, err := db.Get(dbutils.DatabaseInfoBucket, key)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return err
+	}
+	if err == ethdb.ErrKeyNotFound {
+		val := []byte{}
+		if currentValue {
+			val = []byte{1}
+		}
+		if err = db.Put(dbutils.DatabaseInfoBucket, key, val); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
+	var (
+		sm  StorageMode
+		v   []byte
+		err error
+	)
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeHistory)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.History = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModePreImages)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.Preimages = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeReceipts)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.Receipts = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeTxIndex)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.TxIndex = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.ThinHistory = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeIntermediateTrieHash)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.IntermediateTrieHash = len(v) > 0
+	return sm, nil
 }
