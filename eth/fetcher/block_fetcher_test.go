@@ -758,7 +758,7 @@ func TestBlockMemoryExhaustionAttack(t *testing.T) {
 	tester := newTester()
 	defer tester.fetcher.Stop()
 
-	imported, enqueued := make(chan *types.Block), int32(0)
+	imported, enqueued := make(chan *types.Block, 1), int32(0)
 	tester.fetcher.importedHook = func(block *types.Block) { imported <- block }
 	tester.fetcher.queueChangeHook = func(hash common.Hash, added bool) {
 		if added {

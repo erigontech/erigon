@@ -5,6 +5,7 @@ import (
 	"os"
 	"runtime"
 	"sort"
+	"io"
 
 	"os/signal"
 	"syscall"
@@ -15,10 +16,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/urfave/cli"
+
+	"net/http"
+	//nolint:gosec
+	_ "net/http/pprof"
 )
 
 var (
@@ -64,6 +71,25 @@ func main() {
 }
 
 func tester(ctx *cli.Context) error {
+	var (
+		ostream log.Handler
+		glogger *log.GlogHandler
+	)
+
+	usecolor := (isatty.IsTerminal(os.Stderr.Fd()) || isatty.IsCygwinTerminal(os.Stderr.Fd())) && os.Getenv("TERM") != "dumb"
+	output := io.Writer(os.Stderr)
+	if usecolor {
+		output = colorable.NewColorableStderr()
+	}
+	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
+	glogger = log.NewGlogHandler(ostream)
+	log.Root().SetHandler(glogger)
+	glogger.Verbosity(log.LvlTrace)
+
+	go func() {
+		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
+	}()
+
 	if len(ctx.Args()) < 1 {
 		fmt.Printf("Usage: tester <enode>\n")
 		return nil
@@ -89,7 +115,7 @@ func tester(ctx *cli.Context) error {
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
 	}
-	tp.protocolVersion = uint32(eth.ProtocolVersions[1])
+	tp.protocolVersion = uint32(eth.ProtocolVersions[2])
 	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = params.MainnetGenesisHash
 	serverKey, err := crypto.GenerateKey()
@@ -100,11 +126,12 @@ func tester(ctx *cli.Context) error {
 	p2pConfig.PrivateKey = serverKey
 	p2pConfig.Name = "geth tester"
 	p2pConfig.Logger = log.New()
+	p2pConfig.MaxPeers = 1
 	p2pConfig.Protocols = []p2p.Protocol{
 		{
 			Name:    eth.ProtocolName,
-			Version: eth.ProtocolVersions[1],
-			Length:  eth.ProtocolLengths[eth.ProtocolVersions[1]],
+			Version: eth.ProtocolVersions[2],
+			Length:  eth.ProtocolLengths[eth.ProtocolVersions[2]],
 			Run:     tp.protocolRun,
 		},
 	}
