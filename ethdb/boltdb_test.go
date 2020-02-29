@@ -2,6 +2,7 @@ package ethdb
 
 import (
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"reflect"
 	"strconv"
 	"testing"
@@ -18,16 +19,16 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 	db := NewMemDatabase()
 
-	block2Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block2Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block4Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block4Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block6Expected := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block6Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
 	//create state and history
@@ -90,16 +91,16 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 
 	}
 
-	block2 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block4 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block6 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
 	//walk and collect walkAsOf result
@@ -167,8 +168,8 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 
 	db := NewMemDatabase()
 
-	block2Expected := &dbutils.ChangeSet{
-		Changes: []dbutils.Change{
+	block2Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
 			{
 				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
 				Value: []byte("block 3 " + strconv.Itoa(1)),
@@ -184,8 +185,8 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 		},
 	}
 
-	block4Expected := &dbutils.ChangeSet{
-		Changes: []dbutils.Change{
+	block4Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
 			{
 				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
 				Value: []byte("state   " + strconv.Itoa(1)),
@@ -201,8 +202,8 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 		},
 	}
 
-	block6Expected := &dbutils.ChangeSet{
-		Changes: []dbutils.Change{
+	block6Expected := &changeset.ChangeSet{
+		Changes: []changeset.Change{
 			{
 				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
 				Value: []byte("state   " + strconv.Itoa(1)),
@@ -277,16 +278,16 @@ func TestBoltDB_MultiWalkAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	block2 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block4 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
-	block6 := &dbutils.ChangeSet{
-		Changes: make([]dbutils.Change, 0),
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
 	}
 
 	err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 2, func(idx int, k []byte, v []byte) error {

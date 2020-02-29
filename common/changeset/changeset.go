@@ -1,10 +1,12 @@
-package dbutils
+package changeset
 
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"reflect"
 	"sort"
 )
 
@@ -24,6 +26,7 @@ type Change struct {
 type ChangeSet struct {
 	// Invariant: all keys are of the same size.
 	Changes []Change
+	keyLen  int
 }
 
 // BEGIN sort.Interface
@@ -55,9 +58,7 @@ len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{N-1})
 
 uint32 integers are serialized as big-endian.
 */
-
-// Encode sorts a ChangeSet by key and then serializes it.
-func (s *ChangeSet) Encode() ([]byte, error) {
+func EncodeChangeSet(s *ChangeSet) ([]byte, error) {
 	sort.Sort(s)
 	buf := new(bytes.Buffer)
 	intArr := make([]byte, 4)
@@ -103,6 +104,9 @@ func (s *ChangeSet) Encode() ([]byte, error) {
 }
 
 func (s *ChangeSet) KeySize() int {
+	if s.keyLen != 0 {
+		return s.keyLen
+	}
 	for _, c := range s.Changes {
 		return len(c.Key)
 	}
@@ -110,14 +114,14 @@ func (s *ChangeSet) KeySize() int {
 }
 
 func (s *ChangeSet) checkKeySize(key []byte) error {
-	if s.Len() == 0 || len(key) == s.KeySize() {
+	if (s.Len() == 0 && s.KeySize() == 0) || (len(key) == s.KeySize() && len(key) > 0) {
 		return nil
 	}
 
-	return fmt.Errorf("wrong key size in ChangeSet: expected %d, actual %d", s.KeySize(), len(key))
+	return fmt.Errorf("wrong key size in AccountChangeSet: expected %d, actual %d", s.KeySize(), len(key))
 }
 
-// Add adds a new entry to the ChangeSet.
+// Add adds a new entry to the AccountChangeSet.
 // One must not add an existing key
 // and may add keys only of the same size.
 func (s *ChangeSet) Add(key []byte, value []byte) error {
@@ -138,6 +142,10 @@ func (s *ChangeSet) ChangedKeys() map[string]struct{} {
 		m[string(s.Changes[i].Key)] = struct{}{}
 	}
 	return m
+}
+
+func (s *ChangeSet) Equals(s2 *ChangeSet) bool {
+	return reflect.DeepEqual(s.Changes, s2.Changes)
 }
 
 // Encoded Method
@@ -227,4 +235,52 @@ func FindLast(b []byte, k []byte) ([]byte, error) {
 		}
 	}
 	return nil, errors.New("not found")
+}
+
+//DecodeChangeSet - decodes bytes to changeset
+//NOTE. Don't use it in real code. It's need for debug purposes
+func DecodeChangeSet(b []byte) (*ChangeSet, error) {
+	h := new(ChangeSet)
+	h.Changes = make([]Change, 0)
+	if len(b) == 0 {
+		return h, nil
+	}
+
+	if len(b) < 8 {
+		return h, fmt.Errorf("decode: input too short (%d bytes)", len(b))
+	}
+
+	n := binary.BigEndian.Uint32(b[0:4])
+	m := binary.BigEndian.Uint32(b[4:8])
+
+	if n == 0 {
+		return h, nil
+	}
+
+	h.Changes = make([]Change, n)
+
+	valOffset := 8 + n*m + 4*n
+	if uint32(len(b)) < valOffset {
+		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset)
+	}
+
+	totalValLength := binary.BigEndian.Uint32(b[valOffset-4 : valOffset])
+	if uint32(len(b)) < valOffset+totalValLength {
+		return h, fmt.Errorf("decode: input too short (%d bytes, expected at least %d bytes)", len(b), valOffset+totalValLength)
+	}
+
+	for i := uint32(0); i < n; i++ {
+		key := b[8+i*m : 8+(i+1)*m]
+		idx0 := uint32(0)
+		if i > 0 {
+			idx0 = binary.BigEndian.Uint32(b[8+n*m+4*(i-1) : 8+n*m+4*i])
+		}
+		idx1 := binary.BigEndian.Uint32(b[8+n*m+4*i : 8+n*m+4*(i+1)])
+		val := b[valOffset+idx0 : valOffset+idx1]
+
+		h.Changes[i].Key = common.CopyBytes(key)
+		h.Changes[i].Value = common.CopyBytes(val)
+	}
+
+	return h, nil
 }

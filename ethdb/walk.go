@@ -17,8 +17,9 @@
 package ethdb
 
 import (
-	"bytes"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -32,30 +33,81 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 	// Collect list of buckets and keys that need to be considered
 	m := make(map[string]map[string][]byte)
 	suffixDst := dbutils.EncodeTimestamp(timestampDst + 1)
-	if err := db.Walk(dbutils.ChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
-		timestamp, bucket := dbutils.DecodeTimestamp(k)
+	if err := db.Walk(dbutils.AccountChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
 		if timestamp > timestampSrc {
 			return false, nil
 		}
 
-		if dbutils.Len(v) > 0 {
-			bucketStr := string(common.CopyBytes(bucket))
+		if changeset.Len(v) > 0 {
+			bucketStr := string(dbutils.AccountsHistoryBucket)
 			var t map[string][]byte
 			var ok bool
 			if t, ok = m[bucketStr]; !ok {
 				t = make(map[string][]byte)
 				m[bucketStr] = t
 			}
-			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
-			err := dbutils.Walk(v, func(k, vv []byte) error {
-				if _, ok = t[string(k)]; !ok {
-					t[string(k)] = vv
-				}
 
-				return nil
-			})
-			if err != nil {
-				return false, err
+			var innerErr error
+
+			if debug.IsThinHistory() {
+				innerErr = changeset.AccountChangeSetBytes(v).Walk(func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			} else {
+				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			}
+			if innerErr != nil {
+				return false, innerErr
+			}
+		}
+		return true, nil
+	}); err != nil {
+		return err
+	}
+	if err := db.Walk(dbutils.StorageChangeSetBucket, suffixDst, 0, func(k, v []byte) (bool, error) {
+		timestamp, _ := dbutils.DecodeTimestamp(k)
+		if timestamp > timestampSrc {
+			return false, nil
+		}
+
+		if changeset.Len(v) > 0 {
+			bucketStr := string(dbutils.StorageHistoryBucket)
+			var t map[string][]byte
+			var ok bool
+			if t, ok = m[bucketStr]; !ok {
+				t = make(map[string][]byte)
+				m[bucketStr] = t
+			}
+
+			var innerErr error
+			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
+			if debug.IsThinHistory() {
+				innerErr = changeset.StorageChangeSetBytes(v).Walk(func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+			} else {
+				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
+					if _, ok = t[string(kk)]; !ok {
+						t[string(kk)] = vv
+					}
+					return nil
+				})
+
+			}
+			if innerErr != nil {
+				return false, innerErr
 			}
 		}
 		return true, nil
@@ -77,20 +129,26 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
 	var keys [][]byte
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
-	if err := db.Walk(dbutils.ChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
-		keyTimestamp, bucket := dbutils.DecodeTimestamp(k)
-		if !bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
-			return true, nil
-		}
+	if err := db.Walk(dbutils.AccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
+		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
+
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
-		err := dbutils.Walk(v, func(k, _ []byte) error {
-			keys = append(keys, k)
-			return nil
-		})
-		if err != nil {
-			return false, err
+		var innerErr error
+		if debug.IsThinHistory() {
+			innerErr = changeset.AccountChangeSetBytes(v).Walk(func(k, _ []byte) error {
+				keys = append(keys, k)
+				return nil
+			})
+		} else {
+			innerErr = changeset.Walk(v, func(k, _ []byte) error {
+				keys = append(keys, k)
+				return nil
+			})
+		}
+		if innerErr != nil {
+			return false, innerErr
 		}
 
 		return true, nil

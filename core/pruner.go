@@ -4,12 +4,13 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sync"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -116,6 +117,7 @@ func calculateNumOfPrunedBlocks(currentBlock, lastPrunedBlock uint64, blocksBefo
 		return lastPrunedBlock, lastPrunedBlock, false
 	}
 }
+
 func (p *BasicPruner) Stop() {
 	p.stop <- struct{}{}
 	p.wg.Wait()
@@ -177,7 +179,7 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 
 func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 	keysToRemove := newKeysToRemove()
-	err := db.Walk(dbutils.ChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
 		timestamp, _ := dbutils.DecodeTimestamp(key)
 		if timestamp < blockNumFrom {
 			return true, nil
@@ -186,20 +188,47 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.ChangeSet = append(keysToRemove.ChangeSet, key)
+		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, key)
 
-		err := dbutils.Walk(v, func(cKey, _ []byte) error {
+		innerErr := changeset.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-			if bytes.HasSuffix(cKey, dbutils.AccountsHistoryBucket) {
-				keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
-			}
-			if bytes.HasSuffix(cKey, dbutils.StorageHistoryBucket) {
-				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
-			}
+			keysToRemove.AccountHistoryKeys = append(keysToRemove.AccountHistoryKeys, compKey)
 			return nil
 		})
-		if err != nil {
-			return false, err
+		if innerErr != nil {
+			return false, innerErr
+		}
+		return true, nil
+	})
+	if err != nil {
+		return err
+	}
+	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
+		timestamp, _ := dbutils.DecodeTimestamp(key)
+		if timestamp < blockNumFrom {
+			return true, nil
+		}
+		if timestamp > blockNumTo {
+			return false, nil
+		}
+
+		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, key)
+		var innerErr error
+		if debug.IsThinHistory() {
+			innerErr = changeset.StorageChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
+				//todo implement pruning for thin history
+				return nil
+			})
+		} else {
+			innerErr = changeset.Walk(v, func(cKey, _ []byte) error {
+				compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
+				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
+				return nil
+			})
+		}
+
+		if innerErr != nil {
+			return false, innerErr
 		}
 		return true, nil
 	})
@@ -215,7 +244,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 }
 
 func batchDelete(db ethdb.Database, keys *keysToRemove) error {
-	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.ChangeSet))
+	log.Debug("Removing: ", "accounts", len(keys.AccountHistoryKeys), "storage", len(keys.StorageHistoryKeys), "suffix", len(keys.AccountChangeSet))
 	iterator := LimitIterator(keys, DeleteLimit)
 	for iterator.HasMore() {
 		iterator.ResetLimit()
@@ -243,7 +272,8 @@ func newKeysToRemove() *keysToRemove {
 	return &keysToRemove{
 		AccountHistoryKeys:       make(Keys, 0),
 		StorageHistoryKeys:       make(Keys, 0),
-		ChangeSet:                make(Keys, 0),
+		AccountChangeSet:         make(Keys, 0),
+		StorageChangeSet:         make(Keys, 0),
 		StorageKeys:              make(Keys, 0),
 		IntermediateTrieHashKeys: make(Keys, 0),
 	}
@@ -258,7 +288,8 @@ type Batch struct {
 type keysToRemove struct {
 	AccountHistoryKeys       Keys
 	StorageHistoryKeys       Keys
-	ChangeSet                Keys
+	AccountChangeSet         Keys
+	StorageChangeSet         Keys
 	StorageKeys              Keys
 	IntermediateTrieHashKeys Keys
 }
@@ -268,11 +299,13 @@ func LimitIterator(k *keysToRemove, limit int) *limitIterator {
 		k:     k,
 		limit: limit,
 	}
+
 	i.batches = []Batch{
 		{bucket: dbutils.AccountsHistoryBucket, keys: i.k.AccountHistoryKeys},
 		{bucket: dbutils.StorageHistoryBucket, keys: i.k.StorageHistoryKeys},
 		{bucket: dbutils.StorageBucket, keys: i.k.StorageKeys},
-		{bucket: dbutils.ChangeSetBucket, keys: i.k.ChangeSet},
+		{bucket: dbutils.AccountChangeSetBucket, keys: i.k.AccountChangeSet},
+		{bucket: dbutils.StorageChangeSetBucket, keys: i.k.StorageChangeSet},
 		{bucket: dbutils.IntermediateTrieHashBucket, keys: i.k.IntermediateTrieHashKeys},
 	}
 
