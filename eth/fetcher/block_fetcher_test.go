@@ -788,8 +788,8 @@ func TestBlockMemoryExhaustionAttack(t *testing.T) {
 	for i := 0; i < maxQueueDist-1; i++ {
 		tester.fetcher.Enqueue("valid", blocks[hashes[len(hashes)-3-i]])
 	}
-	if queued := atomic.LoadInt32(&enqueued); queued != blockLimit+maxQueueDist && queued != blockLimit+maxQueueDist-1 {
-		t.Fatalf("queued block count mismatch: have %d, want %d or %d", queued, blockLimit+maxQueueDist, blockLimit+maxQueueDist)
+	if queued := atomic.LoadInt32(&enqueued); queued != blockLimit+maxQueueDist-1 && queued != blockLimit+maxQueueDist-2 {
+		t.Fatalf("queued block count mismatch: have %d, want %d or %d", queued, blockLimit+maxQueueDist-1, blockLimit+maxQueueDist-2)
 	}
 	// Insert the missing piece (and sanity check the import)
 	tester.fetcher.Enqueue("valid", blocks[hashes[len(hashes)-2]])
