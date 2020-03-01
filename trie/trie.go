@@ -524,8 +524,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 }
 
 // non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
-	nd = t.root
+func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool) {
+	var nd = t.root
+	var parent node
 	pos := 0
 	var account bool
 	for pos < len(hex) || account {
@@ -538,7 +539,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
 				parent = n
 				nd = n.Val
 				pos += matchlen
-				if _, ok := n.Val.(*accountNode); ok {
+				if _, ok := nd.(*accountNode); ok {
 					account = true
 				}
 			} else {
@@ -569,16 +570,17 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
 			child := n.Children[hex[pos]]
 			if child == nil {
 				return nil, nil, false
+			} else {
+				parent = n
+				nd = child
+				pos++
 			}
-			parent = n
-			nd = child
-			pos++
-		case valueNode:
-			return nd, parent, true
 		case *accountNode:
 			parent = n
 			nd = n.storage
 			account = false
+		case valueNode:
+			return nd, parent, true
 		case hashNode:
 			return nd, parent, true
 		default:
