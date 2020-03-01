@@ -314,7 +314,6 @@ func (f *BlockFetcher) loop() {
 		}
 		// Import any queued blocks that could potentially fit
 		height := f.chainHeight()
-		//fmt.Printf("Queue is empty: %t %d\n", f.queue.Empty(), f.queue.Size())
 		for !f.queue.Empty() {
 			select {
 			case <-f.queueCh:
@@ -332,13 +331,11 @@ func (f *BlockFetcher) loop() {
 				if f.queueChangeHook != nil {
 					f.queueChangeHook(hash, true)
 				}
-				//fmt.Printf("Break number (%d) > height+1 (%d)\n", number, height+1)
 				f.queueCh <- struct{}{}
 				break
 			}
 			// Otherwise if fresh and still unknown, try and import
 			if number+maxUncleDist < height || f.getBlock(hash) != nil {
-				//fmt.Printf("Forgetting %x because not fresh?\n", hash)
 				f.forgetBlock(hash)
 				continue
 			}
@@ -354,7 +351,6 @@ func (f *BlockFetcher) loop() {
 			// A block was announced, make sure the peer isn't DOSing us
 			blockAnnounceInMeter.Mark(1)
 
-			//fmt.Printf("Notification received for block %d\n", notification.number)
 			count := f.announces[notification.origin] + 1
 			if count > hashLimit {
 				log.Debug("Peer exceeded outstanding announces", "peer", notification.origin, "limit", hashLimit)
