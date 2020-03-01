@@ -20,13 +20,14 @@ package eth
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"math/big"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -659,11 +660,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeIntermediateTrieHash, sm.IntermediateTrieHash)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -721,10 +717,5 @@ func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 	}
 	sm.ThinHistory = len(v) > 0
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeIntermediateTrieHash)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.IntermediateTrieHash = len(v) > 0
 	return sm, nil
 }
