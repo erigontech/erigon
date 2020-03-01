@@ -344,9 +344,6 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 				}
 				roots[addrHash] = &account
 				incarnationMap[account.Incarnation]++
-				if account.Incarnation == 0 {
-					fmt.Printf("Incarnation 0: %x\n", addrHash)
-				}
 			}
 		}
 		return true, nil

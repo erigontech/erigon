@@ -40,7 +40,7 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 
 	m.Migrations = m.Migrations[i+1:]
 	for _, v := range m.Migrations {
-		log.Warn("Apply migration", v.Name)
+		log.Warn("Apply migration", "name", v.Name)
 		err := v.Up(db, history, receipts, txIndex, preImages, thinHistory)
 		if err != nil {
 			return err
@@ -49,7 +49,7 @@ func (m *Migrator) Apply(db ethdb.Database, history, receipts, txIndex, preImage
 		if err != nil {
 			return err
 		}
-		log.Warn("Applied migration", v.Name)
+		log.Warn("Applied migration", "name", v.Name)
 	}
 	return nil
 }
