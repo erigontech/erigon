@@ -288,12 +288,27 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	return nil
 }
 
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, prefix []byte) {
-	if len(prefix) != common.HashLength {
+// PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
+func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) {
+	if len(addrHash) != common.HashLength {
 		return
 	}
 
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
+	if v == nil {
+		return
+	}
+	acc := accounts.NewAccount()
+	if err := acc.DecodeForStorage(v); err != nil {
+		log.Warn("could not decode account", "err", err)
+		return
+	}
+
+	if acc.Root == trie.EmptyRoot {
+		return
+	}
+
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
 }
@@ -886,8 +901,8 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
+
 			tds.t.DeleteSubtree(addrHash[:])
-			// TODO: how to check if account has storage?
 			PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
