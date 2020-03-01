@@ -224,7 +224,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 		return err
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	s.ref.len = 32
 	// Replace top of the stack
 	hb.nodeStack[len(hb.nodeStack)-1] = s
 	if hb.trace {
@@ -330,7 +330,7 @@ func (hb *HashBuilder) extension(key []byte) error {
 		return err
 	}
 	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	s.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	s.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
@@ -391,13 +391,14 @@ func (hb *HashBuilder) extensionHash(key []byte) error {
 		}
 		ni += 2
 	}
-	if _, err := hb.sha.Write(branchHash[:branchHash[0]-127]); err != nil {
+	if _, err := hb.sha.Write(branchHash[:common.HashLength+1]); err != nil {
 		return err
 	}
 	// Replace previous hash with the new one
 	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
 		return err
 	}
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
 	if _, ok := hb.nodeStack[len(hb.nodeStack)-1].(*fullNode); ok {
 		return fmt.Errorf("extensionHash cannot be emitted when a node is on top of the stack")
 	}
@@ -432,7 +433,7 @@ func (hb *HashBuilder) branch(set uint16) error {
 		return err
 	}
 	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
-	f.ref.len = hb.hashStack[len(hb.hashStack)-common.HashLength-1] - 0x80
+	f.ref.len = 32
 	if hb.trace {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}

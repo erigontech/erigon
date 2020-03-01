@@ -183,6 +183,25 @@ func (n *shortNode) copy() *shortNode {
 	return &c
 }
 
+func resetRefs(nd node) {
+	switch n := nd.(type) {
+	case *shortNode:
+		n.ref.len = 0
+		resetRefs(n.Val)
+	case *duoNode:
+		n.ref.len = 0
+		resetRefs(n.child1)
+		resetRefs(n.child2)
+	case *fullNode:
+		n.ref.len = 0
+		for _, child := range n.Children {
+			if child != nil {
+				resetRefs(child)
+			}
+		}
+	}
+}
+
 // nodeRef might contain node's RLP or hash thereof.
 // Used instead of []byte in order to reduce GC churn.
 type nodeRef struct {
