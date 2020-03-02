@@ -16,8 +16,8 @@ import (
 
 var boltOriginDb *bolt.DB
 var badgerOriginDb *badger.DB
-var boltDb *ethdb.DB
-var badgerDb *ethdb.DB
+var boltDb ethdb.DB
+var badgerDb ethdb.DB
 
 func TestMain(m *testing.M) {
 	setupDatabases()

@@ -12,6 +12,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
+type DB interface {
+	View(ctx context.Context, f func(tx Tx) error) (err error)
+	Update(ctx context.Context, f func(tx Tx) error) (err error)
+	Close() error
+}
+
 type Tx interface {
 	Bucket(name []byte) Bucket
 }
@@ -25,6 +31,8 @@ type Bucket interface {
 
 type Cursor interface {
 	Prefix(v []byte) Cursor
+	From(v []byte) Cursor
+	MatchBits(uint) Cursor
 	Prefetch(v uint) Cursor
 	NoValues() Cursor
 
@@ -34,6 +42,7 @@ type Cursor interface {
 	FirstKey() ([]byte, uint64, error)
 	SeekKey(seek []byte) ([]byte, uint64, error)
 	NextKey() ([]byte, uint64, error)
+
 	Walk(walker func(k, v []byte) (bool, error)) error
 	WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error
 }
@@ -119,7 +128,7 @@ func (opts Options) InMem(val bool) Options {
 	return opts
 }
 
-type DB struct {
+type allDB struct {
 	opts   Options
 	bolt   *bolt.DB
 	badger *badger.DB
@@ -131,12 +140,12 @@ var buckets = [][]byte{
 	dbutils.AccountsBucket,
 }
 
-func (opts Options) Open(ctx context.Context) (db *DB, err error) {
+func (opts Options) Open(ctx context.Context) (db *allDB, err error) {
 	return Open(ctx, opts)
 }
 
-func Open(ctx context.Context, opts Options) (db *DB, err error) {
-	db = &DB{opts: opts}
+func Open(ctx context.Context, opts Options) (db *allDB, err error) {
+	db = &allDB{opts: opts}
 
 	switch db.opts.provider {
 	case Bolt:
@@ -167,7 +176,7 @@ func Open(ctx context.Context, opts Options) (db *DB, err error) {
 
 // Close closes DB
 // All transactions must be closed before closing the database.
-func (db *DB) Close() error {
+func (db *allDB) Close() error {
 	switch db.opts.provider {
 	case Bolt:
 		return db.bolt.Close()
@@ -181,7 +190,7 @@ func (db *DB) Close() error {
 
 type tx struct {
 	ctx context.Context
-	db  *DB
+	db  *allDB
 
 	bolt   *bolt.Tx
 	badger *badger.Txn
@@ -217,7 +226,7 @@ type cursor struct {
 	err error
 }
 
-func (db *DB) View(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *allDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
@@ -241,7 +250,7 @@ func (db *DB) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	return err
 }
 
-func (db *DB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
+func (db *allDB) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &tx{db: db, ctx: ctx}
 	switch db.opts.provider {
 	case Bolt:
@@ -293,6 +302,16 @@ func (c *cursor) Prefix(v []byte) Cursor {
 	return c
 }
 
+func (c *cursor) From(v []byte) Cursor {
+	panic("not implemented yet")
+	return c
+}
+
+func (c *cursor) MatchBits(n uint) Cursor {
+	panic("not implemented yet")
+	return c
+}
+
 func (c *cursor) Prefetch(v uint) Cursor {
 	switch c.provider {
 	case Bolt:
@@ -306,18 +325,6 @@ func (c *cursor) Prefetch(v uint) Cursor {
 }
 
 func (c *cursor) NoValues() Cursor {
-	switch c.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		c.badgerOpts.PrefetchValues = false
-	case Remote:
-		c.remoteOpts.PrefetchValues(false)
-	}
-	return c
-}
-
-func (c *cursor) From() Cursor {
 	switch c.provider {
 	case Bolt:
 		// nothing to do

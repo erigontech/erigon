@@ -75,7 +75,47 @@ Known problems: mutation.Put does copy internally.
 - Nested Buckets
 - Backups, tx.WriteTo
 
+## Result interface:
+
+```
+type DB interface {
+	View(ctx context.Context, f func(tx Tx) error) (err error)
+	Update(ctx context.Context, f func(tx Tx) error) (err error)
+	Close() error
+}
+
+type Tx interface {
+	Bucket(name []byte) Bucket
+}
+
+type Bucket interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
+	Cursor() Cursor
+}
+
+type Cursor interface {
+	Prefix(v []byte) Cursor
+	From(v []byte) Cursor
+	MatchBits(uint) Cursor
+	Prefetch(v uint) Cursor
+	NoValues() Cursor
+
+	First() ([]byte, []byte, error)
+	Seek(seek []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
+	FirstKey() ([]byte, uint64, error)
+	SeekKey(seek []byte) ([]byte, uint64, error)
+	NextKey() ([]byte, uint64, error)
+
+	Walk(walker func(k, v []byte) (bool, error)) error
+	WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error
+}
+```
+
 ## Naming: 
 - `Iter` shorter `Cursor` shorter `Iterator`
 - `Opts` shorter `Options`
 - `Walk` shorter `ForEach`
+
