@@ -936,33 +936,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Tue Mar 3 16:55:06 2020 +0200
 
     core/state: fix account root hash update point
-
-commit a4cf279494f53276cf3576ae89b14b58efe644fb
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Mar 3 15:52:00 2020 +0200
-
-    core/state: extend snapshotter to handle account resurrections
-
-commit 6e05ccd845da26774774185956b3fd67966894ca
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Mar 3 09:10:23 2020 +0200
-
-    core/state/snapshot, tests: sync snap gen + snaps in consensus tests
-
-commit fe8347ea8a596ed233911340368ffd607fc23f70
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Mar 2 14:06:44 2020 +0100
-
-    squashme
-
-commit 361a6f08acad506c16cef1a1436b5975478e811f
-Author: Martin Holst Swende <martin@swende.se>
-Date:   Mon Mar 2 13:46:56 2020 +0100
-
-    core/tests: test for destroy+recreate contract with storage
-
-commit 92ec07d63bc06241df6b9c8cec6c9d5954a192f5
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Thu Feb 27 15:03:10 2020 +0200
-
-    core/state: fix an account resurrection issue
