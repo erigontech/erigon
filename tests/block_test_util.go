@@ -95,7 +95,7 @@ type btHeaderMarshaling struct {
 	Timestamp  math.HexOrDecimal64
 }
 
-func (t *BlockTest) Run() error {
+func (t *BlockTest) Run(snapshotter bool) error {
 	config, ok := Forks[t.json.Network]
 	if !ok {
 		return UnsupportedForkError{t.json.Network}
