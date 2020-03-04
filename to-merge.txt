@@ -930,9 +930,3 @@ Author: Péter Szilágyi <peterke@gmail.com>
 Date:   Wed Mar 4 10:19:53 2020 +0200
 
     core/state: fix resurrection state clearing and access
-
-commit dcb22a9f99b19bb6b6d27cdba754ad740dc426c5
-Author: Péter Szilágyi <peterke@gmail.com>
-Date:   Tue Mar 3 16:55:06 2020 +0200
-
-    core/state: fix account root hash update point
