@@ -11,28 +11,20 @@ import (
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
-	accountChanges   map[common.Address][]byte
-	accountNoChanges map[common.Address][]byte
+	accountChanges map[common.Address][]byte
+	storageChanges map[common.Address]bool
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
 	return &ChangeSetWriter{
-		accountChanges:   make(map[common.Address][]byte),
-		accountNoChanges: make(map[common.Address][]byte),
+		accountChanges: make(map[common.Address][]byte),
+		storageChanges: make(map[common.Address]bool),
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges(inclNoChanges bool) *dbutils.ChangeSet {
+func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
 	cs := new(dbutils.ChangeSet)
 	for key, val := range w.accountChanges {
-		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
-			panic(err)
-		}
-	}
-	if !inclNoChanges {
-		return cs
-	}
-	for key, val := range w.accountNoChanges {
 		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
 			panic(err)
 		}
@@ -53,9 +45,7 @@ func accountData(original *accounts.Account) []byte {
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	if accountsEqual(original, account) {
-		w.accountNoChanges[address] = accountData(original)
-	} else {
+	if !accountsEqual(original, account) || w.storageChanges[address] {
 		w.accountChanges[address] = accountData(original)
 	}
 	return nil
@@ -71,6 +61,10 @@ func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Addr
 }
 
 func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
+	if *original == *value {
+		return nil
+	}
+	w.storageChanges[address] = true
 	return nil
 }
 
