@@ -28,6 +28,8 @@ type TesterProtocol struct {
 	forkFeeder       BlockFeeder
 	blockMarkers     []uint64 // Bitmap to remember which blocks (or just header if the blocks are empty) have been sent already
 	// This is to prevent double counting them
+	forkBase   uint64
+	forkHeight uint64
 }
 
 func NewTesterProtocol() *TesterProtocol {
@@ -48,6 +50,7 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 
 func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	fmt.Printf("Ethereum peer connected: %s\n", peer.Name())
+	fmt.Printf("Protocol version: %d\n", tp.protocolVersion)
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
 		ProtocolVersion: tp.protocolVersion,
@@ -126,8 +129,8 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		//}
 	}
 	fmt.Printf("Peer downloaded all our blocks, entering next phase\n")
-	tp.sendLastBlock(rw, tp.forkFeeder)
-	fmt.Printf("Announced fork block\n")
+	tp.announceForkHeaders(rw)
+	fmt.Printf("Announced fork blocks\n")
 	for i := 0; i < 10000; i++ {
 		fmt.Printf("Message loop i %d\n", i)
 		// Read the next message
@@ -213,7 +216,7 @@ func (tp *TesterProtocol) handleGetBlockHeaderMsg(msg p2p.Msg, rw p2p.MsgReadWri
 		fmt.Printf("Failed to decode msg %v: %v\n", msg, err)
 		return newEmptyBlocks, fmt.Errorf("Failed to decode msg %v: %v\n", msg, err)
 	}
-	fmt.Printf("GetBlockHeadersMsg: %v\n", query)
+	fmt.Printf("GetBlockHeadersMsg %v\n", query)
 	headers := []*types.Header{}
 	if query.Origin.Hash == (common.Hash{}) && !query.Reverse {
 		number := query.Origin.Number
@@ -234,7 +237,7 @@ func (tp *TesterProtocol) handleGetBlockHeaderMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	}
 	if query.Origin.Hash != (common.Hash{}) && query.Amount == 1 && query.Skip == 0 && !query.Reverse {
 		if header := blockFeeder.GetHeaderByHash(query.Origin.Hash); header != nil {
-			fmt.Printf("Going to send block %d\n", header.Number.Uint64())
+			fmt.Printf("Going to send header %d\n", header.Number.Uint64())
 			headers = append(headers, header)
 		}
 	}
@@ -274,7 +277,10 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 			if !tp.markBlockSent(uint(block.NumberU64())) {
 				newSentBlocks++
 			}
-			data, err := rlp.EncodeToBytes(block.Body())
+			body := block.Body()
+			// Need to transform because our blocks also contain list of tx senders
+			smallBody := types.SmallBody{Transactions: body.Transactions, Uncles: body.Uncles}
+			data, err := rlp.EncodeToBytes(smallBody)
 			if err != nil {
 				fmt.Printf("Failed to encode body: %v", err)
 				return newSentBlocks, fmt.Errorf("Failed to encode body: %v", err)
@@ -287,11 +293,20 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	return newSentBlocks, nil
 }
 
-func (tp *TesterProtocol) announceForkBlock(rw p2p.MsgReadWriter) error {
-	request := make(newBlockHashesData, 1)
-	request[0].Hash = tp.forkFeeder.LastBlock().Hash()
-	request[0].Number = tp.forkFeeder.LastBlock().NumberU64()
-	return p2p.Send(rw, eth.NewBlockHashesMsg, request)
+func (tp *TesterProtocol) announceForkHeaders(rw p2p.MsgWriter) {
+	var request = make(newBlockHashesData, int(tp.forkHeight))
+	for fb := 0; fb < int(tp.forkHeight); fb++ {
+		blockNumber := tp.forkBase + uint64(fb)
+		block, err := tp.forkFeeder.GetBlockByNumber(blockNumber)
+		if err != nil {
+			panic(err)
+		}
+		request[fb].Hash = block.Hash()
+		request[fb].Number = blockNumber
+	}
+	if err := p2p.Send(rw, eth.NewBlockHashesMsg, request); err != nil {
+		panic(err)
+	}
 }
 
 func (tp *TesterProtocol) sendLastBlock(rw p2p.MsgReadWriter, blockFeeder BlockFeeder) error {

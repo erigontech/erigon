@@ -12,6 +12,8 @@ type BlockFeeder interface {
 	GetHeaderByHash(hash common.Hash) *types.Header
 	GetHeaderByNumber(number uint64) *types.Header
 	GetBlockByHash(hash common.Hash) (*types.Block, error)
+	GetBlockByNumber(number uint64) (*types.Block, error)
+	GetTdByNumber(number uint64) *big.Int
 	TotalDifficulty() *big.Int
 	LastBlock() *types.Block
 }
