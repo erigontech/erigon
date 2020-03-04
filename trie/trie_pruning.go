@@ -154,7 +154,7 @@ func (tp *TriePruning) Touch(hex []byte, del bool) {
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 }
 
-func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
+func pruneMap(t *Trie, m map[string]struct{}) bool {
 	hexes := make([]string, len(m))
 	i := 0
 	for hexS := range m {
@@ -166,7 +166,7 @@ func pruneMap(t *Trie, m map[string]struct{}, h *hasher) bool {
 
 	for i, hex := range hexes {
 		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes pruned, there is no need to prune descendants
-			t.unload([]byte(hex), h)
+			t.unload([]byte(hex))
 			if len(hex) == 0 {
 				empty = true
 			}
@@ -229,7 +229,7 @@ func (tp *TriePruning) PruneToTimestamp(
 
 	h := newHasher(false)
 	defer returnHasherToPool(h)
-	pruneMap(accountsTrie, aggregateAccounts, h)
+	pruneMap(accountsTrie, aggregateAccounts)
 	// Remove fom the timestamp structure
 	for hexS := range aggregateAccounts {
 		delete(tp.accountTimestamps, hexS)

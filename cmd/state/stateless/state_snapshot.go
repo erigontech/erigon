@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"os"
 	"time"
 
@@ -169,7 +170,7 @@ func newBucketWriter(db ethdb.Database, bucket []byte) *bucketWriter {
 }
 
 func copyDatabase(fromDB ethdb.Database, toDB ethdb.Database) error {
-	for _, bucket := range [][]byte{dbutils.AccountsBucket, dbutils.StorageBucket, dbutils.CodeBucket} {
+	for _, bucket := range [][]byte{dbutils.AccountsBucket, dbutils.StorageBucket, dbutils.CodeBucket, dbutils.DatabaseInfoBucket} {
 		fmt.Printf(" - copying bucket '%s'...\n", string(bucket))
 		writer := newBucketWriter(toDB, bucket)
 
@@ -206,6 +207,8 @@ func loadSnapshot(db ethdb.Database, filename string, createDb CreateDbFunc) {
 	defer diskDb.Close()
 
 	err = copyDatabase(diskDb, db)
+	check(err)
+	err = migrations.NewMigrator().Apply(diskDb, false, false, false, false, false)
 	check(err)
 }
 
@@ -341,9 +344,6 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 				}
 				roots[addrHash] = &account
 				incarnationMap[account.Incarnation]++
-				if account.Incarnation == 0 {
-					fmt.Printf("Incarnation 0: %x\n", addrHash)
-				}
 			}
 		}
 		return true, nil

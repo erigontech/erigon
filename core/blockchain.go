@@ -351,7 +351,7 @@ func (bc *BlockChain) EnablePreimages(ep bool) {
 }
 
 func (bc *BlockChain) GetTrieDbState() (*state.TrieDbState, error) {
-	if bc.trieDbState == nil {
+	if bc.trieDbState == nil && !bc.cacheConfig.DownloadOnly {
 		currentBlockNr := bc.CurrentBlock().NumberU64()
 		trieDbState, err := bc.GetTrieDbStateByBlock(bc.CurrentBlock().Header().Root, currentBlockNr)
 		if err != nil {
@@ -637,13 +637,8 @@ func (bc *BlockChain) ResetWithGenesisBlock(genesis *types.Block) error {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	batch := bc.db.NewBatch()
-
-	rawdb.WriteTd(batch, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
-	rawdb.WriteBlock(context.Background(), batch, genesis)
-	if _, err := batch.Commit(); err != nil {
-		log.Crit("Failed to write genesis block", "err", err)
-	}
+	rawdb.WriteTd(bc.db, genesis.Hash(), genesis.NumberU64(), genesis.Difficulty())
+	rawdb.WriteBlock(context.Background(), bc.db, genesis)
 	bc.writeHeadBlock(genesis)
 
 	// Last update all in-memory chain markers
@@ -700,21 +695,15 @@ func (bc *BlockChain) writeHeadBlock(block *types.Block) {
 	updateHeads := rawdb.ReadCanonicalHash(bc.db, block.NumberU64()) != block.Hash()
 
 	// Add the block to the canonical chain number scheme and mark as the head
-	batch := bc.db.NewBatch()
-	rawdb.WriteCanonicalHash(batch, block.Hash(), block.NumberU64())
-	if bc.enableTxLookupIndex {
-		rawdb.WriteTxLookupEntries(batch, block)
+	rawdb.WriteCanonicalHash(bc.db, block.Hash(), block.NumberU64())
+	if bc.enableTxLookupIndex && !bc.cacheConfig.DownloadOnly {
+		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
-	rawdb.WriteHeadBlockHash(batch, block.Hash())
+	rawdb.WriteHeadBlockHash(bc.db, block.Hash())
 
 	if updateHeads {
 		bc.hc.SetCurrentHeader(bc.db, block.Header())
 		rawdb.WriteHeadFastBlockHash(bc.db, block.Hash())
-	}
-
-	// Flush the whole batch into the disk, exit the node if failed
-	if _, err := batch.Commit(); err != nil {
-		log.Crit("Failed to update chain indexes and markers", "err", err)
 	}
 
 	// If the block is better than our head or is on a different chain, force update heads
@@ -973,7 +962,6 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 	bc.chainmu.Lock()
 	defer bc.chainmu.Unlock()
 
-	batch := bc.db.NewBatch()
 	for i := len(chain) - 1; i >= 0; i-- {
 		hash := chain[i]
 
@@ -987,18 +975,18 @@ func (bc *BlockChain) Rollback(chain []common.Hash) {
 		}
 		if currentFastBlock := bc.CurrentFastBlock(); currentFastBlock.Hash() == hash {
 			newFastBlock := bc.GetBlock(currentFastBlock.ParentHash(), currentFastBlock.NumberU64()-1)
-			rawdb.WriteHeadFastBlockHash(batch, currentFastBlock.ParentHash())
+			rawdb.WriteHeadFastBlockHash(bc.db, currentFastBlock.ParentHash())
 			bc.currentFastBlock.Store(newFastBlock)
 			headFastBlockGauge.Update(int64(newFastBlock.NumberU64()))
 		}
 		if currentBlock := bc.CurrentBlock(); currentBlock.Hash() == hash {
 			newBlock := bc.GetBlock(currentBlock.ParentHash(), currentBlock.NumberU64()-1)
-			rawdb.WriteHeadBlockHash(batch, currentBlock.ParentHash())
+			rawdb.WriteHeadBlockHash(bc.db, currentBlock.ParentHash())
 			bc.currentBlock.Store(newBlock)
 			headBlockGauge.Update(int64(newBlock.NumberU64()))
 		}
 	}
-	if _, err := batch.Commit(); err != nil {
+	if _, err := bc.db.Commit(); err != nil {
 		log.Crit("Failed to rollback chain markers", "err", err)
 	}
 	// Truncate ancient data which exceeds the current header.
@@ -1111,7 +1099,6 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 	writeAncient := func(blockChain types.Blocks, receiptChain []types.Receipts) (int, error) {
 		var (
 			previous = bc.CurrentFastBlock()
-			batch    = bc.db.NewBatch()
 		)
 		// If any error occurs before updating the head or we are inserting a side chain,
 		// all the data written this time wll be rolled back.
@@ -1142,17 +1129,11 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 			// Flush data into ancient database.
 			size += rawdb.WriteAncientBlock(bc.db, block, receiptChain[i], bc.GetTd(block.Hash(), block.NumberU64()))
 			if bc.enableTxLookupIndex {
-				rawdb.WriteTxLookupEntries(batch, block)
+				rawdb.WriteTxLookupEntries(bc.db, block)
 			}
 
 			stats.processed++
 		}
-		// Flush all tx-lookup index data.
-		size += batch.BatchSize()
-		if _, err := batch.Commit(); err != nil {
-			return 0, err
-		}
-		batch = bc.db.NewBatch()
 
 		if !updateHead(blockChain[len(blockChain)-1]) {
 			return 0, errors.New("side blocks can't be accepted as the ancient chain data")
@@ -1161,37 +1142,30 @@ func (bc *BlockChain) InsertReceiptChain(blockChain types.Blocks, receiptChain [
 
 		// Wipe out canonical block data.
 		for _, nh := range deleted {
-			rawdb.DeleteBlockWithoutNumber(batch, nh.hash, nh.number)
-			rawdb.DeleteCanonicalHash(batch, nh.number)
+			rawdb.DeleteBlockWithoutNumber(bc.db, nh.hash, nh.number)
+			rawdb.DeleteCanonicalHash(bc.db, nh.number)
 		}
 		for _, block := range blockChain {
 			// Always keep genesis block in active database.
 			if block.NumberU64() != 0 {
-				rawdb.DeleteBlockWithoutNumber(batch, block.Hash(), block.NumberU64())
-				rawdb.DeleteCanonicalHash(batch, block.NumberU64())
+				rawdb.DeleteBlockWithoutNumber(bc.db, block.Hash(), block.NumberU64())
+				rawdb.DeleteCanonicalHash(bc.db, block.NumberU64())
 			}
 		}
-		if _, err := batch.Commit(); err != nil {
-			return 0, err
-		}
-		batch = bc.db.NewBatch()
 
 		// Wipe out side chain too.
 		for _, nh := range deleted {
 			for _, hash := range rawdb.ReadAllHashes(bc.db, nh.number) {
-				rawdb.DeleteBlock(batch, hash, nh.number)
+				rawdb.DeleteBlock(bc.db, hash, nh.number)
 			}
 		}
 		for _, block := range blockChain {
 			// Always keep genesis block in active database.
 			if block.NumberU64() != 0 {
 				for _, hash := range rawdb.ReadAllHashes(bc.db, block.NumberU64()) {
-					rawdb.DeleteBlock(batch, hash, block.NumberU64())
+					rawdb.DeleteBlock(bc.db, hash, block.NumberU64())
 				}
 			}
-		}
-		if _, err := batch.Commit(); err != nil {
-			return 0, err
 		}
 		return 0, nil
 	}
@@ -1300,15 +1274,8 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	if common.IsCanceled(ctx) {
 		return NonStatTy, ctx.Err()
 	}
-	blockBatch := bc.db.NewBatch()
-	rawdb.WriteTd(blockBatch, block.Hash(), block.NumberU64(), externTd)
-	rawdb.WriteBlock(ctx, blockBatch, block)
-
-	// fixme add context
-	if _, err := blockBatch.Commit(); err != nil {
-		log.Crit("Failed to write block into disk", "err", err)
-	}
-	// Commit all cached state changes into underlying memory database.
+	rawdb.WriteTd(bc.db, block.Hash(), block.NumberU64(), externTd)
+	rawdb.WriteBlock(ctx, bc.db, block)
 
 	if tds != nil {
 		tds.SetBlockNr(block.NumberU64())
@@ -1796,8 +1763,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		}
 		stats.processed++
 		stats.usedGas += usedGas
-		stats.report(chain, i, bc.db)
-		if stats.needToCommit(chain, bc.db, i) {
+		toCommit := stats.needToCommit(chain, bc.db, i)
+		stats.report(chain, i, bc.db, toCommit)
+		if toCommit {
 			var written uint64
 			if written, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb", "error", err)
@@ -1826,7 +1794,6 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
 	if index == len(chain)-1 || elapsed >= commitLimit || db.BatchSize() >= db.IdealBatchSize() {
-		*st = insertStats{startTime: now, lastIndex: index + 1}
 		return true
 	}
 	return false
@@ -1834,14 +1801,14 @@ func (st *insertStats) needToCommit(chain []*types.Block, db ethdb.DbWithPending
 
 // report prints statistics if some number of blocks have been processed
 // or more than a few seconds have passed since the last message.
-func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations) {
+func (st *insertStats) report(chain []*types.Block, index int, batch ethdb.DbWithPendingMutations, toCommit bool) {
 	// Fetch the timings for the batch
 	var (
 		now     = mclock.Now()
 		elapsed = time.Duration(now) - time.Duration(st.startTime)
 	)
 	// If we're at the last block of the batch or report period reached, log
-	if index == len(chain)-1 || elapsed >= statsReportLimit {
+	if index == len(chain)-1 || elapsed >= statsReportLimit || toCommit {
 		// Count the number of transactions in this segment
 		var txs int
 		for _, block := range chain[st.lastIndex : index+1] {

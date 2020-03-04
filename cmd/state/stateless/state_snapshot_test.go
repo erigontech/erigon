@@ -95,6 +95,13 @@ func TestCopyDatabase(t *testing.T) {
 		string(dbutils.CodeBucket):     generateData(string(dbutils.CodeBucket)),
 	})
 
+	doTestcase(t, map[string]testData{
+		string(dbutils.AccountsBucket):     generateData(string(dbutils.AccountsBucket)),
+		string(dbutils.StorageBucket):      generateData(string(dbutils.StorageBucket)),
+		string(dbutils.CodeBucket):         generateData(string(dbutils.CodeBucket)),
+		string(dbutils.DatabaseInfoBucket): generateData(string(dbutils.DatabaseInfoBucket)),
+	})
+
 }
 
 func doTestcase(t *testing.T, testCase map[string]testData) {
