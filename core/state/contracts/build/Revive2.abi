@@ -1,0 +1,1 @@
+[{"inputs":[],"stateMutability":"nonpayable","type":"constructor"},{"anonymous":false,"inputs":[{"indexed":false,"internalType":"contract Phoenix","name":"d","type":"address"}],"name":"DeployEvent","type":"event"},{"inputs":[{"internalType":"bytes32","name":"salt","type":"bytes32"}],"name":"deploy","outputs":[],"stateMutability":"nonpayable","type":"function"}]
