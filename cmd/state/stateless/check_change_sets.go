@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
@@ -60,7 +61,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return err
 		}
 
-		expectedAccountChanges, err := csw.GetAccountChanges().Encode()
+		expectedAccountChanges, err := changeset.EncodeAccounts(csw.GetAccountChanges())
 		if err != nil {
 			return err
 		}

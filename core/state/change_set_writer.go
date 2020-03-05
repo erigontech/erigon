@@ -4,7 +4,7 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -22,8 +22,8 @@ func NewChangeSetWriter() *ChangeSetWriter {
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() *dbutils.ChangeSet {
-	cs := new(dbutils.ChangeSet)
+func (w *ChangeSetWriter) GetAccountChanges() *changeset.ChangeSet {
+	cs := changeset.NewAccountChangeSet()
 	for key, val := range w.accountChanges {
 		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
 			panic(err)
