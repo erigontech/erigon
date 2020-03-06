@@ -304,12 +304,10 @@ func (c *cursor) Prefix(v []byte) Cursor {
 
 func (c *cursor) From(v []byte) Cursor {
 	panic("not implemented yet")
-	return c
 }
 
 func (c *cursor) MatchBits(n uint) Cursor {
 	panic("not implemented yet")
-	return c
 }
 
 func (c *cursor) Prefetch(v uint) Cursor {
