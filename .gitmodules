@@ -1,3 +1,6 @@
 [submodule "tests"]
 	path = tests/testdata
 	url = https://github.com/ethereum/tests
+[submodule "semantics/z3"]
+	path = semantics/z3
+	url = https://github.com/Z3Prover/z3
