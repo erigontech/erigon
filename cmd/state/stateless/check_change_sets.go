@@ -61,7 +61,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return err
 		}
 
-		expectedAccountChanges, err := changeset.EncodeAccounts(csw.GetAccountChanges())
+		expectedAccountChanges, err := changeset.EncodeChangeSet(csw.GetAccountChanges())
 		if err != nil {
 			return err
 		}
