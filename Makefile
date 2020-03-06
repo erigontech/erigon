@@ -67,6 +67,16 @@ rpcdaemon:
 	@echo "Done building."
 	@echo "Run \"$(GOBIN)/rpcdaemon\" to launch rpcdaemon."
 
+semantics: semantics/z3/build/libz3.a
+	build/env.sh go run build/ci.go install ./cmd/semantics
+	@echo "Done building."
+	@echo "Run \"$(GOBIN)/semantics\" to launch semantics."
+
+semantics/z3/build/libz3.a:
+	cd semantics/z3 && python scripts/mk_make.py --staticlib
+	cd semantics/z3/build && ${MAKE} -j8
+	cp semantics/z3/build/libz3.a .	
+
 all:
 	$(GORUN) build/ci.go install -procs=1
 
@@ -80,7 +90,7 @@ ios:
 	@echo "Done building."
 	@echo "Import \"$(GOBIN)/Geth.framework\" to use the library."
 
-test: all
+test: semantics/z3/build/libz3.a all
 	$(GORUN) build/ci.go test
 
 lint: lintci
