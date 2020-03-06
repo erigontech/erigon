@@ -17,6 +17,7 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
