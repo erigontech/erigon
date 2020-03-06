@@ -3,12 +3,16 @@ package main
 import (
 	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
 	"os"
+	"os/signal"
 	"runtime"
 	"sort"
-
-	"os/signal"
 	"syscall"
+
+	//nolint:gosec
+	_ "net/http/pprof"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
@@ -22,10 +26,6 @@ import (
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
-
-	"net/http"
-	//nolint:gosec
-	_ "net/http/pprof"
 )
 
 var (
@@ -90,11 +90,17 @@ func tester(ctx *cli.Context) error {
 		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
 	}()
 
+	var enodeAddress string
 	if len(ctx.Args()) < 1 {
-		fmt.Printf("Usage: tester <enode>\n")
-		return nil
+		addr, err := ioutil.ReadFile(p2p.EnodeAddressFileName)
+		if err != nil {
+			return err
+		}
+		enodeAddress = string(addr)
+	} else {
+		enodeAddress = ctx.Args()[0]
 	}
-	nodeToConnect, err := enode.ParseV4(ctx.Args()[0])
+	nodeToConnect, err := enode.ParseV4(enodeAddress)
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse the node info: %v", err))
 	}

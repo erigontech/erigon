@@ -1,14 +1,13 @@
 package main
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
-
-	"context"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
@@ -90,6 +89,10 @@ func randAddress(r *rand.Rand) common.Address {
 	binary.BigEndian.PutUint64(b[8:], r.Uint64())
 	binary.BigEndian.PutUint32(b[16:], r.Uint32())
 	return b
+}
+
+func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *core.BlockGen)) ([]*types.Block, []types.Receipts) {
+
 }
 
 func generateBlock(
