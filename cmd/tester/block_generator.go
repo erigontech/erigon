@@ -91,10 +91,6 @@ func randAddress(r *rand.Rand) common.Address {
 	return b
 }
 
-func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *types.Block, engine consensus.Engine, db ethdb.Database, n int, gen func(int, *core.BlockGen)) ([]*types.Block, []types.Receipts) {
-
-}
-
 func generateBlock(
 	parent *types.Block,
 	extra []byte,
