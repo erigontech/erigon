@@ -190,8 +190,6 @@ func (tp *TriePruning) PruneToTimestamp(
 		delete(tp.accounts, gen)
 	}
 
-	h := newHasher(false)
-
 	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
 		key := pool.GetBuffer(64)
 		defer pool.PutBuffer(key)
@@ -213,8 +211,7 @@ func (tp *TriePruning) PruneToTimestamp(
 		}
 	}
 
-	defer returnHasherToPool(h)
-	pruneMap(accountsTrie, aggregateAccounts, h)
+	pruneMap(accountsTrie, aggregateAccounts)
 
 	// Remove fom the timestamp structure
 	for hexS := range aggregateAccounts {
