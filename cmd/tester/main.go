@@ -100,6 +100,10 @@ func tester(ctx *cli.Context) error {
 	} else {
 		enodeAddress = ctx.Args()[0]
 	}
+	if enodeAddress == "" {
+		fmt.Printf("Usage: tester <enode>\n")
+		return nil
+	}
 	nodeToConnect, err := enode.ParseV4(enodeAddress)
 	if err != nil {
 		panic(fmt.Sprintf("Could not parse the node info: %v", err))
