@@ -570,11 +570,10 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool) {
 			child := n.Children[hex[pos]]
 			if child == nil {
 				return nil, nil, false
-			} else {
-				parent = n
-				nd = child
-				pos++
 			}
+			parent = n
+			nd = child
+			pos++
 		case *accountNode:
 			parent = n
 			nd = n.storage
