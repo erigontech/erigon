@@ -138,7 +138,7 @@ func generateBlock(
 		}
 		signedTxs = append(signedTxs, signedTx)
 		receipt, err2 := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signedTx, usedGas, vmConfig)
-		if err1 != nil {
+		if err2 != nil {
 			return nil, fmt.Errorf("tx %x failed: %v", signedTx.Hash(), err2)
 		}
 		if !chainConfig.IsByzantium(header.Number) {
