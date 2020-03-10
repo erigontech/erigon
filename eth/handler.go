@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
@@ -230,6 +231,36 @@ func (pm *ProtocolManager) makeFirehoseProtocol() p2p.Protocol {
 	}
 }
 
+func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
+	// Initiate Debug protocol
+	log.Info("Initialising Debug protocol", "versions", FirehoseVersions)
+	return p2p.Protocol{
+		Name:    DebugName,
+		Version: DebugVersions[0],
+		Length:  DebugLengths[DebugVersions[0]],
+		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			peer := &debugPeer{Peer: p, rw: rw}
+			select {
+			case <-pm.quitSync:
+				return p2p.DiscQuitting
+			default:
+				pm.wg.Add(1)
+				defer pm.wg.Done()
+				return pm.handleDebug(peer)
+			}
+		},
+		NodeInfo: func() interface{} {
+			return pm.NodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			if p := pm.peers.Peer(fmt.Sprintf("%x", id[:8])); p != nil {
+				return p.Info()
+			}
+			return nil
+		},
+	}
+}
+
 func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 	length, ok := ProtocolLengths[version]
 	if !ok {
@@ -409,13 +440,22 @@ func (pm *ProtocolManager) handleFirehose(p *firehosePeer) error {
 	}
 }
 
+func (pm *ProtocolManager) handleDebug(p *debugPeer) error {
+	for {
+		if err := pm.handleDebugMsg(p); err != nil {
+			p.Log().Debug("Debug message handling failed", "err", err)
+			return err
+		}
+	}
+}
+
 // handleMsg is invoked whenever an inbound message is received from a remote
 // peer. The remote connection is torn down upon returning any error.
 func (pm *ProtocolManager) handleMsg(p *peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
 	msg, err := p.rw.ReadMsg()
 	if err != nil {
-		return err
+		return fmt.Errorf("handleMsg p.rw.ReadMsg: %w", err)
 	}
 	if msg.Size > ProtocolMaxMsgSize {
 		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
@@ -1170,6 +1210,74 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
 	}
+}
+
+func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
+	msg, readErr := p.rw.ReadMsg()
+	if readErr != nil {
+		return fmt.Errorf("handleDebugMsg p.rw.ReadMsg: %w", readErr)
+	}
+	if msg.Size > DebugMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, DebugMaxMsgSize)
+	}
+	defer msg.Discard()
+
+	switch msg.Code {
+	case DebugSetGenesisMsg:
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+
+		var msgAsJson []byte
+		if err := msgStream.Decode(&msgAsJson); err != nil {
+			return fmt.Errorf("msgStream.Decode: %w", err)
+		}
+
+		genesis := core.DefaultGenesisBlock()
+		if err := json.Unmarshal(msgAsJson, genesis); err != nil {
+			return fmt.Errorf("json.Unmarshal: %w", err)
+		}
+
+		ethDb := ethdb.NewMemDatabase()
+		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
+		if err != nil {
+			return fmt.Errorf("SetupGenesisBlock: %w", err)
+		}
+
+		engine := pm.blockchain.Engine()
+		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+		if err != nil {
+			return fmt.Errorf("NewBlockChain: %w", err)
+		}
+
+		// Clean up
+		// pm.engine.Close()
+		// pm.ethDb.Close()
+		pm.blockchain.Stop()
+		pm.blockchain = blockchain
+		pm.downloader.Terminate()
+		pm.downloader = downloader.New(pm.checkpointNumber, blockchain.ChainDb(), nil /*stateBloom */, pm.eventMux, blockchain, nil, pm.removePeer)
+
+		//api.chainConfig = chainConfig
+		//api.genesisHash = genesisHash
+		//api.author = chainParams.Genesis.Author
+		//api.extraData = chainParams.Genesis.ExtraData
+		//api.ethDb = blockchain.ChainDb()
+		//api.engine = engine
+		//api.blockchain = blockchain
+		//api.db = state.NewDatabase(api.ethDb)
+		//api.txMap = make(map[common.Address]map[uint64]*types.Transaction)
+		//api.txSenders = make(map[common.Address]struct{})
+		//api.blockInterval = 0
+
+		log.Debug("Succeed to set new Genesis")
+		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
+		if err != nil {
+			return fmt.Errorf("p2p.Send: %w", err)
+		}
+		return nil
+	default:
+		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
+	}
+	return nil
 }
 
 // BroadcastBlock will either propagate a block to a subset of its peers, or

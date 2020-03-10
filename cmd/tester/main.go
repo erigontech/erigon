@@ -1,15 +1,20 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
+	"math/rand"
 	"net/http"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
 	"sort"
 	"syscall"
+	"time"
 
 	//nolint:gosec
 	_ "net/http/pprof"
@@ -27,6 +32,22 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
 )
+
+func init() {
+	// go tool pprof -http=:8081 http://localhost:6060/
+	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
+	go func() {
+		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+		randomPort := func(min, max int) int {
+			return r.Intn(max-min) + min
+		}
+		port := randomPort(6000, 7000)
+
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "\\?seconds\\=20")
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "debug/pprof/heap")
+		fmt.Fprintf(os.Stderr, "%s\n", http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil))
+	}()
+}
 
 var (
 	// Git SHA1 commit hash of the release (set via linker flags)
@@ -61,6 +82,19 @@ func init() {
 		console.Stdin.Close() // Resets terminal mode.
 		return nil
 	}
+
+	app.Commands = []cli.Command{
+		{
+			Action:    utils.MigrateFlags(genesisCmd),
+			Name:      "genesis",
+			Usage:     "Initialize the signer, generate secret storage",
+			ArgsUsage: "",
+			Description: `
+The init command generates a master seed which Clef can use to store credentials and data needed for
+the rule-engine to work.`,
+		},
+	}
+
 }
 
 func main() {
@@ -70,7 +104,39 @@ func main() {
 	}
 }
 
-func tester(ctx *cli.Context) error {
+func genesisCmd(c *cli.Context) error {
+	res, err := json.Marshal(genesis())
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(os.Stdout, string(res))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func rootContext() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+
+		select {
+		case <-ch:
+			log.Info("Got interrupt, shutting down...")
+		case <-ctx.Done():
+		}
+
+		cancel()
+	}()
+	return ctx
+}
+
+func tester(cliCtx *cli.Context) error {
+	ctx := rootContext()
+
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -91,14 +157,14 @@ func tester(ctx *cli.Context) error {
 	}()
 
 	var enodeAddress string
-	if len(ctx.Args()) < 1 {
+	if len(cliCtx.Args()) < 1 {
 		addr, err := ioutil.ReadFile(p2p.EnodeAddressFileName)
 		if err != nil {
 			return err
 		}
 		enodeAddress = string(addr)
 	} else {
-		enodeAddress = ctx.Args()[0]
+		enodeAddress = cliCtx.Args()[0]
 	}
 	if enodeAddress == "" {
 		fmt.Printf("Usage: tester <enode>\n")
@@ -112,19 +178,19 @@ func tester(ctx *cli.Context) error {
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
-	blockGen, err := NewBlockGenerator("blocks", 50000)
-	defer blockGen.Close()
+	blockGen, err := NewBlockGenerator(ctx, "blocks", 60000)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
+	defer blockGen.Close()
 	tp.blockFeeder = blockGen
 	tp.forkBase = 49998
 	tp.forkHeight = 5
-	tp.forkFeeder, err = NewForkGenerator(blockGen, "forkblocks", tp.forkBase, tp.forkHeight)
-	defer tp.forkFeeder.Close()
+	tp.forkFeeder, err = NewForkGenerator(ctx, blockGen, "forkblocks", tp.forkBase, tp.forkHeight)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create fork generator: %v", err))
 	}
+	defer tp.forkFeeder.Close()
 	tp.protocolVersion = uint32(eth.ProtocolVersions[2])
 	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = params.MainnetGenesisHash
@@ -144,6 +210,12 @@ func tester(ctx *cli.Context) error {
 			Length:  eth.ProtocolLengths[eth.ProtocolVersions[2]],
 			Run:     tp.protocolRun,
 		},
+		{
+			Name:    eth.DebugName,
+			Version: eth.DebugVersions[0],
+			Length:  eth.DebugLengths[eth.DebugVersions[0]],
+			Run:     tp.debugProtocolRun,
+		},
 	}
 	server := &p2p.Server{Config: p2pConfig}
 	// Add protocol
@@ -152,15 +224,6 @@ func tester(ctx *cli.Context) error {
 	}
 	server.AddPeer(nodeToConnect)
 
-	sigs := make(chan os.Signal, 1)
-	interruptCh := make(chan bool, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-sigs
-		interruptCh <- true
-	}()
-
-	_ = <-interruptCh
+	_ = <-ctx.Done()
 	return nil
 }

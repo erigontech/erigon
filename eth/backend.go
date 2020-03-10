@@ -32,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/clique"
@@ -48,6 +49,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 	"github.com/ledgerwatch/turbo-geth/miner"
 	"github.com/ledgerwatch/turbo-geth/node"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -577,6 +579,9 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 
 	// Firehose
 	protos = append(protos, s.protocolManager.makeFirehoseProtocol())
+
+	// Debug
+	protos = append(protos, s.protocolManager.makeDebugProtocol())
 
 	if s.lesServer != nil {
 		protos = append(protos, s.lesServer.Protocols()...)
