@@ -546,11 +546,12 @@ func (a *Account) Reset() {
 func (a *Account) DecodeForStorage(enc []byte) error {
 	a.Reset()
 
-	var fieldSet = enc[0]
-	var pos = 1
 	if len(enc) == 0 {
 		return nil
 	}
+
+	var fieldSet = enc[0]
+	var pos = 1
 
 	if fieldSet&1 > 0 {
 		decodeLength := int(enc[pos])
