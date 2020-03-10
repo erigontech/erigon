@@ -2,9 +2,11 @@ package state
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 )
@@ -70,4 +72,17 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 
 func (w *ChangeSetWriter) CreateContract(address common.Address) error {
 	return nil
+}
+
+func (w *ChangeSetWriter) PrintChangedAccounts() {
+	fmt.Println("Account Changes")
+	for k := range w.accountChanges {
+		fmt.Println(hexutil.Encode(k.Bytes()))
+	}
+	fmt.Println("------------------------------------------")
+	fmt.Println("Storage Changes")
+	for k := range w.storageChanges {
+		fmt.Println(hexutil.Encode(k.Bytes()))
+	}
+	fmt.Println("------------------------------------------")
 }

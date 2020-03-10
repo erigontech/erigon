@@ -73,6 +73,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 
 		if !bytes.Equal(dbAccountChanges, expectedAccountChanges) {
 			fmt.Printf("Unexpected account changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbAccountChanges), hexutil.Encode(expectedAccountChanges))
+			csw.PrintChangedAccounts()
 			return nil
 		}
 
