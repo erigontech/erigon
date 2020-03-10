@@ -1243,6 +1243,9 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		// Clean up: reuse engine... probably we can
+		pm.noMorePeers <- struct{}{} // exit pm.syncer loop
+		time.Sleep(time.Millisecond) // wait for pm.syncer finish
+
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
 		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
@@ -1251,9 +1254,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
-		pm.downloader.Terminate()
 		pm.downloader = downloader.New(pm.checkpointNumber, blockchain.ChainDb(), nil /*stateBloom */, pm.eventMux, blockchain, nil, pm.removePeer)
-		pm.blockFetcher.Stop()
 		// Construct the fetcher (short sync)
 		validator := func(header *types.Header) error {
 			return engine.VerifyHeader(blockchain, header, true)
@@ -1288,8 +1289,9 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return n, err
 		}
 		pm.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, pm.BroadcastBlock, heighter, inserter, pm.removePeer)
+		go pm.syncer()
 
-		log.Debug("Succeed to set new Genesis")
+		log.Warn("Succeed to set new Genesis")
 		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
 		if err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
