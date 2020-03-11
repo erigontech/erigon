@@ -1243,8 +1243,8 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		// Clean up: reuse engine... probably we can
-		pm.noMorePeers <- struct{}{} // exit pm.syncer loop
-		time.Sleep(time.Millisecond) // wait for pm.syncer finish
+		pm.noMorePeers <- struct{}{}     // exit pm.syncer loop
+		time.Sleep(2 * time.Millisecond) // wait for pm.syncer finish
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()

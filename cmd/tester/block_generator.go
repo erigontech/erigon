@@ -17,6 +17,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
@@ -174,6 +175,7 @@ func generateBlock(
 	}
 	header.Root = roots[len(roots)-1]
 	header.GasUsed = *usedGas
+
 	tds.SetBlockNr(uint64(height))
 	err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 	if err != nil {
@@ -184,7 +186,10 @@ func generateBlock(
 	return block, nil
 }
 
-type NoopBackend struct{}
+type NoopBackend struct {
+	db      ethdb.Database
+	genesis *core.Genesis
+}
 
 func (*NoopBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	panic("must not be called")
@@ -209,6 +214,11 @@ func (*NoopBackend) SendTransaction(ctx context.Context, tx *types.Transaction) 
 	return nil // nothing to do
 }
 
+func (b *NoopBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	receipt, _, _, _ := rawdb.ReadReceipt(b.db, txHash, b.genesis.Config)
+	return receipt, nil
+}
+
 func (*NoopBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
 	panic("must not be called")
 }
@@ -226,11 +236,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 
 	db := ethdb.NewMemDatabase()
 	genesis := genesis()
-	genesisBlock, _, tds, err1 := genesis.ToBlock(db)
-	if err1 != nil {
-		return nil, err1
-	}
-	parent := genesisBlock
+	genesisBlock := genesis.MustCommit(db)
 	extra := []byte("BlockGenerator")
 	coinbaseKey, err2 := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
 	if err2 != nil {
@@ -265,15 +271,28 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	var phoenix *contracts.Phoenix
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
+	var nonce uint64 // nonce of the sender (coinbase)
 
-	//ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
-	backend := &NoopBackend{}
-	txGen := func(ctx context.Context, i int, nonce uint64, gp *core.GasPool, statedb *state.IntraBlockState) *types.Transaction {
+	backend := &NoopBackend{db: db, genesis: genesis}
+	genBlock := func(i int, gen *core.BlockGen) {
+		select {
+		case <-ctx.Done():
+			panic(ctx.Err())
+		default:
+		}
+
+		gen.SetExtra(extra)
+		gen.SetCoinbase(coinbase)
+		if gen.GetHeader().GasLimit <= 21000 {
+			return
+		}
+		gen.SetNonce(types.EncodeNonce(nonce))
+
+		signer := types.MakeSigner(genesis.Config, big.NewInt(int64(nonce)))
 		var tx *types.Transaction
+
 		switch i {
 		case 59001: // deploy factory
-			transactOpts.GasLimit = 180_000
-			transactOpts.Nonce = big.NewInt(int64(nonce))
 			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, backend)
 			if err != nil {
 				panic(err)
@@ -290,52 +309,68 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 		case 59002: // call .deploy() method on factory
-			transactOpts.GasLimit = 180_000
-			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = revive.Deploy(transactOpts, [32]byte{})
 			if err != nil {
 				panic(err)
 			}
+			gen.AddTx(tx)
 		case 59003:
-			transactOpts.GasLimit = 180_000
-			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Store(transactOpts)
 			if err != nil {
 				panic(err)
 			}
+			gen.AddTx(tx)
 		case 59004:
-			transactOpts.GasLimit = 180_000
-			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Die(transactOpts)
 			if err != nil {
 				panic(err)
 			}
+			gen.AddTx(tx)
 		case 59005:
-			transactOpts.GasLimit = 180_000
-			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = revive.Deploy(transactOpts, [32]byte{})
 			if err != nil {
 				panic(err)
 			}
+			gen.AddTx(tx)
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(nonce, to, amount, 21000, gasPrice, []byte{})
+			tx = types.NewTransaction(nonce, to, amount, params.TxGas, nil, nil)
+			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
+			if err1 != nil {
+				panic(err1)
+			}
+			gen.AddTx(signedTx)
 		}
-		return tx
+
+		nonce++
 	}
 
-	var nonce uint64 // nonce of the sender (coinbase)
-	for height := 1; height <= initialHeight; height++ {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+	blocks := make(chan *types.Block, 1000)
+	go func() {
+		defer close(blocks)
+		height := initialHeight
+		parent := genesisBlock
+		i := 0
+		n := 1000
+		for height > 0 {
+			if height < 1000 {
+				n = height
+			}
 
-		block, err3 := generateBlock(parent, extra, coinbase, genesis.Config, tds, height, &nonce, coinbaseKey, engine, txGen)
-		if err3 != nil {
-			return nil, fmt.Errorf("generateBlock: %w", err3)
+			// Generate a batch of blocks, each properly signed
+			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			for _, block := range blocksSlice {
+				blocks <- block
+				parent = block
+			}
+			height -= 1000
+			i++
+			log.Info(fmt.Sprintf("block gen %dK", i))
 		}
+	}()
+
+	var parent *types.Block
+	for block := range blocks {
 		buffer, err4 := rlp.EncodeToBytes(block)
 		if err4 != nil {
 			return nil, err4
@@ -353,12 +388,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		td = new(big.Int).Add(td, block.Difficulty())
 		bg.tdByNumber[block.NumberU64()] = td
 		parent = block
-
-		if height%1000 == 0 {
-			log.Info(fmt.Sprintf("block gen %dK", height/1000))
-		}
 	}
-
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
 
@@ -454,7 +484,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		parent = block
 
 		if height%1000 == 0 {
-			log.Info(fmt.Sprintf("block gen %dK", height/1000))
+			log.Info(fmt.Sprintf("fork gen %dK", height/1000))
 		}
 	}
 	bg.lastBlock = parent

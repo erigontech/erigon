@@ -178,6 +178,14 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 	b.header.Difficulty = b.engine.CalcDifficulty(chainreader, b.header.Time, b.parent.Header())
 }
 
+func (b *BlockGen) GetHeader() *types.Header {
+	return b.header
+}
+
+func (b *BlockGen) GetParent() *types.Block {
+	return b.parent
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.
@@ -220,8 +228,8 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			// Finalize and seal the block
 			_, err := b.engine.FinalizeAndAssemble(config, b.header, statedb, b.txs, b.uncles, b.receipts)
 
-			ctx, _ = params.GetNoHistoryByBlock(ctx, b.header.Number)
-			if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
+			ctx2, _ := params.GetNoHistoryByBlock(config.WithEIPsFlags(ctx, b.header.Number), b.header.Number)
+			if err := statedb.FinalizeTx(ctx2, tds.TrieStateWriter()); err != nil {
 				panic(err)
 			}
 			roots, err := tds.ComputeTrieRoots()
@@ -250,9 +258,9 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	if err != nil {
 		panic(err)
 	}
-	if err := tds.Rebuild(); err != nil {
-		panic(err)
-	}
+	//if err := tds.Rebuild(); err != nil {
+	//	panic(err)
+	//}
 	for i := 0; i < n; i++ {
 		statedb := state.New(tds)
 		block, receipt := genblock(i, parent, statedb, tds)
@@ -286,7 +294,7 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			Difficulty: parent.Difficulty(),
 			UncleHash:  parent.UncleHash(),
 		}),
-		GasLimit: CalcGasLimit(parent, parent.GasLimit(), parent.GasLimit()),
+		GasLimit: CalcGasLimit(parent, 200000, 8000000),
 		Number:   number,
 		Time:     time,
 	}
