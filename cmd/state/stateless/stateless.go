@@ -39,41 +39,33 @@ var chartColors = []drawing.Color{
 	chart.ColorGreen,
 }
 
-func runBlock(dbstate *state.Stateless, chainConfig *params.ChainConfig,
-	bcb core.ChainContext, header *types.Header, block *types.Block, trace bool, checkRoot bool,
+func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
+	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block,
 ) error {
+	header := block.Header()
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
-	statedb := state.New(dbstate)
-	statedb.SetTrace(trace)
 	gp := new(core.GasPool).AddGas(block.GasLimit())
 	usedGas := new(uint64)
 	var receipts types.Receipts
 	if chainConfig.DAOForkSupport && chainConfig.DAOForkBlock != nil && chainConfig.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(statedb)
+		misc.ApplyDAOHardFork(ibs)
 	}
 	for _, tx := range block.Transactions() {
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, dbstate, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
 		receipts = append(receipts, receipt)
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	if _, err := engine.FinalizeAndAssemble(chainConfig, header, statedb, block.Transactions(), block.Uncles(), receipts); err != nil {
+	if _, err := engine.FinalizeAndAssemble(chainConfig, header, ibs, block.Transactions(), block.Uncles(), receipts); err != nil {
 		return fmt.Errorf("finalize of block %d failed: %v", block.NumberU64(), err)
 	}
-	dbstate.SetBlockNr(block.NumberU64())
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := statedb.CommitBlock(ctx, dbstate); err != nil {
+	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
-	}
-	if checkRoot {
-		if err := dbstate.CheckRoot(header.Root); err != nil {
-			fmt.Printf("block hash = %x\n", block.Hash())
-			return fmt.Errorf("error processing block %d: %v", block.NumberU64(), err)
-		}
 	}
 	return nil
 }
@@ -386,9 +378,17 @@ func Stateless(
 				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
 				check(err)
 			}
-			if err = runBlock(s, chainConfig, bcb, header, block, trace, !binary); err != nil {
+			ibs := state.New(s)
+			ibs.SetTrace(trace)
+			s.SetBlockNr(blockNum)
+			if err = runBlock(ibs, s, s, chainConfig, bcb, block); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
+			} else if !binary {
+				if err = s.CheckRoot(header.Root); err != nil {
+					fmt.Printf("Wrong block hash %x in block %d\n", block.Hash(), blockNum)
+					finalRootFail = true
+				}
 			}
 		}
 		execTime3 := time.Since(execStart)
