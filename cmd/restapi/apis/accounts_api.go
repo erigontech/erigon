@@ -50,10 +50,7 @@ func findAccountByID(accountID string, remoteDB *remote.DB) (*accounts.Account, 
 	var account *accounts.Account
 
 	err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
-		bucket, err := tx.Bucket(dbutils.AccountsBucket)
-		if err != nil {
-			return err
-		}
+		bucket := tx.Bucket(dbutils.AccountsBucket)
 
 		for _, key := range possibleKeys {
 			accountRlp, err := bucket.Get(key)

@@ -1,6 +1,7 @@
 package trie
 
 // CompressNibbles - supports only even number of nibbles
+// This method supports only arrays of even nibbles
 //
 // HI_NIBBLE(b) = (b >> 4) & 0x0F
 // LO_NIBBLE(b) = b & 0x0F

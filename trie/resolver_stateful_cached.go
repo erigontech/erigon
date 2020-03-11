@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
+const TraceFromBlock uint64 = 258199
+
 type ResolverStatefulCached struct {
 	*ResolverStateful
 	fromCache bool
@@ -50,7 +52,7 @@ func (tr *ResolverStatefulCached) PrepareResolveParams() ([][]byte, []uint) {
 	// Remove requests strictly contained in the preceding ones
 	startkeys := [][]byte{}
 	fixedbits := []uint{}
-	tr.rss = nil
+	tr.rss = tr.rss[:0]
 	if len(tr.requests) == 0 {
 		return startkeys, fixedbits
 	}
@@ -117,11 +119,7 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 	if tr.hb.hasRoot() {
 		hbRoot := tr.hb.root()
 		hbHash := tr.hb.rootHash()
-		err := tr.hookFunction(tr.currentReq, hbRoot, hbHash)
-		if err != nil {
-			return err
-		}
-		return nil
+		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 	}
 	return nil
 }
@@ -136,12 +134,38 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		return true, k1
 	}
 
-	switch bytes.Compare(k1, k2) {
+	switch cmpWithoutIncarnation(k1, k2) {
 	case -1, 0:
 		return true, k1
 	default:
 		return false, k2
 	}
+}
+
+// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
+func cmpWithoutIncarnation(k1, k2 []byte) int {
+	if k1 == nil {
+		return 1
+	}
+
+	if k2 == nil {
+		return -1
+	}
+
+	if len(k2) <= common.HashLength {
+		return bytes.Compare(k1, k2)
+	}
+
+	if len(k2) <= common.HashLength+8 {
+		return bytes.Compare(k1, k2[:common.HashLength])
+	}
+
+	buf := pool.GetBuffer(256)
+	defer pool.PutBuffer(buf)
+	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
+	buf.B = append(buf.B, k2[common.HashLength+8:]...)
+
+	return bytes.Compare(k1, buf.B)
 }
 
 func (tr *ResolverStatefulCached) RebuildTrie(
@@ -172,15 +196,14 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
-	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		_, err := tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
-		if err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
+	//if blockNr > TraceFromBlock {
+	//	for _, req := range tr.requests {
+	//		fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+	//		fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+	//	}
+	//	fmt.Printf("fixedbits: %d\n", fixedbits)
+	//	fmt.Printf("startkey: %x\n", startkeys)
+	//}
 
 	var err error
 	if accounts {
@@ -193,30 +216,42 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 			return errors.New("historical resolver not supported yet")
 		}
 		err = tr.MultiWalk2(boltDb, blockNr, dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+
 	}
 	if err != nil {
 		return err
 	}
 
 	if err = tr.finaliseRoot(); err != nil {
+		fmt.Println("Err in finalize root, writing down resolve params")
+		for _, req := range tr.requests {
+			fmt.Printf("req.resolvePos: %d, req.extResolvePos: %d, len(req.resolveHex): %d, len(req.contract): %d\n", req.resolvePos, req.extResolvePos, len(req.resolveHex), len(req.contract))
+			fmt.Printf("req.contract: %x, req.resolveHex: %x\n", req.contract, req.resolveHex)
+		}
+		fmt.Printf("fixedbits: %d\n", fixedbits)
+		fmt.Printf("startkey: %x\n", startkeys)
+
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
 	return nil
 }
 
-func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, k []byte, v []byte, fromCache bool) error {
-	return tr.Walker(true, fromCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error {
+	return tr.Walker(true, blockNr, fromCache, keyIdx, k, v)
 }
 
-func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, k []byte, v []byte, fromCache bool) error {
-	return tr.Walker(false, fromCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error {
+	return tr.Walker(false, blockNr, fromCache, keyIdx, k, v)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	//if bytes.Compare(common.FromHex("0808"), k) == 0 {
-	//	fmt.Printf("Walker Cached: keyIdx: %d key:%x  value:%x, fromCache: %v\n", keyIdx, k, v, fromCache)
+func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
+	//if blockNr > TraceFromBlock {
+	//	buf := pool.GetBuffer(256)
+	//	CompressNibbles(kAsNibbles, &buf.B)
+	//	fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
 	//}
+
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
@@ -233,6 +268,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 		tr.curr.Write(tr.succ.Bytes())
 		tr.succ.Reset()
 		skip := tr.currentReq.extResolvePos // how many first nibbles to skip
+		if fromCache && skip > common.HashLength*2 {
+			skip -= 16 // no incarnation in hash bucket
+		}
 		tr.succ.Write(kAsNibbles[skip:])
 
 		if !fromCache {
@@ -256,10 +294,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 				tr.accData.Incarnation = tr.a.Incarnation
 				data = &tr.accData
 			}
-
 			tr.groups, err = GenStructStep(tr.currentRs.HashOnly, tr.curr.Bytes(), tr.succ.Bytes(), tr.hb, data, tr.groups, false)
 			if err != nil {
-				return fmt.Errorf("fail GenStructStep: %w", err)
+				return err
 			}
 		}
 		// Remember the current key and value
@@ -300,7 +337,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, fromCache bool, keyIdx 
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, k []byte, v []byte, fromCache bool) error) error {
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -332,6 +369,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
+			//if blockNr > TraceFromBlock {
+			//	fmt.Printf("For loop: %x, %x\n", cacheK, k)
+			//}
+
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
 				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
@@ -348,10 +389,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					minKeyIndex := int(math.Min(float64(len(minKey)), float64(fixedbytes-1)))
-					startKeyIndex := int(math.Min(float64(len(startkey)), float64(fixedbytes-1)))
-
-					cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					minKeyIndex := minInt(len(minKey), fixedbytes-1)
+					if fromCache && fixedbytes > 32 {
+						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
+					}
+					startKeyIndex := minInt(len(startkey), fixedbytes-1)
+					if fromCache {
+						cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					} else {
+						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
 						cmp = -1
@@ -388,7 +435,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				if len(v) > 0 {
 					keyAsNibbles.Reset()
 					DecompressNibbles(minKey, &keyAsNibbles.B)
-					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
+					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
 						return err
 					}
 				}
@@ -407,7 +454,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
 					keyAsNibbles.Reset()
 					DecompressNibbles(minKey, &keyAsNibbles.B)
-					if err := walker(rangeIdx, keyAsNibbles.B, v, false); err != nil {
+					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
 						return err
 					}
 				}
@@ -429,7 +476,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					continue
 				}
 
-				if err := walker(rangeIdx, keyAsNibbles.B, cacheV, fromCache); err != nil {
+				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
 					return fmt.Errorf("waker err: %w", err)
 				}
 			}
@@ -450,4 +497,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		return nil
 	})
 	return err
+}
+
+func minInt(i1, i2 int) int {
+	return int(math.Min(float64(i1), float64(i2)))
 }

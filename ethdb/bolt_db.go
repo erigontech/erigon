@@ -19,7 +19,6 @@ package ethdb
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"os"
 	"path"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
@@ -62,12 +62,31 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil, err
 	}
 	// Open the db and recover any potential corruptions
-	db, err := bolt.Open(file, 0600, &bolt.Options{})
+	db, errOpen := bolt.Open(file, 0600, &bolt.Options{})
 
 	// (Re)check for errors and abort if opening of the db failed
-	if err != nil {
+	if errOpen != nil {
+		return nil, errOpen
+	}
+
+	if err := db.Update(func(tx *bolt.Tx) error {
+		for _, bucket := range dbutils.Buckets {
+			if _, err := tx.CreateBucketIfNotExists(bucket, false); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
 		return nil, err
 	}
+
+	if debug.IsIntermediateTrieHash() {
+		_ = db.Update(func(tx *bolt.Tx) error {
+			_, _ = tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
+			return nil
+		})
+	}
+
 	return &BoltDatabase{
 		db:  db,
 		log: logger,
@@ -78,7 +97,7 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 // Put inserts or updates a single entry.
 func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists(bucket, true)
+		b, err := tx.CreateBucketIfNotExists(bucket, false)
 		if err != nil {
 			return err
 		}
@@ -95,7 +114,7 @@ func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, chang
 
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if !changeSetBucketOnly {
-			hb, err := tx.CreateBucketIfNotExists(hBucket, true)
+			hb, err := tx.CreateBucketIfNotExists(hBucket, false)
 			if err != nil {
 				return err
 			}

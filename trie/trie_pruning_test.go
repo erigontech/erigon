@@ -29,9 +29,7 @@ import (
 func TestOnePerTimestamp(t *testing.T) {
 	tp := NewTriePruning(0)
 	tr := New(common.Hash{})
-	tr.SetTouchFunc(func(hex []byte, del bool) {
-		tp.Touch(hex, del)
-	})
+	tr.SetTouchFunc(tp.Touch)
 	var key [4]byte
 	value := []byte("V")
 	var timestamp uint64 = 0

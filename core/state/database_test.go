@@ -17,28 +17,30 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/state/contracts"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Create revival problem
@@ -1153,4 +1155,104 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation", acc.Incarnation)
 	}
 
+}
+
+func TestClearTombstonesForReCreatedAccount(t *testing.T) {
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+
+	accKey := fmt.Sprintf("11%062x", 0)
+	k1 := fmt.Sprintf("11%062x", 0)
+	k2 := fmt.Sprintf("2211%062x", 0)
+	k3 := fmt.Sprintf("2233%062x", 0)
+	prefix := dbutils.GenerateStoragePrefix(common.HexToHash(accKey), 1)
+
+	storageKey := func(storageKey string) []byte {
+		return append(prefix, common.FromHex(storageKey)...)
+	}
+
+	putStorage := func(k string, v string) {
+		err := db.Put(dbutils.StorageBucket, storageKey(k), common.FromHex(v))
+		require.NoError(err)
+	}
+	putCache := func(k string, v string) {
+		err := db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(k), common.FromHex(v))
+		require.NoError(err)
+	}
+
+	putStorage(k1, "hi")
+	putStorage(k2, "hi")
+	putStorage(k3, "hi")
+	// don't put k4 yet
+
+	putCache(accKey, "")
+
+	// step 1: re-create account
+	err := state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	require.NoError(err)
+
+	checks := map[string]bool{
+		accKey:        false,
+		accKey + "11": true,
+		accKey + "22": true,
+		accKey + "aa": true,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 2: re-create storage
+	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
+		return false
+	}
+
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, common.FromHex(accKey+k2))
+	require.NoError(err)
+
+	checks = map[string]bool{
+		accKey + k2:         false,
+		accKey + "2200":     true,
+		accKey + "22ab":     true,
+		accKey + "22110099": true,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 3: create one new storage
+	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
+		if bytes.HasPrefix(common.FromHex(accKey+k3), prefix) {
+			return false
+		}
+		if bytes.HasPrefix(common.FromHex(accKey+k2), prefix) {
+			return true
+		}
+		return false
+	}
+
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k3))
+	require.NoError(err)
+	checks = map[string]bool{
+		accKey + k2:                            false, // results of step2 preserved
+		accKey + "22":                          false, // results of step2 preserved
+		accKey + "2211":                        false, // results of step2 preserved
+		accKey + "22110000":                    false, // results of step2 preserved
+		accKey + k3:                            false,
+		accKey + "223399":                      true,
+		accKey + fmt.Sprintf("2233%04x99", 0):  true,
+		accKey + fmt.Sprintf("2233%058x99", 0): true,  // len=64
+		accKey + fmt.Sprintf("2233%060x99", 0): false, // len=66, too long key
+		accKey + fmt.Sprintf("2233%062x99", 0): false, // len=68, too long key
+	}
+
+	for k, expect := range checks {
+		ok, err := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err, k)
+		assert.Equal(expect, ok, k)
+	}
 }

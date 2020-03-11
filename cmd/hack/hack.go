@@ -7,9 +7,6 @@ import (
 	"encoding/binary"
 	"flag"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/mattn/go-colorable"
-	"github.com/mattn/go-isatty"
 	"io"
 	"io/ioutil"
 	"math/big"
@@ -25,7 +22,9 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -40,6 +39,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/mattn/go-colorable"
+	"github.com/mattn/go-isatty"
 	"github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/util"
 )
@@ -613,38 +614,58 @@ func trieChart() {
 	check(err)
 }
 
-func execToBlock(block int) {
-	blockDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
+func execToBlock(block uint64, fromScratch bool) {
+	blockDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me3/geth/chaindata")
 	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
 	check(err)
-	bcb, err := core.NewBlockChain(blockDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	defer blockDb.Close()
-	os.Remove("statedb")
+	if fromScratch {
+		os.Remove("statedb")
+	}
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
+	//stateDb := ethdb.NewMemDatabase()
 	defer stateDb.Close()
-	_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultTestnetGenesisBlock())
+
+	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
+	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil)
 	check(err)
-	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
+	tds, err := bc.GetTrieDbState()
+	check(err)
+	if debug.IsIntermediateTrieHash() && fromScratch {
+		_ = tds.Rebuild()
+	}
+
+	importedBn := tds.GetBlockNr()
+	if importedBn == 0 {
+		importedBn = 1
+	}
+
 	//bc.SetNoHistory(true)
 	blocks := types.Blocks{}
 	var lastBlock *types.Block
-	for i := 1; i <= block; i++ {
-		lastBlock = bcb.GetBlockByNumber(uint64(i))
+
+	now := time.Now()
+
+	for i := importedBn; i <= block; i++ {
+		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)
 		if len(blocks) >= 100 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
-			check(err)
-			fmt.Printf("Inserted %d blocks\n", i)
+			if err != nil {
+				panic(err)
+			}
 			blocks = types.Blocks{}
 		}
+		if i%1000 == 0 {
+			fmt.Printf("Inserted %dK, %s \n", i/1000, time.Since(now))
+		}
 	}
-	tds, err := bc.GetTrieDbState()
-	if err != nil {
-		panic(err)
-	}
+
 	root := tds.LastRoot()
 	fmt.Printf("Root hash: %x\n", root)
 	fmt.Printf("Last block root hash: %x\n", lastBlock.Root())
@@ -773,6 +794,8 @@ func testStartup() {
 }
 
 func testResolveCached() {
+	execToBlock(100_000_000, false)
+	return
 	//startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
 	check(err)

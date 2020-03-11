@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -90,10 +89,6 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 		return
 	}
 	if !del {
-		if !exists { // Created New node
-			tp.createNodeFunc([]byte(hexS))
-		}
-
 		var newMap map[string]struct{}
 		if m, ok := tp.accounts[newTimestamp]; ok {
 			newMap = m
@@ -150,6 +145,9 @@ func (tp *TriePruning) Touch(hex []byte, del bool) {
 	if !del {
 		tp.accountTimestamps[hexS] = tp.blockNr
 	}
+	if !exists {
+		tp.createNodeFunc([]byte(hexS))
+	}
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 }
@@ -195,8 +193,6 @@ func (tp *TriePruning) PruneToTimestamp(
 	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
 		key := pool.GetBuffer(64)
 		defer pool.PutBuffer(key)
-		fmt.Println("Alex: started", len(aggregateAccounts))
-		now := time.Now()
 		for prefix := range aggregateAccounts {
 			if len(prefix) == 0 || len(prefix)%2 == 1 {
 				continue
@@ -206,30 +202,17 @@ func (tp *TriePruning) PruneToTimestamp(
 			if !ok {
 				continue
 			}
-			switch nd.(type) {
+			switch parent.(type) {
 			case *duoNode, *fullNode:
-				// will work only with these types of nodes
+				CompressNibbles([]byte(prefix), &key.B)
+				tp.unloadNodeFunc(key.B, nd.reference())
 			default:
-				continue
 			}
-			switch parent.(type) { // without this condition - doesn't work. Need investigate why.
-			case *duoNode, *fullNode:
-				// will work only with these types of nodes
-			default:
-				continue
-			}
-
-			CompressNibbles([]byte(prefix), &key.B)
-			tp.unloadNodeFunc(key.B, nd.reference())
 		}
-
-		fmt.Println("Alex: finished")
-		fmt.Println("trie_pruning.go:225", time.Since(now))
 	}
 
-	h := newHasher(false)
-	defer returnHasherToPool(h)
 	pruneMap(accountsTrie, aggregateAccounts)
+
 	// Remove fom the timestamp structure
 	for hexS := range aggregateAccounts {
 		delete(tp.accountTimestamps, hexS)

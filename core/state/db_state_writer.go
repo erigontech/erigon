@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -109,6 +110,7 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 	if len(v) == 0 {
 		err = dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
 	} else {
+
 		err = dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
 	}
 	//fmt.Printf("WriteAccountStorage (db) %x %d %x: %x\n", address, incarnation, key, value)

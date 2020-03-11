@@ -3,10 +3,11 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"sort"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -187,12 +188,10 @@ func (m *mutation) DiskSize() int64 {
 }
 
 func (m *mutation) Put(bucket, key []byte, value []byte) error {
-	bb := make([]byte, len(bucket))
-	copy(bb, bucket)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.puts.Set(bb, key, value)
+	m.puts.Set(bucket, key, value)
 	return nil
 }
 

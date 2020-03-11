@@ -383,7 +383,7 @@ func TestApiDetails(t *testing.T) {
 				a.EncodeForStorage(v)
 
 				require.NoError(db.Put(dbutils.AccountsBucket, common.Hex2Bytes(k), v))
-				//require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), storageV))
+				require.NoError(db.Put(dbutils.StorageBucket, storageKey(k), storageV))
 			}
 		}
 	}
@@ -423,10 +423,7 @@ func TestApiDetails(t *testing.T) {
 			resolver := NewResolver(0, true, 0)
 			expectRootHash := common.HexToHash("1af5daf4281e4e5552e79069d0688492de8684c11b1e983f9c3bbac500ad694a")
 
-			buf := pool.GetBuffer(128)
-			DecompressNibbles(common.Hex2Bytes(fmt.Sprintf("0%x%x%063x", 1, 1, 0)), &buf.B)
-
-			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(buf.B, 16), 0, expectRootHash.Bytes()))
+			resolver.AddRequest(tries[i].NewResolveRequest(nil, append(common.Hex2Bytes(fmt.Sprintf("000101%0122x", 0)), 16), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
 			resolver.AddRequest(tries[i].NewResolveRequest(nil, common.Hex2Bytes("0f"), 0, expectRootHash.Bytes()))
 
@@ -473,44 +470,44 @@ func TestApiDetails(t *testing.T) {
 	})
 
 	t.Run("storage resolver", func(t *testing.T) {
-		for _, resolverName := range []string{Stateful, StatefulCached} {
-			tr, resolver := New(common.Hash{}), NewResolver(0, false, 0)
-			expectRootHash := common.HexToHash("56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421")
+		putCache("00", "9e3571a3a3a75d023799452cfacea4d268b109bc685b9e8b63a50b55be81c7a3")
+		putCache("ff", "8d2b73f47eb0e6c79ca4f48ba551bfd62f058c9d1cff7e1ab72ba3b2d63aefed")
+		putCache("01", "")
 
-			resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000101"), 0, expectRootHash.Bytes()))
-			resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("000202"), 0, expectRootHash.Bytes()))
+		for _, resolverName := range []string{Stateful, StatefulCached} {
+			tr, resolver := New(common.Hash{}), NewResolver(1, false, 0)
+			expectRootHash := common.HexToHash("b7861b26269e04ae4a865ed3900f56472ad248ffd2976cddef8018cc9700f846")
+
+			resolver.AddRequest(tr.NewResolveRequest(nil, common.Hex2Bytes("00020100"), 0, expectRootHash.Bytes()))
 
 			if resolverName == Stateful {
 				err := resolver.ResolveStateful(db, 0)
-				//fmt.Printf("%s\n", tr.root.(*shortNode).Val.(*fullNode).Children[0])
 				require.NoError(err)
 			} else {
 				err := resolver.ResolveStatefulCached(db, 0)
-				//fmt.Printf("%s\n", tr.root.(*shortNode).Val.(*fullNode).Children[0])
 				require.NoError(err)
 			}
 			assert.Equal(expectRootHash.String(), tr.Hash().String())
 
 			_, found := tr.Get(storageKey(fmt.Sprintf("000%061x", 0)))
-			assert.True(found) // exists in DB but not resolved, there is hashNode
-			//assert.False(found) // exists in DB but not resolved, there is hashNode
+			assert.False(found) // exists in DB but not resolved, there is hashNode
 
 			storage, found := tr.Get(storageKey(fmt.Sprintf("011%061x", 0)))
 			assert.True(found)
 			require.Nil(storage) // deleted by empty value in cache bucket
 
-			storage, found = tr.Get(storageKey(fmt.Sprintf("022%061x", 0)))
+			storage, found = tr.Get(storageKey(fmt.Sprintf("021%061x", 0)))
 			assert.True(found)
-			require.Nil(storage)
-			//require.NotNil(storage) // exists in db and resolved
-			//assert.Equal("22", fmt.Sprintf("%x", storage))
+			require.Equal(storage, common.Hex2Bytes("21"))
 
 			storage, found = tr.Get(storageKey(fmt.Sprintf("051%061x", 0)))
 			assert.True(found)
 			assert.Nil(storage) // not exists in DB
 
-			assert.NotPanics(func() {
+			assert.Panics(func() {
 				tr.Update(storageKey(fmt.Sprintf("001%061x", 0)), nil)
+			})
+			assert.NotPanics(func() {
 				tr.Update(storageKey(fmt.Sprintf("011%061x", 0)), nil)
 				tr.Update(storageKey(fmt.Sprintf("021%061x", 0)), nil)
 				tr.Update(storageKey(fmt.Sprintf("051%061x", 0)), nil)
@@ -524,23 +521,36 @@ func TestKeyIsBefore(t *testing.T) {
 
 	is, minKey := keyIsBefore([]byte("a"), []byte("b"))
 	assert.Equal(true, is)
-	assert.Equal("a", string(minKey))
+	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), []byte("a"))
 	assert.Equal(false, is)
-	assert.Equal("a", string(minKey))
+	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), []byte(""))
 	assert.Equal(false, is)
-	assert.Equal("", string(minKey))
+	assert.Equal("", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore(nil, []byte("b"))
 	assert.Equal(false, is)
-	assert.Equal("b", string(minKey))
+	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
 	is, minKey = keyIsBefore([]byte("b"), nil)
 	assert.Equal(true, is)
-	assert.Equal("b", string(minKey))
+	assert.Equal("b", fmt.Sprintf("%s", minKey))
+
+	contract := fmt.Sprintf("2%063x", 0)
+	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
+	cacheKey := common.Hex2Bytes(contract + "20")
+	is, minKey = keyIsBefore(cacheKey, storageKey)
+	assert.False(is)
+	assert.Equal(fmt.Sprintf("%x", storageKey), fmt.Sprintf("%x", minKey))
+
+	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
+	cacheKey = common.Hex2Bytes(contract + "10")
+	is, minKey = keyIsBefore(cacheKey, storageKey)
+	assert.True(is)
+	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
 }
 
 func TestHexIncrement(t *testing.T) {
@@ -565,4 +575,60 @@ func TestHexIncrement(t *testing.T) {
 	assert.Nil(nextSubtree(k))
 	k = common.Hex2Bytes("")
 	assert.Nil(nextSubtree(k))
+}
+
+func TestCmpWithoutIncarnation(t *testing.T) {
+	assert := assert.New(t)
+	type TestCase struct {
+		k1     string
+		k2     string
+		expect int
+	}
+	cases := []TestCase{
+		{
+			k1:     "f2fd",
+			k2:     "f2ff",
+			expect: -1,
+		},
+		{
+			k1:     "f2fd",
+			k2:     "f2f0",
+			expect: 1,
+		},
+		{
+			k1:     "f2ff",
+			k2:     "f2ff",
+			expect: 0,
+		},
+		{
+			k1:     fmt.Sprintf("%064x1%063x", 0, 0),
+			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
+			expect: -1,
+		},
+		{
+			k1:     fmt.Sprintf("%064x7%063x", 0, 0),
+			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
+			expect: 1,
+		},
+		{
+			k1:     fmt.Sprintf("%064x6%063x", 0, 0),
+			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
+			expect: 0,
+		},
+		{
+			k1:     fmt.Sprintf("%064x1", 0),
+			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
+			expect: -1,
+		},
+		{
+			k1:     fmt.Sprintf("%064x70", 0),
+			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
+			expect: 1,
+		},
+	}
+
+	for _, tc := range cases {
+		r := cmpWithoutIncarnation(common.Hex2Bytes(tc.k1), common.Hex2Bytes(tc.k2))
+		assert.Equal(tc.expect, r, fmt.Sprintf("k1: %s\nk2: %s", tc.k1, tc.k2))
+	}
 }

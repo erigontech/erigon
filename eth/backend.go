@@ -20,13 +20,14 @@ package eth
 import (
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/migrations"
 	"math/big"
 	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
+
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/migrations"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -209,18 +210,17 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 			EVMInterpreter:          config.EVMInterpreter,
 		}
 		cacheConfig = &core.CacheConfig{
-			Disabled:               config.NoPruning,
-			BlocksBeforePruning:    config.BlocksBeforePruning,
-			BlocksToPrune:          config.BlocksToPrune,
-			PruneTimeout:           config.PruningTimeout,
-			TrieCleanLimit:         config.TrieCleanCache,
-			TrieDirtyLimit:         config.TrieDirtyCache,
-			TrieCleanNoPrefetch:    config.NoPrefetch,
-			TrieTimeLimit:          config.TrieTimeout,
-			DownloadOnly:           config.DownloadOnly,
-			NoHistory:              !config.StorageMode.History,
-			NoIntermediateTrieHash: !config.StorageMode.IntermediateTrieHash,
-			ArchiveSyncInterval:    uint64(config.ArchiveSyncInterval),
+			Disabled:            config.NoPruning,
+			BlocksBeforePruning: config.BlocksBeforePruning,
+			BlocksToPrune:       config.BlocksToPrune,
+			PruneTimeout:        config.PruningTimeout,
+			TrieCleanLimit:      config.TrieCleanCache,
+			TrieDirtyLimit:      config.TrieDirtyCache,
+			TrieCleanNoPrefetch: config.NoPrefetch,
+			TrieTimeLimit:       config.TrieTimeout,
+			DownloadOnly:        config.DownloadOnly,
+			NoHistory:           !config.StorageMode.History,
+			ArchiveSyncInterval: uint64(config.ArchiveSyncInterval),
 		}
 	)
 	eth.blockchain, err = core.NewBlockChain(chainDb, cacheConfig, chainConfig, eth.engine, vmConfig, eth.shouldPreserve)
@@ -660,11 +660,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeIntermediateTrieHash, sm.IntermediateTrieHash)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -722,10 +717,5 @@ func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 	}
 	sm.ThinHistory = len(v) > 0
 
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeIntermediateTrieHash)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.IntermediateTrieHash = len(v) > 0
 	return sm, nil
 }
