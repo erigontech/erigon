@@ -90,6 +90,10 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 		return err
 	}
 
+	if incarnation == 0 {
+		incarnation = FirstContractIncarnation
+	}
+
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
 
 	o := bytes.TrimLeft(original[:], "\x00")
