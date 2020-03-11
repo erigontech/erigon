@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"runtime"
 	"runtime/pprof"
 	"syscall"
 
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -44,19 +42,6 @@ func getContext() context.Context {
 		cancel()
 	}()
 	return ctx
-}
-
-func connectRemoteDb(ctx context.Context, remoteDbAddress string) (*remote.DB, error) {
-	dial := func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-		dialer := net.Dialer{}
-		conn, err := dialer.DialContext(ctx, "tcp", remoteDbAddress)
-		if err != nil {
-			return nil, nil, nil, fmt.Errorf("could not connect to remoteDb. addr: %s. err: %w", remoteDbAddress, err)
-		}
-		return conn, conn, conn, err
-	}
-
-	return remote.NewDB(ctx, dial)
 }
 
 var rootCmd = &cobra.Command{

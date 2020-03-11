@@ -650,6 +650,7 @@ func execToBlock(block uint64, fromScratch bool) {
 	var lastBlock *types.Block
 
 	now := time.Now()
+
 	for i := importedBn; i <= block; i++ {
 		lastBlock = bcb.GetBlockByNumber(i)
 		blocks = append(blocks, lastBlock)

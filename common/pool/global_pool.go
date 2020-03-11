@@ -37,7 +37,7 @@ func init() {
 		}
 
 		for i := 0; i < preAlloc; i++ {
-			PutBuffer(NewValue(make([]byte, 0, n)))
+			PutBuffer(GetBuffer(n))
 		}
 	}
 }
@@ -74,14 +74,9 @@ func PutBuffer(p *bytebufferpool.ByteBuffer) {
 
 	for i, n := range chunkSizeClasses {
 		if uint(cap(p.B)) <= n {
-			chunkPools[i].Put(p)
+			p.B = p.B[:0]
+			chunkPools[i].pool.Put(p)
 			break
 		}
-	}
-}
-
-func NewValue(b []byte) *bytebufferpool.ByteBuffer {
-	return &bytebufferpool.ByteBuffer{
-		B: b,
 	}
 }

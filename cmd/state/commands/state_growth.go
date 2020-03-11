@@ -8,6 +8,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/spf13/cobra"
 )
 
@@ -21,7 +22,8 @@ func init() {
 				panic(err)
 			}
 			ctx := getContext()
-			remoteDb, err := connectRemoteDb(ctx, remoteDbAddress)
+
+			remoteDb, err := remote.Open(ctx, remote.DefaultOpts.Addr(remoteDbAddress))
 			if err != nil {
 				return err
 			}
