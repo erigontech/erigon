@@ -77,7 +77,24 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return nil
 		}
 
-		// TODO [Andrew] storage changes
+		expectedStorageChanges := csw.GetStorageChanges()
+		expectedtorageSerialized := make([]byte, 0)
+		if expectedStorageChanges.Len() > 0 {
+			expectedtorageSerialized, err = changeset.EncodeChangeSet(expectedStorageChanges)
+			if err != nil {
+				return err
+			}
+		}
+
+		dbStorageChanges, err := ethDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
+		if err != nil {
+			return err
+		}
+
+		if !bytes.Equal(dbStorageChanges, expectedtorageSerialized) {
+			fmt.Printf("Unexpected storage changes in block %d\n%s\nvs\n%s\n", blockNum, hexutil.Encode(dbStorageChanges), hexutil.Encode(expectedtorageSerialized))
+			return nil
+		}
 
 		blockNum++
 		if blockNum%1000 == 0 {

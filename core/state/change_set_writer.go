@@ -1,11 +1,13 @@
 package state
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -14,13 +16,15 @@ import (
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
 type ChangeSetWriter struct {
 	accountChanges map[common.Address][]byte
-	storageChanges map[common.Address]bool
+	storageChanged map[common.Address]bool
+	storageChanges map[string][]byte
 }
 
 func NewChangeSetWriter() *ChangeSetWriter {
 	return &ChangeSetWriter{
 		accountChanges: make(map[common.Address][]byte),
-		storageChanges: make(map[common.Address]bool),
+		storageChanged: make(map[common.Address]bool),
+		storageChanges: make(map[string][]byte),
 	}
 }
 
@@ -28,6 +32,16 @@ func (w *ChangeSetWriter) GetAccountChanges() *changeset.ChangeSet {
 	cs := changeset.NewAccountChangeSet()
 	for key, val := range w.accountChanges {
 		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
+			panic(err)
+		}
+	}
+	return cs
+}
+
+func (w *ChangeSetWriter) GetStorageChanges() *changeset.ChangeSet {
+	cs := changeset.NewStorageChangeSet()
+	for key, val := range w.storageChanges {
+		if err := cs.Add([]byte(key), val); err != nil {
 			panic(err)
 		}
 	}
@@ -47,7 +61,7 @@ func accountData(original *accounts.Account) []byte {
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
-	if !accountsEqual(original, account) || w.storageChanges[address] {
+	if !accountsEqual(original, account) || w.storageChanged[address] {
 		w.accountChanges[address] = accountData(original)
 	}
 	return nil
@@ -66,7 +80,25 @@ func (w *ChangeSetWriter) WriteAccountStorage(ctx context.Context, address commo
 	if *original == *value {
 		return nil
 	}
-	w.storageChanges[address] = true
+
+	secKey, err := common.HashData(key[:])
+	if err != nil {
+		return err
+	}
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return err
+	}
+
+	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, secKey)
+
+	o := bytes.TrimLeft(original[:], "\x00")
+	originalValue := make([]byte, len(o))
+	copy(originalValue, o)
+
+	w.storageChanges[string(compositeKey)] = originalValue
+	w.storageChanged[address] = true
+
 	return nil
 }
 
@@ -77,11 +109,6 @@ func (w *ChangeSetWriter) CreateContract(address common.Address) error {
 func (w *ChangeSetWriter) PrintChangedAccounts() {
 	fmt.Println("Account Changes")
 	for k := range w.accountChanges {
-		fmt.Println(hexutil.Encode(k.Bytes()))
-	}
-	fmt.Println("------------------------------------------")
-	fmt.Println("Storage Changes")
-	for k := range w.storageChanges {
 		fmt.Println(hexutil.Encode(k.Bytes()))
 	}
 	fmt.Println("------------------------------------------")
