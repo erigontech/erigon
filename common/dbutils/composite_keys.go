@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
 // EncodeBlockNumber encodes a block number as big endian uint64
@@ -111,10 +112,10 @@ func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	prefix := make([]byte, 0, common.HashLength+8)
 	prefix = append(prefix, addressHash[:]...)
 
-	//todo pool
-	buf := make([]byte, 8)
-	binary.BigEndian.PutUint64(buf, incarnation^^uint64(0))
-	prefix = append(prefix, buf...)
+	buf := pool.GetBuffer(8)
+	defer pool.PutBuffer(buf)
+	binary.BigEndian.PutUint64(buf.B, incarnation^^uint64(0))
+	prefix = append(prefix, buf.B...)
 	return prefix
 }
 

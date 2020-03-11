@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -31,6 +32,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
+	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -208,7 +210,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 
 	if debug.IsIntermediateTrieHash() {
 		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
-		t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		tp.SetCreateNodeFunc(tds.delIntermediateHash)
 	}
 
@@ -255,21 +256,104 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 
 	if debug.IsIntermediateTrieHash() {
 		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
-		cpy.t.SetOnDeleteSubtreeFunc(tds.markSubtreeEmptyInIntermediateHash)
 		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 	}
 
 	return &cpy
 }
 
-func (tds *TrieDbState) markSubtreeEmptyInIntermediateHash(prefix []byte) {
-	if len(prefix) != common.HashLength {
+func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
+	addrHashBytes := addrHash[:]
+	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
+		return err
+	} else if !ok {
+		return nil
+	}
+
+	buf := pool.GetBuffer(common.HashLength * 2)
+	defer pool.PutBuffer(buf)
+	copy(buf.B, addrHashBytes)
+
+	i := common.HashLength
+	for j := 0; j < 256; j++ {
+		buf.B[i] = uint8(j)
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
+			return err
+		}
+	}
+
+	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
+		return err
+	}
+	return nil
+}
+
+// PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
+func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) {
+	if len(addrHash) != common.HashLength {
 		return
 	}
 
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, prefix, []byte{}); err != nil {
+	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
+	if v == nil {
+		return
+	}
+	acc := accounts.NewAccount()
+	if err := acc.DecodeForStorage(v); err != nil {
+		log.Warn("could not decode account", "err", err)
+		return
+	}
+
+	if acc.Root == trie.EmptyRoot {
+		return
+	}
+
+	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{}); err != nil {
 		log.Warn("could not put intermediate trie hash", "err", err)
 	}
+}
+
+func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
+	if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
+		return nil
+	}
+
+	buf := pool.GetBuffer(128)
+	defer pool.PutBuffer(buf)
+
+	buf.B = buf.B[:cap(buf.B)]
+	foundTombStone := false
+	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
+		if someStorageExistsInThisSubtree(compositeKey[:i]) {
+			continue
+		}
+
+		if !foundTombStone {
+			if ok, err := HasTombstone(db, compositeKey[:i]); err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+			foundTombStone = true
+		}
+
+		copy(buf.B, compositeKey[:i+1])
+		for j := 0; j < 256; j++ {
+			if compositeKey[i] == uint8(j) {
+				continue
+			}
+
+			buf.B[i] = uint8(j)
+
+			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
+				return err
+			}
+		}
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
@@ -287,7 +371,7 @@ func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
 		return
 	}
 
-	var key = make([]byte, 64)
+	key := make([]byte, len(prefixAsNibbles)/2)
 	trie.CompressNibbles(prefixAsNibbles, &key)
 
 	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {
@@ -453,7 +537,8 @@ func (tds *TrieDbState) resolveStorageTouches(storageTouches common.StorageKeys,
 		}
 	}
 	if !firstRequest {
-		return resolveFunc(tds.resolver)
+		res := resolveFunc(tds.resolver)
+		return res
 	}
 	return nil
 }
@@ -694,6 +779,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
+			if debug.IsIntermediateTrieHash() {
+				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
+			}
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -710,6 +798,15 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
+
+						if debug.IsIntermediateTrieHash() {
+							someStorageExistsInThisSubtree := func(prefix []byte) bool {
+								val, ok := tds.t.Get(prefix)
+								return !(ok && val == nil)
+							}
+							_ = ClearTombstonesForNewStorage(someStorageExistsInThisSubtree, tds.db, cKey)
+						}
+
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -804,12 +901,25 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				//fmt.Printf("Set empty root for addrHash %x due to deleted\n", addrHash)
 				account.Root = trie.EmptyRoot
 			}
+
 			tds.t.DeleteSubtree(addrHash[:])
+			PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
 
 	return roots, nil
+}
+
+func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
+	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return v != nil && len(v) == 0, nil
 }
 
 func (tds *TrieDbState) clearUpdates() {

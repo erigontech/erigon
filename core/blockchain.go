@@ -120,13 +120,12 @@ type CacheConfig struct {
 	TrieDirtyLimit      int           // Memory limit (MB) at which to start flushing dirty trie nodes to disk
 	TrieTimeLimit       time.Duration // Time limit after which to flush the current in-memory trie to disk
 
-	BlocksBeforePruning    uint64
-	BlocksToPrune          uint64
-	PruneTimeout           time.Duration
-	ArchiveSyncInterval    uint64
-	DownloadOnly           bool
-	NoHistory              bool
-	NoIntermediateTrieHash bool
+	BlocksBeforePruning uint64
+	BlocksToPrune       uint64
+	PruneTimeout        time.Duration
+	ArchiveSyncInterval uint64
+	DownloadOnly        bool
+	NoHistory           bool
 }
 
 // BlockChain represents the canonical chain given a database with a genesis
@@ -377,13 +376,15 @@ func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*
 			return nil, err
 		}
 		tds.SetNoHistory(bc.NoHistory())
-		tds.EnableIntermediateHash(!bc.NoIntermediateTrieHash())
 		tds.SetResolveReads(bc.resolveReads)
 		tds.EnablePreimages(bc.enablePreimages)
-		if err := tds.Rebuild(); err != nil {
-			log.Error("Rebuiling aborted", "error", err)
-			return nil, err
+		if !debug.IsIntermediateTrieHash() {
+			if err := tds.Rebuild(); err != nil {
+				log.Error("Rebuiling aborted", "error", err)
+				return nil, err
+			}
 		}
+
 		log.Info("Creation complete.")
 		return tds, nil
 	}
@@ -2251,14 +2252,6 @@ func (bc *BlockChain) IsNoHistory(currentBlock *big.Int) bool {
 	return bc.cacheConfig.NoHistory || isArchiveInterval
 }
 
-func (bc *BlockChain) NoIntermediateTrieHash() bool {
-	return bc.cacheConfig.NoIntermediateTrieHash
-}
-
-func (bc *BlockChain) IsNoIntermediateTrieHash(currentBlock *big.Int) bool {
-	return bc.cacheConfig.NoIntermediateTrieHash
-}
-
 func (bc *BlockChain) NotifyHeightKnownBlock(h uint64) {
 	bc.highestKnownBlockMu.Lock()
 	if bc.highestKnownBlock < h {
@@ -2276,7 +2269,6 @@ func (bc *BlockChain) GetHeightKnownBlock() uint64 {
 func (bc *BlockChain) WithContext(ctx context.Context, blockNum *big.Int) context.Context {
 	ctx = bc.Config().WithEIPsFlags(ctx, blockNum)
 	ctx = params.WithNoHistory(ctx, bc.NoHistory(), bc.IsNoHistory)
-	ctx = params.WithNoIntermediateTrieHash(ctx, bc.NoIntermediateTrieHash(), bc.IsNoIntermediateTrieHash)
 	return ctx
 }
 

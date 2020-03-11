@@ -223,9 +223,6 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 }
 
 func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
-	if debug.IsIntermediateTrieHash() {
-		return nil
-	}
 	req := t.NewResolveRequest(nil, key, pos, expected)
 	r := NewResolver(5, accounts, blockNr)
 	r.AddRequest(req)

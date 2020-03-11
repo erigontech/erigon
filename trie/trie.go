@@ -46,8 +46,7 @@ var (
 type Trie struct {
 	root node
 
-	touchFunc           func(hex []byte, del bool)
-	onDeleteSubtreeFunc func(prefix []byte) // called when subtree unloaded
+	touchFunc func(hex []byte, del bool)
 
 	newHasherFunc func() *hasher
 
@@ -66,10 +65,9 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash) *Trie {
 	trie := &Trie{
-		touchFunc:           func([]byte, bool) {},
-		onDeleteSubtreeFunc: func(prefix []byte) {},
-		newHasherFunc:       func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
-		hashMap:             make(map[common.Hash]node),
+		touchFunc:     func([]byte, bool) {},
+		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
+		hashMap:       make(map[common.Hash]node),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -99,10 +97,6 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 
 func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
 	t.touchFunc = touchFunc
-}
-
-func (t *Trie) SetOnDeleteSubtreeFunc(f func(prefix []byte)) {
-	t.onDeleteSubtreeFunc = f
 }
 
 // Get returns the value for key stored in the trie.
@@ -530,8 +524,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 }
 
 // non-recursive version of get and returns: node and parent node
-func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
-	nd = t.root
+func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool) {
+	var nd = t.root
+	var parent node
 	pos := 0
 	var account bool
 	for pos < len(hex) || account {
@@ -544,7 +539,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
 				parent = n
 				nd = n.Val
 				pos += matchlen
-				if _, ok := n.Val.(*accountNode); ok {
+				if _, ok := nd.(*accountNode); ok {
 					account = true
 				}
 			} else {
@@ -579,12 +574,12 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (nd, parent node, ok bool) {
 			parent = n
 			nd = child
 			pos++
-		case valueNode:
-			return nd, parent, true
 		case *accountNode:
 			parent = n
 			nd = n.storage
 			account = false
+		case valueNode:
+			return nd, parent, true
 		case hashNode:
 			return nd, parent, true
 		default:
@@ -921,7 +916,6 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	}
 	_, t.root = t.delete(t.root, hexPrefix, 0, true)
 
-	t.onDeleteSubtreeFunc(keyPrefix)
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {
