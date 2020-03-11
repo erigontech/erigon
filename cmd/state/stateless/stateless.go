@@ -39,7 +39,7 @@ var chartColors = []drawing.Color{
 	chart.ColorGreen,
 }
 
-func runBlock(ibs *state.IntraBlockState, writer state.StateWriter,
+func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWriter state.StateWriter,
 	chainConfig *params.ChainConfig, bcb core.ChainContext, block *types.Block,
 ) error {
 	header := block.Header()
@@ -52,7 +52,7 @@ func runBlock(ibs *state.IntraBlockState, writer state.StateWriter,
 		misc.ApplyDAOHardFork(ibs)
 	}
 	for _, tx := range block.Transactions() {
-		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, writer, header, tx, usedGas, vmConfig)
+		receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, ibs, txnWriter, header, tx, usedGas, vmConfig)
 		if err != nil {
 			return fmt.Errorf("tx %x failed: %v", tx.Hash(), err)
 		}
@@ -64,7 +64,7 @@ func runBlock(ibs *state.IntraBlockState, writer state.StateWriter,
 	}
 
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
-	if err := ibs.CommitBlock(ctx, writer); err != nil {
+	if err := ibs.CommitBlock(ctx, blockWriter); err != nil {
 		return fmt.Errorf("commiting block %d failed: %v", block.NumberU64(), err)
 	}
 	return nil
@@ -381,7 +381,7 @@ func Stateless(
 			ibs := state.New(s)
 			ibs.SetTrace(trace)
 			s.SetBlockNr(blockNum)
-			if err = runBlock(ibs, s, chainConfig, bcb, block); err != nil {
+			if err = runBlock(ibs, s, s, chainConfig, bcb, block); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {

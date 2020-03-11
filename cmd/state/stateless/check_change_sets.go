@@ -46,6 +46,8 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		return err
 	}
 
+	noOpWriter := state.NewNoopWriter()
+
 	interrupt := false
 	for !interrupt {
 		block := bc.GetBlockByNumber(blockNum)
@@ -57,7 +59,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 
-		if err := runBlock(intraBlockState, csw, chainConfig, bc, block); err != nil {
+		if err := runBlock(intraBlockState, noOpWriter, csw, chainConfig, bc, block); err != nil {
 			return err
 		}
 
