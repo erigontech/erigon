@@ -1319,9 +1319,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 		}
 	}
 	// Write the positional metadata for transaction/receipt lookups and preimages
-	if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
-		rawdb.WriteTxLookupEntries(bc.db, block)
-	}
+
 	if stateDb != nil && bc.enablePreimages && !bc.cacheConfig.DownloadOnly {
 		rawdb.WritePreimages(bc.db, stateDb.Preimages())
 	}
@@ -1335,6 +1333,8 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	// Set new head.
 	if status == CanonStatTy {
 		bc.writeHeadBlock(block)
+	} else if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
+		rawdb.WriteTxLookupEntries(bc.db, block)
 	}
 	bc.futureBlocks.Remove(block.Hash())
 
