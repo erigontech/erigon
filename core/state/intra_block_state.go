@@ -862,6 +862,7 @@ func updateAccount(ctx context.Context, stateWriter StateWriter, addr common.Add
 			if err := stateWriter.CreateContract(addr); err != nil {
 				return err
 			}
+			stateObject.created = false
 		}
 	}
 	return nil
