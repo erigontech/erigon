@@ -186,6 +186,10 @@ func (b *BlockGen) GetParent() *types.Block {
 	return b.parent
 }
 
+func (b *BlockGen) GetReceipts() []*types.Receipt {
+	return b.receipts
+}
+
 // GenerateChain creates a chain of n blocks. The first block's
 // parent will be the provided parent. db is used to store
 // intermediate states and should contain the parent's state trie.

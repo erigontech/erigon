@@ -1291,6 +1291,12 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, pm.BroadcastBlock, heighter, inserter, pm.removePeer)
 		go pm.syncer()
 
+		// hacks to speedup local sync
+		downloader.MaxHashFetch = 512 * 10
+		downloader.MaxBlockFetch = 128 * 10
+		downloader.MaxHeaderFetch = 192 * 10
+		downloader.MaxReceiptFetch = 256 * 10
+
 		log.Warn("Succeed to set new Genesis")
 		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
 		if err != nil {

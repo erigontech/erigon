@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -132,7 +133,7 @@ func generateBlock(
 	usedGas := new(uint64)
 	tds.StartNewBuffer()
 
-	if height > 1 && gasLimit >= 21000 {
+	if height > 1 && gasLimit >= params.TxGas {
 		signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
 		gp := new(core.GasPool).AddGas(header.GasLimit)
 		vmConfig := vm.Config{}
@@ -248,7 +249,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	gasPrice := big.NewInt(1)
 	transactOpts := bind.NewKeyedTransactor(coinbaseKey)
 	transactOpts.GasPrice = gasPrice
-	transactOpts.GasLimit = 21000
+	transactOpts.GasLimit = params.TxGas
 
 	var pos uint64
 	td := new(big.Int)
@@ -263,6 +264,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
+
 	r := rand.New(rand.NewSource(4589489854))
 	amount := big.NewInt(1) // 1 wei
 	engine := ethash.NewFullFaker()
@@ -283,7 +285,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 
 		gen.SetExtra(extra)
 		gen.SetCoinbase(coinbase)
-		if gen.GetHeader().GasLimit <= 21000 {
+		if gen.GetHeader().GasLimit <= params.TxGas {
 			return
 		}
 		gen.SetNonce(types.EncodeNonce(nonce))
@@ -291,8 +293,10 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		signer := types.MakeSigner(genesis.Config, big.NewInt(int64(nonce)))
 		var tx *types.Transaction
 
-		switch i {
-		case 59001: // deploy factory
+		switch nonce {
+		case 35001: // deploy factory
+			transactOpts.GasLimit = 3 * params.TxGasContractCreation
+			transactOpts.Nonce = big.NewInt(int64(nonce))
 			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, backend)
 			if err != nil {
 				panic(err)
@@ -308,30 +312,50 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			if err != nil {
 				panic(err)
 			}
-		case 59002: // call .deploy() method on factory
+			gen.AddTx(tx)
+			time.Sleep(10 * time.Second)
+		case 36002: // call .deploy() method on factory
+			transactOpts.GasLimit = 3 * params.TxGasContractCreation
+			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = revive.Deploy(transactOpts, [32]byte{})
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 59003:
+			time.Sleep(10 * time.Second)
+		case 37003:
+			transactOpts.GasLimit = 3 * params.TxGasContractCreation
+			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Store(transactOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 59004:
+			time.Sleep(10 * time.Second)
+		case 38004:
+			transactOpts.GasLimit = 3 * params.TxGasContractCreation
+			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Die(transactOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 59005:
-			tx, err = revive.Deploy(transactOpts, [32]byte{})
-			if err != nil {
-				panic(err)
+			if len(gen.GetReceipts()) > 0 {
+				for _, r := range gen.GetReceipts() {
+					for _, l := range r.Logs {
+						fmt.Printf("block_generator.go:341 Logs! : %d %x \n", l.BlockNumber, l.Data)
+					}
+				}
 			}
-			gen.AddTx(tx)
+			time.Sleep(10 * time.Second)
+		//case 39005:
+		//	transactOpts.GasLimit = 3 * params.TxGasContractCreation
+		//	transactOpts.Nonce = big.NewInt(int64(nonce))
+		//	tx, err = revive.Deploy(transactOpts, [32]byte{})
+		//	if err != nil {
+		//		panic(err)
+		//	}
+		//	gen.AddTx(tx)
 		default:
 			to := randAddress(r)
 			tx = types.NewTransaction(nonce, to, amount, params.TxGas, nil, nil)
@@ -341,7 +365,6 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			}
 			gen.AddTx(signedTx)
 		}
-
 		nonce++
 	}
 
@@ -445,7 +468,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		switch i {
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(nonce, to, amount, 21000, gasPrice, []byte{})
+			tx = types.NewTransaction(nonce, to, amount, params.TxGas, gasPrice, []byte{})
 		}
 		return tx
 	}
