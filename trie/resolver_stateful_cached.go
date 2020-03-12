@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
@@ -28,21 +29,6 @@ func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFu
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
 	}
-}
-
-// nextSubtree does []byte++. Returns false if overflow.
-func nextSubtree(in []byte) ([]byte, bool) {
-	r := make([]byte, len(in))
-	copy(r, in)
-	for i := len(r) - 1; i >= 0; i-- {
-		if r[i] != 255 {
-			r[i]++
-			return r, true
-		}
-
-		r[i] = 0
-	}
-	return nil, false
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
@@ -122,50 +108,6 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 		return tr.hookFunction(tr.currentReq, hbRoot, hbHash)
 	}
 	return nil
-}
-
-// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
-func keyIsBefore(k1, k2 []byte) (bool, []byte) {
-	if k1 == nil {
-		return false, k2
-	}
-
-	if k2 == nil {
-		return true, k1
-	}
-
-	switch cmpWithoutIncarnation(k1, k2) {
-	case -1, 0:
-		return true, k1
-	default:
-		return false, k2
-	}
-}
-
-// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
-func cmpWithoutIncarnation(k1, k2 []byte) int {
-	if k1 == nil {
-		return 1
-	}
-
-	if k2 == nil {
-		return -1
-	}
-
-	if len(k2) <= common.HashLength {
-		return bytes.Compare(k1, k2)
-	}
-
-	if len(k2) <= common.HashLength+8 {
-		return bytes.Compare(k1, k2[:common.HashLength])
-	}
-
-	buf := pool.GetBuffer(256)
-	defer pool.PutBuffer(buf)
-	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
-	buf.B = append(buf.B, k2[common.HashLength+8:]...)
-
-	return bytes.Compare(k1, buf.B)
 }
 
 func (tr *ResolverStatefulCached) RebuildTrie(
@@ -375,7 +317,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
-				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
+				next, ok := intermediatehash.NextSubtree(cacheK[:maxAccountKeyLen])
 				if !ok { // no siblings left in cache
 					cacheK, cacheV = nil, nil
 					continue
@@ -384,7 +326,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			fromCache, minKey = keyIsBefore(cacheK, k)
+			fromCache, minKey = intermediatehash.IsBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
@@ -395,7 +337,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					}
 					startKeyIndex := minInt(len(startkey), fixedbytes-1)
 					if fromCache {
-						cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+						cmp = intermediatehash.CmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					} else {
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					}
@@ -419,7 +361,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						if k == nil && cacheK == nil {
 							return nil
 						}
-						fromCache, minKey = keyIsBefore(cacheK, k)
+						fromCache, minKey = intermediatehash.IsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -483,7 +425,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			// skip subtree
 
-			next, ok := nextSubtree(cacheK)
+			next, ok := intermediatehash.NextSubtree(cacheK)
 			if !ok { // no siblings left
 				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
 					break

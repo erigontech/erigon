@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -1185,6 +1186,15 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	// don't put k4 yet
 
 	putCache(accKey, "")
+
+	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
+		k := fmt.Sprintf("%x", prefix)
+		if strings.HasPrefix(accKey+k1, k) || strings.HasPrefix(accKey+k2, k) || strings.HasPrefix(accKey+k3, k) {
+			return true
+		}
+
+		return false
+	}
 
 	// step 1: re-create account
 	err := state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))

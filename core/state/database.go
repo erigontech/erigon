@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	lru "github.com/hashicorp/golang-lru"
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -37,6 +38,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
+	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 )
 
 // Trie cache generation limit after which to evict trie nodes from memory.
@@ -294,20 +296,77 @@ func PutTombstoneForDeletedAccount(someStorageExistsInThisSubtree func(prefix []
 		return nil
 	}
 
-	buf := pool.GetBuffer(common.HashLength * 2)
+	var boltDb *bolt.DB
+	if hasBolt, ok := db.(ethdb.HasBolt); ok {
+		boltDb = hasBolt.DB()
+	} else if hasDb, ok := db.(ethdb.HasDb); ok {
+		if hasBolt, ok := hasDb.DB().(ethdb.HasBolt); ok {
+			boltDb = hasBolt.DB()
+		}
+	}
+
+	if boltDb == nil {
+		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+	}
+
+	buf := pool.GetBuffer(64)
 	defer pool.PutBuffer(buf)
-	copy(buf.B, addrHash)
 
 	hasStorage := false
-	i := common.HashLength
-	for j := 0; j < 256; j++ {
-		buf.B[i] = uint8(j)
-		if someStorageExistsInThisSubtree(buf.B[:i+1]) {
-			hasStorage = true
-			break
+	if err := boltDb.View(func(tx *bolt.Tx) error {
+		inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
+
+		interK, interV := inter.Seek(addrHash)
+		k, _ := storage.Seek(addrHash)
+		for k != nil || interK != nil {
+			if !bytes.HasPrefix(interK, addrHash) {
+				interK = nil
+			}
+			if !bytes.HasPrefix(k, addrHash) {
+				k = nil
+			}
+
+			if k == nil {
+				return nil
+			}
+
+			useIntermediateKey, _ := intermediatehash.IsBefore(interK, k)
+			if !useIntermediateKey {
+				hasStorage = true
+				return nil
+			}
+
+			if interK == nil {
+				return nil
+			}
+
+			if len(interV) != 0 { // skip non-tombstones
+				interK, interV = inter.Next()
+				continue
+			}
+
+			// part about tombstones
+
+			copy(buf.B, addrHash)
+			buf.B[common.HashLength] = interK[common.HashLength]
+			if buf.B[common.HashLength] == 255 {
+				return nil
+			}
+			buf.B[common.HashLength]++
+
+			if bytes.HasPrefix(k, interK) {
+				k, _ = storage.Seek(buf.B[:common.HashLength+1])
+			}
+
+			interK, interV = inter.Seek(buf.B[:common.HashLength+1])
 		}
 
+		return nil
+	}); err != nil {
+		return err
 	}
+
 	if !hasStorage {
 		return nil
 	}
@@ -781,6 +840,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
+			if debug.IsIntermediateTrieHash() {
+				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
+			}
 		}
 
 		for addrHash, account := range b.accountUpdates {
