@@ -312,9 +312,7 @@ func PutTombstoneForDeletedAccount(someStorageExistsInThisSubtree func(prefix []
 		return nil
 	}
 
-	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{}); err != nil {
-		log.Warn("could not put intermediate trie hash", "err", err)
-	}
+	return db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{})
 }
 
 func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
