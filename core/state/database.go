@@ -289,23 +289,27 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 }
 
 // PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) {
+func PutTombstoneForDeletedAccount(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, addrHash []byte) error {
 	if len(addrHash) != common.HashLength {
-		return
+		return nil
 	}
 
-	v, _ := db.Get(dbutils.AccountsBucket, addrHash)
-	if v == nil {
-		return
-	}
-	acc := accounts.NewAccount()
-	if err := acc.DecodeForStorage(v); err != nil {
-		log.Warn("could not decode account", "err", err)
-		return
-	}
+	buf := pool.GetBuffer(common.HashLength * 2)
+	defer pool.PutBuffer(buf)
+	copy(buf.B, addrHash)
 
-	if acc.Root == trie.EmptyRoot {
-		return
+	hasStorage := false
+	i := common.HashLength
+	for j := 0; j < 256; j++ {
+		buf.B[i] = uint8(j)
+		if someStorageExistsInThisSubtree(buf.B[:i+1]) {
+			hasStorage = true
+			break
+		}
+
+	}
+	if !hasStorage {
+		return nil
 	}
 
 	if err := db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{}); err != nil {
@@ -779,9 +783,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
-			if debug.IsIntermediateTrieHash() {
-				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
-			}
 		}
 
 		for addrHash, account := range b.accountUpdates {

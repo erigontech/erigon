@@ -1194,7 +1194,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		accKey:        false,
 		accKey + "11": true,
 		accKey + "22": true,
-		accKey + "aa": true,
+		accKey + "aa": false,
 	}
 
 	for k, expect := range checks {
@@ -1204,11 +1204,11 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 2: re-create storage
-	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
+	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
 		return false
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, common.FromHex(accKey+k2))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k2))
 	require.NoError(err)
 
 	checks = map[string]bool{
@@ -1225,7 +1225,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 3: create one new storage
-	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
+	someStorageExistsInThisSubtree3 := func(prefix []byte) bool {
 		if bytes.HasPrefix(common.FromHex(accKey+k3), prefix) {
 			return false
 		}
@@ -1235,7 +1235,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		return false
 	}
 
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k3))
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree3, db, common.FromHex(accKey+k3))
 	require.NoError(err)
 	checks = map[string]bool{
 		accKey + k2:                            false, // results of step2 preserved
