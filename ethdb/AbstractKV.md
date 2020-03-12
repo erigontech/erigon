@@ -101,20 +101,21 @@ type Bucket interface {
 
 type Cursor interface {
 	Prefix(v []byte) Cursor
-	From(v []byte) Cursor
 	MatchBits(uint) Cursor
 	Prefetch(v uint) Cursor
-	NoValues() Cursor
+	NoValues() NoValuesCursor
 
 	First() ([]byte, []byte, error)
 	Seek(seek []byte) ([]byte, []byte, error)
 	Next() ([]byte, []byte, error)
-	FirstKey() ([]byte, uint64, error)
-	SeekKey(seek []byte) ([]byte, uint64, error)
-	NextKey() ([]byte, uint64, error)
-
 	Walk(walker func(k, v []byte) (bool, error)) error
-	WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error
+}
+
+type NoValuesCursor interface {
+	First() ([]byte, uint64, error)
+	Seek(seek []byte) ([]byte, uint64, error)
+	Next() ([]byte, uint64, error)
+	Walk(walker func(k []byte, vSize uint64) (bool, error)) error
 }
 ```
 
