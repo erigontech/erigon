@@ -7,7 +7,6 @@ import (
 	"math"
 	"runtime/debug"
 	"strings"
-	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -224,7 +223,6 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	if err = tr.finaliseRoot(); err != nil {
-
 		fmt.Println("Err in finalize root, writing down resolve params")
 		for _, req := range tr.requests {
 			fmt.Printf("req.resolveHash: %s\n", req.resolveHash)
@@ -233,8 +231,6 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		}
 		fmt.Printf("fixedbits: %d\n", fixedbits)
 		fmt.Printf("startkey: %x\n", startkeys)
-
-		time.Sleep(10 * time.Second)
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
 	return nil
