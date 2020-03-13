@@ -544,7 +544,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		bg.tdByNumber[block.NumberU64()] = td
 		parent = block
 
-		if height%1000 == 0 {
+		if height%10000 == 0 {
 			log.Info(fmt.Sprintf("fork gen %dK", height/1000))
 		}
 	}
