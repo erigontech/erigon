@@ -303,10 +303,6 @@ func (c *cursor) Prefix(v []byte) Cursor {
 	return c
 }
 
-func (c *cursor) From(v []byte) Cursor {
-	panic("not implemented yet")
-}
-
 func (c *cursor) MatchBits(n uint) Cursor {
 	panic("not implemented yet")
 }
@@ -323,16 +319,8 @@ func (c *cursor) Prefetch(v uint) Cursor {
 	return c
 }
 
-func (c *cursor) NoValues() Cursor {
-	switch c.provider {
-	case Bolt:
-		// nothing to do
-	case Badger:
-		c.badgerOpts.PrefetchValues = false
-	case Remote:
-		c.remoteOpts.PrefetchValues(false)
-	}
-	return c
+func (c *cursor) NoValues() NoValuesCursor {
+	return newNoValuesCursor(c)
 }
 
 func (b bucket) Get(key []byte) (val []byte, err error) {
@@ -534,7 +522,55 @@ func (c *cursor) Next() ([]byte, []byte, error) {
 	return c.k, c.v, c.err
 }
 
-func (c *cursor) FirstKey() ([]byte, uint64, error) {
+func (c *cursor) Walk(walker func(k, v []byte) (bool, error)) error {
+	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, v)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	return nil
+}
+
+type noValuesCursor struct {
+	cursor
+}
+
+func newNoValuesCursor(c *cursor) *noValuesCursor {
+	switch c.provider {
+	case Bolt:
+		// nothing to do
+	case Badger:
+		c.badgerOpts.PrefetchValues = false
+	case Remote:
+		c.remoteOpts.PrefetchValues(false)
+	}
+	return &noValuesCursor{cursor: *c}
+}
+
+func (c *noValuesCursor) Walk(walker func(k []byte, vSize uint64) (bool, error)) error {
+	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
+		if err != nil {
+			return err
+		}
+		ok, err := walker(k, vSize)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (c *noValuesCursor) First() ([]byte, uint64, error) {
 	c.initCursor()
 
 	var vSize uint64
@@ -570,7 +606,7 @@ func (c *cursor) FirstKey() ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
+func (c *noValuesCursor) Seek(seek []byte) ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
@@ -605,7 +641,7 @@ func (c *cursor) SeekKey(seek []byte) ([]byte, uint64, error) {
 	return c.k, vSize, c.err
 }
 
-func (c *cursor) NextKey() ([]byte, uint64, error) {
+func (c *noValuesCursor) Next() ([]byte, uint64, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
@@ -644,36 +680,4 @@ func (c *cursor) NextKey() ([]byte, uint64, error) {
 		}
 	}
 	return c.k, vSize, c.err
-}
-
-func (c *cursor) Walk(walker func(k, v []byte) (bool, error)) error {
-	for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, v)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
-}
-
-func (c *cursor) WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error {
-	for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
-		if err != nil {
-			return err
-		}
-		ok, err := walker(k, vSize)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-	}
-	return nil
 }

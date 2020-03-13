@@ -52,7 +52,8 @@ func TestManagedTx(t *testing.T) {
 				_ = v
 			}
 
-			for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
+			c2 := c.NoValues()
+			for k, vSize, err := c2.First(); k != nil || err != nil; k, vSize, err = c2.Next() {
 				if err != nil {
 					return err
 				}
@@ -113,7 +114,7 @@ func TestManagedTx(t *testing.T) {
 			//c, err := tx.Bucket(dbutil.AccountBucket).CursorOpts().From(key).Cursor()
 			//
 			//c, err := b.Cursor(b.CursorOpts().From(key).MatchBits(common.HashLength * 8))
-			c := b.Cursor()
+			c := b.Cursor().NoValues()
 
 			for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 				if err != nil {
@@ -122,7 +123,7 @@ func TestManagedTx(t *testing.T) {
 				_ = v
 			}
 
-			for k, vSize, err := c.FirstKey(); k != nil || err != nil; k, vSize, err = c.NextKey() {
+			for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
 				if err != nil {
 					return err
 				}
