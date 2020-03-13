@@ -624,9 +624,9 @@ func execToBlock(block uint64, fromScratch bool) {
 	if fromScratch {
 		os.Remove("statedb")
 	}
-	stateDb, err := ethdb.NewBoltDatabase("statedb")
-	check(err)
-	//stateDb := ethdb.NewMemDatabase()
+	//stateDb, err := ethdb.NewBoltDatabase("statedb")
+	//check(err)
+	stateDb := ethdb.NewMemDatabase()
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())

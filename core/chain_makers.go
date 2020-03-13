@@ -266,6 +266,12 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	//	panic(err)
 	//}
 	for i := 0; i < n; i++ {
+		select {
+		case <-ctx.Done():
+			return nil, nil
+		default:
+		}
+
 		statedb := state.New(tds)
 		block, receipt := genblock(i, parent, statedb, tds)
 		blocks[i] = block

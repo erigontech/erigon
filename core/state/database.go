@@ -903,7 +903,9 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
-			PutTombstoneForDeletedAccount(tds.db, addrHash[:])
+			if debug.IsIntermediateTrieHash() {
+				PutTombstoneForDeletedAccount(tds.db, addrHash[:])
+			}
 		}
 		roots[i] = tds.t.Hash()
 	}

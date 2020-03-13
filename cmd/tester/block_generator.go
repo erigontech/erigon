@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -28,6 +27,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
+
+const ReduceComplexity = true
 
 type BlockGenerator struct {
 	input               *os.File
@@ -93,6 +94,9 @@ func (bg *BlockGenerator) LastBlock() *types.Block {
 }
 
 func randAddress(r *rand.Rand) common.Address {
+	if ReduceComplexity {
+		return common.BytesToAddress(common.FromHex("80977316944e5942e79b0e3abad38da746086519"))
+	}
 	var b common.Address
 	binary.BigEndian.PutUint64(b[:], r.Uint64())
 	binary.BigEndian.PutUint64(b[8:], r.Uint64())
@@ -313,7 +317,6 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-			time.Sleep(10 * time.Second)
 		case 36002: // call .deploy() method on factory
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
@@ -322,7 +325,6 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-			time.Sleep(10 * time.Second)
 		case 37003:
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
@@ -331,7 +333,6 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-			time.Sleep(10 * time.Second)
 		case 38004:
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
@@ -347,7 +348,6 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 					}
 				}
 			}
-			time.Sleep(10 * time.Second)
 		//case 39005:
 		//	transactOpts.GasLimit = 3 * params.TxGasContractCreation
 		//	transactOpts.Nonce = big.NewInt(int64(nonce))
@@ -534,5 +534,12 @@ func genesis() *core.Genesis {
 	genesis.Config.PetersburgBlock = big.NewInt(19)
 	genesis.Config.IstanbulBlock = big.NewInt(20)
 	genesis.Config.MuirGlacierBlock = big.NewInt(21)
+
+	if ReduceComplexity {
+		a := common.BytesToAddress(common.FromHex("80977316944e5942e79b0e3abad38da746086519"))
+		genesis.Alloc = core.GenesisAlloc{
+			a: genesis.Alloc[a],
+		}
+	}
 	return genesis
 }
