@@ -163,6 +163,7 @@ type BlockChain struct {
 	chainmu sync.RWMutex // blockchain insertion lock
 
 	currentBlock     atomic.Value // Current head of the block chain
+	committedBlock   atomic.Value // Committed head of the block chain
 	currentFastBlock atomic.Value // Current head of the fast-sync chain (may be above the block chain!)
 
 	trieDbState   *state.TrieDbState
@@ -1325,34 +1326,22 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 	}
 
 	status = CanonStatTy
-	//} else {
-	//	fmt.Printf("SideStatTy for block %d\n", block.NumberU64())
-	//	status = SideStatTy
-	//}
 
 	// Set new head.
-	if status == CanonStatTy {
-		bc.writeHeadBlock(block)
-	} else if !bc.cacheConfig.DownloadOnly && bc.enableTxLookupIndex {
-		rawdb.WriteTxLookupEntries(bc.db, block)
-	}
+	bc.writeHeadBlock(block)
 	bc.futureBlocks.Remove(block.Hash())
 
-	if status == CanonStatTy {
-		bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
-		if len(logs) > 0 {
-			bc.logsFeed.Send(logs)
-		}
-		// In theory we should fire a ChainHeadEvent when we inject
-		// a canonical block, but sometimes we can insert a batch of
-		// canonicial blocks. Avoid firing too much ChainHeadEvents,
-		// we will fire an accumulated ChainHeadEvent and disable fire
-		// event here.
-		if emitHeadEvent {
-			bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
-		}
-	} else {
-		bc.chainSideFeed.Send(ChainSideEvent{Block: block})
+	bc.chainFeed.Send(ChainEvent{Block: block, Hash: block.Hash(), Logs: logs})
+	if len(logs) > 0 {
+		bc.logsFeed.Send(logs)
+	}
+	// In theory we should fire a ChainHeadEvent when we inject
+	// a canonical block, but sometimes we can insert a batch of
+	// canonicial blocks. Avoid firing too much ChainHeadEvents,
+	// we will fire an accumulated ChainHeadEvent and disable fire
+	// event here.
+	if emitHeadEvent {
+		bc.chainHeadFeed.Send(ChainHeadEvent{Block: block})
 	}
 	return status, nil
 }
@@ -1635,10 +1624,12 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
+				bc.currentBlock.Store(bc.committedBlock.Load())
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				return 0, err
 			}
+			bc.committedBlock.Store(bc.currentBlock.Load())
 
 			if err = bc.trieDbState.UnwindTo(readBlockNr); err != nil {
 				bc.db.Rollback()
@@ -1665,8 +1656,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
+				bc.currentBlock.Store(bc.committedBlock.Load())
 				return 0, err
 			}
+			bc.committedBlock.Store(bc.currentBlock.Load())
 		}
 
 		var stateDB *state.IntraBlockState
@@ -1683,6 +1676,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
+				bc.currentBlock.Store(bc.committedBlock.Load())
 				return k, err
 			}
 			// Update the metrics touched during block processing
@@ -1705,6 +1699,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
+				bc.currentBlock.Store(bc.committedBlock.Load())
 				return k, err
 			}
 		}
@@ -1723,6 +1718,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if err != nil {
 			bc.db.Rollback()
 			bc.setTrieDbState(nil)
+			bc.currentBlock.Store(bc.committedBlock.Load())
 			return k, err
 		}
 		//atomic.StoreUint32(&followupInterrupt, 1)
@@ -1772,8 +1768,10 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
+				bc.currentBlock.Store(bc.committedBlock.Load())
 				return 0, err
 			}
+			bc.committedBlock.Store(bc.currentBlock.Load())
 			if bc.trieDbState != nil {
 				bc.trieDbState.PruneTries(false)
 			}

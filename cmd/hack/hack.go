@@ -614,9 +614,9 @@ func trieChart() {
 	check(err)
 }
 
-func execToBlock(block uint64, fromScratch bool) {
-	blockDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me3/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
+func execToBlock(chaindata string, block uint64, fromScratch bool) {
+	state.MaxTrieCacheGen = 32
+	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
@@ -626,7 +626,6 @@ func execToBlock(block uint64, fromScratch bool) {
 	}
 	stateDb, err := ethdb.NewBoltDatabase("statedb")
 	check(err)
-	//stateDb := ethdb.NewMemDatabase()
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
@@ -657,7 +656,14 @@ func execToBlock(block uint64, fromScratch bool) {
 		if len(blocks) >= 100 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
-				panic(err)
+				// Try to insert blocks one by one to keep the latest state
+				for j := 0; j < len(blocks); j++ {
+					if _, err1 := bc.InsertChain(context.Background(), blocks[j:j+1]); err1 != nil {
+						log.Error("Could not insert block", "error", err1)
+						break
+					}
+				}
+				break
 			}
 			blocks = types.Blocks{}
 		}
@@ -794,7 +800,7 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	execToBlock(100_000_000, false)
+	execToBlock(node.DefaultDataDir() + "/geth-remove-me3/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
@@ -901,11 +907,9 @@ func testResolveCached() {
 	*/
 }
 
-func testResolve() {
+func testResolve(chaindata string) {
 	startTime := time.Now()
-	//ethDb, err := ethdb.NewBoltDatabase("/home/akhounov/.ethereum/geth/chaindata")
-	ethDb, err := ethdb.NewBoltDatabase("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata")
-	//ethDb, err := ethdb.NewBoltDatabase("statedb")
+	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
 	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -916,36 +920,28 @@ func testResolve() {
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-	contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
-	r := trie.NewResolver(2, false, 225281)
+	var contract []byte
+	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
+	r := trie.NewResolver(10, true, 258216)
 	r.SetHistorical(true)
-	key := []byte{}
-	resolveHash := common.FromHex("a3a02e29c6dc8fbb769555a80e3f2b0789a0376296be013a956676d58deaf791")
+	var key []byte
+	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
+	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
 	t := trie.New(common.Hash{})
 	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
-	//err = r.ResolveWithDb(ethDb, 225281)
+	err = r.ResolveWithDb(ethDb, 258216)
+	filename := fmt.Sprintf("right_%d.txt", currentBlockNr)
+	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
+	f, err := os.Create(filename)
+	if err == nil {
+		defer f.Close()
+		t.Print(f)
+	}
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
 	fmt.Printf("Took %v\n", time.Since(startTime))
-	t.Update(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52757c17435002e70fd7d982a101b0549945244f496bf4bb5503d5de3aa770842bce"),
-		common.FromHex("0xa06fe9c682fbb890c09eec59047f97d165875d4f3c86bc65c2870d577b8245f111"))
-	_, h := t.DeepHash(common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd5275"))
-	fmt.Printf("deep hash: %x\n", h)
-	//t.Print(os.Stdout)
-	/*
-		filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
-		f, err := os.Create(filename)
-		if err == nil {
-			t.Print(f)
-			f.Close()
-		} else {
-			check(err)
-		}
-	*/
-	//enc, _ := ethDb.GetAsOf(state.AccountsBucket, state.AccountsHistoryBucket, crypto.Keccak256(contract), 2701646)
-	//fmt.Printf("Account: %x\n", enc)
 }
 
 func hashFile() {
@@ -1672,7 +1668,7 @@ func main() {
 	//hashFile()
 	//buildHashFromFile()
 	if *action == "testResolve" {
-		testResolve()
+		testResolve(*chaindata)
 	}
 	if *action == "testResolveCached" {
 		testResolveCached()
@@ -1706,7 +1702,9 @@ func main() {
 		addPreimage(*chaindata, common.HexToHash(*hash), common.FromHex(*preImage))
 	}
 	//printBranches(uint64(*block))
-	//execToBlock(*block)
+	if *action == "execToBlock" {
+		execToBlock(*chaindata, uint64(*block), true)
+	}
 	//extractTrie(*block)
 	//repair()
 	if *action == "readAccount" {
