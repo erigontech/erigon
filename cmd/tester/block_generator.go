@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -251,9 +252,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 
 	gasPrice := big.NewInt(1)
-	transactOpts := bind.NewKeyedTransactor(coinbaseKey)
-	transactOpts.GasPrice = gasPrice
-	transactOpts.GasLimit = params.TxGas
+	txOpts := bind.NewKeyedTransactor(coinbaseKey)
+	txOpts.GasPrice = gasPrice
+	txOpts.GasLimit = params.TxGas
 
 	var pos uint64
 	td := new(big.Int)
@@ -277,7 +278,8 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	var phoenix *contracts.Phoenix
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
-	var nonce uint64 // nonce of the sender (coinbase)
+	//var nonce uint64 // nonce of the sender (coinbase)
+	txOpts.Nonce = big.NewInt(0)
 
 	backend := &NoopBackend{db: db, genesis: genesis}
 	genBlock := func(i int, gen *core.BlockGen) {
@@ -289,26 +291,26 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 
 		gen.SetExtra(extra)
 		gen.SetCoinbase(coinbase)
-		if gen.GetHeader().GasLimit <= 3*params.TxGasContractCreation {
+		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
 			return
 		}
-		gen.SetNonce(types.EncodeNonce(nonce))
-		signer := types.MakeSigner(genesis.Config, big.NewInt(int64(nonce)))
+		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
+		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 		var tx *types.Transaction
 
+		txOpts.GasLimit = 3 * params.TxGasContractCreation
+		//fmt.Println("Alex")
 		//time.Sleep(5 * time.Second)
-		switch nonce {
-		case 1: // create 0 account
-			tx = types.NewTransaction(nonce, common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
+		switch true {
+		case txOpts.Nonce.Uint64() == 1: // create 0 account
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
-		case 2: // deploy factory
-			transactOpts.GasLimit = 3 * params.TxGasContractCreation
-			transactOpts.Nonce = big.NewInt(int64(nonce))
-			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, backend)
+		case txOpts.Nonce.Uint64() == 2: // deploy factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(txOpts, backend)
 			if err != nil {
 				panic(err)
 			}
@@ -324,61 +326,85 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 3: // call .deploy() method on factory
-			transactOpts.GasLimit = 3 * params.TxGasContractCreation
-			transactOpts.Nonce = big.NewInt(int64(nonce))
-			tx, err = revive.Deploy(transactOpts, [32]byte{})
+		case txOpts.Nonce.Uint64() == 3: // call .deploy() method on factory
+			tx, err = revive.Deploy(txOpts, [32]byte{})
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 4:
-			transactOpts.GasLimit = 3 * params.TxGasContractCreation
-			transactOpts.Nonce = big.NewInt(int64(nonce))
-			tx, err = phoenix.Store(transactOpts)
+		case txOpts.Nonce.Uint64() >= 4 && txOpts.Nonce.Uint64() <= 10000: // gen big storage
+			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 5:
-			transactOpts.GasLimit = 3 * params.TxGasContractCreation
-			transactOpts.Nonce = big.NewInt(int64(nonce))
-			tx, err = phoenix.Die(transactOpts)
+		case txOpts.Nonce.Uint64() == 10001: // kill contract with big storage
+			tx, err = phoenix.Die(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-			if len(gen.GetReceipts()) > 0 {
-				for _, r := range gen.GetReceipts() {
-					for _, l := range r.Logs {
-						fmt.Printf("block_generator.go:341 Logs! : %d %x \n", l.BlockNumber, l.Data)
-					}
-				}
+		case txOpts.Nonce.Uint64() == 10002: // revive Phoenix and add to it some storage in same Tx
+			tx, err = revive.Deploy(txOpts, [32]byte{})
+			if err != nil {
+				panic(err)
 			}
-		//case 39005:
-		//	transactOpts.GasLimit = 3 * params.TxGasContractCreation
-		//	transactOpts.Nonce = big.NewInt(int64(nonce))
-		//	tx, err = revive.Deploy(transactOpts, [32]byte{})
-		//	if err != nil {
-		//		pani
-		//
-		//
-		//		c(err)
-		//	}
-		//	gen.AddTx(tx)
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() == 10003: // add some storage and kill Phoenix in same Tx
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Die(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = revive.Deploy(txOpts, [32]byte{})
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(nonce, to, amount, params.TxGas, nil, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, nil, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
 		}
-		nonce++
+		txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
 	}
 
-	blocks := make(chan *types.Block, 1000)
+	blocks := make(chan *types.Block, 10000)
 	go func() {
 		defer close(blocks)
 		height := initialHeight
@@ -394,7 +420,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			}
 
 			// Generate a batch of blocks, each properly signed
+			t := time.Now()
 			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			fmt.Println("block_generator.go:442", time.Since(t))
 			for _, block := range blocksSlice {
 				blocks <- block
 				parent = block
