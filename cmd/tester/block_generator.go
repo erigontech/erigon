@@ -9,7 +9,6 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -420,9 +419,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			}
 
 			// Generate a batch of blocks, each properly signed
-			t := time.Now()
 			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
-			fmt.Println("block_generator.go:442", time.Since(t))
 			for _, block := range blocksSlice {
 				blocks <- block
 				parent = block
