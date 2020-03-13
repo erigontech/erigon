@@ -151,6 +151,12 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
+	initPm(manager, txpool, engine, blockchain, chaindb)
+
+	return manager, nil
+}
+
+func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	// Construct the different synchronisation mechanisms
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer)
 
@@ -197,8 +203,6 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		return p.RequestTxs(hashes)
 	}
 	manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
-
-	return manager, nil
 }
 
 func (pm *ProtocolManager) makeFirehoseProtocol() p2p.Protocol {
@@ -1254,48 +1258,15 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
-		pm.downloader = downloader.New(pm.checkpointNumber, blockchain.ChainDb(), nil /*stateBloom */, pm.eventMux, blockchain, nil, pm.removePeer)
-		// Construct the fetcher (short sync)
-		validator := func(header *types.Header) error {
-			return engine.VerifyHeader(blockchain, header, true)
-		}
-		heighter := func() uint64 {
-			return blockchain.CurrentBlock().NumberU64()
-		}
-		inserter := func(blocks types.Blocks) (int, error) {
-			// If sync hasn't reached the checkpoint yet, deny importing weird blocks.
-			//
-			// Ideally we would also compare the head block's timestamp and similarly reject
-			// the propagated block if the head is too old. Unfortunately there is a corner
-			// case when starting new networks, where the genesis might be ancient (0 unix)
-			// which would prevent full nodes from accepting it.
-			if pm.blockchain.CurrentBlock().NumberU64() < pm.checkpointNumber {
-				log.Warn("Unsynced yet, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
-				return 0, nil
-			}
-			// If fast sync is running, deny importing weird blocks. This is a problematic
-			// clause when starting up a new network, because fast-syncing miners might not
-			// accept each others' blocks until a restart. Unfortunately we haven't figured
-			// out a way yet where nodes can decide unilaterally whether the network is new
-			// or not. This should be fixed if we figure out a solution.
-			if atomic.LoadUint32(&pm.fastSync) == 1 {
-				log.Warn("Fast syncing, discarded propagated block", "number", blocks[0].Number(), "hash", blocks[0].Hash())
-				return 0, nil
-			}
-			n, err := pm.blockchain.InsertChain(context.Background(), blocks)
-			if err == nil {
-				atomic.StoreUint32(&pm.acceptTxs, 1) // Mark initial sync done on any fetcher import
-			}
-			return n, err
-		}
-		pm.blockFetcher = fetcher.NewBlockFetcher(blockchain.GetBlockByHash, validator, pm.BroadcastBlock, heighter, inserter, pm.removePeer)
+		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
+		pm.quitSync = make(chan struct{})
 		go pm.syncer()
 
 		// hacks to speedup local sync
-		downloader.MaxHashFetch = 512 * 10
-		downloader.MaxBlockFetch = 128 * 10
-		downloader.MaxHeaderFetch = 192 * 10
-		downloader.MaxReceiptFetch = 256 * 10
+		//downloader.MaxHashFetch = 512 * 10
+		//downloader.MaxBlockFetch = 128 * 10
+		//downloader.MaxHeaderFetch = 192 * 10
+		//downloader.MaxReceiptFetch = 256 * 10
 
 		log.Warn("Succeed to set new Genesis")
 		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")

@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
+	"time"
 
 	ethereum "github.com/ledgerwatch/turbo-geth"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -511,6 +512,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return tx
 	}
 
+	t := time.Now()
 	var nonce uint64 // nonce of the sender (coinbase)
 	for height := 1; height <= int(forkBase+forkHeight); height++ {
 		select {
@@ -545,7 +547,8 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		parent = block
 
 		if height%10000 == 0 {
-			log.Info(fmt.Sprintf("fork gen %dK", height/1000))
+			log.Info(fmt.Sprintf("fork gen %dK %ss", height/1000, time.Since(t)))
+			t = time.Now()
 		}
 	}
 	bg.lastBlock = parent
