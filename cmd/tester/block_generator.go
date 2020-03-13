@@ -28,7 +28,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
-const ReduceComplexity = true
+const ReduceComplexity = false
 
 type BlockGenerator struct {
 	input               *os.File
@@ -385,6 +385,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		parent := genesisBlock
 		i := 0
 		n := 10000
+		//if ReduceComplexity {
+		//	n = 1 // 1 block per transaction
+		//}
 		for height > 0 {
 			if height < n {
 				n = height
