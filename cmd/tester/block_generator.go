@@ -289,16 +289,23 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 
 		gen.SetExtra(extra)
 		gen.SetCoinbase(coinbase)
-		if gen.GetHeader().GasLimit <= params.TxGas {
+		if gen.GetHeader().GasLimit <= 3*params.TxGasContractCreation {
 			return
 		}
 		gen.SetNonce(types.EncodeNonce(nonce))
-
 		signer := types.MakeSigner(genesis.Config, big.NewInt(int64(nonce)))
 		var tx *types.Transaction
 
+		//time.Sleep(5 * time.Second)
 		switch nonce {
-		case 35001: // deploy factory
+		case 1: // create 0 account
+			tx = types.NewTransaction(nonce, common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
+			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
+			if err1 != nil {
+				panic(err1)
+			}
+			gen.AddTx(signedTx)
+		case 2: // deploy factory
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
 			reviveAddress, tx, revive, err = contracts.DeployRevive2(transactOpts, backend)
@@ -317,7 +324,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 36002: // call .deploy() method on factory
+		case 3: // call .deploy() method on factory
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = revive.Deploy(transactOpts, [32]byte{})
@@ -325,7 +332,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 37003:
+		case 4:
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Store(transactOpts)
@@ -333,7 +340,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case 38004:
+		case 5:
 			transactOpts.GasLimit = 3 * params.TxGasContractCreation
 			transactOpts.Nonce = big.NewInt(int64(nonce))
 			tx, err = phoenix.Die(transactOpts)
@@ -353,7 +360,10 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		//	transactOpts.Nonce = big.NewInt(int64(nonce))
 		//	tx, err = revive.Deploy(transactOpts, [32]byte{})
 		//	if err != nil {
-		//		panic(err)
+		//		pani
+		//
+		//
+		//		c(err)
 		//	}
 		//	gen.AddTx(tx)
 		default:
@@ -374,9 +384,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 		height := initialHeight
 		parent := genesisBlock
 		i := 0
-		n := 1000
+		n := 10000
 		for height > 0 {
-			if height < 1000 {
+			if height < n {
 				n = height
 			}
 
@@ -386,9 +396,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 				blocks <- block
 				parent = block
 			}
-			height -= 1000
+			height -= n
 			i++
-			log.Info(fmt.Sprintf("block gen %dK", i))
+			log.Info(fmt.Sprintf("block gen %dK", i*n/1000))
 		}
 	}()
 

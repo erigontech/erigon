@@ -6,18 +6,12 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"math/rand"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
 	"sort"
 	"syscall"
-	"time"
-
-	//nolint:gosec
-	_ "net/http/pprof"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
@@ -32,22 +26,6 @@ import (
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
 )
-
-func init() {
-	// go tool pprof -http=:8081 http://localhost:6060/
-	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
-	go func() {
-		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
-		randomPort := func(min, max int) int {
-			return r.Intn(max-min) + min
-		}
-		port := randomPort(6000, 7000)
-
-		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "\\?seconds\\=20")
-		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "debug/pprof/heap")
-		fmt.Fprintf(os.Stderr, "%s\n", http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil))
-	}()
-}
 
 var (
 	// Git SHA1 commit hash of the release (set via linker flags)
@@ -178,7 +156,7 @@ func tester(cliCtx *cli.Context) error {
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
-	blockGen, err := NewBlockGenerator(ctx, "blocks", 60000)
+	blockGen, err := NewBlockGenerator(ctx, "blocks", 50000)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to create block generator: %v", err))
 	}
