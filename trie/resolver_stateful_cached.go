@@ -126,12 +126,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.HasBolt); ok {
-		boltDb = hasBolt.DB()
-	} else if hasDb, ok := db.(ethdb.HasDb); ok {
-		if hasBolt, ok := hasDb.DB().(ethdb.HasBolt); ok {
-			boltDb = hasBolt.DB()
-		}
+	if hasBolt, ok := db.(ethdb.KV); ok {
+		boltDb = hasBolt.KV()
 	}
 
 	if boltDb == nil {
@@ -326,7 +322,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			fromCache, minKey = intermediatehash.IsBefore(cacheK, k)
+			fromCache, minKey = isBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
@@ -337,7 +333,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					}
 					startKeyIndex := minInt(len(startkey), fixedbytes-1)
 					if fromCache {
-						cmp = intermediatehash.CmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+						cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					} else {
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					}
@@ -361,7 +357,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						if k == nil && cacheK == nil {
 							return nil
 						}
-						fromCache, minKey = intermediatehash.IsBefore(cacheK, k)
+						fromCache, minKey = isBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -433,7 +429,17 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				cacheK, cacheV = nil, nil
 				continue
 			}
-			k, v = c.Seek(next)
+
+			if isAccountBucket {
+				k, v = c.Seek(next)
+			} else {
+				kNoInc := dbutils.RemoveIncarnationFromKey(k)
+				for bytes.HasPrefix(kNoInc, cacheK) {
+					k, _ = c.Next()
+					kNoInc = dbutils.RemoveIncarnationFromKey(k)
+				}
+			}
+
 			cacheK, cacheV = cache.Seek(next)
 		}
 		return nil
@@ -443,4 +449,48 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 func minInt(i1, i2 int) int {
 	return int(math.Min(float64(i1), float64(i2)))
+}
+
+// isBefore - kind of bytes.Compare, but nil is the last key. And return
+func isBefore(triePrefix, accOrStorageKey []byte) (bool, []byte) {
+	if triePrefix == nil {
+		return false, accOrStorageKey
+	}
+
+	if accOrStorageKey == nil {
+		return true, triePrefix
+	}
+
+	switch cmpWithoutIncarnation(triePrefix, accOrStorageKey) {
+	case -1, 0:
+		return true, triePrefix
+	default:
+		return false, accOrStorageKey
+	}
+}
+
+// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
+func cmpWithoutIncarnation(triePrefix, accOrStorageKey []byte) int {
+	if triePrefix == nil {
+		return 1
+	}
+
+	if accOrStorageKey == nil {
+		return -1
+	}
+
+	if len(accOrStorageKey) <= common.HashLength {
+		return bytes.Compare(triePrefix, accOrStorageKey)
+	}
+
+	if len(accOrStorageKey) <= common.HashLength+8 {
+		return bytes.Compare(triePrefix, accOrStorageKey[:common.HashLength])
+	}
+
+	buf := pool.GetBuffer(256)
+	defer pool.PutBuffer(buf)
+	buf.B = append(buf.B[:0], accOrStorageKey[:common.HashLength]...)
+	buf.B = append(buf.B, accOrStorageKey[common.HashLength+8:]...)
+
+	return bytes.Compare(triePrefix, buf.B)
 }

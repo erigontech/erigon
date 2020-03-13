@@ -13,6 +13,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -516,39 +517,39 @@ func TestApiDetails(t *testing.T) {
 	})
 }
 
-func TestKeyIsBefore(t *testing.T) {
+func TestIsBefore(t *testing.T) {
 	assert := assert.New(t)
 
-	is, minKey := keyIsBefore([]byte("a"), []byte("b"))
+	is, minKey := isBefore([]byte("a"), []byte("b"))
 	assert.Equal(true, is)
 	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
-	is, minKey = keyIsBefore([]byte("b"), []byte("a"))
+	is, minKey = isBefore([]byte("b"), []byte("a"))
 	assert.Equal(false, is)
 	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
-	is, minKey = keyIsBefore([]byte("b"), []byte(""))
+	is, minKey = isBefore([]byte("b"), []byte(""))
 	assert.Equal(false, is)
 	assert.Equal("", fmt.Sprintf("%s", minKey))
 
-	is, minKey = keyIsBefore(nil, []byte("b"))
+	is, minKey = isBefore(nil, []byte("b"))
 	assert.Equal(false, is)
 	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
-	is, minKey = keyIsBefore([]byte("b"), nil)
+	is, minKey = isBefore([]byte("b"), nil)
 	assert.Equal(true, is)
 	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
 	contract := fmt.Sprintf("2%063x", 0)
 	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
 	cacheKey := common.Hex2Bytes(contract + "20")
-	is, minKey = keyIsBefore(cacheKey, storageKey)
+	is, minKey = isBefore(cacheKey, storageKey)
 	assert.False(is)
 	assert.Equal(fmt.Sprintf("%x", storageKey), fmt.Sprintf("%x", minKey))
 
 	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
 	cacheKey = common.Hex2Bytes(contract + "10")
-	is, minKey = keyIsBefore(cacheKey, storageKey)
+	is, minKey = isBefore(cacheKey, storageKey)
 	assert.True(is)
 	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
 }
@@ -557,24 +558,24 @@ func TestHexIncrement(t *testing.T) {
 	assert := assert.New(t)
 	k := common.Hex2Bytes("f2fd")
 
-	k, ok := nextSubtree(k)
+	k, ok := intermediatehash.NextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f2fe", common.Bytes2Hex(k))
-	k, ok = nextSubtree(k)
+	k, ok = intermediatehash.NextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f2ff", common.Bytes2Hex(k))
-	k, ok = nextSubtree(k)
+	k, ok = intermediatehash.NextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f300", common.Bytes2Hex(k))
 
 	k = common.Hex2Bytes("ffffff")
-	assert.Nil(nextSubtree(k))
+	assert.Nil(intermediatehash.NextSubtree(k))
 	k = common.Hex2Bytes("ffff")
-	assert.Nil(nextSubtree(k))
+	assert.Nil(intermediatehash.NextSubtree(k))
 	k = common.Hex2Bytes("ff")
-	assert.Nil(nextSubtree(k))
+	assert.Nil(intermediatehash.NextSubtree(k))
 	k = common.Hex2Bytes("")
-	assert.Nil(nextSubtree(k))
+	assert.Nil(intermediatehash.NextSubtree(k))
 }
 
 func TestCmpWithoutIncarnation(t *testing.T) {

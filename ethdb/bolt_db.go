@@ -702,7 +702,7 @@ func (db *BoltDatabase) Keys() ([][]byte, error) {
 	return keys, err
 }
 
-func (db *BoltDatabase) DB() *bolt.DB {
+func (db *BoltDatabase) KV() *bolt.DB {
 	return db.db
 }
 

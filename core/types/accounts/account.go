@@ -584,7 +584,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 
 		if len(enc) < pos+decodeLength+1 {
 			return fmt.Errorf(
-				"malformed CBOR for Account.Balance: %s, Length %d",
+				"malformed CBOR for Account.Incarnation: %s, Length %d",
 				enc[pos+1:], decodeLength)
 		}
 
@@ -643,6 +643,49 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	}
 
 	return nil
+}
+
+func GetIncarnationFomStorage(enc []byte) (common.Hash, error) {
+	var root common.Hash
+
+	var fieldSet = enc[0]
+	var pos = 1
+
+	if fieldSet&1 > 0 {
+		decodeLength := int(enc[pos])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&2 > 0 {
+		decodeLength := int(enc[pos])
+
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&4 > 0 {
+		decodeLength := int(enc[pos])
+		pos += decodeLength + 1
+	}
+
+	if fieldSet&8 > 0 {
+		decodeLength := int(enc[pos])
+
+		if decodeLength != 32 {
+			return emptyRoot, fmt.Errorf("root should be 32 bytes long, got %d instead",
+				decodeLength)
+		}
+
+		if len(enc) < pos+decodeLength+1 {
+			return emptyRoot, fmt.Errorf(
+				"malformed CBOR for Account.Root: %s, Length %d",
+				enc[pos+1:], decodeLength)
+		}
+
+		root.SetBytes(enc[pos+1 : pos+decodeLength+1])
+		pos += decodeLength + 1
+	}
+
+	return root, nil
 }
 
 func (a *Account) SelfCopy() *Account {

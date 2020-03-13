@@ -272,16 +272,77 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		return nil
 	}
 
-	buf := pool.GetBuffer(common.HashLength * 2)
-	defer pool.PutBuffer(buf)
-	copy(buf.B, addrHashBytes)
+	var boltDb *bolt.DB
+	if hasBolt, ok := db.(ethdb.KV); ok {
+		boltDb = hasBolt.KV()
+	} else {
+		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+	}
 
-	i := common.HashLength
-	for j := 0; j < 256; j++ {
-		buf.B[i] = uint8(j)
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
-			return err
+	if err := boltDb.Update(func(tx *bolt.Tx) error {
+		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		inter := interBucket.Cursor()
+		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
+
+		k, _ := storage.Seek(addrHashBytes)
+		if !bytes.HasPrefix(k, addrHashBytes) {
+			return nil
 		}
+
+		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
+		//for ; incarnation > 0; incarnation-- {
+		accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
+		interK, interV := inter.Seek(addrHashBytes)
+		k, _ = storage.Seek(accWithInc)
+
+		for k != nil || interK != nil {
+			//fmt.Printf("Loop: %v, %v, interK: %x, k: %x\n", bytes.HasPrefix(k, accWithInc), bytes.HasPrefix(interK, addrHashBytes), interK, k)
+			if !bytes.HasPrefix(interK, addrHashBytes) {
+				interK = nil
+			}
+			if !bytes.HasPrefix(k, accWithInc) {
+				k = nil
+			}
+
+			if k == nil {
+				break
+			}
+
+			if interK != nil && len(interV) != 0 { // skip non-tombstones
+				interK, interV = inter.Next()
+				continue
+			}
+
+			kNoInc := dbutils.RemoveIncarnationFromKey(k)
+			cmp := dbutils.Cmp(interK, kNoInc)
+			if cmp == 1 {
+				if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
+					return err
+				}
+				if k[common.HashLength+8] == 255 {
+					break
+				}
+				k[common.HashLength+8]++
+				k, _ = storage.Seek(k[:common.HashLength+8+1])
+				continue
+			}
+
+			if interK == nil {
+				break
+			}
+
+			// part about tombstones
+			next, ok := intermediatehash.NextSubtree(interK)
+			if !ok {
+				break
+			}
+			interK, interV = inter.Seek(next)
+		}
+		//}
+
+		return nil
+	}); err != nil {
+		return err
 	}
 
 	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
@@ -291,87 +352,36 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 }
 
 // PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, addrHash []byte) error {
+func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
 	if len(addrHash) != common.HashLength {
 		return nil
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.HasBolt); ok {
-		boltDb = hasBolt.DB()
-	} else if hasDb, ok := db.(ethdb.HasDb); ok {
-		if hasBolt, ok := hasDb.DB().(ethdb.HasBolt); ok {
-			boltDb = hasBolt.DB()
-		}
-	}
-
-	if boltDb == nil {
+	if hasKV, ok := db.(ethdb.KV); ok {
+		boltDb = hasKV.KV()
+	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
 	buf := pool.GetBuffer(64)
 	defer pool.PutBuffer(buf)
 
-	hasStorage := false
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-		interK, interV := inter.Seek(addrHash)
-		k, _ := storage.Seek(addrHash)
-		for k != nil || interK != nil {
-			if !bytes.HasPrefix(interK, addrHash) {
-				interK = nil
-			}
-			if !bytes.HasPrefix(k, addrHash) {
-				k = nil
-			}
-
-			if k == nil {
-				return nil
-			}
-
-			useIntermediateKey, _ := intermediatehash.IsBefore(interK, k)
-			if !useIntermediateKey {
-				hasStorage = true
-				return nil
-			}
-
-			if interK == nil {
-				return nil
-			}
-
-			if len(interV) != 0 { // skip non-tombstones
-				interK, interV = inter.Next()
-				continue
-			}
-
-			// part about tombstones
-
-			copy(buf.B, addrHash)
-			buf.B[common.HashLength] = interK[common.HashLength]
-			if buf.B[common.HashLength] == 255 {
-				return nil
-			}
-			buf.B[common.HashLength]++
-
-			if bytes.HasPrefix(k, interK) {
-				k, _ = storage.Seek(buf.B[:common.HashLength+1])
-			}
-
-			interK, interV = inter.Seek(buf.B[:common.HashLength+1])
+	return boltDb.Update(func(tx *bolt.Tx) error {
+		account, _ := tx.Bucket(dbutils.AccountsBucket).Get(addrHash)
+		if account == nil {
+			return nil
+		}
+		root, err1 := accounts.GetIncarnationFomStorage(account)
+		if err1 != nil {
+			return err1
+		}
+		if root == trie.EmptyRoot {
+			return nil
 		}
 
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if !hasStorage {
-		return nil
-	}
-
-	return db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{})
+		return tx.Bucket(dbutils.IntermediateTrieHashBucket).Put(addrHash, []byte{})
+	})
 }
 
 func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
@@ -965,7 +975,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 			tds.t.DeleteSubtree(addrHash[:])
 			if debug.IsIntermediateTrieHash() {
-				PutTombstoneForDeletedAccount(tds.db, addrHash[:])
+				_ = PutTombstoneForDeletedAccount(tds.db, addHashBytes)
 			}
 		}
 		roots[i] = tds.t.Hash()

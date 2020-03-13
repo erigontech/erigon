@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"strings"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
@@ -1165,42 +1164,43 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	k1 := fmt.Sprintf("11%062x", 0)
 	k2 := fmt.Sprintf("2211%062x", 0)
 	k3 := fmt.Sprintf("2233%062x", 0)
-	prefix := dbutils.GenerateStoragePrefix(common.HexToHash(accKey), 1)
+	k4 := fmt.Sprintf("44%062x", 0)
 
-	storageKey := func(storageKey string) []byte {
-		return append(prefix, common.FromHex(storageKey)...)
+	storageKey := func(incarnation uint64, storageKey string) []byte {
+		return append(dbutils.GenerateStoragePrefix(common.HexToHash(accKey), incarnation), common.FromHex(storageKey)...)
 	}
 
-	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, storageKey(k), common.FromHex(v))
-		require.NoError(err)
-	}
-	putCache := func(k string, v string) {
-		err := db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(k), common.FromHex(v))
+	putStorage := func(incarnation uint64, k string, v string) {
+		err := db.Put(dbutils.StorageBucket, storageKey(incarnation, k), common.FromHex(v))
 		require.NoError(err)
 	}
 
-	putStorage(k1, "hi")
-	putStorage(k2, "hi")
-	putStorage(k3, "hi")
-	// don't put k4 yet
-
-	putCache(accKey, "")
-
-	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
-		k := fmt.Sprintf("%x", prefix)
-		if strings.HasPrefix(accKey+k1, k) || strings.HasPrefix(accKey+k2, k) || strings.HasPrefix(accKey+k3, k) {
-			return true
-		}
-
-		return false
-	}
-
-	// step 1: re-create account
-	err := state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	encodedAcc := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(encodedAcc)
+	err := db.Put(dbutils.AccountsBucket, common.FromHex(accKey), encodedAcc)
 	require.NoError(err)
 
+	putStorage(1, k1, "hi")
+	putStorage(1, k2, "hi")
+	putStorage(1, k3, "hi")
+	putStorage(2, k4, "hi")
+
+	// step 1: delete account
+	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	require.NoError(err)
+	untouchedAcc := fmt.Sprintf("99%062x", 0)
 	checks := map[string]bool{
+		accKey:       true,
+		untouchedAcc: false,
+	}
+
+	// step 2: re-create account
+	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	require.NoError(err)
+
+	checks = map[string]bool{
 		accKey:        false,
 		accKey + "11": true,
 		accKey + "22": true,
@@ -1213,7 +1213,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		assert.Equal(expect, ok, k)
 	}
 
-	// step 2: re-create storage
+	// step 3: re-create storage
 	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
 		return false
 	}
