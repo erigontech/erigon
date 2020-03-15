@@ -1699,7 +1699,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
-				bc.currentBlock.Store(bc.committedBlock.Load())
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
 				return k, err
 			}
 		}
