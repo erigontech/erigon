@@ -656,6 +656,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 		if len(blocks) >= 100 || i == block {
 			_, err = bc.InsertChain(context.Background(), blocks)
 			if err != nil {
+				log.Error("Could not insert blocks (group)", "number", len(blocks), "error", err)
 				// Try to insert blocks one by one to keep the latest state
 				for j := 0; j < len(blocks); j++ {
 					if _, err1 := bc.InsertChain(context.Background(), blocks[j:j+1]); err1 != nil {
@@ -922,7 +923,7 @@ func testResolve(chaindata string) {
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	var contract []byte
 	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
-	r := trie.NewResolver(10, true, 258216)
+	r := trie.NewResolver(10, true, 10000000)
 	r.SetHistorical(true)
 	var key []byte
 	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
@@ -930,8 +931,11 @@ func testResolve(chaindata string) {
 	t := trie.New(common.Hash{})
 	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 258216)
-	filename := fmt.Sprintf("right_%d.txt", currentBlockNr)
+	err = r.ResolveWithDb(ethDb, 10000000)
+	if err != nil {
+		fmt.Printf("Resolve error: %v\n", err)
+	}
+	filename := fmt.Sprintf("root_%d.txt", currentBlockNr)
 	fmt.Printf("Generating deep snapshot of the right tries... %s\n", filename)
 	f, err := os.Create(filename)
 	if err == nil {
