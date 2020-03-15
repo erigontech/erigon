@@ -136,11 +136,18 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 		}
 		fmt.Fprintf(&errorBuf, "invalid bloom (remote: %x  local: %x)", header.Bloom, rbloom)
 	}
+
 	// Tre receipt Trie's root (R = (Tr [[H1, R1], ... [Hn, R1]]))
 	receiptSha := types.DeriveSha(receipts)
 	if receiptSha != header.ReceiptHash {
 		if errorBuf.Len() > 0 {
 			errorBuf.WriteString("; ")
+		}
+		for _, r := range receipts {
+			for _, l := range r.Logs {
+				fmt.Printf("receipts: %s %x\n", l.Data, l.Data)
+			}
+
 		}
 		fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 	}

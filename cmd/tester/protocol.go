@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
@@ -30,10 +33,14 @@ type TesterProtocol struct {
 	// This is to prevent double counting them
 	forkBase   uint64
 	forkHeight uint64
+
+	genesisReady chan bool
 }
 
 func NewTesterProtocol() *TesterProtocol {
-	return &TesterProtocol{}
+	return &TesterProtocol{
+		genesisReady: make(chan bool, 1),
+	}
 }
 
 // Return true if the block has already been marked. If the block has not been marked, returns false and marks it
@@ -48,9 +55,49 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 	return result
 }
 
+func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	v, err := json.Marshal(genesis())
+	if err != nil {
+		return err
+	}
+	err = p2p.Send(rw, eth.DebugSetGenesisMsg, v)
+	if err != nil {
+		return fmt.Errorf("failed to send DebugSetGenesisMsg message to peer: %w", err)
+	}
+
+	time.Sleep(time.Second)
+	tp.genesisReady <- true
+
+	/* todo: Server does send DebugSetGenesisMsg, but next code does timeout
+	msg, err := rw.ReadMsg()
+	if err != nil {
+		fmt.Printf("Failed to recevied DebugSetGenesisMsg message from peer: %v\n", err)
+		return err
+	}
+	fmt.Println("2")
+	if msg.Code != eth.DebugSetGenesisMsg {
+		fmt.Printf("first msg has code %x (!= %x)\n", msg.Code, eth.DebugSetGenesisMsg)
+		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.DebugSetGenesisMsg)
+	}
+	if msg.Size > eth.ProtocolMaxMsgSize {
+		fmt.Printf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
+		return fmt.Errorf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
+	}
+	*/
+
+	log.Info("eth set custom genesis.config")
+	for {
+		// Read the next message
+		_, _ = rw.ReadMsg()
+	}
+	return nil
+}
+
 func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-	fmt.Printf("Ethereum peer connected: %s\n", peer.Name())
-	fmt.Printf("Protocol version: %d\n", tp.protocolVersion)
+	<-tp.genesisReady
+	log.Info("Ethereum peer connected", "peer", peer.Name())
+	log.Debug("Protocol version", "version", tp.protocolVersion)
+
 	// Synchronous "eth" handshake
 	err := p2p.Send(rw, eth.StatusMsg, &statusData{
 		ProtocolVersion: tp.protocolVersion,
@@ -60,40 +107,33 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		GenesisBlock:    tp.genesisBlockHash,
 	})
 	if err != nil {
-		fmt.Printf("Failed to send status message to peer: %v\n", err)
-		return err
+		return fmt.Errorf("failed to send status message to peer: %w", err)
 	}
 	msg, err := rw.ReadMsg()
 	if err != nil {
-		fmt.Printf("Failed to recevied state message from peer: %v\n", err)
-		return err
+		return fmt.Errorf("failed to recevied state message from peer: %w", err)
 	}
 	if msg.Code != eth.StatusMsg {
-		fmt.Printf("first msg has code %x (!= %x)\n", msg.Code, eth.StatusMsg)
 		return fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.StatusMsg)
 	}
 	if msg.Size > eth.ProtocolMaxMsgSize {
-		fmt.Printf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 		return fmt.Errorf("message too large %v > %v", msg.Size, eth.ProtocolMaxMsgSize)
 	}
 	var statusResp statusData
 	if err := msg.Decode(&statusResp); err != nil {
-		fmt.Printf("Failed to decode msg %v: %v\n", msg, err)
 		return fmt.Errorf("failed to decode msg %v: %v", msg, err)
 	}
 	if statusResp.GenesisBlock != tp.genesisBlockHash {
-		fmt.Printf("Mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 		return fmt.Errorf("mismatched genesis block hash %x (!= %x)", statusResp.GenesisBlock[:8], tp.genesisBlockHash[:8])
 	}
 	if statusResp.NetworkID != tp.networkId {
-		fmt.Printf("Mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 		return fmt.Errorf("mismatched network id %d (!= %d)", statusResp.NetworkID, tp.networkId)
 	}
 	if statusResp.ProtocolVersion != tp.protocolVersion {
-		fmt.Printf("Mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 		return fmt.Errorf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 	}
-	fmt.Printf("eth handshake complete, block hash: %x, block difficulty: %s\n", statusResp.CurrentBlock, statusResp.TD)
+	log.Info(fmt.Sprintf("eth handshake complete, block hash: %x, block difficulty: %s\n", statusResp.CurrentBlock, statusResp.TD))
+
 	//lastBlockNumber := int(tp.blockFeeder.LastBlock().NumberU64())
 	sentBlocks := 0
 	emptyBlocks := 0
@@ -102,8 +142,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
-			fmt.Printf("Failed to receive state message from peer: %v\n", err)
-			return err
+			return fmt.Errorf("failed to receive message from peer: %w", err)
 		}
 		switch {
 		case msg.Code == eth.GetBlockHeadersMsg:
@@ -119,7 +158,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 				return err
 			}
 		default:
-			fmt.Printf("Next message: %v\n", msg)
+			log.Debug("Next message", "msg", msg)
 		}
 		if signaledHead {
 			break
@@ -128,16 +167,14 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		//	break
 		//}
 	}
-	fmt.Printf("Peer downloaded all our blocks, entering next phase\n")
+	log.Info("Peer downloaded all our blocks, entering next phase")
 	tp.announceForkHeaders(rw)
-	fmt.Printf("Announced fork blocks\n")
+	log.Info("Announced fork blocks")
 	for i := 0; i < 10000; i++ {
-		fmt.Printf("Message loop i %d\n", i)
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
-			fmt.Printf("Failed to receive state message from peer: %v\n", err)
-			return err
+			return fmt.Errorf("failed to receive state message from peer: %w", err)
 		}
 		switch {
 		case msg.Code == eth.GetBlockHeadersMsg:
@@ -153,7 +190,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 				return err
 			}
 		default:
-			fmt.Printf("Next message: %v\n", msg)
+			log.Debug("Next message", "msg", msg)
 		}
 	}
 	return nil
@@ -213,10 +250,9 @@ func (tp *TesterProtocol) handleGetBlockHeaderMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	newEmptyBlocks := emptyBlocks
 	var query getBlockHeadersData
 	if err := msg.Decode(&query); err != nil {
-		fmt.Printf("Failed to decode msg %v: %v\n", msg, err)
-		return newEmptyBlocks, fmt.Errorf("Failed to decode msg %v: %v\n", msg, err)
+		return newEmptyBlocks, fmt.Errorf("failed to decode msg %v: %w", msg, err)
 	}
-	fmt.Printf("GetBlockHeadersMsg %v\n", query)
+	log.Debug("GetBlockHeadersMsg", "query", query)
 	headers := []*types.Header{}
 	if query.Origin.Hash == (common.Hash{}) && !query.Reverse {
 		number := query.Origin.Number
@@ -237,22 +273,21 @@ func (tp *TesterProtocol) handleGetBlockHeaderMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	}
 	if query.Origin.Hash != (common.Hash{}) && query.Amount == 1 && query.Skip == 0 && !query.Reverse {
 		if header := blockFeeder.GetHeaderByHash(query.Origin.Hash); header != nil {
-			fmt.Printf("Going to send header %d\n", header.Number.Uint64())
+			log.Debug("Going to send header", "number", header.Number.Uint64())
 			headers = append(headers, header)
 		}
 	}
 	if err := p2p.Send(rw, eth.BlockHeadersMsg, headers); err != nil {
-		fmt.Printf("Failed to send headers: %v\n", err)
-		return newEmptyBlocks, err
+		return newEmptyBlocks, fmt.Errorf("failed to send headers: %w", err)
 	}
-	fmt.Printf("Sent %d headers, empty blocks so far %d\n", len(headers), newEmptyBlocks)
+	log.Info(fmt.Sprintf("Sent %d headers, empty blocks so far %d\n", len(headers), newEmptyBlocks))
 	return newEmptyBlocks, nil
 }
 
 func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWriter, blockFeeder BlockFeeder, sentBlocks int) (int, error) {
 	newSentBlocks := sentBlocks
 	msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-	fmt.Printf("GetBlockBodiesMsg with size %d\n", msg.Size)
+	log.Debug("GetBlockBodiesMsg with size", "size", msg.Size)
 	if _, err := msgStream.List(); err != nil {
 		return newSentBlocks, err
 	}
@@ -266,13 +301,11 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 		if err := msgStream.Decode(&hash); err == rlp.EOL {
 			break
 		} else if err != nil {
-			fmt.Printf("Failed to decode msg %v: %v", msg, err)
-			return newSentBlocks, fmt.Errorf("Failed to decode msg %v: %v", msg, err)
+			return newSentBlocks, fmt.Errorf("failed to decode msg %v: %w", msg, err)
 		}
 		// Retrieve the requested block body, stopping if enough was found
 		if block, err := blockFeeder.GetBlockByHash(hash); err != nil {
-			fmt.Printf("Failed to read block %v", err)
-			return newSentBlocks, fmt.Errorf("Failed to read block %v", err)
+			return newSentBlocks, fmt.Errorf("failed to read block %w", err)
 		} else if block != nil {
 			if !tp.markBlockSent(uint(block.NumberU64())) {
 				newSentBlocks++
@@ -282,14 +315,14 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 			smallBody := types.SmallBody{Transactions: body.Transactions, Uncles: body.Uncles}
 			data, err := rlp.EncodeToBytes(smallBody)
 			if err != nil {
-				fmt.Printf("Failed to encode body: %v", err)
-				return newSentBlocks, fmt.Errorf("Failed to encode body: %v", err)
+				return newSentBlocks, fmt.Errorf("failed to encode body: %w", err)
 			}
 			bodies = append(bodies, data)
 		}
 	}
 	p2p.Send(rw, eth.BlockBodiesMsg, bodies)
-	fmt.Printf("Sent %d bodies, total so far %d\n", len(bodies), newSentBlocks)
+	log.Info("Sending bodies", "progress", newSentBlocks)
+
 	return newSentBlocks, nil
 }
 
@@ -316,10 +349,9 @@ func (tp *TesterProtocol) sendLastBlock(rw p2p.MsgReadWriter, blockFeeder BlockF
 func (tp *TesterProtocol) handleNewBlockHashesMsg(msg p2p.Msg, rw p2p.MsgReadWriter) (bool, error) {
 	var blockHashMsg newBlockHashesData
 	if err := msg.Decode(&blockHashMsg); err != nil {
-		fmt.Printf("Failed to decode msg %v: %v\n", msg, err)
-		return false, fmt.Errorf("Failed to decode msg %v: %v\n", msg, err)
+		return false, fmt.Errorf("failed to decode msg %v: %w", msg, err)
 	}
-	fmt.Printf("NewBlockHashesMsg: %v\n", blockHashMsg)
+	log.Debug("NewBlockHashesMsg", "query", blockHashMsg)
 	signaledHead := false
 	for _, bh := range blockHashMsg {
 		if bh.Number == tp.blockFeeder.LastBlock().NumberU64() {
