@@ -1624,7 +1624,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 
 			if _, err = bc.db.Commit(); err != nil {
 				log.Error("Could not commit chainDb before rewinding", "error", err)
-				bc.currentBlock.Store(bc.committedBlock.Load())
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				return 0, err
@@ -1656,7 +1658,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Could not commit chainDb after rewinding", "error", err)
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				bc.currentBlock.Store(bc.committedBlock.Load())
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
 				return 0, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
@@ -1676,7 +1680,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
 				bc.reportBlock(block, receipts, err)
-				bc.currentBlock.Store(bc.committedBlock.Load())
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
 				return k, err
 			}
 			// Update the metrics touched during block processing
@@ -1720,7 +1726,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if err != nil {
 			bc.db.Rollback()
 			bc.setTrieDbState(nil)
-			bc.currentBlock.Store(bc.committedBlock.Load())
+			if bc.committedBlock.Load() != nil {
+				bc.currentBlock.Store(bc.committedBlock.Load())
+			}
 			return k, err
 		}
 		//atomic.StoreUint32(&followupInterrupt, 1)
@@ -1770,7 +1778,9 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 				log.Error("Could not commit chainDb", "error", err)
 				bc.db.Rollback()
 				bc.setTrieDbState(nil)
-				bc.currentBlock.Store(bc.committedBlock.Load())
+				if bc.committedBlock.Load() != nil {
+					bc.currentBlock.Store(bc.committedBlock.Load())
+				}
 				return 0, err
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
