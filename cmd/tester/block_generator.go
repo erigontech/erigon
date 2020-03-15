@@ -1,27 +1,35 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
 	"fmt"
 	"math/big"
 	"math/rand"
 	"os"
+	"time"
 
-	"context"
-
+	ethereum "github.com/ledgerwatch/turbo-geth"
+	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
+	"github.com/ledgerwatch/turbo-geth/cmd/tester/contracts"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
+
+const ReduceComplexity = false
 
 type BlockGenerator struct {
 	input               *os.File
@@ -37,7 +45,9 @@ type BlockGenerator struct {
 }
 
 func (bg *BlockGenerator) Close() {
-	bg.input.Close()
+	if bg.input != nil {
+		bg.input.Close()
+	}
 }
 
 func (bg *BlockGenerator) GetHeaderByHash(hash common.Hash) *types.Header {
@@ -85,6 +95,9 @@ func (bg *BlockGenerator) LastBlock() *types.Block {
 }
 
 func randAddress(r *rand.Rand) common.Address {
+	if ReduceComplexity {
+		return common.BytesToAddress(common.FromHex("80977316944e5942e79b0e3abad38da746086519"))
+	}
 	var b common.Address
 	binary.BigEndian.PutUint64(b[:], r.Uint64())
 	binary.BigEndian.PutUint64(b[8:], r.Uint64())
@@ -99,17 +112,15 @@ func generateBlock(
 	chainConfig *params.ChainConfig,
 	tds *state.TrieDbState,
 	height int,
-	r *rand.Rand,
 	nonce *uint64,
-	amount *big.Int,
-	gasPrice *big.Int,
 	coinbaseKey *ecdsa.PrivateKey,
 	engine consensus.Engine,
+	txGen func(ctx context.Context, i int, nonce uint64, gp *core.GasPool, statedb *state.IntraBlockState) *types.Transaction,
 ) (*types.Block, error) {
 	var err error
 	num := parent.Number()
 	tstamp := parent.Time() + 15
-	gasLimit := core.CalcGasLimit(parent, 100000, 8000000)
+	gasLimit := core.CalcGasLimit(parent, 200000, 8000000)
 	header := &types.Header{
 		ParentHash: parent.Hash(),
 		Number:     num.Add(num, common.Big1),
@@ -126,21 +137,22 @@ func generateBlock(
 	receipts := []*types.Receipt{}
 	usedGas := new(uint64)
 	tds.StartNewBuffer()
-	if height > 1 && gasLimit >= 21000 {
+
+	if height > 1 && gasLimit >= params.TxGas {
 		signer := types.MakeSigner(chainConfig, big.NewInt(int64(height)))
 		gp := new(core.GasPool).AddGas(header.GasLimit)
 		vmConfig := vm.Config{}
 
-		to := randAddress(r)
-		tx := types.NewTransaction(*nonce, to, amount, 21000, gasPrice, []byte{})
+		tx := txGen(context.TODO(), height, *nonce, gp, statedb)
 		signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 		if err1 != nil {
-			return nil, err1
+			return nil, fmt.Errorf("SignTx: %w", err1)
 		}
+
 		signedTxs = append(signedTxs, signedTx)
 		receipt, err2 := core.ApplyTransaction(chainConfig, nil, &coinbase, gp, statedb, tds.TrieStateWriter(), header, signedTx, usedGas, vmConfig)
-		if err1 != nil {
-			return nil, fmt.Errorf("tx %x failed: %v", signedTx.Hash(), err2)
+		if err2 != nil {
+			return nil, fmt.Errorf("ApplyTransaction: tx %x, height: %d, gasPool: %d, usedGas: %d, failed: %v", signedTx.Hash(), height, gp, *usedGas, err2)
 		}
 		if !chainConfig.IsByzantium(header.Number) {
 			tds.StartNewBuffer()
@@ -150,17 +162,17 @@ func generateBlock(
 	}
 
 	if _, err = engine.FinalizeAndAssemble(chainConfig, header, statedb, signedTxs, []*types.Header{}, receipts); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("FinalizeAndAssemble: %w", err)
 	}
 	ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("FinalizeTx: %w", err)
 	}
 
 	var roots []common.Hash
 	roots, err = tds.ComputeTrieRoots()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ComputeTrieRoots: %w", err)
 	}
 	if !chainConfig.IsByzantium(header.Number) {
 		for i, receipt := range receipts {
@@ -169,36 +181,81 @@ func generateBlock(
 	}
 	header.Root = roots[len(roots)-1]
 	header.GasUsed = *usedGas
+
 	tds.SetBlockNr(uint64(height))
 	err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("CommitBlock: %w", err)
 	}
 	// Generate an empty block
 	block := types.NewBlock(header, signedTxs, []*types.Header{}, receipts)
 	return block, nil
 }
 
-func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, error) {
-	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+type NoopBackend struct {
+	db      ethdb.Database
+	genesis *core.Genesis
+}
+
+func (*NoopBackend) CallContract(ctx context.Context, call ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
+	panic("must not be called")
+}
+func (*NoopBackend) CodeAt(ctx context.Context, contract common.Address, blockNumber *big.Int) ([]byte, error) {
+	panic("must not be called")
+}
+
+func (*NoopBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
+	panic("must not be called")
+}
+func (*NoopBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
+	panic("must not be called")
+}
+func (*NoopBackend) SuggestGasPrice(ctx context.Context) (*big.Int, error) {
+	panic("must not be called")
+}
+func (*NoopBackend) EstimateGas(ctx context.Context, call ethereum.CallMsg) (gas uint64, err error) {
+	panic("must not be called")
+}
+func (*NoopBackend) SendTransaction(ctx context.Context, tx *types.Transaction) error {
+	return nil // nothing to do
+}
+
+func (b *NoopBackend) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
+	receipt, _, _, _ := rawdb.ReadReceipt(b.db, txHash, b.genesis.Config)
+	return receipt, nil
+}
+
+func (*NoopBackend) FilterLogs(ctx context.Context, query ethereum.FilterQuery) ([]types.Log, error) {
+	panic("must not be called")
+}
+func (*NoopBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.FilterQuery, ch chan<- types.Log) (ethereum.Subscription, error) {
+	panic("must not be called")
+}
+
+func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int) (*BlockGenerator, error) {
+	outputF, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	defer output.Close()
+	defer outputF.Close()
+	output := bufio.NewWriterSize(outputF, 128*1024)
+
 	db := ethdb.NewMemDatabase()
-	genesisBlock, _, tds, err1 := core.DefaultGenesisBlock().ToBlock(db)
-	if err1 != nil {
-		return nil, err1
-	}
-	parent := genesisBlock
+	genesis := genesis()
+	genesisBlock := genesis.MustCommit(db)
 	extra := []byte("BlockGenerator")
 	coinbaseKey, err2 := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
 	if err2 != nil {
 		return nil, err2
 	}
-	fmt.Printf("Generated private key: %x\n", crypto.FromECDSA(coinbaseKey))
+	log.Debug(fmt.Sprintf("Generated private key: %x\n", crypto.FromECDSA(coinbaseKey)))
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
-	chainConfig := params.MainnetChainConfig
+
+	gasPrice := big.NewInt(1)
+	txOpts := bind.NewKeyedTransactor(coinbaseKey)
+	txOpts.GasPrice = gasPrice
+	txOpts.GasLimit = params.TxGas
+
 	var pos uint64
 	td := new(big.Int)
 	bg := &BlockGenerator{
@@ -212,17 +269,170 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
+
 	r := rand.New(rand.NewSource(4589489854))
-	var nonce uint64        // nonce of the sender (coinbase)
 	amount := big.NewInt(1) // 1 wei
-	gasPrice := big.NewInt(10000000)
 	engine := ethash.NewFullFaker()
 
-	for height := 1; height <= initialHeight; height++ {
-		block, err3 := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, coinbaseKey, engine)
-		if err3 != nil {
-			return nil, err3
+	var revive *contracts.Revive2
+	var phoenix *contracts.Phoenix
+	var reviveAddress common.Address
+	var phoenixAddress common.Address
+	//var nonce uint64 // nonce of the sender (coinbase)
+	txOpts.Nonce = big.NewInt(0)
+
+	backend := &NoopBackend{db: db, genesis: genesis}
+	genBlock := func(i int, gen *core.BlockGen) {
+		select {
+		case <-ctx.Done():
+			panic(ctx.Err())
+		default:
 		}
+
+		gen.SetExtra(extra)
+		gen.SetCoinbase(coinbase)
+		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
+			return
+		}
+		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
+		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
+		var tx *types.Transaction
+
+		txOpts.GasLimit = 3 * params.TxGasContractCreation
+		//fmt.Println("Alex")
+		//time.Sleep(5 * time.Second)
+		switch true {
+		case txOpts.Nonce.Uint64() == 1: // create 0 account
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
+			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
+			if err1 != nil {
+				panic(err1)
+			}
+			gen.AddTx(signedTx)
+		case txOpts.Nonce.Uint64() == 2: // deploy factory
+			reviveAddress, tx, revive, err = contracts.DeployRevive2(txOpts, backend)
+			if err != nil {
+				panic(err)
+			}
+
+			codeHash, err := common.HashData(common.FromHex(contracts.PhoenixBin))
+			if err != nil {
+				panic(err)
+			}
+
+			phoenixAddress = crypto.CreateAddress2(reviveAddress, [32]byte{}, codeHash.Bytes())
+			phoenix, err = contracts.NewPhoenix(phoenixAddress, backend)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() == 3: // call .deploy() method on factory
+			tx, err = revive.Deploy(txOpts, [32]byte{})
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() >= 4 && txOpts.Nonce.Uint64() <= 10000: // gen big storage
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() == 10001: // kill contract with big storage
+			tx, err = phoenix.Die(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() == 10002: // revive Phoenix and add to it some storage in same Tx
+			tx, err = revive.Deploy(txOpts, [32]byte{})
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		case txOpts.Nonce.Uint64() == 10003: // add some storage and kill Phoenix in same Tx
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Die(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = revive.Deploy(txOpts, [32]byte{})
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			tx, err = phoenix.Store(txOpts)
+			if err != nil {
+				panic(err)
+			}
+			gen.AddTx(tx)
+		default:
+			to := randAddress(r)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, nil, nil)
+			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
+			if err1 != nil {
+				panic(err1)
+			}
+			gen.AddTx(signedTx)
+		}
+		txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+	}
+
+	blocks := make(chan *types.Block, 10000)
+	go func() {
+		defer close(blocks)
+		height := initialHeight
+		parent := genesisBlock
+		i := 0
+		n := 10000
+		//if ReduceComplexity {
+		//	n = 1 // 1 block per transaction
+		//}
+		for height > 0 {
+			if height < n {
+				n = height
+			}
+
+			// Generate a batch of blocks, each properly signed
+			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			for _, block := range blocksSlice {
+				blocks <- block
+				parent = block
+			}
+			height -= n
+			i++
+			log.Info(fmt.Sprintf("block gen %dK", i*n/1000))
+		}
+	}()
+
+	var parent *types.Block
+	for block := range blocks {
 		buffer, err4 := rlp.EncodeToBytes(block)
 		if err4 != nil {
 			return nil, err4
@@ -243,7 +453,7 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 	}
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
-	output.Close()
+
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
@@ -253,14 +463,17 @@ func NewBlockGenerator(outputFile string, initialHeight int) (*BlockGenerator, e
 }
 
 // NewForkGenerator Creates a fork from the existing block generator
-func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, forkHeight uint64) (*BlockGenerator, error) {
-	output, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
+func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile string, forkBase uint64, forkHeight uint64) (*BlockGenerator, error) {
+	outputF, err := os.OpenFile(outputFile, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.ModePerm)
 	if err != nil {
 		return nil, err
 	}
-	defer output.Close()
+	defer outputF.Close()
+	output := bufio.NewWriterSize(outputF, 128*1024)
 	db := ethdb.NewMemDatabase()
-	genesisBlock, _, tds, err := core.DefaultGenesisBlock().ToBlock(db)
+	genesis := genesis()
+
+	genesisBlock, _, tds, err := genesis.ToBlock(db)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +485,6 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 	}
 	coinbase := crypto.PubkeyToAddress(base.coinbaseKey.PublicKey)
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
-	chainConfig := params.MainnetChainConfig
 	var pos uint64
 	td := new(big.Int)
 	bg := &BlockGenerator{
@@ -287,15 +499,32 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
 	r := rand.New(rand.NewSource(4589489854))
-	var nonce uint64        // nonce of the sender (coinbase)
 	amount := big.NewInt(1) // 1 wei
 	gasPrice := big.NewInt(10000000)
 	engine := ethash.NewFullFaker()
+	txGen := func(ctx context.Context, i int, nonce uint64, gp *core.GasPool, statedb *state.IntraBlockState) *types.Transaction {
+		var tx *types.Transaction
+		switch i {
+		default:
+			to := randAddress(r)
+			tx = types.NewTransaction(nonce, to, amount, params.TxGas, gasPrice, []byte{})
+		}
+		return tx
+	}
+
+	t := time.Now()
+	var nonce uint64 // nonce of the sender (coinbase)
 	for height := 1; height <= int(forkBase+forkHeight); height++ {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		if height >= int(forkBase) {
 			coinbase = forkCoinbase
 		}
-		block, err1 := generateBlock(parent, extra, coinbase, chainConfig, tds, height, r, &nonce, amount, gasPrice, base.coinbaseKey, engine)
+		block, err1 := generateBlock(parent, extra, coinbase, genesis.Config, tds, height, &nonce, base.coinbaseKey, engine, txGen)
 		if err1 != nil {
 			return nil, err1
 		}
@@ -316,14 +545,42 @@ func NewForkGenerator(base *BlockGenerator, outputFile string, forkBase uint64, 
 		td = new(big.Int).Add(td, block.Difficulty())
 		bg.tdByNumber[block.NumberU64()] = td
 		parent = block
+
+		if height%10000 == 0 {
+			log.Info(fmt.Sprintf("fork gen %dK %ss", height/1000, time.Since(t)))
+			t = time.Now()
+		}
 	}
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
-	output.Close()
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
 		return nil, err
 	}
 	return bg, nil
+}
+
+func genesis() *core.Genesis {
+	genesis := core.DefaultGenesisBlock()
+	genesis.Config.HomesteadBlock = big.NewInt(0)
+	genesis.Config.DAOForkBlock = nil
+	genesis.Config.DAOForkSupport = true
+	genesis.Config.EIP150Block = big.NewInt(0)
+	genesis.Config.EIP150Hash = common.HexToHash("0x41941023680923e0fe4d74a34bdac8141f2540e3ae90623718e47d66d1ca4a2d")
+	genesis.Config.EIP155Block = big.NewInt(10)
+	genesis.Config.EIP158Block = big.NewInt(10)
+	genesis.Config.ByzantiumBlock = big.NewInt(17)
+	genesis.Config.ConstantinopleBlock = big.NewInt(18)
+	genesis.Config.PetersburgBlock = big.NewInt(19)
+	genesis.Config.IstanbulBlock = big.NewInt(20)
+	genesis.Config.MuirGlacierBlock = big.NewInt(21)
+
+	if ReduceComplexity {
+		a := common.BytesToAddress(common.FromHex("80977316944e5942e79b0e3abad38da746086519"))
+		genesis.Alloc = core.GenesisAlloc{
+			a: genesis.Alloc[a],
+		}
+	}
+	return genesis
 }

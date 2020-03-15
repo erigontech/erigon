@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
@@ -150,6 +151,12 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		manager.checkpointHash = checkpoint.SectionHead
 	}
 
+	initPm(manager, txpool, engine, blockchain, chaindb)
+
+	return manager, nil
+}
+
+func initPm(manager *ProtocolManager, txpool txPool, engine consensus.Engine, blockchain *core.BlockChain, chaindb ethdb.Database) {
 	// Construct the different synchronisation mechanisms
 	manager.downloader = downloader.New(manager.checkpointNumber, chaindb, nil /*stateBloom */, manager.eventMux, blockchain, nil, manager.removePeer)
 
@@ -196,8 +203,6 @@ func NewProtocolManager(config *params.ChainConfig, checkpoint *params.TrustedCh
 		return p.RequestTxs(hashes)
 	}
 	manager.txFetcher = fetcher.NewTxFetcher(txpool.Has, txpool.AddRemotes, fetchTx)
-
-	return manager, nil
 }
 
 func (pm *ProtocolManager) makeFirehoseProtocol() p2p.Protocol {
@@ -216,6 +221,36 @@ func (pm *ProtocolManager) makeFirehoseProtocol() p2p.Protocol {
 				pm.wg.Add(1)
 				defer pm.wg.Done()
 				return pm.handleFirehose(peer)
+			}
+		},
+		NodeInfo: func() interface{} {
+			return pm.NodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			if p := pm.peers.Peer(fmt.Sprintf("%x", id[:8])); p != nil {
+				return p.Info()
+			}
+			return nil
+		},
+	}
+}
+
+func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
+	// Initiate Debug protocol
+	log.Info("Initialising Debug protocol", "versions", FirehoseVersions)
+	return p2p.Protocol{
+		Name:    DebugName,
+		Version: DebugVersions[0],
+		Length:  DebugLengths[DebugVersions[0]],
+		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			peer := &debugPeer{Peer: p, rw: rw}
+			select {
+			case <-pm.quitSync:
+				return p2p.DiscQuitting
+			default:
+				pm.wg.Add(1)
+				defer pm.wg.Done()
+				return pm.handleDebug(peer)
 			}
 		},
 		NodeInfo: func() interface{} {
@@ -409,13 +444,22 @@ func (pm *ProtocolManager) handleFirehose(p *firehosePeer) error {
 	}
 }
 
+func (pm *ProtocolManager) handleDebug(p *debugPeer) error {
+	for {
+		if err := pm.handleDebugMsg(p); err != nil {
+			p.Log().Debug("Debug message handling failed", "err", err)
+			return err
+		}
+	}
+}
+
 // handleMsg is invoked whenever an inbound message is received from a remote
 // peer. The remote connection is torn down upon returning any error.
 func (pm *ProtocolManager) handleMsg(p *peer) error {
 	// Read the next message from the remote peer, and ensure it's fully consumed
 	msg, err := p.rw.ReadMsg()
 	if err != nil {
-		return err
+		return fmt.Errorf("handleMsg p.rw.ReadMsg: %w", err)
 	}
 	if msg.Size > ProtocolMaxMsgSize {
 		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, ProtocolMaxMsgSize)
@@ -1170,6 +1214,70 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
 	}
+}
+
+func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
+	msg, readErr := p.rw.ReadMsg()
+	if readErr != nil {
+		return fmt.Errorf("handleDebugMsg p.rw.ReadMsg: %w", readErr)
+	}
+	if msg.Size > DebugMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, DebugMaxMsgSize)
+	}
+	defer msg.Discard()
+
+	switch msg.Code {
+	case DebugSetGenesisMsg:
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+
+		var msgAsJson []byte
+		if err := msgStream.Decode(&msgAsJson); err != nil {
+			return fmt.Errorf("msgStream.Decode: %w", err)
+		}
+
+		genesis := core.DefaultGenesisBlock()
+		if err := json.Unmarshal(msgAsJson, genesis); err != nil {
+			return fmt.Errorf("json.Unmarshal: %w", err)
+		}
+
+		ethDb := ethdb.NewMemDatabase()
+		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
+		if err != nil {
+			return fmt.Errorf("SetupGenesisBlock: %w", err)
+		}
+
+		// Clean up: reuse engine... probably we can
+		pm.noMorePeers <- struct{}{}     // exit pm.syncer loop
+		time.Sleep(2 * time.Millisecond) // wait for pm.syncer finish
+
+		engine := pm.blockchain.Engine()
+		pm.blockchain.ChainDb().Close()
+		blockchain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+		if err != nil {
+			return fmt.Errorf("NewBlockChain: %w", err)
+		}
+		pm.blockchain.Stop()
+		pm.blockchain = blockchain
+		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
+		pm.quitSync = make(chan struct{})
+		go pm.syncer()
+
+		// hacks to speedup local sync
+		//downloader.MaxHashFetch = 512 * 10
+		//downloader.MaxBlockFetch = 128 * 10
+		//downloader.MaxHeaderFetch = 192 * 10
+		//downloader.MaxReceiptFetch = 256 * 10
+
+		log.Warn("Succeed to set new Genesis")
+		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
+		if err != nil {
+			return fmt.Errorf("p2p.Send: %w", err)
+		}
+		return nil
+	default:
+		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
+	}
+	return nil
 }
 
 // BroadcastBlock will either propagate a block to a subset of its peers, or
