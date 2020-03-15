@@ -381,6 +381,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
 				origAccN.Account.Copy(&vAccN.Account)
+				origAccN.rootCorrect = false
 			}
 			newNode = origAccN
 			return
