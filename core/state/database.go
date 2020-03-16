@@ -395,7 +395,7 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 	buf.B = buf.B[:cap(buf.B)]
 	foundTombStone := false
 	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
-		if someStorageExistsInThisSubtree(compositeKey[:i]) {
+		if !someStorageExistsInThisSubtree(compositeKey[:i]) {
 			continue
 		}
 
@@ -975,7 +975,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 
 			tds.t.DeleteSubtree(addrHash[:])
 			if debug.IsIntermediateTrieHash() {
-				_ = PutTombstoneForDeletedAccount(tds.db, addHashBytes)
+				_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 			}
 		}
 		roots[i] = tds.t.Hash()
