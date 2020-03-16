@@ -625,10 +625,11 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 // Cursor iterating over bucket keys
 func (b *Bucket) Cursor(opts CursorOpts) *Cursor {
 	return &Cursor{
-		ctx:  b.ctx,
-		opts: opts,
-		in:   b.in,
-		out:  b.out,
+		bucket: b,
+		ctx:    b.ctx,
+		opts:   opts,
+		in:     b.in,
+		out:    b.out,
 	}
 }
 
