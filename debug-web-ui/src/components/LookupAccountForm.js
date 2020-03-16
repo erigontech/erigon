@@ -23,7 +23,7 @@ const LookupAccountForm = ({api}) => {
             setState(() => { throw error })
         }
     }
-    
+
     return (
         <div>
             <SearchField placeholder="lookup by id or hash"
@@ -40,10 +40,12 @@ const LookupAccountForm = ({api}) => {
 const DetailsForm = ({account}) => (
     <Row>
         <Col>
-            <Table>
+            <Table size="sm">
                 <thead>
-                    <td><strong>Account</strong></td>
-                    <td></td>
+                    <tr>
+                        <th><strong>Account</strong></th>
+                        <th></th>
+                    </tr>
                 </thead>
                 <tbody>
                     <TableRow name="balance" value={account.balance} />

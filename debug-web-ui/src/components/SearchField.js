@@ -4,7 +4,6 @@ import Form from 'react-bootstrap/Form';
 import Col from 'react-bootstrap/Col'
 import Button from 'react-bootstrap/Button'
 
-
 class SearchField extends React.Component {
     constructor(props) {
         super(props);
@@ -25,16 +24,16 @@ class SearchField extends React.Component {
 
     render() {
         return (
-            <Form onSubmit={this.handleSubmit}>
+            <Form onSubmit={this.handleSubmit}  >
                 <Form.Row>
                     <Col>
-                        <Form.Control type="text"
+                        <Form.Control type="text" size="sm"
                                     placeholder={this.props.placeholder}
                                     value={this.state.value || ''}
                                     onChange={this.handleChange} />
                     </Col>
                     <Col>
-                        <Button variant="primary" type="submit">Find</Button>
+                        <Button variant="primary" type="submit" size="sm">Find</Button>
                     </Col>
                 </Form.Row>
             </Form>
