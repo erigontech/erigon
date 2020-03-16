@@ -4,7 +4,7 @@ import Modal from 'react-bootstrap/Modal'
 import Button from 'react-bootstrap/Button'
 
 export default class ErrorCatcher extends React.Component {
-    constructorGB(props) {
+    constructor(props) {
         super(props);
         this.state = {error: undefined, errorInfo: undefined}
 
@@ -18,7 +18,6 @@ export default class ErrorCatcher extends React.Component {
     }
 
     componentDidCatch(error, errorInfo) {
-
         this.setState({error: error, errorInfo: errorInfo})
     }
 

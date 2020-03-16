@@ -27,7 +27,6 @@ func RegisterStorageTombstonesAPI(account *gin.RouterGroup, remoteDB *remote.DB)
 func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]string, error) {
 	var results []string
 	prefix := common.FromHex(prefixS)
-	fmt.Printf("%x\n", prefix)
 	if err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true))
 
