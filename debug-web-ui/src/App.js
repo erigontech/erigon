@@ -7,7 +7,7 @@ import {BrowserRouter as Router, Link, NavLink, Redirect, Route, Switch} from 'r
 import AccountsPage from './page/Accounts';
 import StorageTombstones from './page/StorageTombstones';
 import {ReactComponent as Logo} from './logo.svg';
-import "./App.css";
+import './App.css';
 
 const api = new API('http://localhost:8080')
 const sidebar = [
@@ -59,8 +59,7 @@ function App() {
                 </Container>
             </Router>
         </ErrorCatcher>
-    )
-        ;
+    );
 }
 
 export default App;

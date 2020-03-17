@@ -3,6 +3,7 @@ package rest
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/ledgerwatch/turbo-geth/cmd/restapi/apis"
@@ -19,9 +20,14 @@ func printError(name string, err error) {
 
 func ServeREST(localAddress, remoteDbAddress string) error {
 	r := gin.Default()
-
 	root := r.Group("api/v1")
 	allowCORS(root)
+	root.Use(func(c *gin.Context) {
+		c.Next()
+		if len(c.Errors) > 0 {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, c.Errors)
+		}
+	})
 
 	remoteDB, err := remote.Open(context.TODO(), remote.DefaultOpts.Addr(remoteDbAddress))
 	if err != nil {

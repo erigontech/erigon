@@ -6,25 +6,31 @@ import {Spinner, Table} from 'react-bootstrap';
 
 import SearchField from './SearchField.js';
 
+const search = (prefix, api, setState) => {
+    return api.lookupIntermediateHashes(prefix);
+}
+
 const LookupStorageTombstonesForm = ({api}) => {
     const [state, setState] = useState({hashes: undefined, loading: false});
 
-    const search = (prefix) => {
-        setState({hashes: undefined, error: undefined, loading: true})
-        api.lookupIntermediateHashes(prefix)
-            .then(lookupSuccess)
-            .catch(lookupFail)
-    }
     const lookupSuccess = (response) => setState({hashes: response.data, loading: false});
     const lookupFail = (error) => {
+        // console.debug(Object.keys(error), error.response.data)
         setState({hashes: undefined, loading: false})
-        if (error) throw error
+        throw error
     }
 
     return (
         <div>
             {state.loading && <Spinner animation="border"/>}
-            {!state.loading && <SearchField placeholder="lookup by prefix" onClick={search}/>}
+            {!state.loading && <SearchField placeholder="lookup by prefix" onClick={
+                (prefix) => {
+                    setState({hashes: undefined, loading: true});
+
+                    search(prefix, api, setState)
+                        .then(lookupSuccess)
+                        .catch(lookupFail)
+                }}/>}
             <hr/>
             {state.hashes && <DetailsForm hashes={state.hashes}/>}
         </div>

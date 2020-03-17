@@ -3,6 +3,7 @@ package apis
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -14,9 +15,10 @@ import (
 
 func RegisterStorageTombstonesAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
 	account.GET("/", func(c *gin.Context) {
-		results, err := findIntermediateHashesByPrefix(c.Query("prefix"), remoteDB)
+		results, err := findStorageTombstoneByPrefix(c.Query("prefix"), remoteDB)
 		if err != nil {
-			c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
+			c.Error(err) //nolint:errcheck
+			c.Error(err) //nolint:errcheck
 			return
 		}
 		c.JSON(http.StatusOK, results)
@@ -30,7 +32,7 @@ type StorageTombsResponse struct {
 	HideStorage          bool   `json:"hideStorage"`
 }
 
-func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]*StorageTombsResponse, error) {
+func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*StorageTombsResponse, error) {
 	var results []*StorageTombsResponse
 	prefix := common.FromHex(prefixS)
 	if err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
@@ -71,6 +73,10 @@ func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]*Sto
 				DontOverlapOtherTomb: !overlap,
 				HideStorage:          hideStorage,
 			})
+
+			if len(results) > 1 {
+				return errors.New("too much results")
+			}
 		}
 
 		return nil
