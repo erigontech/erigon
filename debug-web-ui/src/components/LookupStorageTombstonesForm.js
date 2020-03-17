@@ -25,7 +25,6 @@ const LookupStorageTombstonesForm = ({api}) => {
         <div>
             {state.loading && <Spinner animation="border"/>}
             {!state.loading && <SearchField placeholder="lookup by prefix" onClick={search}/>}
-
             <hr/>
             {state.hashes && <DetailsForm hashes={state.hashes}/>}
         </div>
@@ -35,24 +34,38 @@ const LookupStorageTombstonesForm = ({api}) => {
 const DetailsForm = ({hashes}) => (
     <Row>
         <Col>
-            <Table size="sm">
+            <Table size="sm" borderless>
                 <thead>
                 <tr>
                     <th><strong>Prefix</strong></th>
+                    <th><strong>Don't overlap other tomb</strong></th>
+                    <th><strong>Hide storage</strong></th>
                 </tr>
                 </thead>
                 <tbody>
-                {hashes.map((el, i) => <TableRow key={i} prefix={el}/>)}
+                {hashes.map((item, i) => <TableRow key={i} item={item}/>)}
                 </tbody>
             </Table>
         </Col>
     </Row>
 );
 
-const TableRow = ({prefix, value}) => (
-    <tr>
-        <td><code>{prefix}</code></td>
-    </tr>
-);
+const TableRow = ({item}) => {
+    const {prefix, dontOverlapOtherTomb, hideStorage} = item
+
+    return (
+        <tr>
+            <td className="text-monospace">
+                {prefix}
+            </td>
+            <td className={dontOverlapOtherTomb ? '' : 'bg-danger'}>
+                {dontOverlapOtherTomb ? 'yes' : 'no'}
+            </td>
+            <td className={hideStorage ? '' : 'bg-danger'}>
+                {hideStorage ? 'yes' : 'no'}
+            </td>
+        </tr>
+    );
+};
 
 export default LookupStorageTombstonesForm;

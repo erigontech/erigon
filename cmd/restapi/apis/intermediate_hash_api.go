@@ -24,11 +24,20 @@ func RegisterStorageTombstonesAPI(account *gin.RouterGroup, remoteDB *remote.DB)
 	return nil
 }
 
-func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]string, error) {
-	var results []string
+type StorageTombsResponse struct {
+	Prefix               string `json:"prefix"`
+	DontOverlapOtherTomb bool   `json:"dontOverlapOtherTomb"`
+	HideStorage          bool   `json:"hideStorage"`
+}
+
+func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]*StorageTombsResponse, error) {
+	var results []*StorageTombsResponse
 	prefix := common.FromHex(prefixS)
 	if err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true))
+		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		c := interBucket.Cursor(remote.DefaultCursorOpts.PrefetchValues(true))
+		cOverlap := interBucket.Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(1))
+		storage := tx.Bucket(dbutils.StorageBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(1))
 
 		for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
 			if err != nil {
@@ -42,7 +51,26 @@ func findIntermediateHashesByPrefix(prefixS string, remoteDB *remote.DB) ([]stri
 				continue
 			}
 
-			results = append(results, fmt.Sprintf("%x\n", k))
+			// 1 prefix must be covered only by 1 tombstone
+			overlapK, _, err := cOverlap.Seek(append(k, []byte{0, 0}...))
+			if err != nil {
+				return err
+			}
+			overlap := bytes.HasPrefix(overlapK, k)
+
+			// each tomb must cover storage
+			storageK, _, err := storage.Seek(k)
+			if err != nil {
+				return err
+			}
+
+			hideStorage := bytes.HasPrefix(storageK, k)
+
+			results = append(results, &StorageTombsResponse{
+				Prefix:               fmt.Sprintf("%x\n", k),
+				DontOverlapOtherTomb: !overlap,
+				HideStorage:          hideStorage,
+			})
 		}
 
 		return nil

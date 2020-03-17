@@ -5,7 +5,7 @@ import LookupStorageTombstonesForm from '../components/LookupStorageTombstonesFo
 
 const StorageTombstones = ({api}) => (
 
-    <Container className="mt-1">
+    <Container fluid className="mt-1">
         <Row>
             <Col>
                 <h1>Storage Tombstones</h1>

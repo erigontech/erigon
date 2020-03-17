@@ -5,7 +5,7 @@ import Container from "react-bootstrap/Container";
 import LookupAccountForm from "../components/LookupAccountForm";
 
 const AccountsPage = ({api}) => (
-    <Container className="mt-1">
+    <Container fluid className="mt-1">
         <Row>
             <Col>
                 <h1>Lookup Accounts</h1>
