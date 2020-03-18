@@ -288,25 +288,25 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		}
 
 		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
-		//for ; incarnation > 0; incarnation-- {
-		accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
+		for ; incarnation > 0; incarnation-- {
+			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
 
-		for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
-			//fmt.Printf("Loop: %v, %v, interK: %x, k: %x\n", bytes.HasPrefix(k, accWithInc), bytes.HasPrefix(interK, addrHashBytes), interK, k)
-			if !bytes.HasPrefix(k, accWithInc) {
-				k = nil
-			}
+			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
+				//fmt.Printf("Loop: %v, %v, interK: %x, k: %x\n", bytes.HasPrefix(k, accWithInc), bytes.HasPrefix(interK, addrHashBytes), interK, k)
+				if !bytes.HasPrefix(k, accWithInc) {
+					k = nil
+				}
 
-			if k == nil {
-				break
-			}
+				if k == nil {
+					break
+				}
 
-			kNoInc := dbutils.RemoveIncarnationFromKey(k)
-			if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
-				return err
+				kNoInc := dbutils.RemoveIncarnationFromKey(k)
+				if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
+					return err
+				}
 			}
 		}
-		//}
 
 		return nil
 	}); err != nil {
@@ -348,7 +348,24 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			return nil
 		}
 
-		return tx.Bucket(dbutils.IntermediateTrieHashBucket).Put(addrHash, []byte{})
+		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		inter := interBucket.Cursor()
+		for k, v := inter.Seek(addrHash); k != nil; inter.Next() {
+			if !bytes.HasPrefix(k, addrHash) {
+				k = nil
+			}
+			if k == nil {
+				break
+			}
+
+			if len(v) > 0 {
+				continue
+			}
+
+			interBucket.Delete(k)
+		}
+
+		return interBucket.Put(addrHash, []byte{})
 	})
 }
 
