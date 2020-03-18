@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1175,6 +1176,57 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		require.NoError(err)
 	}
 
+	checkProps := func() {
+		if err := db.KV().View(func(tx *bolt.Tx) error {
+			interC := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			storageC := tx.Bucket(dbutils.StorageBucket).Cursor()
+
+			var prev []byte
+			for k, v := interC.First(); k != nil; k, v = interC.Next() {
+				if len(v) > 0 {
+					continue
+				}
+
+				if prev != nil {
+					require.False(bytes.HasPrefix(k, prev), fmt.Sprintf("%x is prefix of %x\n", prev, k))
+				}
+
+				addrHash := common.CopyBytes(k[:common.HashLength])
+				storageK, _ := storageC.Seek(addrHash)
+				require.True(bytes.HasPrefix(storageK, addrHash), fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				incarnation := storageK[common.HashLength : common.HashLength+8]
+				kWithInc := append(append(addrHash, incarnation...), k[common.HashLength:]...)
+
+				storageK, _ = storageC.Seek(kWithInc)
+				if !bytes.HasPrefix(storageK, kWithInc) {
+					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				}
+
+				prev = k
+			}
+			fmt.Printf("Step Done -----\n")
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
+	printBucket := func() {
+		fmt.Printf("IH bucket print\n")
+		db.KV().View(func(tx *bolt.Tx) error {
+			interC := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			for k, v := interC.First(); k != nil; k, v = interC.Next() {
+				if len(v) > 0 {
+					continue
+				}
+
+				fmt.Printf("IH: %x\n", k)
+			}
+			return nil
+		})
+		fmt.Printf("IH bucket print END\n")
+	}
+
 	acc := accounts.NewAccount()
 	acc.Incarnation = 1
 	encodedAcc := make([]byte, acc.EncodingLengthForStorage())
@@ -1182,14 +1234,17 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	err := db.Put(dbutils.AccountsBucket, common.FromHex(accKey), encodedAcc)
 	require.NoError(err)
 
-	putStorage(1, k1, "hi")
-	putStorage(1, k2, "hi")
-	putStorage(1, k3, "hi")
+	putStorage(2, k1, "hi")
+	putStorage(2, k2, "hi")
+	putStorage(2, k3, "hi")
 	putStorage(2, k4, "hi")
 
 	// step 1: delete account
 	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
 	require.NoError(err)
+	printBucket()
+	checkProps()
+
 	untouchedAcc := fmt.Sprintf("99%062x", 0)
 	checks := map[string]bool{
 		accKey:       true,
@@ -1199,6 +1254,8 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	// step 2: re-create account
 	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
 	require.NoError(err)
+	printBucket()
+	checkProps()
 
 	checks = map[string]bool{
 		accKey:        false,
@@ -1215,17 +1272,45 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 
 	// step 3: re-create storage
 	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
-		return false
+		exists := false
+		db.KV().View(func(tx *bolt.Tx) error {
+			c := tx.Bucket(dbutils.StorageBucket).Cursor()
+			addrHash := prefix[:common.HashLength]
+			storageK, _ := c.Seek(addrHash)
+			if !bytes.HasPrefix(storageK, addrHash) {
+				exists = false
+				return nil
+			}
+
+			prefixWithInc := append(storageK[:common.HashLength+8], prefix[common.HashLength:]...)
+			storageK, _ = c.Seek(prefixWithInc)
+			if bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(storageK), prefix) {
+				exists = true
+			}
+			if exists {
+				fmt.Printf("Check2: %v, %x, %x\n", exists, prefix, storageK)
+			}
+			return nil
+		})
+
+		return exists
 	}
 
 	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k2))
 	require.NoError(err)
+	printBucket()
+	checkProps()
 
 	checks = map[string]bool{
-		accKey + k2:         false,
-		accKey + "2200":     true,
-		accKey + "22ab":     true,
-		accKey + "22110099": true,
+		accKey + "11":     true,
+		accKey + k2:       false,
+		accKey + "22":     false,
+		accKey + "2200":   false,
+		accKey + "2211":   false,
+		accKey + "2233":   true,
+		accKey + "223300": false,
+		accKey + "22ab":   false,
+		accKey + "44":     true,
 	}
 
 	for k, expect := range checks {
@@ -1234,30 +1319,19 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		assert.Equal(expect, ok, k)
 	}
 
-	// step 3: create one new storage
-	someStorageExistsInThisSubtree3 := func(prefix []byte) bool {
-		if bytes.HasPrefix(common.FromHex(accKey+k3), prefix) {
-			return false
-		}
-		if bytes.HasPrefix(common.FromHex(accKey+k2), prefix) {
-			return true
-		}
-		return false
-	}
-
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree3, db, common.FromHex(accKey+k3))
+	// step 4: create one new storage
+	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k4))
 	require.NoError(err)
+	printBucket()
+	checkProps()
+
 	checks = map[string]bool{
-		accKey + k2:                            false, // results of step2 preserved
-		accKey + "22":                          false, // results of step2 preserved
-		accKey + "2211":                        false, // results of step2 preserved
-		accKey + "22110000":                    false, // results of step2 preserved
-		accKey + k3:                            false,
-		accKey + "223399":                      true,
-		accKey + fmt.Sprintf("2233%04x99", 0):  true,
-		accKey + fmt.Sprintf("2233%058x99", 0): true,  // len=64
-		accKey + fmt.Sprintf("2233%060x99", 0): false, // len=66, too long key
-		accKey + fmt.Sprintf("2233%062x99", 0): false, // len=68, too long key
+		accKey + k2:         false, // results of step2 preserved
+		accKey + "22":       false, // results of step2 preserved
+		accKey + "2211":     false, // results of step2 preserved
+		accKey + "22110000": false, // results of step2 preserved
+		accKey + "2233":     true,  // results of step2 preserved
+		accKey + "44":       false, // results of step2 preserved
 	}
 
 	for k, expect := range checks {

@@ -308,7 +308,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				break
 			}
 
-			if interK != nil && len(interV) != 0 { // skip non-tombstones
+			if interK != nil && len(interV) > 0 { // skip non-tombstones
 				interK, interV = inter.Next()
 				continue
 			}
@@ -319,11 +319,11 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
 					return err
 				}
-				if k[common.HashLength+8] == 255 {
+				next, ok := intermediatehash.NextSubtree(k[:common.HashLength+8+1])
+				if !ok {
 					break
 				}
-				k[common.HashLength+8]++
-				k, _ = storage.Seek(k[:common.HashLength+8+1])
+				k, _ = storage.Seek(next)
 				continue
 			}
 
@@ -385,27 +385,22 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 }
 
 func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []byte) bool, db ethdb.MinDatabase, compositeKey []byte) error {
-	if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
-		return nil
-	}
+	//if someStorageExistsInThisSubtree(compositeKey) { // this func is only for newly created storage
+	//	return nil
+	//}
 
 	buf := pool.GetBuffer(128)
 	defer pool.PutBuffer(buf)
 
 	buf.B = buf.B[:cap(buf.B)]
-	foundTombStone := false
 	for i := common.HashLength + 1; i < len(compositeKey)-1; i++ { // +1 because first step happened during account re-creation
-		if !someStorageExistsInThisSubtree(compositeKey[:i]) {
-			continue
+		ok, err := HasTombstone(db, compositeKey[:i])
+		//fmt.Printf("HasTombstone: %v %x\n", ok, compositeKey[:i])
+		if err != nil {
+			return err
 		}
-
-		if !foundTombStone {
-			if ok, err := HasTombstone(db, compositeKey[:i]); err != nil {
-				return err
-			} else if !ok {
-				continue
-			}
-			foundTombStone = true
+		if !ok {
+			continue
 		}
 
 		copy(buf.B, compositeKey[:i+1])
@@ -415,11 +410,17 @@ func ClearTombstonesForNewStorage(someStorageExistsInThisSubtree func(prefix []b
 			}
 
 			buf.B[i] = uint8(j)
+			ok := someStorageExistsInThisSubtree(buf.B[:i+1])
+			//fmt.Printf("someStorageExistsInThisSubtree: %v %x\n", ok, buf.B[:i+1])
+			if !ok {
+				continue
+			}
 
 			if err := db.Put(dbutils.IntermediateTrieHashBucket, buf.B[:i+1], []byte{}); err != nil {
 				return err
 			}
 		}
+
 		if err := db.Delete(dbutils.IntermediateTrieHashBucket, compositeKey[:i]); err != nil {
 			return err
 		}
