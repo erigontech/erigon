@@ -52,26 +52,58 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 			}
 
 			// 1 prefix must be covered only by 1 tombstone
-			overlapK, _, err := cOverlap.Seek(append(k, []byte{0, 0}...))
-			if err != nil {
-				return err
+			overlap := false
+			from := append(k, []byte{0, 0}...)
+			for overlapK, v, err := cOverlap.Seek(from); overlapK != nil; overlapK, v, err = cOverlap.Next() {
+				if err != nil {
+					return err
+				}
+				if !bytes.HasPrefix(overlapK, from) {
+					overlapK = nil
+				}
+				if len(v) > 0 {
+					continue
+				}
+
+				if bytes.HasPrefix(overlapK, k) {
+					overlap = true
+				}
 			}
-			overlap := bytes.HasPrefix(overlapK, k)
 
 			// each tomb must cover storage
-			storageK, _, err := storage.Seek(k)
+			hideStorage := false
+			addrHash := common.CopyBytes(k[:common.HashLength])
+			storageK, _, err := storage.Seek(addrHash)
 			if err != nil {
 				return err
 			}
+			if !bytes.HasPrefix(storageK, addrHash) {
+				hideStorage = false
+			} else {
+				incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+				for ; incarnation > 0; incarnation-- {
+					kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+					kWithInc = append(kWithInc, k[common.HashLength:]...)
+					storageK, _, err = storage.Seek(kWithInc)
+					if err != nil {
+						return err
+					}
+					if bytes.HasPrefix(storageK, kWithInc) {
+						hideStorage = true
+					}
+				}
+				if hideStorage {
+					break
+				}
+			}
 
-			hideStorage := bytes.HasPrefix(storageK, k)
 			results = append(results, &StorageTombsResponse{
 				Prefix:               fmt.Sprintf("%x\n", k),
 				DontOverlapOtherTomb: !overlap,
 				HideStorage:          hideStorage,
 			})
 
-			if len(results) > 1000 {
+			if len(results) > 50 {
 				results = append(results, &StorageTombsResponse{
 					Prefix:               "too much results",
 					DontOverlapOtherTomb: true,
