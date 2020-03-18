@@ -35,6 +35,9 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 	if err = apis.RegisterAccountAPI(root.Group("accounts"), remoteDB); err != nil {
 		return err
 	}
+	if err = apis.RegisterStorageTombstonesAPI(root.Group("storage-tombstones"), remoteDB); err != nil {
+		return err
+	}
 
 	fmt.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
 

@@ -15,4 +15,14 @@ export default class API {
             method: 'get',
         })
     }
+
+    lookupIntermediateHashes(prefix) {
+        return axios({
+            url: this.endpoint('/api/v1/storage-tombstones/'),
+            method: 'get',
+            params: {
+                'prefix': prefix,
+            }
+        })
+    }
 }
