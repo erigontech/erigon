@@ -17,7 +17,7 @@ const LookupStorageTombstonesForm = ({api}) => {
     const lookupFail = (error) => {
         // console.debug(Object.keys(error), error.response.data)
         setState({hashes: undefined, loading: false})
-        throw error
+        setState(() => { throw error })
     }
 
     return (
