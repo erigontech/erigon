@@ -478,12 +478,10 @@ var stopNetInterface context.CancelFunc
 func StartDeprecated(db ethdb.HasBolt, addr string) {
 	if stopNetInterface != nil {
 		stopNetInterface()
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	// TODO: implement node.Service, then Stop() will called on SIGINT | SIGTERM and we can call cancel() there
 	tcpCtx, cancel := context.WithCancel(context.Background())
-	stopNetInterface = cancel
 	if addr != "" {
 		netAddr = addr
 	}
@@ -505,6 +503,10 @@ func StartDeprecated(db ethdb.HasBolt, addr string) {
 	if err != nil {
 		logger.Error("Could not create listener", "address", netAddr, "err", err)
 		return
+	}
+	stopNetInterface = func() {
+		cancel()
+		ln.Close()
 	}
 
 	logger.Info("Listening on", "address", netAddr)
