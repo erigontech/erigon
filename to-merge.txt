@@ -864,11 +864,3 @@ Date:   Wed Mar 18 20:15:49 2020 +0800
     from it we don't handle the key properly. In theory the prefix should be truncated and
     only user key is returned. But we don't do it in some cases, e.g. the iterator and batch
     replayer created from it. So this PR is the fix to these issues.
-
-commit 20a092fb9fac68a1835b7a98e2e3a0e96a138ef6
-Author: meowsbits <45600330+meowsbits@users.noreply.github.com>
-Date:   Wed Mar 18 06:55:30 2020 -0500
-
-    core/rawdb: fix freezer table test error check
-    
-    Fixes: Condition is always 'false' because 'err' is always 'nil'
