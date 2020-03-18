@@ -110,6 +110,50 @@ func (tr *ResolverStatefulCached) finaliseRoot() error {
 	return nil
 }
 
+// keyIsBefore - kind of bytes.Compare, but nil is the last key. And return
+func keyIsBefore(k1, k2 []byte) (bool, []byte) {
+	if k1 == nil {
+		return false, k2
+	}
+
+	if k2 == nil {
+		return true, k1
+	}
+
+	switch cmpWithoutIncarnation(k1, k2) {
+	case -1, 0:
+		return true, k1
+	default:
+		return false, k2
+	}
+}
+
+// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
+func cmpWithoutIncarnation(k1, k2 []byte) int {
+	if k1 == nil {
+		return 1
+	}
+
+	if k2 == nil {
+		return -1
+	}
+
+	if len(k2) <= common.HashLength {
+		return bytes.Compare(k1, k2)
+	}
+
+	if len(k2) <= common.HashLength+8 {
+		return bytes.Compare(k1, k2[:common.HashLength])
+	}
+
+	buf := pool.GetBuffer(256)
+	defer pool.PutBuffer(buf)
+	buf.B = append(buf.B[:0], k2[:common.HashLength]...)
+	buf.B = append(buf.B, k2[common.HashLength+8:]...)
+
+	return bytes.Compare(k1, buf.B)
+}
+
 func (tr *ResolverStatefulCached) RebuildTrie(
 	db ethdb.Database,
 	blockNr uint64,
@@ -322,7 +366,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			fromCache, minKey = isBefore(cacheK, k)
+			fromCache, minKey = keyIsBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
@@ -357,7 +401,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						if k == nil && cacheK == nil {
 							return nil
 						}
-						fromCache, minKey = isBefore(cacheK, k)
+						fromCache, minKey = keyIsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -433,10 +477,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			if isAccountBucket {
 				k, v = c.Seek(next)
 			} else {
-				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				for bytes.HasPrefix(kNoInc, cacheK) {
-					k, _ = c.Next()
-					kNoInc = dbutils.RemoveIncarnationFromKey(k)
+				// skip subtree - can't .Seek because storage bucket has incarnation in keys
+				for k, v = c.Next(); bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(k), cacheK); k, v = c.Next() {
 				}
 			}
 
@@ -449,48 +491,4 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 func minInt(i1, i2 int) int {
 	return int(math.Min(float64(i1), float64(i2)))
-}
-
-// isBefore - kind of bytes.Compare, but nil is the last key. And return
-func isBefore(triePrefix, accOrStorageKey []byte) (bool, []byte) {
-	if triePrefix == nil {
-		return false, accOrStorageKey
-	}
-
-	if accOrStorageKey == nil {
-		return true, triePrefix
-	}
-
-	switch cmpWithoutIncarnation(triePrefix, accOrStorageKey) {
-	case -1, 0:
-		return true, triePrefix
-	default:
-		return false, accOrStorageKey
-	}
-}
-
-// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
-func cmpWithoutIncarnation(triePrefix, accOrStorageKey []byte) int {
-	if triePrefix == nil {
-		return 1
-	}
-
-	if accOrStorageKey == nil {
-		return -1
-	}
-
-	if len(accOrStorageKey) <= common.HashLength {
-		return bytes.Compare(triePrefix, accOrStorageKey)
-	}
-
-	if len(accOrStorageKey) <= common.HashLength+8 {
-		return bytes.Compare(triePrefix, accOrStorageKey[:common.HashLength])
-	}
-
-	buf := pool.GetBuffer(256)
-	defer pool.PutBuffer(buf)
-	buf.B = append(buf.B[:0], accOrStorageKey[:common.HashLength]...)
-	buf.B = append(buf.B, accOrStorageKey[common.HashLength+8:]...)
-
-	return bytes.Compare(triePrefix, buf.B)
 }

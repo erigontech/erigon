@@ -520,36 +520,36 @@ func TestApiDetails(t *testing.T) {
 func TestIsBefore(t *testing.T) {
 	assert := assert.New(t)
 
-	is, minKey := isBefore([]byte("a"), []byte("b"))
+	is, minKey := keyIsBefore([]byte("a"), []byte("b"))
 	assert.Equal(true, is)
 	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
-	is, minKey = isBefore([]byte("b"), []byte("a"))
+	is, minKey = keyIsBefore([]byte("b"), []byte("a"))
 	assert.Equal(false, is)
 	assert.Equal("a", fmt.Sprintf("%s", minKey))
 
-	is, minKey = isBefore([]byte("b"), []byte(""))
+	is, minKey = keyIsBefore([]byte("b"), []byte(""))
 	assert.Equal(false, is)
 	assert.Equal("", fmt.Sprintf("%s", minKey))
 
-	is, minKey = isBefore(nil, []byte("b"))
+	is, minKey = keyIsBefore(nil, []byte("b"))
 	assert.Equal(false, is)
 	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
-	is, minKey = isBefore([]byte("b"), nil)
+	is, minKey = keyIsBefore([]byte("b"), nil)
 	assert.Equal(true, is)
 	assert.Equal("b", fmt.Sprintf("%s", minKey))
 
 	contract := fmt.Sprintf("2%063x", 0)
 	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
 	cacheKey := common.Hex2Bytes(contract + "20")
-	is, minKey = isBefore(cacheKey, storageKey)
+	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.False(is)
 	assert.Equal(fmt.Sprintf("%x", storageKey), fmt.Sprintf("%x", minKey))
 
 	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
 	cacheKey = common.Hex2Bytes(contract + "10")
-	is, minKey = isBefore(cacheKey, storageKey)
+	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.True(is)
 	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
 }
