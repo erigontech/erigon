@@ -1179,7 +1179,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps := func() {
 		if err := db.KV().View(func(tx *bolt.Tx) error {
 			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			interC2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 			for k, v := inter.First(); k != nil; k, v = inter.Next() {
@@ -1187,16 +1187,18 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 					continue
 				}
 
-				for k1, v1 := interC2.Seek(k[:common.HashLength]); k1 != nil; interC2.Next() {
-					if len(v1) != 0 {
+				// 1 prefix must be covered only by 1 tombstone
+				from := append(k, []byte{0, 0}...)
+				for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
+					if !bytes.HasPrefix(overlapK, from) {
+						overlapK = nil
+					}
+					if len(overlapV) > 0 {
 						continue
 					}
-					if !bytes.HasPrefix(k1, k[:common.HashLength]) {
-						break
-					}
 
-					if bytes.HasPrefix(k, k1) {
-						panic(fmt.Sprintf("%d %x is prefix of %d %x\n", len(k1), k1, len(k), k))
+					if bytes.HasPrefix(overlapK, k) {
+						panic(fmt.Sprintf("%x is prefix of %x\n", overlapK, k))
 					}
 				}
 
@@ -1204,13 +1206,20 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 				storageK, _ := storage.Seek(addrHash)
 				if !bytes.HasPrefix(storageK, addrHash) {
 					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
-				}
-				incarnation := storageK[common.HashLength : common.HashLength+8]
-				kWithInc := append(append(addrHash, incarnation...), k[common.HashLength:]...)
-
-				storageK, _ = storage.Seek(kWithInc)
-				if !bytes.HasPrefix(storageK, kWithInc) {
-					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				} else {
+					incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+					hideStorage := false
+					for ; incarnation > 0; incarnation-- {
+						kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+						kWithInc = append(kWithInc, k[common.HashLength:]...)
+						storageK, _ = storage.Seek(kWithInc)
+						if bytes.HasPrefix(storageK, kWithInc) {
+							hideStorage = true
+						}
+					}
+					if !hideStorage {
+						panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+					}
 				}
 			}
 			return nil
