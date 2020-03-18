@@ -21,7 +21,7 @@ func TestMigrate(t *testing.T) {
 		t.Errorf(err.Error())
 	}
 
-	err = convertDatabaseToCBOR(db.DB(), 1)
+	err = convertDatabaseToCBOR(db.KV(), 1)
 	if err != nil {
 		t.Errorf(err.Error())
 	}

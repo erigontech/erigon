@@ -801,7 +801,7 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	execToBlock(node.DefaultDataDir() + "/geth-remove-me3/geth/chaindata", 100_000_000, false)
+	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(node.DefaultDataDir() + "/geth-remove-me/geth/chaindata")
