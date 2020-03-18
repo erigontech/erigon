@@ -1178,11 +1178,11 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 
 	checkProps := func() {
 		if err := db.KV().View(func(tx *bolt.Tx) error {
-			interC := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			storageC := tx.Bucket(dbutils.StorageBucket).Cursor()
+			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 			var prev []byte
-			for k, v := interC.First(); k != nil; k, v = interC.Next() {
+			for k, v := inter.First(); k != nil; k, v = inter.Next() {
 				if len(v) > 0 {
 					continue
 				}
@@ -1192,40 +1192,37 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 				}
 
 				addrHash := common.CopyBytes(k[:common.HashLength])
-				storageK, _ := storageC.Seek(addrHash)
+				storageK, _ := storage.Seek(addrHash)
 				require.True(bytes.HasPrefix(storageK, addrHash), fmt.Sprintf("tombstone %x has no storage to hide\n", k))
 				incarnation := storageK[common.HashLength : common.HashLength+8]
 				kWithInc := append(append(addrHash, incarnation...), k[common.HashLength:]...)
 
-				storageK, _ = storageC.Seek(kWithInc)
+				storageK, _ = storage.Seek(kWithInc)
 				if !bytes.HasPrefix(storageK, kWithInc) {
 					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
 				}
 
 				prev = k
 			}
-			fmt.Printf("Step Done -----\n")
 			return nil
 		}); err != nil {
 			panic(err)
 		}
 	}
 
-	printBucket := func() {
-		fmt.Printf("IH bucket print\n")
-		db.KV().View(func(tx *bolt.Tx) error {
-			interC := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			for k, v := interC.First(); k != nil; k, v = interC.Next() {
-				if len(v) > 0 {
-					continue
-				}
-
-				fmt.Printf("IH: %x\n", k)
-			}
-			return nil
-		})
-		fmt.Printf("IH bucket print END\n")
-	}
+	//printBucket := func() {
+	//	fmt.Printf("IH bucket print\n")
+	//	_ = db.KV().View(func(tx *bolt.Tx) error {
+	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
+	//			if len(v) == 0 {
+	//				fmt.Printf("IH: %x\n", k)
+	//			}
+	//			return nil
+	//		})
+	//		return nil
+	//	})
+	//	fmt.Printf("IH bucket print END\n")
+	//}
 
 	acc := accounts.NewAccount()
 	acc.Incarnation = 1
@@ -1242,7 +1239,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	// step 1: delete account
 	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
 	require.NoError(err)
-	printBucket()
+	//printBucket()
 	checkProps()
 
 	untouchedAcc := fmt.Sprintf("99%062x", 0)
@@ -1254,7 +1251,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	// step 2: re-create account
 	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
 	require.NoError(err)
-	printBucket()
+	//printBucket()
 	checkProps()
 
 	checks = map[string]bool{
@@ -1271,34 +1268,9 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 3: re-create storage
-	//someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
-	//	exists := false
-	//	db.KV().View(func(tx *bolt.Tx) error {
-	//		c := tx.Bucket(dbutils.StorageBucket).Cursor()
-	//		addrHash := prefix[:common.HashLength]
-	//		storageK, _ := c.Seek(addrHash)
-	//		if !bytes.HasPrefix(storageK, addrHash) {
-	//			exists = false
-	//			return nil
-	//		}
-	//
-	//		prefixWithInc := append(storageK[:common.HashLength+8], prefix[common.HashLength:]...)
-	//		storageK, _ = c.Seek(prefixWithInc)
-	//		if bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(storageK), prefix) {
-	//			exists = true
-	//		}
-	//		if exists {
-	//			fmt.Printf("Check2: %v, %x, %x\n", exists, prefix, storageK)
-	//		}
-	//		return nil
-	//	})
-	//
-	//	return exists
-	//}
-
 	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k2))
 	require.NoError(err)
-	printBucket()
+	//printBucket()
 	checkProps()
 
 	checks = map[string]bool{
@@ -1322,7 +1294,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	// step 4: create one new storage
 	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k4))
 	require.NoError(err)
-	printBucket()
+	//printBucket()
 	checkProps()
 
 	checks = map[string]bool{

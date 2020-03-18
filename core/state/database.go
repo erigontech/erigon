@@ -38,7 +38,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
-	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 )
 
 // Trie cache generation limit after which to evict trie nodes from memory.
@@ -281,7 +280,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		inter := interBucket.Cursor()
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 		k, _ := storage.Seek(addrHashBytes)
@@ -292,14 +290,9 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
 		//for ; incarnation > 0; incarnation-- {
 		accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
-		interK, interV := inter.Seek(addrHashBytes)
-		k, _ = storage.Seek(accWithInc)
 
-		for k != nil || interK != nil {
+		for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
 			//fmt.Printf("Loop: %v, %v, interK: %x, k: %x\n", bytes.HasPrefix(k, accWithInc), bytes.HasPrefix(interK, addrHashBytes), interK, k)
-			if !bytes.HasPrefix(interK, addrHashBytes) {
-				interK = nil
-			}
 			if !bytes.HasPrefix(k, accWithInc) {
 				k = nil
 			}
@@ -308,36 +301,10 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				break
 			}
 
-			if interK != nil && len(interV) > 0 { // skip non-tombstones
-				interK, interV = inter.Next()
-				continue
-			}
-
 			kNoInc := dbutils.RemoveIncarnationFromKey(k)
-			cmp := dbutils.Cmp(interK, kNoInc)
-			if cmp == 1 {
-				if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
-					return err
-				}
-
-				next, ok := intermediatehash.NextSubtree(k[:common.HashLength+8+1])
-				if !ok {
-					break
-				}
-				k, _ = storage.Seek(next)
-				continue
+			if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
+				return err
 			}
-
-			if interK == nil {
-				break
-			}
-
-			// part about tombstones
-			next, ok := intermediatehash.NextSubtree(interK)
-			if !ok {
-				break
-			}
-			interK, interV = inter.Seek(next)
 		}
 		//}
 
