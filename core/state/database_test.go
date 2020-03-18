@@ -1266,6 +1266,12 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		untouchedAcc: false,
 	}
 
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
 	// step 2: re-create account
 	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
 	require.NoError(err)
@@ -1327,6 +1333,25 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	for k, expect := range checks {
 		ok, err := state.HasTombstone(db, common.FromHex(k))
 		require.NoError(err, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 5: delete account again - it must remove all tombstones and keep only 1 which will cover account itself
+	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey:          true,
+		untouchedAcc:    false,
+		accKey + "2233": false, // was true on previous step
+
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
 }

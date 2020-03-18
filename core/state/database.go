@@ -349,8 +349,8 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 		}
 
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		inter := interBucket.Cursor()
-		for k, v := inter.Seek(addrHash); k != nil; inter.Next() {
+		c := interBucket.Cursor()
+		for k, v := c.Seek(addrHash); k != nil; k, v = c.Next() {
 			if !bytes.HasPrefix(k, addrHash) {
 				k = nil
 			}
@@ -362,7 +362,9 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 				continue
 			}
 
-			interBucket.Delete(k)
+			if err := interBucket.Delete(k); err != nil {
+				return err
+			}
 		}
 
 		return interBucket.Put(addrHash, []byte{})
