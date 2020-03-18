@@ -5,15 +5,20 @@ import API from './utils/API.js'
 import ErrorCatcher from './components/ErrorCatcher.js'
 import {BrowserRouter as Router, Link, NavLink, Redirect, Route, Switch} from 'react-router-dom';
 import AccountsPage from './page/Accounts';
-import StorageTombstones from './page/StorageTombstones';
+import StorageTombstonesPage from './page/StorageTombstonesPage';
 import {ReactComponent as Logo} from './logo.svg';
 import './App.css';
+import StoragePage from './page/Storage';
 
 const api = new API('http://localhost:8080')
 const sidebar = [
     {
         url: '/accounts',
         label: 'Accounts',
+    },
+    {
+        url: '/storage',
+        label: 'Storage',
     },
     {
         url: '/storage-tombstones',
@@ -50,8 +55,11 @@ function App() {
                                 <Route exact path="/accounts">
                                     <AccountsPage api={api}/>
                                 </Route>
+                                <Route path="/storage">
+                                    <StoragePage api={api}/>
+                                </Route>
                                 <Route path="/storage-tombstones">
-                                    <StorageTombstones api={api}/>
+                                    <StorageTombstonesPage api={api}/>
                                 </Route>
                             </Switch>
                         </Col>

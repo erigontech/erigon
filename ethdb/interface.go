@@ -131,4 +131,8 @@ type HasBolt interface {
 	DB() *bolt.DB
 }
 
+type HasNetInterface interface {
+	DB() Database
+}
+
 var errNotSupported = errors.New("not supported")

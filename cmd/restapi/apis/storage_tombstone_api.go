@@ -3,7 +3,6 @@ package apis
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 
@@ -17,7 +16,6 @@ func RegisterStorageTombstonesAPI(account *gin.RouterGroup, remoteDB *remote.DB)
 	account.GET("/", func(c *gin.Context) {
 		results, err := findStorageTombstoneByPrefix(c.Query("prefix"), remoteDB)
 		if err != nil {
-			c.Error(err) //nolint:errcheck
 			c.Error(err) //nolint:errcheck
 			return
 		}
@@ -67,15 +65,19 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 			}
 
 			hideStorage := bytes.HasPrefix(storageK, k)
-
 			results = append(results, &StorageTombsResponse{
 				Prefix:               fmt.Sprintf("%x\n", k),
 				DontOverlapOtherTomb: !overlap,
 				HideStorage:          hideStorage,
 			})
 
-			if len(results) > 1 {
-				return errors.New("too much results")
+			if len(results) > 1000 {
+				results = append(results, &StorageTombsResponse{
+					Prefix:               "too much results",
+					DontOverlapOtherTomb: true,
+					HideStorage:          true,
+				})
+				return nil
 			}
 		}
 

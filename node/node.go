@@ -17,21 +17,17 @@
 package node
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
-	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -633,26 +629,6 @@ func (n *Node) OpenDatabase(name string) (ethdb.Database, error) {
 	boltDb, err := ethdb.NewBoltDatabase(n.config.ResolvePath(name))
 	if err != nil {
 		return nil, err
-	}
-	if n.config.RemoteDbListenAddress != "" {
-		// TODO: implement node.Service, then Stop() will called on SIGINT | SIGTERM and we can call cancel() there
-		tcpCtx, cancel := context.WithCancel(context.Background())
-		go func() {
-			ch := make(chan os.Signal, 1)
-			signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-			defer signal.Stop(ch)
-
-			select {
-			case <-ch:
-				log.Info("Got interrupt, shutting down...")
-			case <-tcpCtx.Done():
-			}
-
-			cancel()
-		}()
-
-		go remotedbserver.Listener(tcpCtx, boltDb.DB(), n.config.RemoteDbListenAddress)
-
 	}
 	return boltDb, nil
 }

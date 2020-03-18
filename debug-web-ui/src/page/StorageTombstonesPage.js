@@ -3,7 +3,7 @@ import React from 'react';
 import {Col, Container, Row} from 'react-bootstrap';
 import LookupStorageTombstonesForm from '../components/LookupStorageTombstonesForm';
 
-const StorageTombstones = ({api}) => (
+const StorageTombstonesPage = ({api}) => (
 
     <Container fluid className="mt-1">
         <Row>
@@ -19,4 +19,4 @@ const StorageTombstones = ({api}) => (
     </Container>
 )
 
-export default StorageTombstones;
+export default StorageTombstonesPage;

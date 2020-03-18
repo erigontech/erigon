@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/ledgerwatch/bolt"
@@ -23,7 +26,7 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.HasBolt, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
 			logger.Error("Could not close connection", "err", err1)
@@ -90,7 +93,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.Begin(false)
+			tx, err = db.DB().Begin(false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)
@@ -410,7 +413,7 @@ func Server(ctx context.Context, db *bolt.DB, in io.Reader, out io.Writer, close
 				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
 			}
 
-			d := ethdb.NewWrapperBoltDatabase(db)
+			d := ethdb.NewWrapperBoltDatabase(db.DB())
 
 			var err error
 			v, err = d.GetAsOf(bucket, hBucket, key, timestamp)
@@ -469,21 +472,53 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 	}
 }
 
-// Listener starts listener that for each incoming connection
-// spawn a go-routine invoking Server
-func Listener(ctx context.Context, db *bolt.DB, address string) {
+var netAddr string
+var stopNetInterface context.CancelFunc
+
+func StartDeprecated(db ethdb.HasBolt, addr string) {
+	if stopNetInterface != nil {
+		stopNetInterface()
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// TODO: implement node.Service, then Stop() will called on SIGINT | SIGTERM and we can call cancel() there
+	tcpCtx, cancel := context.WithCancel(context.Background())
+	stopNetInterface = cancel
+	if addr != "" {
+		netAddr = addr
+	}
+	go func() {
+		ch := make(chan os.Signal, 1)
+		signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
+		defer signal.Stop(ch)
+
+		select {
+		case <-ch:
+			log.Info("Got interrupt, shutting down...")
+			cancel()
+		case <-tcpCtx.Done():
+		}
+	}()
+
 	var lc net.ListenConfig
-	ln, err := lc.Listen(ctx, "tcp", address)
+	ln, err := lc.Listen(tcpCtx, "tcp", netAddr)
 	if err != nil {
-		logger.Error("Could not create listener", "address", address, "err", err)
+		logger.Error("Could not create listener", "address", netAddr, "err", err)
 		return
 	}
+
+	logger.Info("Listening on", "address", netAddr)
+	go Listen(tcpCtx, ln, db)
+}
+
+// Listener starts listener that for each incoming connection
+// spawn a go-routine invoking Server
+func Listen(ctx context.Context, ln net.Listener, db ethdb.HasBolt) {
 	defer func() {
-		if err = ln.Close(); err != nil {
+		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)
 		}
 	}()
-	logger.Info("Listening on", "address", address)
 
 	ch := make(chan bool, ServerMaxConnections)
 	defer close(ch)
@@ -505,6 +540,9 @@ func Listener(ctx context.Context, db *bolt.DB, address string) {
 	for {
 		conn, err1 := ln.Accept()
 		if err1 != nil {
+			if netErr, ok := err1.(*net.OpError); ok && !netErr.Temporary() {
+				return
+			}
 			logger.Error("Could not accept connection", "err", err1)
 			continue
 		}
