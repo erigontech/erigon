@@ -1271,32 +1271,32 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 3: re-create storage
-	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
-		exists := false
-		db.KV().View(func(tx *bolt.Tx) error {
-			c := tx.Bucket(dbutils.StorageBucket).Cursor()
-			addrHash := prefix[:common.HashLength]
-			storageK, _ := c.Seek(addrHash)
-			if !bytes.HasPrefix(storageK, addrHash) {
-				exists = false
-				return nil
-			}
+	//someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
+	//	exists := false
+	//	db.KV().View(func(tx *bolt.Tx) error {
+	//		c := tx.Bucket(dbutils.StorageBucket).Cursor()
+	//		addrHash := prefix[:common.HashLength]
+	//		storageK, _ := c.Seek(addrHash)
+	//		if !bytes.HasPrefix(storageK, addrHash) {
+	//			exists = false
+	//			return nil
+	//		}
+	//
+	//		prefixWithInc := append(storageK[:common.HashLength+8], prefix[common.HashLength:]...)
+	//		storageK, _ = c.Seek(prefixWithInc)
+	//		if bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(storageK), prefix) {
+	//			exists = true
+	//		}
+	//		if exists {
+	//			fmt.Printf("Check2: %v, %x, %x\n", exists, prefix, storageK)
+	//		}
+	//		return nil
+	//	})
+	//
+	//	return exists
+	//}
 
-			prefixWithInc := append(storageK[:common.HashLength+8], prefix[common.HashLength:]...)
-			storageK, _ = c.Seek(prefixWithInc)
-			if bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(storageK), prefix) {
-				exists = true
-			}
-			if exists {
-				fmt.Printf("Check2: %v, %x, %x\n", exists, prefix, storageK)
-			}
-			return nil
-		})
-
-		return exists
-	}
-
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k2))
+	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k2))
 	require.NoError(err)
 	printBucket()
 	checkProps()
@@ -1320,7 +1320,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 4: create one new storage
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k4))
+	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k4))
 	require.NoError(err)
 	printBucket()
 	checkProps()
