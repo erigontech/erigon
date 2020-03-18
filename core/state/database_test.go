@@ -1179,21 +1179,32 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps := func() {
 		if err := db.KV().View(func(tx *bolt.Tx) error {
 			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			interC2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
-			var prev []byte
 			for k, v := inter.First(); k != nil; k, v = inter.Next() {
 				if len(v) > 0 {
 					continue
 				}
 
-				if prev != nil {
-					require.False(bytes.HasPrefix(k, prev), fmt.Sprintf("%x is prefix of %x\n", prev, k))
+				for k1, v1 := interC2.Seek(k[:common.HashLength]); k1 != nil; interC2.Next() {
+					if len(v1) != 0 {
+						continue
+					}
+					if !bytes.HasPrefix(k1, k[:common.HashLength]) {
+						break
+					}
+
+					if bytes.HasPrefix(k, k1) {
+						panic(fmt.Sprintf("%d %x is prefix of %d %x\n", len(k1), k1, len(k), k))
+					}
 				}
 
 				addrHash := common.CopyBytes(k[:common.HashLength])
 				storageK, _ := storage.Seek(addrHash)
-				require.True(bytes.HasPrefix(storageK, addrHash), fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				if !bytes.HasPrefix(storageK, addrHash) {
+					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				}
 				incarnation := storageK[common.HashLength : common.HashLength+8]
 				kWithInc := append(append(addrHash, incarnation...), k[common.HashLength:]...)
 
@@ -1201,8 +1212,6 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 				if !bytes.HasPrefix(storageK, kWithInc) {
 					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
 				}
-
-				prev = k
 			}
 			return nil
 		}); err != nil {
