@@ -597,11 +597,11 @@ func (bc *BlockChain) Processor() Processor {
 
 // State returns a new mutable state based on the current HEAD block.
 func (bc *BlockChain) State() (*state.IntraBlockState, *state.DbState, error) {
-	return bc.StateAt(bc.CurrentBlock().Root(), bc.CurrentBlock().NumberU64())
+	return bc.StateAt(bc.CurrentBlock().NumberU64())
 }
 
 // StateAt returns a new mutable state based on a particular point in time.
-func (bc *BlockChain) StateAt(root common.Hash, blockNr uint64) (*state.IntraBlockState, *state.DbState, error) {
+func (bc *BlockChain) StateAt(blockNr uint64) (*state.IntraBlockState, *state.DbState, error) {
 	dbstate := state.NewDbState(bc.db, blockNr)
 	return state.New(dbstate), dbstate, nil
 }

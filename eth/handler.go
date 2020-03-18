@@ -953,7 +953,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			_, dbstate, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			_, dbstate, err := pm.blockchain.StateAt(block.NumberU64())
 			if err != nil {
 				return err
 			}
@@ -999,7 +999,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 
 		block := pm.blockchain.GetBlockByHash(request.Block)
 		if block != nil {
-			_, dbstate, err := pm.blockchain.StateAt(block.Root(), block.NumberU64())
+			_, dbstate, err := pm.blockchain.StateAt(block.NumberU64())
 			if err != nil {
 				return err
 			}
