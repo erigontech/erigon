@@ -712,22 +712,24 @@ func (sdb *IntraBlockState) GetOrNewStateObject(addr common.Address) *stateObjec
 
 	stateObject := sdb.getStateObject(addr)
 	if stateObject == nil || stateObject.deleted {
-		stateObject, _ = sdb.createObject(addr, stateObject)
+		stateObject = sdb.createObject(addr, stateObject)
 	}
 	return stateObject
 }
 
 // createObject creates a new state object. If there is an existing account with
-// the given address, it is overwritten and returned as the second return value.
-func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj, prev *stateObject) {
-	//fmt.Printf("CREATE %x\n", addr[:])
-	prev = previous
+// the given address, it is overwritten.
+func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObject) (newobj *stateObject) {
 	account := new(accounts.Account)
 	var original *accounts.Account
 	if previous == nil {
 		account = &accounts.Account{}
 		account.Root.SetBytes(trie.EmptyRoot[:])
-		original = &accounts.Account{}
+		if obj := sdb.stateObjects[addr]; obj != nil && obj.deleted {
+			original = &obj.original
+		} else {
+			original = &accounts.Account{}
+		}
 	} else {
 		account.Copy(&previous.data)
 		account.Incarnation = NonContractIncarnation
@@ -735,13 +737,13 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	}
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
-	if prev == nil {
+	if previous == nil {
 		sdb.journal.append(createObjectChange{account: &addr})
 	} else {
-		sdb.journal.append(resetObjectChange{prev: prev})
+		sdb.journal.append(resetObjectChange{prev: previous})
 	}
 	sdb.setStateObject(newobj)
-	return newobj, prev
+	return newobj
 }
 
 // CreateAccount explicitly creates a state object. If a state object with the address
@@ -774,10 +776,7 @@ func (sdb *IntraBlockState) CreateAccount(addr common.Address, contractCreation 
 		previous = sdb.getStateObject(addr)
 	}
 
-	newObj, prev := sdb.createObject(addr, previous)
-	if prev != nil {
-		newObj.setBalance(&prev.data.Balance)
-	}
+	newObj := sdb.createObject(addr, previous)
 
 	if contractCreation {
 		newObj.created = true

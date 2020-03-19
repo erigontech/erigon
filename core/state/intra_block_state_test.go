@@ -494,7 +494,7 @@ func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{2}
-	newObj, _ := state.createObject(addr, nil)
+	newObj := state.createObject(addr, nil)
 	newObj.code = []byte("some non empty byte code")
 	state.setStateObject(newObj)
 	state.CreateAccount(common.Address{2}, true)

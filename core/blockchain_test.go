@@ -1785,7 +1785,7 @@ func TestDoubleAccountRemoval(t *testing.T) {
 			assert.NoError(t, err)
 			block.AddTx(tx)
 
-			// double kill
+			// sending kill messsage to an already suicided account
 			tx, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(big.Int), 90000, new(big.Int), kill), signer, bankKey)
 			assert.NoError(t, err)
 			block.AddTx(tx)
