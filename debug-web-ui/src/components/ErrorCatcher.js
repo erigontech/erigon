@@ -13,13 +13,11 @@ export default class ErrorCatcher extends React.Component {
     }
 
     static getDerivedStateFromError(error) {
-        console.debug(2)
         // Update state so the next render will show the fallback UI.
         return {error: error};
     }
 
     componentDidCatch(error, errorInfo) {
-        console.debug(1)
         this.setState({error: error, errorInfo: errorInfo})
     }
 

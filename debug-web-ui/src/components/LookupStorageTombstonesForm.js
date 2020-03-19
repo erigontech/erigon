@@ -7,7 +7,8 @@ import {Spinner, Table} from 'react-bootstrap';
 import SearchField from './SearchField.js';
 
 const search = (prefix, api, setState) => {
-    return api.lookupIntermediateHashes(prefix);
+    setState({hashes: undefined, loading: true});
+    return api.lookupStorageTombstones(prefix);
 }
 
 const LookupStorageTombstonesForm = ({api}) => {
@@ -15,24 +16,20 @@ const LookupStorageTombstonesForm = ({api}) => {
 
     const lookupSuccess = (response) => setState({hashes: response.data, loading: false});
     const lookupFail = (error) => {
-        // console.debug(Object.keys(error), error.response.data)
         setState({hashes: undefined, loading: false})
 
-        setState(() => { throw error })
+        setState(() => {
+            throw error
+        })
     }
 
     return (
         <div>
             {state.loading && <Spinner animation="border"/>}
-            {!state.loading && <SearchField placeholder="lookup by prefix" onClick={
-                (prefix) => {
-                    setState({hashes: undefined, loading: true});
-
-                    search(prefix, api, setState)
-                        .then(lookupSuccess)
-                        .catch(lookupFail)
-                }}/>}
-            <hr/>
+            {!state.loading && <SearchField placeholder="lookup by prefix"
+                                            onClick={(prefix) => search(prefix, api, setState)
+                                                .then(lookupSuccess)
+                                                .catch(lookupFail)}/>}
             {state.hashes && <DetailsForm hashes={state.hashes}/>}
         </div>
     );

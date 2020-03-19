@@ -12,9 +12,17 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func RegisterStorageTombstonesAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
-	account.GET("/", func(c *gin.Context) {
+func RegisterStorageTombstonesAPI(router *gin.RouterGroup, remoteDB *remote.DB) error {
+	router.GET("/", func(c *gin.Context) {
 		results, err := findStorageTombstoneByPrefix(c.Query("prefix"), remoteDB)
+		if err != nil {
+			c.Error(err) //nolint:errcheck
+			return
+		}
+		c.JSON(http.StatusOK, results)
+	})
+	router.GET("/integrity/", func(c *gin.Context) {
+		results, err := storageTombstonesIntegrityDBCheck(remoteDB)
 		if err != nil {
 			c.Error(err) //nolint:errcheck
 			return
@@ -119,4 +127,97 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 	}
 
 	return results, nil
+}
+
+type IntegrityCheck struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+func storageTombstonesIntegrityDBCheck(remoteDB *remote.DB) ([]*IntegrityCheck, error) {
+	var results []*IntegrityCheck
+	return results, remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
+		res, err := storageTombstonesIntegrityDBCheckTx(tx)
+		if err != nil {
+			return err
+		}
+		results = res
+		return nil
+	})
+}
+
+func storageTombstonesIntegrityDBCheckTx(tx *remote.Tx) ([]*IntegrityCheck, error) {
+	var res []*IntegrityCheck
+	var check1 = &IntegrityCheck{
+		Name:  "1 trie prefix must be covered only by 1 tombstone",
+		Value: "ok",
+	}
+	res = append(res, check1)
+	check2 := &IntegrityCheck{
+		Name:  "tombstone must hide at least 1 storage",
+		Value: "ok",
+	}
+	res = append(res, check2)
+
+	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true).PrefetchSize(1000))
+	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true).PrefetchSize(5))
+	storage := tx.Bucket(dbutils.StorageBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(10))
+
+	for k, v, err := inter.First(); k != nil; k, v, err = inter.Next() {
+		if err != nil {
+			return nil, err
+		}
+		if len(v) > 0 {
+			continue
+		}
+
+		// 1 prefix must be covered only by 1 tombstone
+		from := append(k, []byte{0, 0}...)
+		for overlapK, overlapV, err := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV, err = cOverlap.Next() {
+			if err != nil {
+				return nil, err
+			}
+			if !bytes.HasPrefix(overlapK, from) {
+				overlapK = nil
+			}
+			if len(overlapV) > 0 {
+				continue
+			}
+
+			if bytes.HasPrefix(overlapK, k) {
+				check1.Value = fmt.Sprintf("%x is prefix of %x\n", overlapK, k)
+				break
+			}
+		}
+
+		// each tombstone must hide at least 1 storage
+		addrHash := common.CopyBytes(k[:common.HashLength])
+		storageK, _, err := storage.Seek(addrHash)
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.HasPrefix(storageK, addrHash) {
+			return nil, fmt.Errorf("tombstone %x has no storage to hide\n", k)
+		} else {
+			incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+			hideStorage := false
+			for ; incarnation > 0; incarnation-- {
+				kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+				kWithInc = append(kWithInc, k[common.HashLength:]...)
+				storageK, _, err = storage.Seek(kWithInc)
+				if err != nil {
+					return nil, err
+				}
+				if bytes.HasPrefix(storageK, kWithInc) {
+					hideStorage = true
+				}
+			}
+
+			if !hideStorage {
+				check2.Value = fmt.Sprintf("tombstone %x has no storage to hide\n", k)
+				break
+			}
+		}
+	}
+	return res, nil
 }

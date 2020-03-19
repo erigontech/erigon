@@ -2,6 +2,7 @@ import React from 'react';
 
 import {Col, Container, Row} from 'react-bootstrap';
 import LookupStorageTombstonesForm from '../components/LookupStorageTombstonesForm';
+import StorageTombstonesIntegrityChecks from '../components/StorageTombstonesIntegrityChecks';
 
 const StorageTombstonesPage = ({api}) => (
 
@@ -12,8 +13,11 @@ const StorageTombstonesPage = ({api}) => (
             </Col>
         </Row>
         <Row>
-            <Col>
+            <Col xs={10}>
                 <LookupStorageTombstonesForm api={api}/>
+            </Col>
+            <Col xs={2}>
+                <StorageTombstonesIntegrityChecks api={api}/>
             </Col>
         </Row>
     </Container>

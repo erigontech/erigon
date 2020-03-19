@@ -16,13 +16,20 @@ export default class API {
         })
     }
 
-    lookupIntermediateHashes(prefix) {
+    lookupStorageTombstones(prefix) {
         return axios({
             url: this.endpoint('/api/v1/storage-tombstones/'),
             method: 'get',
             params: {
                 'prefix': prefix,
             }
+        })
+    }
+
+    storageTombstonesIntegrityChecks() {
+        return axios({
+            url: this.endpoint('/api/v1/storage-tombstones/integrity/'),
+            method: 'get',
         })
     }
 }

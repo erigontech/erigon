@@ -12,10 +12,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func RegisterAccountAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
+func RegisterAccountAPI(router *gin.RouterGroup, remoteDB *remote.DB) error {
 	fmt.Println("remote db connected")
 
-	account.GET(":accountID", func(c *gin.Context) {
+	router.GET(":accountID", func(c *gin.Context) {
 		account, err := findAccountByID(c.Param("accountID"), remoteDB)
 		if err == ErrEntityNotFound {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
