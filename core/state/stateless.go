@@ -47,7 +47,7 @@ type Stateless struct {
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
 func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
-	t, codeMap, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
+	t, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,6 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	}
 	return &Stateless{
 		t:              t,
-		codeMap:        codeMap,
 		storageUpdates: make(map[common.Hash]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
@@ -121,10 +120,15 @@ func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash
 	if s.trace {
 		fmt.Printf("Getting code for %x\n", codeHash)
 	}
-	if code, ok := s.codeMap[codeHash]; ok {
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+	if code, ok := s.t.GetAccountCode(addrHash[:]); ok {
 		return code, nil
 	}
-	return nil, fmt.Errorf("could not find bytecode for hash %x", codeHash)
+	return nil, fmt.Errorf("could not find bytecode for acc: %s hash %x", address, codeHash)
 }
 
 // ReadAccountCodeSize is a part of the StateReader interface
@@ -310,8 +314,4 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 func (s *Stateless) GetTrie() *trie.Trie {
 	return s.t
-}
-
-func (s *Stateless) GetCodeMap() map[common.Hash][]byte {
-	return s.codeMap
 }

@@ -28,7 +28,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -95,6 +94,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // Structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
+	codeReads      map[common.Hash]common.Hash
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
 	accountUpdates map[common.Hash]*accounts.Account
@@ -105,6 +105,7 @@ type Buffer struct {
 
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
+	b.codeReads = make(map[common.Hash]common.Hash)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
@@ -124,6 +125,9 @@ func (b *Buffer) detachAccounts() {
 
 // Merges the content of another buffer into this one
 func (b *Buffer) merge(other *Buffer) {
+	for codeHash, code := range other.codeReads {
+		b.codeReads[codeHash] = code
+	}
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
@@ -167,8 +171,6 @@ type TrieDbState struct {
 	buffers                []*Buffer
 	aggregateBuffer        *Buffer // Merge of all buffers
 	currentBuffer          *Buffer
-	codeCache              *lru.Cache
-	codeSizeCache          *lru.Cache
 	historical             bool
 	noHistory              bool
 	resolveReads           bool
@@ -183,14 +185,6 @@ type TrieDbState struct {
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	csc, err := lru.New(100000)
-	if err != nil {
-		return nil, err
-	}
-	cc, err := lru.New(10000)
-	if err != nil {
-		return nil, err
-	}
 	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
@@ -199,8 +193,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tMu:               new(sync.Mutex),
 		db:                db,
 		blockNr:           blockNr,
-		codeCache:         cc,
-		codeSizeCache:     csc,
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
 		savePreimages:     true,
@@ -563,8 +555,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
-		codeCache:         tds.codeCache,
-		codeSizeCache:     tds.codeSizeCache,
 		historical:        tds.historical,
 		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
@@ -694,6 +684,10 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
+func (tds *TrieDbState) buildCodeTouches(withReads bool) map[common.Hash]common.Hash {
+	return tds.aggregateBuffer.codeReads
+}
+
 // Builds a sorted list of all address hashes that were touched within the
 // period for which we are aggregating updates
 func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (common.Hashes, []*accounts.Account) {
@@ -738,9 +732,30 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 	return accountTouches, aValues
 }
 
+func (tds *TrieDbState) resolveCodeTouches(codeTouches map[common.Hash]common.Hash, resolveFunc trie.ResolveFunc) error {
+	firstRequest := true
+	for address, codeHash := range codeTouches {
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash); need {
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
+			}
+			firstRequest = false
+			tds.resolver.AddCodeRequest(req)
+		}
+	}
+
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
+}
+
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc func(*trie.Resolver) error) error {
+func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc trie.ResolveFunc) error {
 	var firstRequest = true
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
@@ -774,7 +789,7 @@ func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouche
 	return tds.resolveSetBuilder.ExtractTouches()
 }
 
-func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc func(*trie.Resolver) error) error {
+func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) error {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -795,9 +810,17 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc func(*trie.Resolver
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
+
+	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
+	codeTouches := tds.buildCodeTouches(tds.resolveReads)
+
 	var err error
 
 	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
+		return err
+	}
+
+	if err = tds.resolveCodeTouches(codeTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -1325,14 +1348,16 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if cached, ok := tds.codeCache.Get(codeHash); ok {
-		code, err = cached.([]byte), nil
+
+	addrHash, err := tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return nil, err
+	}
+
+	if cached, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+		code, err = cached, nil
 	} else {
 		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
-		if err == nil {
-			tds.codeSizeCache.Add(codeHash, len(code))
-			tds.codeCache.Add(codeHash, code)
-		}
 	}
 	if tds.resolveReads {
 		addrHash, err1 := common.HashData(address[:])
@@ -1342,6 +1367,10 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.currentBuffer.codeReads[addrHash] = codeHash
 		tds.resolveSetBuilder.ReadCode(codeHash, code)
 	}
 	return code, err
@@ -1349,18 +1378,14 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 
 func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
 	var code []byte
-	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
-		codeSize, err = cached.(int), nil
-		if tds.resolveReads {
-			if cachedCode, ok := tds.codeCache.Get(codeHash); ok {
-				code, err = cachedCode.([]byte), nil
-			} else {
-				code, err = tds.ReadAccountCode(address, codeHash)
-				if err != nil {
-					return 0, err
-				}
-			}
-		}
+
+	addrHash, err := tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return 0, err
+	}
+
+	if code, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+		codeSize, err = len(code), nil
 	} else {
 		code, err = tds.ReadAccountCode(address, codeHash)
 		if err != nil {
@@ -1376,6 +1401,10 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.currentBuffer.codeReads[addrHash] = codeHash
 		tds.resolveSetBuilder.ReadCode(codeHash, code)
 	}
 	return codeSize, nil

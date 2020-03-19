@@ -42,7 +42,7 @@ func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieL
 				return 0, err
 			}
 
-			trie, _, err := BuildTrieFromWitness(witness, false /*is-binary*/, false /*trace*/)
+			trie, err := BuildTrieFromWitness(witness, false /*is-binary*/, false /*trace*/)
 			if err != nil {
 				return 0, err
 			}
