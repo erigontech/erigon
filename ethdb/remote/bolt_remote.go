@@ -173,10 +173,11 @@ func defaultDialFunc(ctx context.Context, dialAddress string) (in io.Reader, out
 // DB mimicks the interface of the bolt.DB,
 // but it works via a pair (Reader, Writer)
 type DB struct {
-	opts           DbOpts
-	connectionPool chan *conn
-	doDial         chan struct{}
-	doPing         <-chan time.Time
+	opts              DbOpts
+	connectionPool    chan *conn
+	doDial            chan struct{}
+	doPing            <-chan time.Time
+	cancelConnections context.CancelFunc
 }
 
 type DialFunc func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error)
@@ -282,6 +283,7 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 		<-parentCtx.Done()
 		cancelConnections()
 	}()
+	db.cancelConnections = cancelConnections
 
 	traceTicker := time.NewTicker(3 * time.Second)
 	pingTicker := time.NewTicker(db.opts.PingEvery)
@@ -341,8 +343,14 @@ func (db *DB) autoReconnect(ctx context.Context) {
 	}
 }
 
+func (db *DB) GetDialAddr() string {
+	return db.opts.dialAddress
+}
+
 // Close closes DB by using the closer field
 func (db *DB) Close() error {
+	db.cancelConnections()
+
 	return nil
 }
 

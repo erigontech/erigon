@@ -41,7 +41,7 @@ export default class ErrorCatcher extends React.Component {
         return (
             <div className={this.props.className}>
                 {this.props.children}
-                <Modal show={show} onHide={this.handleClose} respo>
+                <Modal show={show} onHide={this.handleClose} size="xl">
                     <Modal.Header>
                         <Modal.Title>Unexpected Error</Modal.Title>
                     </Modal.Header>

@@ -29,22 +29,29 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 		}
 	})
 
-	remoteDB, err := remote.Open(context.TODO(), remote.DefaultOpts.Addr(remoteDbAddress))
+	db, err := remote.Open(context.Background(), remote.DefaultOpts.Addr(remoteDbAddress))
 	if err != nil {
 		return err
 	}
 
-	defer func() {
-		printError("Closing Remote DB", remoteDB.Close())
-	}()
+	e := &apis.Env{
+		DB: db,
+	}
 
-	if err = apis.RegisterAccountAPI(root.Group("accounts"), remoteDB); err != nil {
+	//defer func() {
+	//	printError("Closing Remote DB", remoteDB.Close())
+	//}()
+
+	if err = apis.RegisterRemoteDBAPI(root.Group("remote-db"), e); err != nil {
 		return err
 	}
-	if err = apis.RegisterStorageAPI(root.Group("storage"), remoteDB); err != nil {
+	if err = apis.RegisterAccountAPI(root.Group("accounts"), e); err != nil {
 		return err
 	}
-	if err = apis.RegisterStorageTombstonesAPI(root.Group("storage-tombstones"), remoteDB); err != nil {
+	if err = apis.RegisterStorageAPI(root.Group("storage"), e); err != nil {
+		return err
+	}
+	if err = apis.RegisterStorageTombstonesAPI(root.Group("storage-tombstones"), e); err != nil {
 		return err
 	}
 

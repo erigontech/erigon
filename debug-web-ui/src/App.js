@@ -9,6 +9,7 @@ import StorageTombstonesPage from './page/StorageTombstonesPage';
 import {ReactComponent as Logo} from './logo.svg';
 import './App.css';
 import StoragePage from './page/Storage';
+import RemoteDBForm from './components/RemoteDBForm';
 
 const api = new API('http://localhost:8080')
 const sidebar = [
@@ -32,8 +33,8 @@ function App() {
             <Router>
                 <Container fluid>
                     <Row>
-                        <Col className="border-right p-0 sidebar" xs={3} md={2} lg={1}>
-                            <Nav className="flex-column sticky-top min-vh-100" variant="pills">
+                        <Col className="border-right p-0 sidebar min-vh-100" xs={3} md={2} lg={1}>
+                            <Nav className="flex-column sticky-top">
                                 <div className="mb-2 pb-1 border-bottom">
                                     <Link to="/">
                                         <Logo alt="Logo" sidth="120" height="120" className="d-block w-100"/>
@@ -46,8 +47,8 @@ function App() {
                                         <div className="active-pointer"/>
                                     </NavLink>
                                 )}
+                                <RemoteDBForm api={api}/>
                             </Nav>
-
                         </Col>
                         <Col xs={9} md={10} lg={11}>
                             <Switch>

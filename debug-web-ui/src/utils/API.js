@@ -9,6 +9,24 @@ export default class API {
         return this.baseURL + name
     }
 
+    getRemoteDB() {
+        return axios({
+            url: this.endpoint('/api/v1/remote-db/'),
+            method: 'get',
+        })
+    }
+
+    setRemoteDB(host, port) {
+        return axios({
+            url: this.endpoint('/api/v1/remote-db/'),
+            method: 'post',
+            params: {
+                'host': host,
+                'port': port,
+            }
+        })
+    }
+
     lookupAccount(id) {
         return axios({
             url: this.endpoint('/api/v1/accounts/' + id),

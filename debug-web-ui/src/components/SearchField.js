@@ -28,7 +28,7 @@ class SearchField extends React.Component {
             <Form onSubmit={this.handleSubmit}  >
                 <Form.Row>
                     <Col>
-                        <Form.Control type="text" size="sm"
+                        <Form.Control size="sm"
                                     placeholder={this.props.placeholder}
                                     value={this.state.value || ''}
                                     onChange={this.handleChange} />

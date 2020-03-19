@@ -12,24 +12,26 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func RegisterStorageTombstonesAPI(router *gin.RouterGroup, remoteDB *remote.DB) error {
-	router.GET("/", func(c *gin.Context) {
-		results, err := findStorageTombstoneByPrefix(c.Query("prefix"), remoteDB)
-		if err != nil {
-			c.Error(err) //nolint:errcheck
-			return
-		}
-		c.JSON(http.StatusOK, results)
-	})
-	router.GET("/integrity/", func(c *gin.Context) {
-		results, err := storageTombstonesIntegrityDBCheck(remoteDB)
-		if err != nil {
-			c.Error(err) //nolint:errcheck
-			return
-		}
-		c.JSON(http.StatusOK, results)
-	})
+func RegisterStorageTombstonesAPI(router *gin.RouterGroup, e *Env) error {
+	router.GET("/", e.FindStorageTombstone)
+	router.GET("/integrity/", e.GetTombstoneIntegrity)
 	return nil
+}
+func (e *Env) GetTombstoneIntegrity(c *gin.Context) {
+	results, err := storageTombstonesIntegrityDBCheck(e.DB)
+	if err != nil {
+		c.Error(err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, results)
+}
+func (e *Env) FindStorageTombstone(c *gin.Context) {
+	results, err := findStorageTombstoneByPrefix(c.Query("prefix"), e.DB)
+	if err != nil {
+		c.Error(err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, results)
 }
 
 type StorageTombsResponse struct {

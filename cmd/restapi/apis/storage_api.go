@@ -12,16 +12,19 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func RegisterStorageAPI(router *gin.RouterGroup, remoteDB *remote.DB) error {
-	router.GET("/", func(c *gin.Context) {
-		results, err := findStorageByPrefix(c.Query("prefix"), remoteDB)
-		if err != nil {
-			c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
-			return
-		}
-		c.JSON(http.StatusOK, results)
-	})
+func RegisterStorageAPI(router *gin.RouterGroup, e *Env) error {
+	router.GET("/", e.FindStorage)
 	return nil
+}
+func (e *Env) FindStorage(c *gin.Context) {
+	fmt.Printf("1: %p", e.DB)
+
+	results, err := findStorageByPrefix(c.Query("prefix"), e.DB)
+	if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, results)
 }
 
 type StorageResponse struct {
