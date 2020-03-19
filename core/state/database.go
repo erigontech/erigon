@@ -266,7 +266,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 const IntermediateTrieHashAssertDbIntegrity = false
 
 func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
-
 	addrHashBytes := addrHash[:]
 	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
 		return err
@@ -303,7 +302,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
 
 			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
-				//fmt.Printf("Loop: %v, %v, interK: %x, k: %x\n", bytes.HasPrefix(k, accWithInc), bytes.HasPrefix(interK, addrHashBytes), interK, k)
 				if !bytes.HasPrefix(k, accWithInc) {
 					k = nil
 				}
@@ -332,7 +330,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 
 // PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
 func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
-
 	if len(addrHash) != common.HashLength {
 		return nil
 	}
@@ -355,18 +352,8 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 				}
 			}()
 		}
-		account, _ := tx.Bucket(dbutils.AccountsBucket).Get(addrHash)
-		if account == nil {
-			return nil
-		}
-		root, err1 := accounts.GetIncarnationFomStorage(account)
-		if err1 != nil {
-			return err1
-		}
-		if root == trie.EmptyRoot {
-			return nil
-		}
 
+		// cleanup all previous under given account
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		c := interBucket.Cursor()
 		for k, v := c.Seek(addrHash); k != nil; k, v = c.Next() {
@@ -384,6 +371,22 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			if err := interBucket.Delete(k); err != nil {
 				return err
 			}
+		}
+
+		// place 1 tombstone to account if it has storage
+		hasStorage := false
+		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
+		k, _ := storage.Seek(addrHash)
+		if !bytes.HasPrefix(k, addrHash) {
+			return nil
+		}
+
+		if k != nil {
+			hasStorage = true
+		}
+
+		if !hasStorage {
+			return nil
 		}
 
 		return interBucket.Put(addrHash, []byte{})
