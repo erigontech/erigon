@@ -801,6 +801,7 @@ func testStartup() {
 }
 
 func testResolveCached() {
+	debug.IntermediateTrieHashAssertDbIntegrity = true
 	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()

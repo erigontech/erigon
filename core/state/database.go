@@ -263,8 +263,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	return &cpy
 }
 
-const IntermediateTrieHashAssertDbIntegrity = false
-
 func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
 	addrHashBytes := addrHash[:]
 	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
@@ -281,7 +279,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	}
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		if IntermediateTrieHashAssertDbIntegrity {
+		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
 					panic(fmt.Errorf("ClearTombstonesForReCreatedAccount(%x): %w\n", addrHash, err))
@@ -345,7 +343,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	defer pool.PutBuffer(buf)
 
 	return boltDb.Update(func(tx *bolt.Tx) error {
-		if IntermediateTrieHashAssertDbIntegrity {
+		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
 					panic(fmt.Errorf("PutTombstoneForDeletedAccount(%x): %w\n", addrHash, err))
@@ -396,7 +394,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 func ClearTombstonesForNewStorage(db ethdb.KV, storageKeyNoInc []byte) error {
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
 	if err := db.KV().Update(func(tx *bolt.Tx) error {
-		if IntermediateTrieHashAssertDbIntegrity {
+		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
 					panic(fmt.Errorf("ClearTombstonesForNewStorage(%x): %w\n", storageKeyNoInc, err))
