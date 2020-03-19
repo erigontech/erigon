@@ -2,7 +2,6 @@ package apis
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -13,8 +12,6 @@ import (
 )
 
 func RegisterAccountAPI(router *gin.RouterGroup, remoteDB *remote.DB) error {
-	fmt.Println("remote db connected")
-
 	router.GET(":accountID", func(c *gin.Context) {
 		account, err := findAccountByID(c.Param("accountID"), remoteDB)
 		if err == ErrEntityNotFound {

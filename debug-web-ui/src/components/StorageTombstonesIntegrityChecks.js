@@ -23,8 +23,8 @@ const StorageTombstonesIntegrityChecks = ({api}) => {
 
     return (
         <div>
-            {state.loading ? <Spinner animation="border"/> :
-                <Button size="sm" onClick={() => load(api, setState)}>Integrity Checks</Button>}
+            {state.loading && <Spinner animation="border"/>}
+            {!state.loading && <Button size="sm" onClick={() => load(api, setState)}>Integrity Checks</Button>}
             {state.data && <DetailsForm data={state.data}/>}
         </div>
     );

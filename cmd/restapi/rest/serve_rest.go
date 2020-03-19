@@ -2,7 +2,7 @@ package rest
 
 import (
 	"context"
-	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,9 +12,9 @@ import (
 
 func printError(name string, err error) {
 	if err != nil {
-		fmt.Printf("%v: SUCCESS", name)
+		log.Printf("%v: SUCCESS", name)
 	} else {
-		fmt.Printf("%v: FAIL (err=%v)", name, err)
+		log.Printf("%v: FAIL (err=%v)", name, err)
 	}
 }
 
@@ -41,13 +41,19 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 	if err = apis.RegisterAccountAPI(root.Group("accounts"), remoteDB); err != nil {
 		return err
 	}
+	if err = apis.RegisterStorageAPI(root.Group("storage"), remoteDB); err != nil {
+		return err
+	}
 	if err = apis.RegisterStorageTombstonesAPI(root.Group("storage-tombstones"), remoteDB); err != nil {
 		return err
 	}
 
-	fmt.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
+	log.Printf("serving on %v... press ctrl+C to abort\n", localAddress)
 
-	r.Run(localAddress) //nolint:errcheck
+	err = r.Run(localAddress) //nolint:errcheck
+	if err != nil {
+		return err
+	}
 
 	return nil
 }

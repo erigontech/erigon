@@ -8,11 +8,6 @@ import SearchField from './SearchField.js';
 
 const search = (prefix, api, setState) => {
     setState({hashes: undefined, loading: true});
-    return api.lookupStorageTombstones(prefix);
-}
-
-const LookupStorageTombstonesForm = ({api}) => {
-    const [state, setState] = useState({hashes: undefined, loading: false});
 
     const lookupSuccess = (response) => setState({hashes: response.data, loading: false});
     const lookupFail = (error) => {
@@ -22,20 +17,24 @@ const LookupStorageTombstonesForm = ({api}) => {
             throw error
         })
     }
+    
+    return api.lookupStorageTombstones(prefix).then(lookupSuccess).catch(lookupFail);
+}
+
+const LookupStorageTombstonesForm = ({api}) => {
+    const [state, setState] = useState({hashes: undefined, loading: false});
 
     return (
         <div>
             {state.loading && <Spinner animation="border"/>}
             {!state.loading && <SearchField placeholder="lookup by prefix"
-                                            onClick={(prefix) => search(prefix, api, setState)
-                                                .then(lookupSuccess)
-                                                .catch(lookupFail)}/>}
-            {state.hashes && <DetailsForm hashes={state.hashes}/>}
+                                            onClick={(prefix) => search(prefix, api, setState)}/>}
+            {state.hashes && <Details hashes={state.hashes}/>}
         </div>
     );
 }
 
-const DetailsForm = ({hashes}) => (
+const Details = ({hashes}) => (
     <Row>
         <Col>
             <Table size="sm" borderless>

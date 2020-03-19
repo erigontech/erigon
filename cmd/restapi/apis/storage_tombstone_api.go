@@ -160,7 +160,7 @@ func storageTombstonesIntegrityDBCheckTx(tx *remote.Tx) ([]*IntegrityCheck, erro
 	res = append(res, check2)
 
 	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true).PrefetchSize(1000))
-	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true).PrefetchSize(5))
+	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(true).PrefetchSize(10))
 	storage := tx.Bucket(dbutils.StorageBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(10))
 
 	for k, v, err := inter.First(); k != nil; k, v, err = inter.Next() {

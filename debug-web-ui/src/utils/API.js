@@ -16,6 +16,16 @@ export default class API {
         })
     }
 
+    lookupStorage(prefix) {
+        return axios({
+            url: this.endpoint('/api/v1/storage/'),
+            method: 'get',
+            params: {
+                'prefix': prefix,
+            }
+        })
+    }
+
     lookupStorageTombstones(prefix) {
         return axios({
             url: this.endpoint('/api/v1/storage-tombstones/'),
