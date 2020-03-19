@@ -263,7 +263,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	return &cpy
 }
 
+const IntermediateTrieHashAssertDbIntegrity = false
+
 func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
+
 	addrHashBytes := addrHash[:]
 	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
 		return err
@@ -279,6 +282,14 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	}
 
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
+		if IntermediateTrieHashAssertDbIntegrity {
+			defer func() {
+				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
+					panic(fmt.Errorf("ClearTombstonesForReCreatedAccount(%x): %w\n", addrHash, err))
+				}
+			}()
+		}
+
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
@@ -321,6 +332,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 
 // PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
 func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
+
 	if len(addrHash) != common.HashLength {
 		return nil
 	}
@@ -336,6 +348,13 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	defer pool.PutBuffer(buf)
 
 	return boltDb.Update(func(tx *bolt.Tx) error {
+		if IntermediateTrieHashAssertDbIntegrity {
+			defer func() {
+				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
+					panic(fmt.Errorf("PutTombstoneForDeletedAccount(%x): %w\n", addrHash, err))
+				}
+			}()
+		}
 		account, _ := tx.Bucket(dbutils.AccountsBucket).Get(addrHash)
 		if account == nil {
 			return nil
@@ -374,6 +393,14 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 func ClearTombstonesForNewStorage(db ethdb.KV, storageKeyNoInc []byte) error {
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
 	if err := db.KV().Update(func(tx *bolt.Tx) error {
+		if IntermediateTrieHashAssertDbIntegrity {
+			defer func() {
+				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
+					panic(fmt.Errorf("ClearTombstonesForNewStorage(%x): %w\n", storageKeyNoInc, err))
+				}
+			}()
+		}
+
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
@@ -418,6 +445,55 @@ func ClearTombstonesForNewStorage(db ethdb.KV, storageKeyNoInc []byte) error {
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	return nil
+}
+
+func StorageTombstonesIntegrityDBCheck(tx *bolt.Tx) error {
+	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+	storage := tx.Bucket(dbutils.StorageBucket).Cursor()
+
+	for k, v := inter.First(); k != nil; k, v = inter.Next() {
+		if len(v) > 0 {
+			continue
+		}
+
+		// 1 prefix must be covered only by 1 tombstone
+		from := append(k, []byte{0, 0}...)
+		for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
+			if !bytes.HasPrefix(overlapK, from) {
+				overlapK = nil
+			}
+			if len(overlapV) > 0 {
+				continue
+			}
+
+			if bytes.HasPrefix(overlapK, k) {
+				return fmt.Errorf("%x is prefix of %x\n", overlapK, k)
+			}
+		}
+
+		addrHash := common.CopyBytes(k[:common.HashLength])
+		storageK, _ := storage.Seek(addrHash)
+		if !bytes.HasPrefix(storageK, addrHash) {
+			return fmt.Errorf("tombstone %x has no storage to hide\n", k)
+		} else {
+			incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+			hideStorage := false
+			for ; incarnation > 0; incarnation-- {
+				kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+				kWithInc = append(kWithInc, k[common.HashLength:]...)
+				storageK, _ = storage.Seek(kWithInc)
+				if bytes.HasPrefix(storageK, kWithInc) {
+					hideStorage = true
+				}
+			}
+			if !hideStorage {
+				return fmt.Errorf("tombstone %x has no storage to hide\n", k)
+			}
+		}
 	}
 	return nil
 }
