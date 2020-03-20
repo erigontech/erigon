@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/rlp"
-	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -558,24 +557,24 @@ func TestHexIncrement(t *testing.T) {
 	assert := assert.New(t)
 	k := common.Hex2Bytes("f2fd")
 
-	k, ok := intermediatehash.NextSubtree(k)
+	k, ok := nextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f2fe", common.Bytes2Hex(k))
-	k, ok = intermediatehash.NextSubtree(k)
+	k, ok = nextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f2ff", common.Bytes2Hex(k))
-	k, ok = intermediatehash.NextSubtree(k)
+	k, ok = nextSubtree(k)
 	assert.True(ok)
 	assert.Equal("f300", common.Bytes2Hex(k))
 
 	k = common.Hex2Bytes("ffffff")
-	assert.Nil(intermediatehash.NextSubtree(k))
+	assert.Nil(nextSubtree(k))
 	k = common.Hex2Bytes("ffff")
-	assert.Nil(intermediatehash.NextSubtree(k))
+	assert.Nil(nextSubtree(k))
 	k = common.Hex2Bytes("ff")
-	assert.Nil(intermediatehash.NextSubtree(k))
+	assert.Nil(nextSubtree(k))
 	k = common.Hex2Bytes("")
-	assert.Nil(intermediatehash.NextSubtree(k))
+	assert.Nil(nextSubtree(k))
 }
 
 func TestCmpWithoutIncarnation(t *testing.T) {
