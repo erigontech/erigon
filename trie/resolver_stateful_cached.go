@@ -13,7 +13,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/trie/intermediatehash"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
@@ -29,6 +28,21 @@ func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFu
 	return &ResolverStatefulCached{
 		ResolverStateful: NewResolverStateful(topLevels, requests, hookFunction),
 	}
+}
+
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
+
+		r[i] = 0
+	}
+	return nil, false
 }
 
 // PrepareResolveParams prepares information for the MultiWalk
@@ -228,7 +242,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	//if blockNr > TraceFromBlock {
+	//if isAccount && fromCache && len(kAsNibbles) > common.HashLength*2 {
 	//	buf := pool.GetBuffer(256)
 	//	CompressNibbles(kAsNibbles, &buf.B)
 	//	fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
@@ -347,6 +361,19 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 		k, v := c.Seek(startkey)
 		cacheK, cacheV := cache.Seek(dbutils.RemoveIncarnationFromKey(startkey))
+		if isAccountBucket && len(cacheK) > common.HashLength { // skip storage hashes when walking accounts
+			for {
+				next, ok := nextSubtree(cacheK[:common.HashLength])
+				if !ok {
+					cacheK = nil
+					break
+				}
+				cacheK, cacheV = cache.Seek(next)
+				if len(cacheK) <= common.HashLength {
+					break
+				}
+			}
+		}
 
 		var minKey []byte
 		var fromCache bool
@@ -357,7 +384,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
-				next, ok := intermediatehash.NextSubtree(cacheK[:maxAccountKeyLen])
+				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
 				if !ok { // no siblings left in cache
 					cacheK, cacheV = nil, nil
 					continue
@@ -398,6 +425,20 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						cacheK, cacheV = cache.SeekTo(dbutils.RemoveIncarnationFromKey(startkey))
+						if isAccountBucket && len(cacheK) > common.HashLength { // skip storage hashes when walking accounts
+							for {
+								next, ok := nextSubtree(cacheK[:common.HashLength])
+								if !ok {
+									cacheK = nil
+									break
+								}
+								cacheK, cacheV = cache.Seek(next)
+								if len(cacheK) <= common.HashLength {
+									break
+								}
+							}
+						}
+
 						if k == nil && cacheK == nil {
 							return nil
 						}
@@ -465,7 +506,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			// skip subtree
 
-			next, ok := intermediatehash.NextSubtree(cacheK)
+			next, ok := nextSubtree(cacheK)
 			if !ok { // no siblings left
 				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.
 					break
