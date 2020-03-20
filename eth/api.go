@@ -297,7 +297,7 @@ func (api *PublicDebugAPI) DumpBlock(blockNr rpc.BlockNumber) (state.Dump, error
 	if block == nil {
 		return state.Dump{}, fmt.Errorf("block #%d not found", blockNr)
 	}
-	_, tds, err := api.eth.BlockChain().StateAt(block.Root(), uint64(blockNr))
+	_, tds, err := api.eth.BlockChain().StateAt(uint64(blockNr))
 	if err != nil {
 		return state.Dump{}, err
 	}

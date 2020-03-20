@@ -188,12 +188,7 @@ func (b *SimulatedBackend) stateByBlockNumber(ctx context.Context, blockNumber *
 		s, _, err := b.blockchain.State()
 		return s, err
 	}
-	block, err := b.BlockByNumber(ctx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	var state *state.IntraBlockState
-	state, _, err = b.blockchain.StateAt(block.Hash(), uint64(blockNumber.Int64()))
+	state, _, err := b.blockchain.StateAt(uint64(blockNumber.Int64()))
 	return state, err
 }
 

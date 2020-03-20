@@ -30,6 +30,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -39,6 +40,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
+	"github.com/stretchr/testify/assert"
 )
 
 // So we can deterministically seed different blockchains
@@ -1740,6 +1742,77 @@ func TestEIP161AccountRemoval(t *testing.T) {
 	if st, _, _ := blockchain.State(); st.Exist(theAddr) {
 		t.Error("account should not exist")
 	}
+}
+
+func TestDoubleAccountRemoval(t *testing.T) {
+	var (
+		db          = ethdb.NewMemDatabase()
+		signer      = types.HomesteadSigner{}
+		bankKey, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		bankAddress = crypto.PubkeyToAddress(bankKey.PublicKey)
+		bankFunds   = big.NewInt(1e9)
+		contract    = hexutil.MustDecode("0x60606040526040516102eb3803806102eb8339016040526060805160600190602001505b33600060006101000a81548173ffffffffffffffffffffffffffffffffffffffff02191690830217905550806001600050908051906020019082805482825590600052602060002090601f01602090048101928215609c579182015b82811115609b578251826000505591602001919060010190607f565b5b50905060c3919060a7565b8082111560bf576000818150600090555060010160a7565b5090565b50505b50610215806100d66000396000f30060606040526000357c01000000000000000000000000000000000000000000000000000000009004806341c0e1b51461004f578063adbd84651461005c578063cfae32171461007d5761004d565b005b61005a6004506100f6565b005b610067600450610208565b6040518082815260200191505060405180910390f35b61008860045061018a565b60405180806020018281038252838181518152602001915080519060200190808383829060006004602084601f0104600302600f01f150905090810190601f1680156100e85780820380516001836020036101000a031916815260200191505b509250505060405180910390f35b600060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff163373ffffffffffffffffffffffffffffffffffffffff16141561018757600060009054906101000a900473ffffffffffffffffffffffffffffffffffffffff1673ffffffffffffffffffffffffffffffffffffffff16ff5b5b565b60206040519081016040528060008152602001506001600050805480601f016020809104026020016040519081016040528092919081815260200182805480156101f957820191906000526020600020905b8154815290600101906020018083116101dc57829003601f168201915b50505050509050610205565b90565b6000439050610212565b90560000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000000d5468697320697320437972757300000000000000000000000000000000000000")
+		input       = hexutil.MustDecode("0xadbd8465")
+		kill        = hexutil.MustDecode("0x41c0e1b5")
+		gspec       = &Genesis{
+			Config: params.AllEthashProtocolChanges,
+			Alloc:  GenesisAlloc{bankAddress: {Balance: bankFunds}},
+		}
+		genesis = gspec.MustCommit(db)
+		genDb   = db.MemCopy()
+	)
+
+	blockchain, _ := NewBlockChain(db, nil, gspec.Config, ethash.NewFaker(), vm.Config{}, nil)
+	ctx := blockchain.WithContext(context.Background(), big.NewInt(genesis.Number().Int64()+1))
+	defer blockchain.Stop()
+
+	var theAddr common.Address
+
+	blocks, _ := GenerateChain(ctx, gspec.Config, genesis, ethash.NewFaker(), genDb, 3, func(i int, block *BlockGen) {
+		nonce := block.TxNonce(bankAddress)
+		switch i {
+		case 0:
+			tx, err := types.SignTx(types.NewContractCreation(nonce, new(big.Int), 1e6, new(big.Int), contract), signer, bankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+			theAddr = crypto.CreateAddress(bankAddress, nonce)
+		case 1:
+			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(big.Int), 90000, new(big.Int), input), signer, bankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		case 2:
+			tx, err := types.SignTx(types.NewTransaction(nonce, theAddr, new(big.Int), 90000, new(big.Int), kill), signer, bankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+
+			// sending kill messsage to an already suicided account
+			tx, err = types.SignTx(types.NewTransaction(nonce+1, theAddr, new(big.Int), 90000, new(big.Int), kill), signer, bankKey)
+			assert.NoError(t, err)
+			block.AddTx(tx)
+		}
+	})
+
+	_, err := blockchain.InsertChain(context.Background(), blocks)
+	assert.NoError(t, err)
+
+	_, err = blockchain.db.Commit()
+	assert.NoError(t, err)
+
+	st, _, err := blockchain.State()
+	assert.NoError(t, err)
+	assert.False(t, st.Exist(theAddr), "Contract should've been removed")
+
+	st, _, err = blockchain.StateAt(0)
+	assert.NoError(t, err)
+	assert.False(t, st.Exist(theAddr), "Contract should not exist at block #0")
+
+	st, _, err = blockchain.StateAt(1)
+	assert.NoError(t, err)
+	assert.True(t, st.Exist(theAddr), "Contract should exist at block #1")
+
+	st, _, err = blockchain.StateAt(2)
+	assert.NoError(t, err)
+	assert.True(t, st.Exist(theAddr), "Contract should exist at block #2")
 }
 
 // This is a regression test (i.e. as weird as it is, don't delete it ever), which

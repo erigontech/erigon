@@ -62,7 +62,7 @@ func (bc *testBlockChain) GetBlock(hash common.Hash, number uint64) *types.Block
 	return bc.CurrentBlock()
 }
 
-func (bc *testBlockChain) StateAt(common.Hash, uint64) (*state.IntraBlockState, *state.DbState, error) {
+func (bc *testBlockChain) StateAt(uint64) (*state.IntraBlockState, *state.DbState, error) {
 	return bc.statedb, nil, nil
 }
 
