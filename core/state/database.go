@@ -1371,14 +1371,12 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		// during the block executuion, so we are always
 		// storing the latest code hash
 		tds.currentBuffer.codeReads[addrHash] = codeHash
-		tds.resolveSetBuilder.ReadCode(codeHash, code)
+		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return code, err
 }
 
 func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
-	var code []byte
-
 	addrHash, err := tds.HashAddress(address, false /*save*/)
 	if err != nil {
 		return 0, err
@@ -1405,7 +1403,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		// during the block executuion, so we are always
 		// storing the latest code hash
 		tds.currentBuffer.codeReads[addrHash] = codeHash
-		tds.resolveSetBuilder.ReadCode(codeHash, code)
+		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return codeSize, nil
 }
@@ -1538,7 +1536,7 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 
 func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
-		tsw.tds.resolveSetBuilder.CreateCode(codeHash, code)
+		tsw.tds.resolveSetBuilder.CreateCode(codeHash)
 	}
 	return nil
 }
@@ -1570,12 +1568,12 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
 func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness, error) {
-	rs, codeMap := tds.resolveSetBuilder.Build(isBinary)
+	rs := tds.resolveSetBuilder.Build(isBinary)
 
-	return tds.makeBlockWitness(trace, rs, codeMap, isBinary)
+	return tds.makeBlockWitness(trace, rs, isBinary)
 }
 
-func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, isBinary bool) (*trie.Witness, error) {
+func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
@@ -1584,7 +1582,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, codeMa
 		t = trie.HexToBin(tds.t).Trie()
 	}
 
-	return t.ExtractWitness(tds.blockNr, trace, rs, codeMap)
+	return t.ExtractWitness(tds.blockNr, trace, rs)
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

@@ -10,6 +10,7 @@ import (
 type HashNodeFunc func(node, bool, []byte) (int, error)
 type HashOnly interface {
 	HashOnly([]byte) bool
+	IsCodeTouched(common.Hash) bool
 	Current() []byte
 }
 
@@ -18,22 +19,18 @@ type MerklePathLimiter struct {
 	HashFunc HashNodeFunc
 }
 
-type CodeMap map[common.Hash][]byte
-
 type WitnessBuilder struct {
 	root     node
 	blockNr  uint64
 	trace    bool
-	codeMap  CodeMap
 	operands []WitnessOperator
 }
 
-func NewWitnessBuilder(root node, blockNr uint64, trace bool, codeMap CodeMap) *WitnessBuilder {
+func NewWitnessBuilder(root node, blockNr uint64, trace bool) *WitnessBuilder {
 	return &WitnessBuilder{
 		root:     root,
 		blockNr:  blockNr,
 		trace:    trace,
-		codeMap:  codeMap,
 		operands: make([]WitnessOperator, 0),
 	}
 }
@@ -158,17 +155,16 @@ func (b *WitnessBuilder) addEmptyRoot() error {
 	return nil
 }
 
-func (b *WitnessBuilder) processAccountCode(n *accountNode) error {
+func (b *WitnessBuilder) processAccountCode(n *accountNode, hashOnly HashOnly) error {
 	if n.IsEmptyRoot() && n.IsEmptyCodeHash() {
 		return nil
 	}
 
-	code, ok := b.codeMap[n.CodeHash]
-	if !ok {
+	if n.code == nil || !hashOnly.IsCodeTouched(n.CodeHash) {
 		return b.addHashOp(hashNode(n.CodeHash[:]))
 	}
 
-	return b.addCodeOp(code)
+	return b.addCodeOp(n.code)
 }
 
 func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, limiter *MerklePathLimiter) error {
@@ -188,7 +184,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
 	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
-		if err := b.processAccountCode(n); err != nil {
+		if err := b.processAccountCode(n, limiter.HashOnly); err != nil {
 			return err
 		}
 		if err := b.processAccountStorage(n, storageKey, limiter); err != nil {

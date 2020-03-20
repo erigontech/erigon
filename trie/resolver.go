@@ -229,7 +229,7 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 		tr.witnesses = make([]*Witness, 0)
 	}
 
-	witness, err := extractWitnessFromRootNode(hbRoot, tr.blockNr, false /*tr.hb.trace*/, nil, nil)
+	witness, err := extractWitnessFromRootNode(hbRoot, tr.blockNr, false /*tr.hb.trace*/, nil)
 	if err != nil {
 		return fmt.Errorf("error while extracting witness for resolver: %w", err)
 	}

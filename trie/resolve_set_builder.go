@@ -6,17 +6,17 @@ import "github.com/ledgerwatch/turbo-geth/common"
 // the execution of a block. It also tracks the contract codes that were created and used during the execution
 // of a block
 type ResolveSetBuilder struct {
-	touches        [][]byte               // Read/change set of account keys (account hashes)
-	storageTouches [][]byte               // Read/change set of storage keys (account hashes concatenated with storage key hashes)
-	proofCodes     map[common.Hash][]byte // Contract codes that have been accessed
-	createdCodes   map[common.Hash][]byte // Contract codes that were created (deployed)
+	touches        [][]byte                 // Read/change set of account keys (account hashes)
+	storageTouches [][]byte                 // Read/change set of storage keys (account hashes concatenated with storage key hashes)
+	proofCodes     map[common.Hash]struct{} // Contract codes that have been accessed (codeHash)
+	createdCodes   map[common.Hash]struct{} // Contract codes that were created (deployed) (codeHash)
 }
 
 // NewResolveSetBuilder creates new ProofGenerator and initialised its maps
 func NewResolveSetBuilder() *ResolveSetBuilder {
 	return &ResolveSetBuilder{
-		proofCodes:   make(map[common.Hash][]byte),
-		createdCodes: make(map[common.Hash][]byte),
+		proofCodes:   make(map[common.Hash]struct{}),
+		createdCodes: make(map[common.Hash]struct{}),
 	}
 }
 
@@ -41,28 +41,28 @@ func (pg *ResolveSetBuilder) ExtractTouches() ([][]byte, [][]byte) {
 
 // extractCodeMap returns the map of all contract codes that were required during the block's execution
 // but were not created during that same block. It also clears the maps for the next block's execution
-func (pg *ResolveSetBuilder) extractCodeMap() map[common.Hash][]byte {
+func (pg *ResolveSetBuilder) extractCodeTouches() map[common.Hash]struct{} {
 	proofCodes := pg.proofCodes
-	pg.proofCodes = make(map[common.Hash][]byte)
-	pg.createdCodes = make(map[common.Hash][]byte)
+	pg.proofCodes = make(map[common.Hash]struct{})
+	pg.createdCodes = make(map[common.Hash]struct{})
 	return proofCodes
 }
 
 // ReadCode registers that given contract code has been accessed during current block's execution
-func (pg *ResolveSetBuilder) ReadCode(codeHash common.Hash, code []byte) {
+func (pg *ResolveSetBuilder) ReadCode(codeHash common.Hash) {
 	if _, ok := pg.createdCodes[codeHash]; !ok {
-		pg.proofCodes[codeHash] = code
+		pg.proofCodes[codeHash] = struct{}{}
 	}
 }
 
 // CreateCode registers that given contract code has been created (deployed) during current block's execution
-func (pg *ResolveSetBuilder) CreateCode(codeHash common.Hash, code []byte) {
+func (pg *ResolveSetBuilder) CreateCode(codeHash common.Hash) {
 	if _, ok := pg.proofCodes[codeHash]; !ok {
-		pg.createdCodes[codeHash] = code
+		pg.createdCodes[codeHash] = struct{}{}
 	}
 }
 
-func (pg *ResolveSetBuilder) Build(isBinary bool) (*ResolveSet, CodeMap) {
+func (pg *ResolveSetBuilder) Build(isBinary bool) *ResolveSet {
 	var rs *ResolveSet
 	if isBinary {
 		rs = NewBinaryResolveSet(0)
@@ -71,6 +71,7 @@ func (pg *ResolveSetBuilder) Build(isBinary bool) (*ResolveSet, CodeMap) {
 	}
 
 	touches, storageTouches := pg.ExtractTouches()
+	codeTouches := pg.extractCodeTouches()
 
 	for _, touch := range touches {
 		rs.AddKey(touch)
@@ -78,6 +79,9 @@ func (pg *ResolveSetBuilder) Build(isBinary bool) (*ResolveSet, CodeMap) {
 	for _, touch := range storageTouches {
 		rs.AddKey(touch)
 	}
-	codeMap := pg.extractCodeMap()
-	return rs, codeMap
+	for codeHash, _ := range codeTouches {
+		rs.AddCodeTouch(codeHash)
+	}
+
+	return rs
 }

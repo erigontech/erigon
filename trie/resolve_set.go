@@ -19,6 +19,8 @@ package trie
 import (
 	"bytes"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 // ResolveSet encapsulates the set of keys that are required to be fully available, or resolved
@@ -26,20 +28,21 @@ import (
 // pairs
 // DESCRIBED: docs/programmers_guide/guide.md#converting-sequence-of-keys-and-value-into-a-multiproof
 type ResolveSet struct {
-	inited    bool // Whether keys are sorted and "LTE" and "GT" indices set
-	binary    bool // if true, use binary encoding instead of Hex
-	minLength int  // Mininum length of prefixes for which `HashOnly` function can return `true`
-	lteIndex  int  // Index of the "LTE" key in the keys slice. Next one is "GT"
-	hexes     sortable
+	inited      bool // Whether keys are sorted and "LTE" and "GT" indices set
+	binary      bool // if true, use binary encoding instead of Hex
+	minLength   int  // Mininum length of prefixes for which `HashOnly` function can return `true`
+	lteIndex    int  // Index of the "LTE" key in the keys slice. Next one is "GT"
+	hexes       sortable
+	codeTouches map[common.Hash]struct{}
 }
 
 // NewResolveSet creates new ResolveSet
 func NewResolveSet(minLength int) *ResolveSet {
-	return &ResolveSet{minLength: minLength}
+	return &ResolveSet{minLength: minLength, codeTouches: make(map[common.Hash]struct{})}
 }
 
 func NewBinaryResolveSet(minLength int) *ResolveSet {
-	return &ResolveSet{minLength: minLength, binary: true}
+	return &ResolveSet{minLength: minLength, codeTouches: make(map[common.Hash]struct{}), binary: true}
 }
 
 // AddKey adds a new key (in KEY encoding) to the set
@@ -55,6 +58,16 @@ func (rs *ResolveSet) AddHex(hex []byte) {
 	} else {
 		rs.hexes = append(rs.hexes, hex)
 	}
+}
+
+// AddCodeTouch adds a new code touch into the resolve set
+func (rs *ResolveSet) AddCodeTouch(codeHash common.Hash) {
+	rs.codeTouches[codeHash] = struct{}{}
+}
+
+func (rs *ResolveSet) IsCodeTouched(codeHash common.Hash) bool {
+	_, ok := rs.codeTouches[codeHash]
+	return ok
 }
 
 func (rs *ResolveSet) ensureInited() {
