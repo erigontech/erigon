@@ -31,17 +31,22 @@ export default class ErrorCatcher extends React.Component {
     }
 
     render() {
-        let show = this.state.error !== undefined;
+        let err = this.state.error;
+        let show = err !== undefined;
         let info = this.state.errorInfo !== undefined ? this.state.errorInfo.componentStack : '';
         let details = process.env.NODE_ENV === 'development' ? info : '';
+
+        let serverErrors = err !== undefined && err.response !== undefined && Array.isArray(err.response.data) ? err.response.data : [];
+
         return (
             <div className={this.props.className}>
                 {this.props.children}
-                <Modal show={show} onHide={this.handleClose} respo>
+                <Modal show={show} onHide={this.handleClose} size="xl">
                     <Modal.Header>
                         <Modal.Title>Unexpected Error</Modal.Title>
                     </Modal.Header>
                     <Modal.Body>
+                        <code>Server Error: {serverErrors.join("<br/>")}</code>
                         <code>{this.state.error && this.state.error.message}</code>
                         <pre>{details}</pre>
                     </Modal.Body>

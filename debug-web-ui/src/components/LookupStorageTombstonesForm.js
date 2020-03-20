@@ -6,53 +6,69 @@ import {Spinner, Table} from 'react-bootstrap';
 
 import SearchField from './SearchField.js';
 
-const LookupStorageTombstonesForm = ({api}) => {
-    const [state, setState] = useState({hashes: undefined, loading: false});
+const search = (prefix, api, setState) => {
+    setState({hashes: undefined, loading: true});
 
-    const search = (prefix) => {
-        setState({hashes: undefined, error: undefined, loading: true})
-        api.lookupIntermediateHashes(prefix)
-            .then(lookupSuccess)
-            .catch(lookupFail)
-    }
     const lookupSuccess = (response) => setState({hashes: response.data, loading: false});
     const lookupFail = (error) => {
         setState({hashes: undefined, loading: false})
-        if (error) throw error
+
+        setState(() => {
+            throw error
+        })
     }
+    
+    return api.lookupStorageTombstones(prefix).then(lookupSuccess).catch(lookupFail);
+}
+
+const LookupStorageTombstonesForm = ({api}) => {
+    const [state, setState] = useState({hashes: undefined, loading: false});
 
     return (
         <div>
             {state.loading && <Spinner animation="border"/>}
-            {!state.loading && <SearchField placeholder="lookup by prefix" onClick={search}/>}
-
-            <hr/>
-            {state.hashes && <DetailsForm hashes={state.hashes}/>}
+            {!state.loading && <SearchField placeholder="lookup by prefix"
+                                            onClick={(prefix) => search(prefix, api, setState)}/>}
+            {state.hashes && <Details hashes={state.hashes}/>}
         </div>
     );
 }
 
-const DetailsForm = ({hashes}) => (
+const Details = ({hashes}) => (
     <Row>
         <Col>
-            <Table size="sm">
+            <Table size="sm" borderless>
                 <thead>
                 <tr>
                     <th><strong>Prefix</strong></th>
+                    <th><strong>Don't overlap other tomb</strong></th>
+                    <th><strong>Hide storage</strong></th>
                 </tr>
                 </thead>
                 <tbody>
-                {hashes.map((el, i) => <TableRow key={i} prefix={el}/>)}
+                {hashes.map((item, i) => <TableRow key={i} item={item}/>)}
                 </tbody>
             </Table>
         </Col>
     </Row>
 );
 
-const TableRow = ({prefix, value}) => (
-    <tr>
-        <td><code>{prefix}</code></td>
-    </tr>
-);
+const TableRow = ({item}) => {
+    const {prefix, dontOverlapOtherTomb, hideStorage} = item
+
+    return (
+        <tr>
+            <td className="text-monospace">
+                {prefix}
+            </td>
+            <td className={dontOverlapOtherTomb ? '' : 'bg-danger'}>
+                {dontOverlapOtherTomb ? 'yes' : 'no'}
+            </td>
+            <td className={hideStorage ? '' : 'bg-danger'}>
+                {hideStorage ? 'yes' : 'no'}
+            </td>
+        </tr>
+    );
+};
 
 export default LookupStorageTombstonesForm;

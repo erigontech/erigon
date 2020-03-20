@@ -19,6 +19,7 @@ package ethdb
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path"
 
@@ -41,6 +42,9 @@ type BoltDatabase struct {
 	db  *bolt.DB   // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 	id  uint64
+
+	stopNetInterface context.CancelFunc
+	netAddr          string
 }
 
 // NewBoltDatabase returns a BoltDB wrapper.
@@ -78,13 +82,6 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 		return nil
 	}); err != nil {
 		return nil, err
-	}
-
-	if debug.IsIntermediateTrieHash() {
-		_ = db.Update(func(tx *bolt.Tx) error {
-			_, _ = tx.CreateBucketIfNotExists(dbutils.IntermediateTrieHashBucket, false)
-			return nil
-		})
 	}
 
 	return &BoltDatabase{

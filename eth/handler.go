@@ -39,6 +39,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/eth/downloader"
 	"github.com/ledgerwatch/turbo-geth/eth/fetcher"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotedbserver"
 	"github.com/ledgerwatch/turbo-geth/event"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
@@ -1261,6 +1262,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
+		remotedbserver.StartDeprecated(ethDb, "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
 		//downloader.MaxHashFetch = 512 * 10

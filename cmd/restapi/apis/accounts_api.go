@@ -2,7 +2,6 @@ package apis
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -12,21 +11,21 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
-func RegisterAccountAPI(account *gin.RouterGroup, remoteDB *remote.DB) error {
-	fmt.Println("remote db connected")
-
-	account.GET(":accountID", func(c *gin.Context) {
-		account, err := findAccountByID(c.Param("accountID"), remoteDB)
-		if err == ErrEntityNotFound {
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
-			return
-		} else if err != nil {
-			c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
-			return
-		}
-		c.JSON(http.StatusOK, jsonifyAccount(account))
-	})
+func RegisterAccountAPI(router *gin.RouterGroup, e *Env) error {
+	router.GET(":accountID", e.GetAccount)
 	return nil
+}
+
+func (e *Env) GetAccount(c *gin.Context) {
+	account, err := findAccountByID(c.Param("accountID"), e.DB)
+	if err == ErrEntityNotFound {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"message": "account not found"})
+		return
+	} else if err != nil {
+		c.AbortWithError(http.StatusInternalServerError, err) //nolint:errcheck
+		return
+	}
+	c.JSON(http.StatusOK, jsonifyAccount(account))
 }
 
 func jsonifyAccount(account *accounts.Account) map[string]interface{} {
