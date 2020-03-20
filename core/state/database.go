@@ -1344,6 +1344,21 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
+func (tds *TrieDbState) ReadCodeByHash(codeHash common.Hash) (code []byte, err error) {
+	if bytes.Equal(codeHash[:], emptyCodeHash) {
+		return nil, nil
+	}
+
+	code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
+	if tds.resolveReads {
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.resolveSetBuilder.ReadCode(codeHash)
+	}
+	return code, err
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
