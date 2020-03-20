@@ -1,3 +1,7 @@
+## Target: 
+
+To build 1 key-value abstraction on top of Bolt, Badger and RemoteDB (our own read-only TCP protocol for key-value databases).
+
 ## Vision: 
 
 Ethereum gives users a powerful resource (which is hard to give) which is not explicitely priced - 
