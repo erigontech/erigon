@@ -39,8 +39,8 @@ func (pg *ResolveSetBuilder) ExtractTouches() ([][]byte, [][]byte) {
 	return touches, storageTouches
 }
 
-// extractCodeMap returns the map of all contract codes that were required during the block's execution
-// but were not created during that same block. It also clears the maps for the next block's execution
+// extractCodeTouches returns the set of all contract codes that were required during the block's execution
+// but were not created during that same block. It also clears the set for the next block's execution
 func (pg *ResolveSetBuilder) extractCodeTouches() map[common.Hash]struct{} {
 	proofCodes := pg.proofCodes
 	pg.proofCodes = make(map[common.Hash]struct{})
