@@ -214,11 +214,15 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
 		ok := false
-		stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
-		accountCode, ok = stackTop.(codeNode)
-		if !ok {
-			return fmt.Errorf(
-				"unexpected node type on the node stack, wanted codeNode, got %t:%s", stackTop, stackTop.fstring(""))
+		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
+			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
+				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
+				accountCode, ok = stackTop.(codeNode)
+				if !ok {
+					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %t:%s", stackTop, stackTop)
+				}
+			}
 		}
 		popped++
 	}

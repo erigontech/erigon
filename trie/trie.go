@@ -301,7 +301,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 
 	accNode, gotValue := t.getAccount(t.root, hex, 0)
 	if accNode == nil || !gotValue {
-		return errors.Wrapf(ethdb.ErrKeyNotFound, "%w: account not found with key: %x", key)
+		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
 	}
 
 	accNode.code = code

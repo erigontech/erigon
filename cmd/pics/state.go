@@ -39,7 +39,7 @@ func constructCodeMap(tds *state.TrieDbState) (map[common.Hash][]byte, error) {
 	return codeMap, nil
 }
 
-func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number int, keyCompression int, codeCompressed bool, valCompressed bool,
+func statePicture(t *trie.Trie, number int, keyCompression int, codeCompressed bool, valCompressed bool,
 	quadTrie bool, quadColors bool, highlights [][]byte) (*trie.Trie, error) {
 	filename := fmt.Sprintf("state_%d.dot", number)
 	f, err := os.Create(filename)
@@ -62,7 +62,6 @@ func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number int, keyC
 		FontColors:     fontColors,
 		Values:         true,
 		CutTerminals:   keyCompression,
-		CodeMap:        codeMap,
 		CodeCompressed: codeCompressed,
 		ValCompressed:  valCompressed,
 		ValHex:         true,
@@ -332,14 +331,10 @@ func initialState1() error {
 		return err
 	}
 	t := tds.Trie()
-	var codeMap map[common.Hash][]byte
-	if codeMap, err = constructCodeMap(tds); err != nil {
+	if _, err = statePicture(t, 0, 0, false, false, false, false, nil); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 0, 0, false, false, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, codeMap, 1, 48, false, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, 1, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 0); err != nil {
@@ -460,13 +455,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[0]}); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 1); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 2, 48, false, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, 2, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 
@@ -476,13 +468,10 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[1]}); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 2); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 3, 48, false, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, 3, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
 
@@ -492,19 +481,16 @@ func initialState1() error {
 	if _, err = blockchain.InsertChain(context.Background(), types.Blocks{blocks[2]}); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 3); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 4, 48, false, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, 4, 48, false, false, false, false, nil); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 5, 48, true, false, false, false, nil); err != nil {
+	if _, err = statePicture(t, 5, 48, true, false, false, false, nil); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 6, 48, true, true, false, false, nil); err != nil {
+	if _, err = statePicture(t, 6, 48, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -517,10 +503,7 @@ func initialState1() error {
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 4); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, codeMap, 7, 48, true, true, false, false, nil); err != nil {
+	if _, err = statePicture(t, 7, 48, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -533,10 +516,7 @@ func initialState1() error {
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, codeMap, 8, 54, true, true, false, false, nil); err != nil {
+	if _, err = statePicture(t, 8, 54, true, true, false, false, nil); err != nil {
 		return err
 	}
 
@@ -549,13 +529,10 @@ func initialState1() error {
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 5); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
+	if _, err = statePicture(t, 9, 54, true, true, false, false, nil); err != nil {
 		return err
 	}
-	if _, err = statePicture(t, codeMap, 9, 54, true, true, false, false, nil); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, codeMap, 10, 110, true, true, true, true, nil); err != nil {
+	if _, err = statePicture(t, 10, 110, true, true, true, true, nil); err != nil {
 		return err
 	}
 
@@ -568,10 +545,7 @@ func initialState1() error {
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 7); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
-	quadTrie, err := statePicture(t, codeMap, 11, 110, true, true, true, true, nil)
+	quadTrie, err := statePicture(t, 11, 110, true, true, true, true, nil)
 	if err != nil {
 		return err
 	}
@@ -586,10 +560,7 @@ func initialState1() error {
 	if err = stateDatabaseComparison(snapshotDb, dbBolt, 8); err != nil {
 		return err
 	}
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
-	if _, err = statePicture(t, codeMap, 12, 110, true, true, true, true, nil); err != nil {
+	if _, err = statePicture(t, 12, 110, true, true, true, true, nil); err != nil {
 		return err
 	}
 
@@ -607,23 +578,18 @@ func initialState1() error {
 		touchQuads = append(touchQuads, touchQuad)
 	}
 
-	if codeMap, err = constructCodeMap(tds); err != nil {
-		return err
-	}
-
 	var witness *trie.Witness
 
-	if witness, err = quadTrie.ExtractWitness(0, false, rs, codeMap); err != nil {
+	if witness, err = quadTrie.ExtractWitness(0, false, rs); err != nil {
 		return err
 	}
 
 	var witnessTrie *trie.Trie
-	var witnessCodeMap map[common.Hash][]byte
 
-	if witnessTrie, witnessCodeMap, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
+	if witnessTrie, err = trie.BuildTrieFromWitness(witness, false, false); err != nil {
 		return err
 	}
-	if _, err = statePicture(witnessTrie, witnessCodeMap, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
+	if _, err = statePicture(witnessTrie, 13, 110, true, true, false /*already quad*/, true, touchQuads); err != nil {
 		return err
 	}
 
@@ -632,7 +598,7 @@ func initialState1() error {
 	}
 
 	// Repeat the block witness illustration, but without any highlighted keys
-	if _, err = statePicture(witnessTrie, witnessCodeMap, 15, 110, true, true, false /*already quad*/, true, nil); err != nil {
+	if _, err = statePicture(witnessTrie, 15, 110, true, true, false /*already quad*/, true, nil); err != nil {
 		return err
 	}
 
