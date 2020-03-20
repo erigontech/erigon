@@ -123,12 +123,8 @@ type DbWithPendingMutations interface {
 	BatchSize() int
 }
 
-type HasDb interface {
-	DB() Database
-}
-
-type HasBolt interface {
-	DB() *bolt.DB
+type KV interface {
+	KV() *bolt.DB
 }
 
 type HasNetInterface interface {

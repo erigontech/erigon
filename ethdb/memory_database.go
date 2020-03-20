@@ -41,6 +41,7 @@ func NewMemDatabase() *BoltDatabase {
 	}); err != nil {
 		panic(err)
 	}
+
 	b := &BoltDatabase{
 		db:  db,
 		log: logger,

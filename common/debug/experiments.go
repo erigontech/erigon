@@ -64,3 +64,6 @@ func OverrideGetNodeData(val bool) {
 		atomic.StoreUint32(&getNodeData, gndInitializedFlag)
 	}
 }
+
+// --------------- Flags which are enabling additional runtime checks and asserts ----------------
+var IntermediateTrieHashAssertDbIntegrity = false

@@ -26,7 +26,7 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db ethdb.HasBolt, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
 			logger.Error("Could not close connection", "err", err1)
@@ -93,7 +93,7 @@ func Server(ctx context.Context, db ethdb.HasBolt, in io.Reader, out io.Writer, 
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.DB().Begin(false)
+			tx, err = db.KV().Begin(false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)
@@ -413,7 +413,7 @@ func Server(ctx context.Context, db ethdb.HasBolt, in io.Reader, out io.Writer, 
 				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
 			}
 
-			d := ethdb.NewWrapperBoltDatabase(db.DB())
+			d := ethdb.NewWrapperBoltDatabase(db.KV())
 
 			var err error
 			v, err = d.GetAsOf(bucket, hBucket, key, timestamp)
@@ -475,7 +475,7 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 var netAddr string
 var stopNetInterface context.CancelFunc
 
-func StartDeprecated(db ethdb.HasBolt, addr string) {
+func StartDeprecated(db ethdb.KV, addr string) {
 	if stopNetInterface != nil {
 		stopNetInterface()
 	}
@@ -515,7 +515,7 @@ func StartDeprecated(db ethdb.HasBolt, addr string) {
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listen(ctx context.Context, ln net.Listener, db ethdb.HasBolt) {
+func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
 	defer func() {
 		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)

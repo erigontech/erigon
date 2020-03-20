@@ -3,13 +3,14 @@ package migrations
 import (
 	"bytes"
 	"errors"
+	"time"
+
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"time"
 )
 
 var (
@@ -47,7 +48,7 @@ func splitChangeSetMigration(batchSize int) Migration {
 
 			startTime := time.Now()
 			for !done {
-				err := boltDB.DB().Update(func(tx *bolt.Tx) error {
+				err := boltDB.KV().Update(func(tx *bolt.Tx) error {
 					changesetBucket := tx.Bucket(ChangeSetBucket)
 					dbInfoBucket, err := tx.CreateBucketIfNotExists(dbutils.DatabaseInfoBucket, false)
 					if err != nil {

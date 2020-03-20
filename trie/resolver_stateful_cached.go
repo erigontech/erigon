@@ -184,12 +184,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.HasBolt); ok {
-		boltDb = hasBolt.DB()
-	} else if hasDb, ok := db.(ethdb.HasDb); ok {
-		if hasBolt, ok := hasDb.DB().(ethdb.HasBolt); ok {
-			boltDb = hasBolt.DB()
-		}
+	if hasBolt, ok := db.(ethdb.KV); ok {
+		boltDb = hasBolt.KV()
 	}
 
 	if boltDb == nil {
@@ -246,7 +242,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	//if blockNr > TraceFromBlock {
+	//if isAccount && fromCache {
 	//	buf := pool.GetBuffer(256)
 	//	CompressNibbles(kAsNibbles, &buf.B)
 	//	fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
@@ -364,24 +360,20 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		c := b.Cursor()
 
 		k, v := c.Seek(startkey)
-		cacheK, cacheV := cache.Seek(startkey)
+		cacheK, cacheV := cache.Seek(dbutils.RemoveIncarnationFromKey(startkey))
 
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			//if blockNr > TraceFromBlock {
-			//	fmt.Printf("For loop: %x, %x\n", cacheK, k)
+			//fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			//}
 
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
-				next, ok := nextSubtree(cacheK[:maxAccountKeyLen])
-				if !ok { // no siblings left in cache
-					cacheK, cacheV = nil, nil
-					continue
+				for len(cacheK) > maxAccountKeyLen {
+					cacheK, cacheV = cache.Next()
 				}
-				cacheK, cacheV = cache.SeekTo(next)
-				continue
 			}
 
 			fromCache, minKey = keyIsBefore(cacheK, k)
@@ -394,8 +386,12 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
 					}
 					startKeyIndex := minInt(len(startkey), fixedbytes-1)
-					if fromCache {
-						cmp = cmpWithoutIncarnation(minKey[:minKeyIndex], startkey[:startKeyIndex])
+
+					if fromCache && fixedbytes > 32 && fixedbytes <= 40 {
+						startKeyIndex = minInt(len(startkey), fixedbytes-1-8)
+						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+					} else if fromCache && fixedbytes > 40 {
+						cmp = bytes.Compare(minKey[:minKeyIndex], dbutils.RemoveIncarnationFromKey(startkey[:startKeyIndex]))
 					} else {
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 					}
@@ -415,10 +411,17 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					}
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
-						cacheK, cacheV = cache.SeekTo(startkey)
+						cacheK, cacheV = cache.SeekTo(dbutils.RemoveIncarnationFromKey(startkey))
+						// for Address bucket, skip cache keys longer than 31 bytes
+						if isAccountBucket && len(cacheK) > maxAccountKeyLen {
+							for len(cacheK) > maxAccountKeyLen {
+								cacheK, cacheV = cache.Next()
+							}
+						}
 						if k == nil && cacheK == nil {
 							return nil
 						}
+
 						fromCache, minKey = keyIsBefore(cacheK, k)
 					} else if cmp > 0 {
 						rangeIdx++
@@ -491,7 +494,15 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				cacheK, cacheV = nil, nil
 				continue
 			}
-			k, v = c.Seek(next)
+
+			if isAccountBucket {
+				k, v = c.Seek(next)
+			} else {
+				// skip subtree - can't .Seek because storage bucket has incarnation in keys
+				for k, v = c.Next(); bytes.HasPrefix(dbutils.RemoveIncarnationFromKey(k), cacheK); k, v = c.Next() {
+				}
+			}
+
 			cacheK, cacheV = cache.Seek(next)
 		}
 		return nil

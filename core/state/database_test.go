@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -1164,37 +1165,124 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	k1 := fmt.Sprintf("11%062x", 0)
 	k2 := fmt.Sprintf("2211%062x", 0)
 	k3 := fmt.Sprintf("2233%062x", 0)
-	prefix := dbutils.GenerateStoragePrefix(common.HexToHash(accKey), 1)
+	k4 := fmt.Sprintf("44%062x", 0)
 
-	storageKey := func(storageKey string) []byte {
-		return append(prefix, common.FromHex(storageKey)...)
+	storageKey := func(incarnation uint64, storageKey string) []byte {
+		return append(dbutils.GenerateStoragePrefix(common.HexToHash(accKey), incarnation), common.FromHex(storageKey)...)
 	}
 
-	putStorage := func(k string, v string) {
-		err := db.Put(dbutils.StorageBucket, storageKey(k), common.FromHex(v))
-		require.NoError(err)
-	}
-	putCache := func(k string, v string) {
-		err := db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(k), common.FromHex(v))
+	putStorage := func(incarnation uint64, k string, v string) {
+		err := db.Put(dbutils.StorageBucket, storageKey(incarnation, k), common.FromHex(v))
 		require.NoError(err)
 	}
 
-	putStorage(k1, "hi")
-	putStorage(k2, "hi")
-	putStorage(k3, "hi")
-	// don't put k4 yet
+	checkProps := func() {
+		if err := db.KV().View(func(tx *bolt.Tx) error {
+			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
-	putCache(accKey, "")
+			for k, v := inter.First(); k != nil; k, v = inter.Next() {
+				if len(v) > 0 {
+					continue
+				}
 
-	// step 1: re-create account
-	err := state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+				// 1 prefix must be covered only by 1 tombstone
+				from := append(k, []byte{0, 0}...)
+				for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
+					if !bytes.HasPrefix(overlapK, from) {
+						overlapK = nil
+					}
+					if len(overlapV) > 0 {
+						continue
+					}
+
+					if bytes.HasPrefix(overlapK, k) {
+						panic(fmt.Sprintf("%x is prefix of %x\n", overlapK, k))
+					}
+				}
+
+				addrHash := common.CopyBytes(k[:common.HashLength])
+				storageK, _ := storage.Seek(addrHash)
+				if !bytes.HasPrefix(storageK, addrHash) {
+					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				} else {
+					incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+					hideStorage := false
+					for ; incarnation > 0; incarnation-- {
+						kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+						kWithInc = append(kWithInc, k[common.HashLength:]...)
+						storageK, _ = storage.Seek(kWithInc)
+						if bytes.HasPrefix(storageK, kWithInc) {
+							hideStorage = true
+						}
+					}
+					if !hideStorage {
+						panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
+	//printBucket := func() {
+	//	fmt.Printf("IH bucket print\n")
+	//	_ = db.KV().View(func(tx *bolt.Tx) error {
+	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
+	//			if len(v) == 0 {
+	//				fmt.Printf("IH: %x\n", k)
+	//			}
+	//			return nil
+	//		})
+	//		return nil
+	//	})
+	//	fmt.Printf("IH bucket print END\n")
+	//}
+
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	encodedAcc := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(encodedAcc)
+	err := db.Put(dbutils.AccountsBucket, common.FromHex(accKey), encodedAcc)
 	require.NoError(err)
 
+	putStorage(2, k1, "hi")
+	putStorage(2, k2, "hi")
+	putStorage(2, k3, "hi")
+	putStorage(2, k4, "hi")
+
+	// step 1: delete account
+	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	untouchedAcc := fmt.Sprintf("99%062x", 0)
 	checks := map[string]bool{
+		accKey:       true,
+		untouchedAcc: false,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 2: re-create account
+	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
 		accKey:        false,
 		accKey + "11": true,
 		accKey + "22": true,
-		accKey + "aa": true,
+		accKey + "aa": false,
 	}
 
 	for k, expect := range checks {
@@ -1203,19 +1291,22 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		assert.Equal(expect, ok, k)
 	}
 
-	// step 2: re-create storage
-	someStorageExistsInThisSubtree1 := func(prefix []byte) bool {
-		return false
-	}
-
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree1, db, common.FromHex(accKey+k2))
+	// step 3: re-create storage
+	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k2))
 	require.NoError(err)
+	//printBucket()
+	checkProps()
 
 	checks = map[string]bool{
-		accKey + k2:         false,
-		accKey + "2200":     true,
-		accKey + "22ab":     true,
-		accKey + "22110099": true,
+		accKey + "11":     true,
+		accKey + k2:       false,
+		accKey + "22":     false,
+		accKey + "2200":   false,
+		accKey + "2211":   false,
+		accKey + "2233":   true,
+		accKey + "223300": false,
+		accKey + "22ab":   false,
+		accKey + "44":     true,
 	}
 
 	for k, expect := range checks {
@@ -1224,35 +1315,43 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		assert.Equal(expect, ok, k)
 	}
 
-	// step 3: create one new storage
-	someStorageExistsInThisSubtree2 := func(prefix []byte) bool {
-		if bytes.HasPrefix(common.FromHex(accKey+k3), prefix) {
-			return false
-		}
-		if bytes.HasPrefix(common.FromHex(accKey+k2), prefix) {
-			return true
-		}
-		return false
-	}
-
-	err = state.ClearTombstonesForNewStorage(someStorageExistsInThisSubtree2, db, common.FromHex(accKey+k3))
+	// step 4: create one new storage
+	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k4))
 	require.NoError(err)
+	//printBucket()
+	checkProps()
+
 	checks = map[string]bool{
-		accKey + k2:                            false, // results of step2 preserved
-		accKey + "22":                          false, // results of step2 preserved
-		accKey + "2211":                        false, // results of step2 preserved
-		accKey + "22110000":                    false, // results of step2 preserved
-		accKey + k3:                            false,
-		accKey + "223399":                      true,
-		accKey + fmt.Sprintf("2233%04x99", 0):  true,
-		accKey + fmt.Sprintf("2233%058x99", 0): true,  // len=64
-		accKey + fmt.Sprintf("2233%060x99", 0): false, // len=66, too long key
-		accKey + fmt.Sprintf("2233%062x99", 0): false, // len=68, too long key
+		accKey + k2:         false, // results of step2 preserved
+		accKey + "22":       false, // results of step2 preserved
+		accKey + "2211":     false, // results of step2 preserved
+		accKey + "22110000": false, // results of step2 preserved
+		accKey + "2233":     true,  // results of step2 preserved
+		accKey + "44":       false, // results of step2 preserved
 	}
 
 	for k, expect := range checks {
 		ok, err := state.HasTombstone(db, common.FromHex(k))
 		require.NoError(err, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 5: delete account again - it must remove all tombstones and keep only 1 which will cover account itself
+	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey:          true,
+		untouchedAcc:    false,
+		accKey + "2233": false, // was true on previous step
+
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
 }

@@ -516,7 +516,7 @@ func TestApiDetails(t *testing.T) {
 	})
 }
 
-func TestKeyIsBefore(t *testing.T) {
+func TestIsBefore(t *testing.T) {
 	assert := assert.New(t)
 
 	is, minKey := keyIsBefore([]byte("a"), []byte("b"))

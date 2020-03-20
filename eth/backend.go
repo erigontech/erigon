@@ -142,7 +142,7 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		if casted, ok := chainDb.(ethdb.HasBolt); ok {
+		if casted, ok := chainDb.(ethdb.KV); ok {
 			remotedbserver.StartDeprecated(casted, ctx.Config.RemoteDbListenAddress)
 		}
 	}

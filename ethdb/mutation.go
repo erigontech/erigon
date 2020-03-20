@@ -7,9 +7,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 )
@@ -93,8 +93,12 @@ type mutation struct {
 	db                      Database
 }
 
-func (m *mutation) DB() Database {
-	return m.db
+func (m *mutation) KV() *bolt.DB {
+	if casted, ok := m.db.(KV); !ok {
+		return nil
+	} else {
+		return casted.KV()
+	}
 }
 
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
