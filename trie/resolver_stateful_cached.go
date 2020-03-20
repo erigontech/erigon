@@ -346,7 +346,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		c := b.Cursor()
 
 		k, v := c.Seek(startkey)
-		cacheK, cacheV := cache.Seek(startkey)
+		cacheK, cacheV := cache.Seek(dbutils.RemoveIncarnationFromKey(startkey))
 
 		var minKey []byte
 		var fromCache bool
@@ -397,7 +397,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					}
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
-						cacheK, cacheV = cache.SeekTo(startkey)
+						cacheK, cacheV = cache.SeekTo(dbutils.RemoveIncarnationFromKey(startkey))
 						if k == nil && cacheK == nil {
 							return nil
 						}
