@@ -131,7 +131,7 @@ func TestCmdBucket(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket
 	var name = []byte("testbucket")
-	if err := db.DB().Update(func(tx *bolt.Tx) error {
+	if err := db.KV().Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket(name, false)
 		return err1
 	}); err != nil {
@@ -174,7 +174,7 @@ func TestCmdGet(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	if err := db.DB().Update(func(tx *bolt.Tx) error {
+	if err := db.KV().Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -249,7 +249,7 @@ func TestCmdSeek(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	if err := db.DB().Update(func(tx *bolt.Tx) error {
+	if err := db.KV().Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -323,7 +323,7 @@ func TestCursorOperations(t *testing.T) {
 	// ---------- End of boilerplate code
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
-	err := db.DB().Update(func(tx *bolt.Tx) error {
+	err := db.KV().Update(func(tx *bolt.Tx) error {
 		b, err1 := tx.CreateBucket(name, false)
 		require.NoError(err1)
 		err1 = b.Put([]byte(key1), []byte(value1))
@@ -433,7 +433,7 @@ func TestTxYield(t *testing.T) {
 	assert, db := assert.New(t), ethdb.NewMemDatabase()
 
 	// Create bucket
-	err := db.DB().Update(func(tx *bolt.Tx) error {
+	err := db.KV().Update(func(tx *bolt.Tx) error {
 		_, err1 := tx.CreateBucket([]byte("bucket"), false)
 		return err1
 	})
@@ -451,7 +451,7 @@ func TestTxYield(t *testing.T) {
 		}()
 
 		// Long read-only transaction
-		if err = db.DB().View(func(tx *bolt.Tx) error {
+		if err = db.KV().View(func(tx *bolt.Tx) error {
 			b := tx.Bucket([]byte("bucket"))
 			var keyBuf [8]byte
 			var i uint64
@@ -473,7 +473,7 @@ func TestTxYield(t *testing.T) {
 	}()
 
 	// Expand the database
-	err = db.DB().Update(func(tx *bolt.Tx) error {
+	err = db.KV().Update(func(tx *bolt.Tx) error {
 		b := tx.Bucket([]byte("bucket"))
 		var keyBuf, valBuf [8]byte
 		for i := uint64(0); i < 10000; i++ {
@@ -514,7 +514,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
 
-	err := db.DB().Update(func(tx *bolt.Tx) error {
+	err := db.KV().Update(func(tx *bolt.Tx) error {
 		bucket, err1 := tx.CreateBucket(name, false)
 		if err1 != nil {
 			return err1
@@ -598,7 +598,7 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 	// Create a bucket and populate some values
 	var name = []byte("testbucket")
 
-	err := db.DB().Update(func(tx *bolt.Tx) error {
+	err := db.KV().Update(func(tx *bolt.Tx) error {
 		bucket, err1 := tx.CreateBucket(name, false)
 		require.NoError(err1)
 
@@ -612,7 +612,7 @@ func BenchmarkBoltCursorFirst(b *testing.B) {
 	var k, v []byte
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		tx, err := db.DB().Begin(false)
+		tx, err := db.KV().Begin(false)
 		if err != nil {
 			panic(err)
 		}
