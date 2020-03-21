@@ -341,7 +341,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	buf := pool.GetBuffer(64)
 	defer pool.PutBuffer(buf)
 
-	return boltDb.Update(func(tx *bolt.Tx) error {
+	return boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
@@ -398,7 +398,7 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
-	if err := boltDb.Update(func(tx *bolt.Tx) error {
+	if err := boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
