@@ -1355,3 +1355,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		assert.Equal(expect, ok, k)
 	}
 }
+
+func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
+	assert.Fail(t, "not implemented")
+}
