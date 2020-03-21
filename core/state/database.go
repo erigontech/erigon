@@ -287,7 +287,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 			}()
 		}
 
-		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 		k, _ := storage.Seek(addrHashBytes)
@@ -309,7 +308,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				}
 
 				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				if err := interBucket.Put(kNoInc[:common.HashLength+1], []byte{}); err != nil {
+				if err := db.Put(dbutils.IntermediateTrieHashBucket,kNoInc[:common.HashLength+1], []byte{}); err != nil {
 					return err
 				}
 			}
@@ -366,7 +365,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 				continue
 			}
 
-			if err := interBucket.Delete(k); err != nil {
+			if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
 				return err
 			}
 		}
@@ -387,13 +386,19 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			return nil
 		}
 
-		return interBucket.Put(addrHash, []byte{})
+		return db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{})
 	})
 }
 
-func ClearTombstonesForNewStorage(db ethdb.KV, storageKeyNoInc []byte) error {
+func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
+	var boltDb *bolt.DB
+	if hasKV, ok := db.(ethdb.KV); ok {
+		boltDb = hasKV.KV()
+	} else {
+		return fmt.Errorf("only Bolt supported yet, given: %T", db)
+	}
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
-	if err := db.KV().Update(func(tx *bolt.Tx) error {
+	if err := boltDb.Update(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
@@ -434,11 +439,11 @@ func ClearTombstonesForNewStorage(db ethdb.KV, storageKeyNoInc []byte) error {
 					continue
 				}
 
-				if err := interBucket.Put(dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]), []byte{}); err != nil {
+				if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]), []byte{}); err != nil {
 					return err
 				}
 			}
-			if err := interBucket.Delete(storageKeyNoInc[:i]); err != nil {
+			if err := db.Delete(dbutils.IntermediateTrieHashBucket, storageKeyNoInc[:i]); err != nil {
 				return err
 			}
 			break
@@ -943,7 +948,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 					if forward {
 
 						if debug.IsIntermediateTrieHash() {
-							_ = ClearTombstonesForNewStorage(tds.db.(ethdb.KV), cKey)
+							_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						}
 
 						tds.t.Update(cKey, v)
