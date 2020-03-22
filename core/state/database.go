@@ -308,7 +308,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				}
 
 				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, kNoInc[:common.HashLength+1], []byte{}); err != nil {
+				if err := db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(kNoInc[:common.HashLength+1]), []byte{}); err != nil {
 					return err
 				}
 			}
@@ -365,7 +365,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 				continue
 			}
 
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
+			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(k)); err != nil {
 				return err
 			}
 		}
@@ -386,7 +386,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			return nil
 		}
 
-		return db.Put(dbutils.IntermediateTrieHashBucket, addrHash, []byte{})
+		return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
 	})
 }
 
@@ -448,7 +448,7 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 					return err
 				}
 			}
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, storageKeyNoInc[:i]); err != nil {
+			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
 				return err
 			}
 			break
