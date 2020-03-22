@@ -1255,7 +1255,10 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	putStorage(2, k4, "hi")
 
 	// step 1: delete account
-	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	batch := db.NewBatch()
+	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
 	require.NoError(err)
 	//printBucket()
 	checkProps()
@@ -1273,7 +1276,10 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 2: re-create account
-	err = state.ClearTombstonesForReCreatedAccount(db, common.HexToHash(accKey))
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForReCreatedAccount(batch, common.HexToHash(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
 	require.NoError(err)
 	//printBucket()
 	checkProps()
@@ -1292,7 +1298,10 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 3: re-create storage
-	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k2))
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k2))
+	require.NoError(err)
+	_, err = batch.Commit()
 	require.NoError(err)
 	//printBucket()
 	checkProps()
@@ -1303,7 +1312,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		accKey + "22":     false,
 		accKey + "2200":   false,
 		accKey + "2211":   false,
-		accKey + "2233":   true,
+		accKey + "2233":   false,
 		accKey + "223300": false,
 		accKey + "22ab":   false,
 		accKey + "44":     true,
@@ -1316,7 +1325,10 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 4: create one new storage
-	err = state.ClearTombstonesForNewStorage(db, common.FromHex(accKey+k4))
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k4))
+	require.NoError(err)
+	_, err = batch.Commit()
 	require.NoError(err)
 	//printBucket()
 	checkProps()
@@ -1326,7 +1338,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		accKey + "22":       false, // results of step2 preserved
 		accKey + "2211":     false, // results of step2 preserved
 		accKey + "22110000": false, // results of step2 preserved
-		accKey + "2233":     true,  // results of step2 preserved
+		accKey + "2233":     false, // results of step2 preserved
 		accKey + "44":       false, // results of step2 preserved
 	}
 
@@ -1337,7 +1349,10 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	// step 5: delete account again - it must remove all tombstones and keep only 1 which will cover account itself
-	err = state.PutTombstoneForDeletedAccount(db, common.FromHex(accKey))
+	batch = db.NewBatch()
+	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
 	require.NoError(err)
 	//printBucket()
 	checkProps()
