@@ -2,22 +2,6 @@
 
 To build 1 key-value abstraction on top of Bolt, Badger and RemoteDB (our own read-only TCP protocol for key-value databases).
 
-## Vision: 
-
-Ethereum gives users a powerful resource (which is hard to give) which is not explicitely priced - 
-transaction atomicity and "serialisable" isolation (the highest level of isolation you can get in the databases). 
-Which means that transaction does not even need to declare in advance what it wants to lock, the entire 
-state is deemed "locked" for its execution. I wonder if the weaker isolation models would make sense. 
-For example, ["read committed"](https://en.wikipedia.org/wiki/Isolation_(database_systems)#Read_committed)
-
-with the weaker isolation, you might be able to split any transaction into smaller parts, each of which 
-does not perform any Dynamic State Access (I have no proof of that though).
-
-It is similar to Tendermint strategy, but even more granular. You can view it as a support for "continuations". 
-Transactions starts, and whenever it hits dynamic access, its execution stops, gas is charged, and the continuation 
-is added to the state. Then, transaction can be resumed, because by committing to some continuation, it makes its 
-next dynamic state access static.
-
 ## Design principles:
 - No internal copies/allocations - all must be delegated to user. 
 Make it part of contract - written clearly in docs, because it's unsafe (unsafe to put slice to DB and then change it). 
