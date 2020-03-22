@@ -420,7 +420,7 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 
 		kWithInc := pool.GetBuffer(256)
 		defer pool.PutBuffer(kWithInc)
-
+		kWithInc.B = kWithInc.B[:0]
 		kWithInc.B = append(kWithInc.B, storageK[:common.HashLength+8]...)
 		kWithInc.B = append(kWithInc.B, storageKeyNoInc[common.HashLength:]...)
 
@@ -443,8 +443,8 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 					continue
 				}
 
-				dbutils.RemoveIncarnationFromKey(storageK[:i+1+8])
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]), []byte{}); err != nil {
+				k := dbutils.RemoveIncarnationFromKey(storageK[:i+1+8])
+				if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
 					return err
 				}
 			}

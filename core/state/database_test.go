@@ -1312,7 +1312,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		accKey + "22":     false,
 		accKey + "2200":   false,
 		accKey + "2211":   false,
-		accKey + "2233":   false,
+		accKey + "2233":   true,
 		accKey + "223300": false,
 		accKey + "22ab":   false,
 		accKey + "44":     true,
@@ -1338,7 +1338,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		accKey + "22":       false, // results of step2 preserved
 		accKey + "2211":     false, // results of step2 preserved
 		accKey + "22110000": false, // results of step2 preserved
-		accKey + "2233":     false, // results of step2 preserved
+		accKey + "2233":     true,  // results of step2 preserved
 		accKey + "44":       false, // results of step2 preserved
 	}
 
