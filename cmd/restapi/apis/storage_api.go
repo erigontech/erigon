@@ -1,7 +1,6 @@
 package apis
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -36,14 +35,11 @@ func findStorageByPrefix(prefixS string, remoteDB ethdb.KV) ([]*StorageResponse,
 	var results []*StorageResponse
 	prefix := common.FromHex(prefixS)
 	if err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(200)
+		c := tx.Bucket(dbutils.StorageBucket).Cursor().Prefix(prefix).Prefetch(200)
 
-		for k, v, err := c.Seek(prefix); k != nil || err != nil; k, v, err = c.Next() {
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if !bytes.HasPrefix(k, prefix) {
-				return nil
 			}
 
 			results = append(results, &StorageResponse{

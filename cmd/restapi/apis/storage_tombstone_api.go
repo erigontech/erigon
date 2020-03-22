@@ -139,7 +139,6 @@ func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error)
 	res = append(res, check2)
 
 	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefetch(1000)
-	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefetch(10)
 	storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(10)
 
 	for k, v, err := inter.First(); k != nil || err != nil; k, v, err = inter.Next() {
@@ -151,13 +150,11 @@ func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error)
 		}
 
 		// 1 prefix must be covered only by 1 tombstone
-		from := append(k, []byte{0, 0}...)
-		for overlapK, overlapV, err := cOverlap.Seek(from); overlapK != nil || err != nil; overlapK, overlapV, err = cOverlap.Next() {
+		pref := append(k, []byte{0, 0}...)
+		c2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefix(pref).Prefetch(10)
+		for overlapK, overlapV, err := c2.First(); overlapK != nil || err != nil; overlapK, overlapV, err = c2.Next() {
 			if err != nil {
 				return nil, err
-			}
-			if !bytes.HasPrefix(overlapK, from) {
-				overlapK = nil
 			}
 			if len(overlapV) > 0 {
 				continue
