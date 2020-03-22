@@ -47,15 +47,12 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB ethdb.KV) ([]*Storage
 		c := interBucket.Cursor()
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(1)
 
-		for k, v, err := c.Seek(prefix); k != nil || err != nil; k, v, err = c.Next() {
+		for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
 			}
-			if !bytes.HasPrefix(k, prefix) {
-				return nil
-			}
 
-			if len(v) > 0 {
+			if vSize > 0 {
 				continue
 			}
 
