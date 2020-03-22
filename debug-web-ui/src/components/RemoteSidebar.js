@@ -18,7 +18,7 @@ const RestApiForm = ({host, port, onApiChange}) => {
         e.preventDefault();
         setShow(false);
         let form = e.target;
-        onApiChange({host:form.elements.host.value, port:form.elements.port.value});
+        onApiChange({host: form.elements.host.value, port: form.elements.port.value});
     }
 
     const handleClick = (e) => {
@@ -32,18 +32,13 @@ const RestApiForm = ({host, port, onApiChange}) => {
                 Rest API<br/>
                 {host && host + ':' + port}
             </a>
-            <Modal show={show} onHide={() => setShow(false)}>
-                <Modal.Header>
-                    <Modal.Title>Rest API</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    <Form onSubmit={handleSubmit}>
-                        <Input label="Host" defaultValue={host}/>
-                        <Input label="Port" defaultValue={port}/>
-                        <Button type="submit">Submit</Button>
-                    </Form>
-                </Modal.Body>
-            </Modal>
+            <ModalWindow title="Rest API" show={show} onHide={() => setShow(false)}>
+                <Form onSubmit={handleSubmit}>
+                    <Input label="Host" defaultValue={host}/>
+                    <Input label="Port" defaultValue={port}/>
+                    <Button type="submit">Submit</Button>
+                </Form>
+            </ModalWindow>
         </div>
     );
 }
@@ -95,22 +90,17 @@ const RemoteDBForm = ({api}) => {
 
     return (
         <div className="pl-2 mb-2 font-weight-light text-break">
-            <a href="/remote-db"  onClick={handleClick}>
+            <a href="/remote-db" onClick={handleClick}>
                 Remote DB<br/>
                 {host && host + ':' + port}
             </a>
-            <Modal show={show} onHide={() => setShow(false)}>
-                <Modal.Header>
-                    <Modal.Title>Remote DB</Modal.Title>
-                </Modal.Header>
-                <Modal.Body>
-                    <Form onSubmit={handleSubmit}>
-                        <Input label="Host" defaultValue={host}/>
-                        <Input label="Port" defaultValue={port}/>
-                        <Button type="submit">Submit</Button>
-                    </Form>
-                </Modal.Body>
-            </Modal>
+            <ModalWindow title="Remote DB" show={show} onHide={() => setShow(false)}>
+                <Form onSubmit={handleSubmit}>
+                    <Input label="Host" defaultValue={host}/>
+                    <Input label="Port" defaultValue={port}/>
+                    <Button type="submit">Submit</Button>
+                </Form>
+            </ModalWindow>
         </div>
     );
 }
@@ -126,6 +116,17 @@ const Input = ({label, ...props}) => (
             {...props}
         />
     </Form.Group>
+)
+
+const ModalWindow = ({children, title, ...props}) => (
+    <Modal {...props}>
+        <Modal.Header>
+            <Modal.Title>{title}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+            {children}
+        </Modal.Body>
+    </Modal>
 )
 
 export default RemoteSidebar;

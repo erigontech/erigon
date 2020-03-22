@@ -134,7 +134,7 @@ func BenchmarkCursor(b *testing.B) {
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
-				bucket := tx.Bucket(dbutils.AccountsBucket).bucket.Cursor()
+				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
 				for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 					if err != nil {
 						return err
