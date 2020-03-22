@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func RegisterRemoteDBAPI(router *gin.RouterGroup, e *Env) error {
@@ -17,7 +17,8 @@ func RegisterRemoteDBAPI(router *gin.RouterGroup, e *Env) error {
 
 func (e *Env) GetDB(c *gin.Context) {
 	var host, port string
-	split := strings.Split(e.DB.GetDialAddr(), ":")
+
+	split := strings.Split(e.DB.Options().Remote.DialAddress, ":")
 	if len(split) == 2 {
 		host, port = split[0], split[1]
 	}
@@ -26,7 +27,7 @@ func (e *Env) GetDB(c *gin.Context) {
 
 func (e *Env) PostDB(c *gin.Context) {
 	newAddr := c.Query("host") + ":" + c.Query("port")
-	remoteDB, err := remote.Open(context.Background(), remote.DefaultOpts.Addr(newAddr))
+	remoteDB, err := ethdb.NewRemote().Path(newAddr).Open(context.TODO())
 	if err != nil {
 		c.Error(err) //nolint:errcheck
 		return

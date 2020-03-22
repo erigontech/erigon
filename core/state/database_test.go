@@ -1215,7 +1215,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 
 	//printBucket := func() {
 	//	fmt.Printf("IH bucket print\n")
-	//	_ = db.KV().View(func(tx *bolt.Tx) error {
+	//	_ = db.HasKV().View(func(tx *bolt.Tx) error {
 	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
 	//			if len(v) == 0 {
 	//				fmt.Printf("IH: %x\n", k)

@@ -16,8 +16,8 @@ import (
 
 var boltOriginDb *bolt.DB
 var badgerOriginDb *badger.DB
-var boltDb ethdb.DB
-var badgerDb ethdb.DB
+var boltDb ethdb.KV
+var badgerDb ethdb.KV
 
 func TestMain(m *testing.M) {
 	setupDatabases()
@@ -134,9 +134,7 @@ func BenchmarkCursor(b *testing.B) {
 	b.Run("abstract bolt", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := boltDb.View(ctx, func(tx ethdb.Tx) error {
-				bucket := tx.Bucket(dbutils.AccountsBucket)
-				c := bucket.Cursor()
-
+				bucket := tx.Bucket(dbutils.AccountsBucket).bucket.Cursor()
 				for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 					if err != nil {
 						return err

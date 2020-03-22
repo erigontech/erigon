@@ -26,7 +26,7 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
 		if err1 := closer.Close(); err1 != nil {
 			logger.Error("Could not close connection", "err", err1)
@@ -475,7 +475,7 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 var netAddr string
 var stopNetInterface context.CancelFunc
 
-func StartDeprecated(db ethdb.KV, addr string) {
+func StartDeprecated(db ethdb.HasKV, addr string) {
 	if stopNetInterface != nil {
 		stopNetInterface()
 	}
@@ -515,7 +515,7 @@ func StartDeprecated(db ethdb.KV, addr string) {
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
+func Listen(ctx context.Context, ln net.Listener, db ethdb.HasKV) {
 	defer func() {
 		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)

@@ -123,7 +123,7 @@ type DbWithPendingMutations interface {
 	BatchSize() int
 }
 
-type KV interface {
+type HasKV interface {
 	KV() *bolt.DB
 }
 

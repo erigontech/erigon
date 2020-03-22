@@ -94,7 +94,7 @@ type mutation struct {
 }
 
 func (m *mutation) KV() *bolt.DB {
-	if casted, ok := m.db.(KV); !ok {
+	if casted, ok := m.db.(HasKV); !ok {
 		return nil
 	} else {
 		return casted.KV()
