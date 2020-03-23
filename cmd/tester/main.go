@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/ioutil"
-	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
@@ -38,6 +38,8 @@ var (
 )
 
 func init() {
+	setupLogger()
+
 	// Initialize the CLI app and start Geth
 	app.Action = tester
 	app.HideVersion = true // we have a command to print the version
@@ -63,13 +65,14 @@ func init() {
 
 	app.Commands = []cli.Command{
 		{
-			Action:    utils.MigrateFlags(genesisCmd),
-			Name:      "genesis",
-			Usage:     "Initialize the signer, generate secret storage",
-			ArgsUsage: "",
-			Description: `
-The init command generates a master seed which Clef can use to store credentials and data needed for
-the rule-engine to work.`,
+			Action: utils.MigrateFlags(genesisCmd),
+			Name:   "genesis",
+			Usage:  "Produce genesis.json file for geth",
+		},
+		{
+			Action: utils.MigrateFlags(mgrCmd),
+			Name:   "mgr",
+			Usage:  "MGR (aka Marry-Go-Round) protocol to swarm-full-sync",
 		},
 	}
 
@@ -80,18 +83,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-}
-
-func genesisCmd(c *cli.Context) error {
-	res, err := json.Marshal(genesis())
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(os.Stdout, string(res))
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func rootContext() context.Context {
@@ -112,9 +103,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func tester(cliCtx *cli.Context) error {
-	ctx := rootContext()
-
+func setupLogger() {
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -129,30 +118,15 @@ func tester(cliCtx *cli.Context) error {
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
 	glogger.Verbosity(log.LvlTrace)
+}
 
-	go func() {
-		log.Info("HTTP", "error", http.ListenAndServe("localhost:6060", nil))
-	}()
-
-	var enodeAddress string
-	if len(cliCtx.Args()) < 1 {
-		addr, err := ioutil.ReadFile(p2p.EnodeAddressFileName)
-		if err != nil {
-			return err
-		}
-		enodeAddress = string(addr)
-	} else {
-		enodeAddress = cliCtx.Args()[0]
-	}
-	if enodeAddress == "" {
-		fmt.Printf("Usage: tester <enode>\n")
-		return nil
-	}
-	nodeToConnect, err := enode.ParseV4(enodeAddress)
+func tester(cliCtx *cli.Context) error {
+	ctx := rootContext()
+	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {
-		panic(fmt.Sprintf("Could not parse the node info: %v", err))
+		return err
 	}
-	fmt.Printf("Parsed node: %s, IP: %s\n", nodeToConnect, nodeToConnect.IP())
+
 	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
@@ -170,32 +144,8 @@ func tester(cliCtx *cli.Context) error {
 	}
 	defer tp.forkFeeder.Close()
 	tp.protocolVersion = uint32(eth.ProtocolVersions[2])
-	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = params.MainnetGenesisHash
-	serverKey, err := crypto.GenerateKey()
-	if err != nil {
-		panic(fmt.Sprintf("Failed to generate server key: %v", err))
-	}
-	p2pConfig := p2p.Config{}
-	p2pConfig.PrivateKey = serverKey
-	p2pConfig.Name = "geth tester"
-	p2pConfig.Logger = log.New()
-	p2pConfig.MaxPeers = 1
-	p2pConfig.Protocols = []p2p.Protocol{
-		{
-			Name:    eth.ProtocolName,
-			Version: eth.ProtocolVersions[2],
-			Length:  eth.ProtocolLengths[eth.ProtocolVersions[2]],
-			Run:     tp.protocolRun,
-		},
-		{
-			Name:    eth.DebugName,
-			Version: eth.DebugVersions[0],
-			Length:  eth.DebugLengths[eth.DebugVersions[0]],
-			Run:     tp.debugProtocolRun,
-		},
-	}
-	server := &p2p.Server{Config: p2pConfig}
+	server := makeP2PServer(tp, []string{eth.ProtocolName, eth.DebugName})
 	// Add protocol
 	if err := server.Start(); err != nil {
 		panic(fmt.Sprintf("Could not start server: %v", err))
@@ -204,4 +154,98 @@ func tester(cliCtx *cli.Context) error {
 
 	_ = <-ctx.Done()
 	return nil
+}
+
+func genesisCmd(cliCtx *cli.Context) error {
+	res, err := json.Marshal(genesis())
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(os.Stdout, string(res))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func mgrCmd(cliCtx *cli.Context) error {
+	ctx := rootContext()
+	nodeToConnect, err := getTargetAddr(cliCtx)
+	if err != nil {
+		return err
+	}
+
+	tp := NewTesterProtocol()
+	server := makeP2PServer(tp, []string{eth.MGRName})
+
+	// Add protocol
+	if err := server.Start(); err != nil {
+		panic(fmt.Sprintf("Could not start server: %v", err))
+	}
+	server.AddPeer(nodeToConnect)
+
+	_ = <-ctx.Done()
+	return nil
+}
+
+func makeP2PServer(tp *TesterProtocol, protocols []string) *p2p.Server {
+	serverKey, err := crypto.GenerateKey()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to generate server key: %v", err))
+	}
+
+	p2pConfig := p2p.Config{}
+	p2pConfig.PrivateKey = serverKey
+	p2pConfig.Name = "geth tester"
+	p2pConfig.Logger = log.New()
+	p2pConfig.MaxPeers = 1
+	p2pConfig.Protocols = []p2p.Protocol{}
+	pMap := map[string]p2p.Protocol{
+		eth.ProtocolName: {
+			Name:    eth.ProtocolName,
+			Version: eth.ProtocolVersions[2],
+			Length:  eth.ProtocolLengths[eth.ProtocolVersions[2]],
+			Run:     tp.protocolRun,
+		},
+		eth.DebugName: {
+			Name:    eth.DebugName,
+			Version: eth.DebugVersions[0],
+			Length:  eth.DebugLengths[eth.DebugVersions[0]],
+			Run:     tp.debugProtocolRun,
+		},
+		eth.MGRName: {
+			Name:    eth.MGRName,
+			Version: eth.MGRVersions[0],
+			Length:  eth.MGRLengths[eth.MGRVersions[0]],
+			Run:     tp.mgrProtocolRun,
+		},
+	}
+
+	for _, protocolName := range protocols {
+		p2pConfig.Protocols = append(p2pConfig.Protocols, pMap[protocolName])
+	}
+	return &p2p.Server{Config: p2pConfig}
+}
+
+func getTargetAddr(cliCtx *cli.Context) (*enode.Node, error) {
+	var enodeAddress string
+	if len(cliCtx.Args()) < 1 {
+		addr, err := ioutil.ReadFile(p2p.EnodeAddressFileName)
+		if err != nil {
+			return nil, err
+		}
+		enodeAddress = string(addr)
+	} else {
+		enodeAddress = cliCtx.Args()[0]
+	}
+	if enodeAddress == "" {
+		return nil, errors.New("Usage: tester <enode>\n")
+	}
+	nodeToConnect, err := enode.ParseV4(enodeAddress)
+	if err != nil {
+		return nil, fmt.Errorf("could not parse the node info: %w", err)
+	}
+	fmt.Printf("Parsed node: %s, IP: %s\n", nodeToConnect, nodeToConnect.IP())
+
+	return nodeToConnect, nil
 }

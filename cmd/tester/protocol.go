@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type statusData struct {
@@ -53,6 +55,50 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 	result := (tp.blockMarkers[blockNumber/64] & bitMask) != 0
 	tp.blockMarkers[blockNumber/64] |= bitMask
 	return result
+}
+
+func (tp *TesterProtocol) mgrProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	prefixes := [][]byte{
+		{1, 1, 1, 1, 1, 1},
+		{2, 2, 2, 2, 2, 2},
+		{3, 3, 3, 3, 3, 3},
+	}
+	err := p2p.Send(rw, eth.MGRStatus, prefixes)
+	if err != nil {
+		panic(err)
+	}
+
+	startTime := time.Now()
+
+	i := 0
+	j := 0
+	for {
+		msg, err := rw.ReadMsg()
+		if err != nil {
+			fmt.Printf("Failed to recevied DebugSetGenesisMsg message from peer: %v\n", err)
+			return err
+		}
+		switch msg.Code {
+		case eth.MGRWitness:
+			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+			var marshaledWitness []byte
+			if err := msgStream.Decode(&marshaledWitness); err != nil {
+				return fmt.Errorf("msgStream.Decode: %w", err)
+			}
+
+			res, err := trie.NewWitnessFromReader(bytes.NewReader(marshaledWitness), false)
+			if err != nil {
+				panic(err)
+			}
+
+			i += len(res.Operators)
+			j++
+			if j%10 == 0 {
+				ms := float64(time.Since(startTime).Milliseconds())
+				fmt.Printf("Messages: %f/sec, Operators: %f/sec\n", (float64(i) / ms * 1000), (float64(j) / ms * 1000))
+			}
+		}
+	}
 }
 
 func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {

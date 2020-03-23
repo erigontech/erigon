@@ -1609,6 +1609,25 @@ func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness
 	return tds.makeBlockWitness(trace, rs, isBinary)
 }
 
+// ExtractWitness produces block witness for the block just been processed, in a serialised form
+func (tds *TrieDbState) ExtractWitnessForPrefix(prefix []byte, trace bool, isBinary bool) (*trie.Witness, error) {
+	rs, codeMap := tds.resolveSetBuilder.Build(isBinary)
+
+	return tds.makeBlockWitnessForPrefix(prefix, trace, rs, codeMap, isBinary)
+}
+
+func (tds *TrieDbState) makeBlockWitnessForPrefix(prefix []byte, trace bool, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, isBinary bool) (*trie.Witness, error) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+
+	t := tds.t
+	if isBinary {
+		t = trie.HexToBin(tds.t).Trie()
+	}
+
+	return t.ExtractWitnessForPrefix(prefix, tds.blockNr, trace, rs, codeMap)
+}
+
 func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
