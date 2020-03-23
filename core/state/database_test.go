@@ -1179,7 +1179,6 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps := func() {
 		if err := db.KV().View(func(tx *bolt.Tx) error {
 			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 			for k, v := inter.First(); k != nil; k, v = inter.Next() {
@@ -1187,21 +1186,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 					continue
 				}
 
-				// 1 prefix must be covered only by 1 tombstone
-				from := append(k, []byte{0, 0}...)
-				for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
-					if !bytes.HasPrefix(overlapK, from) {
-						overlapK = nil
-					}
-					if len(overlapV) > 0 {
-						continue
-					}
-
-					if bytes.HasPrefix(overlapK, k) {
-						panic(fmt.Sprintf("%x is prefix of %x\n", overlapK, k))
-					}
-				}
-
+				// each tomb must cover storage
 				addrHash := common.CopyBytes(k[:common.HashLength])
 				storageK, _ := storage.Seek(addrHash)
 				if !bytes.HasPrefix(storageK, addrHash) {
@@ -1358,10 +1343,12 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps()
 
 	checks = map[string]bool{
-		accKey:          true,
-		untouchedAcc:    false,
-		accKey + "2233": false, // was true on previous step
+		accKey:       true,
+		untouchedAcc: false,
 
+		// accKey + "2233" was true on previous step, don't delete this tombstone even one with shorter prefix exists.
+		// Because account creation must do predictable amount of operations.
+		accKey + "2233": true,
 	}
 
 	for k, expect := range checks {
