@@ -278,6 +278,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
+	var toPut [][]byte
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
@@ -297,7 +298,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
 		for ; incarnation > 0; incarnation-- {
 			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
-
 			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
 				if !bytes.HasPrefix(k, accWithInc) {
 					k = nil
@@ -308,15 +308,17 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				}
 
 				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(kNoInc[:common.HashLength+1]), []byte{}); err != nil {
-					return err
-				}
+				toPut = append(toPut, common.CopyBytes(kNoInc[:common.HashLength+1]))
 			}
 		}
-
 		return nil
 	}); err != nil {
 		return err
+	}
+	for _, k := range toPut {
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
+			return err
+		}
 	}
 
 	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
@@ -341,7 +343,8 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	buf := pool.GetBuffer(64)
 	defer pool.PutBuffer(buf)
 
-	return boltDb.View(func(tx *bolt.Tx) error {
+	hasStorage := false
+	if err := boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
@@ -350,28 +353,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			}()
 		}
 
-		// cleanup all previous under given account
-		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		c := interBucket.Cursor()
-		for k, v := c.Seek(addrHash); k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, addrHash) {
-				k = nil
-			}
-			if k == nil {
-				break
-			}
-
-			if len(v) > 0 {
-				continue
-			}
-
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(k)); err != nil {
-				return err
-			}
-		}
-
 		// place 1 tombstone to account if it has storage
-		hasStorage := false
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 		k, _ := storage.Seek(addrHash)
 		if !bytes.HasPrefix(k, addrHash) {
@@ -382,12 +364,16 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			hasStorage = true
 		}
 
-		if !hasStorage {
-			return nil
-		}
+		return nil
+	}); err != nil {
+		return err
+	}
 
-		return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
-	})
+	if !hasStorage {
+		return nil
+	}
+
+	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
 }
 
 func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
@@ -398,6 +384,9 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
+
+	var toPut [][]byte
+	var toDelete [][]byte
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
@@ -443,19 +432,26 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 					continue
 				}
 
-				k := dbutils.RemoveIncarnationFromKey(storageK[:i+1+8])
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-					return err
-				}
+				toPut = append(toPut, dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]))
 			}
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
-				return err
-			}
+			toDelete = append(toDelete, common.CopyBytes(storageKeyNoInc[:i]))
 			break
 		}
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	for _, k := range toPut {
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
+			return err
+		}
+	}
+
+	for _, k := range toDelete {
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
+			return err
+		}
 	}
 
 	return nil

@@ -41,7 +41,6 @@ const Details = ({hashes}) => (
                 <thead>
                 <tr>
                     <th><strong>Prefix</strong></th>
-                    <th><strong>Don't overlap other tomb</strong></th>
                     <th><strong>Hide storage</strong></th>
                 </tr>
                 </thead>
@@ -54,15 +53,12 @@ const Details = ({hashes}) => (
 );
 
 const TableRow = ({item}) => {
-    const {prefix, dontOverlapOtherTomb, hideStorage} = item
+    const {prefix,  hideStorage} = item
 
     return (
         <tr>
             <td className="text-monospace">
                 {prefix}
-            </td>
-            <td className={dontOverlapOtherTomb ? '' : 'bg-danger'}>
-                {dontOverlapOtherTomb ? 'yes' : 'no'}
             </td>
             <td className={hideStorage ? '' : 'bg-danger'}>
                 {hideStorage ? 'yes' : 'no'}

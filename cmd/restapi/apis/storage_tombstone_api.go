@@ -35,9 +35,8 @@ func (e *Env) FindStorageTombstone(c *gin.Context) {
 }
 
 type StorageTombsResponse struct {
-	Prefix               string `json:"prefix"`
-	DontOverlapOtherTomb bool   `json:"dontOverlapOtherTomb"`
-	HideStorage          bool   `json:"hideStorage"`
+	Prefix      string `json:"prefix"`
+	HideStorage bool   `json:"hideStorage"`
 }
 
 func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*StorageTombsResponse, error) {
@@ -46,7 +45,6 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 	if err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
 		c := interBucket.Cursor(remote.DefaultCursorOpts.PrefetchValues(true))
-		cOverlap := interBucket.Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(1))
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor(remote.DefaultCursorOpts.PrefetchValues(false).PrefetchSize(1))
 
 		for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
@@ -59,25 +57,6 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 
 			if len(v) > 0 {
 				continue
-			}
-
-			// 1 prefix must be covered only by 1 tombstone
-			overlap := false
-			from := append(k, []byte{0, 0}...)
-			for overlapK, v, err := cOverlap.Seek(from); overlapK != nil; overlapK, v, err = cOverlap.Next() {
-				if err != nil {
-					return err
-				}
-				if !bytes.HasPrefix(overlapK, from) {
-					overlapK = nil
-				}
-				if len(v) > 0 {
-					continue
-				}
-
-				if bytes.HasPrefix(overlapK, k) {
-					overlap = true
-				}
 			}
 
 			// each tomb must cover storage
@@ -108,16 +87,14 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB *remote.DB) ([]*Stora
 			}
 
 			results = append(results, &StorageTombsResponse{
-				Prefix:               fmt.Sprintf("%x\n", k),
-				DontOverlapOtherTomb: !overlap,
-				HideStorage:          hideStorage,
+				Prefix:      fmt.Sprintf("%x\n", k),
+				HideStorage: hideStorage,
 			})
 
 			if len(results) > 50 {
 				results = append(results, &StorageTombsResponse{
-					Prefix:               "too much results",
-					DontOverlapOtherTomb: true,
-					HideStorage:          true,
+					Prefix:      "too much results",
+					HideStorage: true,
 				})
 				return nil
 			}
