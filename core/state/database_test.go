@@ -1343,10 +1343,12 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps()
 
 	checks = map[string]bool{
-		accKey:          true,
-		untouchedAcc:    false,
-		accKey + "2233": false, // was true on previous step
+		accKey:       true,
+		untouchedAcc: false,
 
+		// accKey + "2233" was true on previous step, don't delete this tombstone even one with shorter prefix exists.
+		// Because account creation must do predictable amount of operations.
+		accKey + "2233": true,
 	}
 
 	for k, expect := range checks {
