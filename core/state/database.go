@@ -963,6 +963,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:])
+				delete(b.codeUpdates, addrHash)
 			}
 		}
 
