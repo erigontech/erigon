@@ -145,7 +145,7 @@ func tester(cliCtx *cli.Context) error {
 	defer tp.forkFeeder.Close()
 	tp.protocolVersion = uint32(eth.ProtocolVersions[2])
 	tp.genesisBlockHash = params.MainnetGenesisHash
-	server := makeP2PServer(tp, []string{eth.ProtocolName, eth.DebugName})
+	server := makeP2PServer(ctx, tp, []string{eth.ProtocolName, eth.DebugName})
 	// Add protocol
 	if err := server.Start(); err != nil {
 		panic(fmt.Sprintf("Could not start server: %v", err))
@@ -176,7 +176,7 @@ func mgrCmd(cliCtx *cli.Context) error {
 	}
 
 	tp := NewTesterProtocol()
-	server := makeP2PServer(tp, []string{eth.MGRName})
+	server := makeP2PServer(ctx, tp, []string{eth.MGRName})
 
 	// Add protocol
 	if err := server.Start(); err != nil {
@@ -188,7 +188,7 @@ func mgrCmd(cliCtx *cli.Context) error {
 	return nil
 }
 
-func makeP2PServer(tp *TesterProtocol, protocols []string) *p2p.Server {
+func makeP2PServer(ctx context.Context, tp *TesterProtocol, protocols []string) *p2p.Server {
 	serverKey, err := crypto.GenerateKey()
 	if err != nil {
 		panic(fmt.Sprintf("Failed to generate server key: %v", err))
@@ -205,19 +205,25 @@ func makeP2PServer(tp *TesterProtocol, protocols []string) *p2p.Server {
 			Name:    eth.ProtocolName,
 			Version: eth.ProtocolVersions[2],
 			Length:  eth.ProtocolLengths[eth.ProtocolVersions[2]],
-			Run:     tp.protocolRun,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+				return tp.protocolRun(ctx, peer, rw)
+			},
 		},
 		eth.DebugName: {
 			Name:    eth.DebugName,
 			Version: eth.DebugVersions[0],
 			Length:  eth.DebugLengths[eth.DebugVersions[0]],
-			Run:     tp.debugProtocolRun,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+				return tp.debugProtocolRun(ctx, peer, rw)
+			},
 		},
 		eth.MGRName: {
 			Name:    eth.MGRName,
 			Version: eth.MGRVersions[0],
 			Length:  eth.MGRLengths[eth.MGRVersions[0]],
-			Run:     tp.mgrProtocolRun,
+			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+				return tp.mgrProtocolRun(ctx, peer, rw)
+			},
 		},
 	}
 

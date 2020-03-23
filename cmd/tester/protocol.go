@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -57,25 +58,47 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 	return result
 }
 
-func (tp *TesterProtocol) mgrProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-	prefixes := [][]byte{
-		{1, 1, 1, 1, 1, 1},
-		{2, 2, 2, 2, 2, 2},
-		{3, 3, 3, 3, 3, 3},
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
+
+		r[i] = 0
 	}
+	return nil, false
+}
+
+func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	amountOfPrefixes := 100
+	prefixes := make([][]byte, 0, amountOfPrefixes)
+	from := []byte{1, 1, 1, 1, 1, 1}
+	for next, ok := nextSubtree(from); ok && amountOfPrefixes > 0; next, ok = nextSubtree(from) {
+		amountOfPrefixes--
+		prefixes = append(prefixes, next)
+	}
+
 	err := p2p.Send(rw, eth.MGRStatus, prefixes)
 	if err != nil {
 		panic(err)
 	}
-
-	startTime := time.Now()
+	fmt.Printf("Sent MGRStatus\n")
 
 	i := 0
 	j := 0
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		msg, err := rw.ReadMsg()
 		if err != nil {
-			fmt.Printf("Failed to recevied DebugSetGenesisMsg message from peer: %v\n", err)
 			return err
 		}
 		switch msg.Code {
@@ -93,15 +116,12 @@ func (tp *TesterProtocol) mgrProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) e
 
 			i += len(res.Operators)
 			j++
-			if j%10 == 0 {
-				ms := float64(time.Since(startTime).Milliseconds())
-				fmt.Printf("Messages: %f/sec, Operators: %f/sec\n", (float64(i) / ms * 1000), (float64(j) / ms * 1000))
-			}
+			fmt.Printf("Messages: %d, Operators: %dK\n", i/1000, j/1000)
 		}
 	}
 }
 
-func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	v, err := json.Marshal(genesis())
 	if err != nil {
 		return err
@@ -139,7 +159,7 @@ func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter)
 	return nil
 }
 
-func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	<-tp.genesisReady
 	log.Info("Ethereum peer connected", "peer", peer.Name())
 	log.Debug("Protocol version", "version", tp.protocolVersion)
