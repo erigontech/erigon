@@ -1357,5 +1357,49 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
-	assert.Fail(t, "not implemented")
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+
+	db := ethdb.NewMemDatabase()
+	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
+	if err != nil {
+		t.Errorf("could not create TrieDbState: %v", err)
+	}
+	tsw := tds.TrieStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+
+	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, oldCode)
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	tds.ComputeTrieRoots()
+
+	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
+
+	trieCode, err := tds.ReadAccountCode(contract, oldCodeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, oldCode, trieCode, "new code should be received")
+
+	tds.StartNewBuffer()
+
+	newCode := []byte{0x04, 0x04, 0x04, 0x04}
+	intraBlockState.SetCode(contract, newCode)
+
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	tds.ComputeTrieRoots()
+
+	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
+	trieCode, err = tds.ReadAccountCode(contract, newCodeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, newCode, trieCode, "new code should be received")
 }

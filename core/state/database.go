@@ -95,6 +95,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads      map[common.Hash]common.Hash
+	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
 	accountUpdates map[common.Hash]*accounts.Account
@@ -106,6 +107,7 @@ type Buffer struct {
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
 	b.codeReads = make(map[common.Hash]common.Hash)
+	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
@@ -125,9 +127,14 @@ func (b *Buffer) detachAccounts() {
 
 // Merges the content of another buffer into this one
 func (b *Buffer) merge(other *Buffer) {
-	for codeHash, code := range other.codeReads {
-		b.codeReads[codeHash] = code
+	for addrHash, codeHash := range other.codeReads {
+		b.codeReads[addrHash] = codeHash
 	}
+
+	for addrHash, code := range other.codeUpdates {
+		b.codeUpdates[addrHash] = code
+	}
+
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
@@ -958,6 +965,13 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				tds.t.Delete(addrHash[:])
 			}
 		}
+
+		for addrHash, newCode := range b.codeUpdates {
+			fmt.Printf("updateTrieRoots updating account %x\n", addrHash[:])
+			if err := tds.t.UpdateAccountCode(addrHash[:], newCode); err != nil {
+				return nil, err
+			}
+		}
 		for addrHash, m := range b.storageUpdates {
 			for keyHash, v := range m {
 				cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
@@ -1553,6 +1567,7 @@ func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation 
 	if tsw.tds.resolveReads {
 		tsw.tds.resolveSetBuilder.CreateCode(codeHash)
 	}
+	tsw.tds.currentBuffer.codeUpdates[addrHash] = code
 	return nil
 }
 
