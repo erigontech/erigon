@@ -4,12 +4,10 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
-func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, CodeMap, error) {
-	codeMap := make(map[common.Hash][]byte)
+func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
 	hb := NewHashBuilder(false)
 	for _, operator := range witness.Operators {
 		switch op := operator.(type) {
@@ -20,38 +18,36 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			keyHex := op.Key
 			val := op.Value
 			if err := hb.leaf(len(op.Key), keyHex, rlphacks.RlpSerializableBytes(val)); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		case *OperatorExtension:
 			if trace {
 				fmt.Printf("EXTENSION ")
 			}
 			if err := hb.extension(op.Key); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		case *OperatorBranch:
 			if trace {
 				fmt.Printf("BRANCH ")
 			}
 			if err := hb.branch(uint16(op.Mask)); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		case *OperatorHash:
 			if trace {
 				fmt.Printf("HASH ")
 			}
 			if err := hb.hash(op.Hash[:]); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		case *OperatorCode:
 			if trace {
 				fmt.Printf("CODE ")
 			}
 
-			if codeHash, err := hb.code(op.Code); err == nil {
-				codeMap[codeHash] = op.Code
-			} else {
-				return nil, nil, err
+			if err := hb.code(op.Code); err != nil {
+				return nil, err
 			}
 
 		case *OperatorLeafAccount:
@@ -74,7 +70,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			incarnaton := uint64(0)
 
 			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnaton, fieldSet); err != nil {
-				return nil, nil, err
+				return nil, err
 			}
 		case *OperatorEmptyRoot:
 			if trace {
@@ -82,7 +78,7 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 			}
 			hb.emptyRoot()
 		default:
-			return nil, nil, fmt.Errorf("unknown operand type: %T", operator)
+			return nil, fmt.Errorf("unknown operand type: %T", operator)
 		}
 	}
 	if trace {
@@ -90,9 +86,9 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 	}
 	if !hb.hasRoot() {
 		if isBinary {
-			return NewBinary(EmptyRoot), nil, nil
+			return NewBinary(EmptyRoot), nil
 		}
-		return New(EmptyRoot), nil, nil
+		return New(EmptyRoot), nil
 	}
 	r := hb.root()
 	var tr *Trie
@@ -102,5 +98,5 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, C
 		tr = New(hb.rootHash())
 	}
 	tr.root = r
-	return tr, codeMap, nil
+	return tr, nil
 }

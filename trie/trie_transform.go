@@ -18,7 +18,12 @@ func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTrans
 	case *accountNode:
 		accountCopy := accounts.NewAccount()
 		accountCopy.Copy(&n.Account)
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), 0, &accountNode{accountCopy, nil, true})
+		var code []byte = nil
+		if n.code != nil {
+			code = make([]byte, len(n.code))
+			copy(code, n.code)
+		}
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), 0, &accountNode{accountCopy, nil, true, codeNode(code)})
 		aHex := hex
 		if aHex[len(aHex)-1] == 16 {
 			aHex = aHex[:len(aHex)-1]

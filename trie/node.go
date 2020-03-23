@@ -62,7 +62,10 @@ type (
 		accounts.Account
 		storage     node
 		rootCorrect bool
+		code        codeNode
 	}
+
+	codeNode []byte
 )
 
 // nilValueNode is used when collapsing internal trie nodes for hashing, since
@@ -211,6 +214,7 @@ type nodeRef struct {
 
 func (n hashNode) reference() []byte      { return n }
 func (n valueNode) reference() []byte     { return nil }
+func (n codeNode) reference() []byte      { return nil }
 func (n *fullNode) reference() []byte     { return n.ref.data[0:n.ref.len] }
 func (n *duoNode) reference() []byte      { return n.ref.data[0:n.ref.len] }
 func (n *shortNode) reference() []byte    { return n.ref.data[0:n.ref.len] }
@@ -222,4 +226,5 @@ func (n duoNode) String() string      { return n.fstring("") }
 func (n shortNode) String() string    { return n.fstring("") }
 func (n hashNode) String() string     { return n.fstring("") }
 func (n valueNode) String() string    { return n.fstring("") }
+func (n codeNode) String() string     { return n.fstring("") }
 func (an accountNode) String() string { return an.fstring("") }

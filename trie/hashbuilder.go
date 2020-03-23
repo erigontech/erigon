@@ -1,6 +1,7 @@
 package trie
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"math/big"
@@ -210,14 +211,26 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 		}
 		popped++
 	}
+	var accountCode codeNode
 	if fieldSet&uint32(8) != 0 {
 		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		ok := false
+		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
+			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
+				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
+				accountCode, ok = stackTop.(codeNode)
+				if !ok {
+					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %t:%s", stackTop, stackTop)
+				}
+			}
+		}
 		popped++
 	}
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true}}
+	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true, accountCode}}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
@@ -520,23 +533,23 @@ func (hb *HashBuilder) hash(hash []byte) error {
 	return nil
 }
 
-func (hb *HashBuilder) code(code []byte) (common.Hash, error) {
+func (hb *HashBuilder) code(code []byte) error {
 	if hb.trace {
 		fmt.Printf("CODE\n")
 	}
 	codeCopy := common.CopyBytes(code)
-	hb.nodeStack = append(hb.nodeStack, nil)
+	hb.nodeStack = append(hb.nodeStack, codeNode(codeCopy))
 	hb.sha.Reset()
 	if _, err := hb.sha.Write(codeCopy); err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	var hash [hashStackStride]byte // RLP representation of hash (or un-hashes value)
 	hash[0] = 0x80 + common.HashLength
 	if _, err := hb.sha.Read(hash[1:]); err != nil {
-		return common.Hash{}, err
+		return err
 	}
 	hb.hashStack = append(hb.hashStack, hash[:]...)
-	return common.BytesToHash(hash[1:]), nil
+	return nil
 }
 
 func (hb *HashBuilder) emptyRoot() {

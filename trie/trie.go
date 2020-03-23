@@ -26,7 +26,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/pkg/errors"
 )
 
 var (
@@ -127,6 +129,31 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 		var value accounts.Account
 		value.Copy(&accNode.Account)
 		return &value, gotValue
+	}
+	return nil, gotValue
+}
+
+func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
+	if t.root == nil {
+		return nil, true
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode != nil {
+		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+			return nil, gotValue
+		}
+
+		if accNode.code == nil {
+			return nil, false
+		}
+
+		return accNode.code, gotValue
 	}
 	return nil, gotValue
 }
@@ -247,18 +274,57 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if t.root == nil {
 		var newnode node
 		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
-			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true}}
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true, nil}}
 		} else {
-			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true}}
+			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true, nil}}
 		}
 		t.root = newnode
 	} else {
 		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
-			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, nil, true})
+			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, nil, true, nil})
 		} else {
-			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, hashNode(value.Root[:]), true})
+			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, hashNode(value.Root[:]), true, nil})
 		}
 	}
+}
+
+// UpdateAccountCode attaches the code node to an account at specified key
+func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
+	if t.root == nil {
+		return nil
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode == nil || !gotValue {
+		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
+	}
+
+	actualCodeHash := crypto.Keccak256(code)
+	if !bytes.Equal(accNode.CodeHash[:], actualCodeHash) {
+		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash[:], actualCodeHash)
+	}
+
+	accNode.code = code
+
+	_, t.root = t.insert(t.root, hex, 0, accNode)
+	return nil
+}
+
+// ResolveRequestFor Code expresses the need to fetch code from the DB (by its hash) and attach
+// to a specific account leaf in the trie.
+type ResolveRequestForCode struct {
+	t        *Trie
+	addrHash common.Hash // contract address hash
+	codeHash common.Hash
+}
+
+func (rr *ResolveRequestForCode) String() string {
+	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x}", rr.addrHash, rr.codeHash)
 }
 
 // ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
@@ -283,6 +349,8 @@ type ResolveRequest struct {
 	NodeRLP       []byte   // [OUT] RLP of the resolved node
 }
 
+/* add code hash there, if nil -- don't do anything with the code */
+
 // NewResolveRequest creates a new ResolveRequest.
 // contract must be either address hash + incarnation (32+8 bytes) or nil
 func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHash []byte) *ResolveRequest {
@@ -291,6 +359,23 @@ func (t *Trie) NewResolveRequest(contract []byte, hex []byte, pos int, resolveHa
 
 func (rr *ResolveRequest) String() string {
 	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
+}
+
+func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash) *ResolveRequestForCode {
+	return &ResolveRequestForCode{t, addrHash, codeHash}
+}
+
+func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash) (bool, *ResolveRequestForCode) {
+	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
+		return false, nil
+	}
+
+	_, ok := t.GetAccountCode(addrHash[:])
+	if !ok {
+		return true, t.NewResolveRequestForCode(addrHash, codeHash)
+	}
+
+	return false, nil
 }
 
 // NeedResolution determines whether the trie needs to be extended (resolved) by fetching data
@@ -380,6 +465,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if origNok && vnok {
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
+				if !bytes.Equal(origAccN.CodeHash[:], vAccN.CodeHash[:]) {
+					origAccN.code = nil
+				}
 				origAccN.Account.Copy(&vAccN.Account)
 				origAccN.rootCorrect = false
 			}

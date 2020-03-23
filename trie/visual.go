@@ -30,16 +30,15 @@ import (
 // VisualOpts contains various configuration options fo the Visual function
 // It has been introduced as a replacement for too many arguments with options
 type VisualOpts struct {
-	Highlights     [][]byte               // Collection of keys, in the HEX encoding, that need to be highlighted with digits
-	IndexColors    []string               // Array of colors for representing digits as colored boxes
-	FontColors     []string               // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
-	CutTerminals   int                    // Specifies how many digits to cut from the terminal short node keys for a more convinient display
-	Values         bool                   // Whether to display value nodes (as box with rounded corners)
-	CodeCompressed bool                   // Whether to turn the code from a large rectange to a small square for a more convinient display
-	ValCompressed  bool                   // Whether long values (over 10 characters) are shortened using ... in the middle
-	ValHex         bool                   // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
-	SameLevel      bool                   // Whether the leaves (and hashes) need to be on the same horizontal level
-	CodeMap        map[common.Hash][]byte // Map that allows looking up bytecode of contracts by the bytecode's hash
+	Highlights     [][]byte // Collection of keys, in the HEX encoding, that need to be highlighted with digits
+	IndexColors    []string // Array of colors for representing digits as colored boxes
+	FontColors     []string // Array of colors, the same length as indexColors, for the textual digits inside the coloured boxes
+	CutTerminals   int      // Specifies how many digits to cut from the terminal short node keys for a more convinient display
+	Values         bool     // Whether to display value nodes (as box with rounded corners)
+	CodeCompressed bool     // Whether to turn the code from a large rectange to a small square for a more convinient display
+	ValCompressed  bool     // Whether long values (over 10 characters) are shortened using ... in the middle
+	ValHex         bool     // Whether values should be displayed as hex numbers (otherwise they are displayed as just strings)
+	SameLevel      bool     // Whether the leaves (and hashes) need to be on the same horizontal level
 }
 
 // Visual creates visualisation of trie with highlighting
@@ -108,7 +107,7 @@ func visualNode(nd node, hex []byte, w io.Writer, highlights [][]byte, opts *Vis
 				`n_%x -> e_%x;
 `, hex, accountHex)
 			if !a.IsEmptyCodeHash() {
-				if code, ok := opts.CodeMap[a.CodeHash]; ok {
+				if code := a.code; code != nil {
 					codeHex := keybytesToHex(code)
 					codeHex = codeHex[:len(codeHex)-1]
 					visual.HexBox(w, fmt.Sprintf("c_%x", accountHex), codeHex, 32, opts.CodeCompressed, false)

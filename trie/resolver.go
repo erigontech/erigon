@@ -13,6 +13,8 @@ import (
 
 var emptyHash [32]byte
 
+type ResolveFunc func(*Resolver) error
+
 func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
 	if t.root == nil {
 		return nil
@@ -38,15 +40,17 @@ type Resolver struct {
 	blockNr          uint64
 	topLevels        int // How many top levels of the trie to keep (not roll into hashes)
 	requests         []*ResolveRequest
+	codeRequests     []*ResolveRequestForCode
 	witnesses        []*Witness // list of witnesses for resolved subtries, nil if `collectWitnesses` is false
 }
 
 func NewResolver(topLevels int, forAccounts bool, blockNr uint64) *Resolver {
 	tr := Resolver{
-		accounts:  forAccounts,
-		requests:  []*ResolveRequest{},
-		blockNr:   blockNr,
-		topLevels: topLevels,
+		accounts:     forAccounts,
+		requests:     []*ResolveRequest{},
+		codeRequests: []*ResolveRequestForCode{},
+		blockNr:      blockNr,
+		topLevels:    topLevels,
 	}
 	return &tr
 }
@@ -56,6 +60,7 @@ func (tr *Resolver) Reset(topLevels int, forAccounts bool, blockNr uint64) {
 	tr.accounts = forAccounts
 	tr.blockNr = blockNr
 	tr.requests = tr.requests[:0]
+	tr.codeRequests = tr.codeRequests[:0]
 	tr.witnesses = nil
 	tr.collectWitnesses = false
 	tr.historical = false
@@ -74,6 +79,11 @@ func (tr *Resolver) PopCollectedWitnesses() []*Witness {
 
 func (tr *Resolver) SetHistorical(h bool) {
 	tr.historical = h
+}
+
+// AddCodeRequest add a request for code resolution
+func (tr *Resolver) AddCodeRequest(req *ResolveRequestForCode) {
+	tr.codeRequests = append(tr.codeRequests, req)
 }
 
 // Resolver implements sort.Interface
@@ -152,7 +162,10 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 	sort.Stable(tr)
 
 	resolver := NewResolverStateful(tr.topLevels, tr.requests, hf)
-	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical); err != nil {
+		return err
+	}
+	return resolver.AttachRequestedCode(db, tr.codeRequests)
 }
 
 func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) error {
@@ -166,7 +179,10 @@ func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) err
 	sort.Stable(tr)
 
 	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
-	return resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical)
+	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical); err != nil {
+		return err
+	}
+	return resolver.AttachRequestedCode(db, tr.codeRequests)
 }
 
 // ResolveStateless resolves and hooks subtries using a witnesses database instead of
@@ -174,6 +190,7 @@ func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) err
 func (tr *Resolver) ResolveStateless(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64) (int64, error) {
 	sort.Stable(tr)
 	resolver := NewResolverStateless(tr.requests, hookSubtrie)
+	// we expect CodeNodes to be already attached to the trie in stateless resolution
 	return resolver.RebuildTrie(db, blockNr, trieLimit, startPos)
 }
 
@@ -212,7 +229,7 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 		tr.witnesses = make([]*Witness, 0)
 	}
 
-	witness, err := extractWitnessFromRootNode(hbRoot, tr.blockNr, false /*tr.hb.trace*/, nil, nil)
+	witness, err := extractWitnessFromRootNode(hbRoot, tr.blockNr, false /*tr.hb.trace*/, nil)
 	if err != nil {
 		return fmt.Errorf("error while extracting witness for resolver: %w", err)
 	}

@@ -18,7 +18,7 @@ func TestBlockWitnessBinary(t *testing.T) {
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false, nil)
+	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -29,7 +29,7 @@ func TestBlockWitnessBinary(t *testing.T) {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, _, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
+	trBin1, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 	rs := NewBinaryResolveSet(2)
 	rs.AddKey([]byte("ABCD0001"))
 
-	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false, nil)
+	bwb := NewWitnessBuilder(trBin.Trie().root, 1, false)
 
 	hr := newHasher(false)
 	defer returnHasherToPool(hr)
@@ -68,7 +68,7 @@ func TestBlockWitnessBinaryAccount(t *testing.T) {
 		t.Errorf("Could not make block witness: %v", err)
 	}
 
-	trBin1, _, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
+	trBin1, err := BuildTrieFromWitness(w, true /*is-binary*/, false /*trace*/)
 	if err != nil {
 		t.Errorf("Could not restore trie from the block witness: %v", err)
 	}
