@@ -736,13 +736,92 @@ func TestCodeNodeGetExistingAccountEmptyCode(t *testing.T) {
 }
 
 func TestCodeNodeWrongHash(t *testing.T) {
-	assert.Fail(t, "not implemented")
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
+
+	address := getAddressForIndex(0)
+
+	codeValue1 := genRandomByteArrayOfLen(128)
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = uint64(random.Int63())
+	acc.Balance = *balance
+	acc.Root = EmptyRoot
+	acc.CodeHash = codeHash1
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+
+	codeValue2 := genRandomByteArrayOfLen(128)
+	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue2)
+	assert.Error(t, err, "should NOT be able to insert code with wrong hash")
 }
 
 func TestCodeNodeUpdateAccountAndCodeValidHash(t *testing.T) {
-	assert.Fail(t, "not implemented")
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
+
+	address := getAddressForIndex(0)
+
+	codeValue1 := genRandomByteArrayOfLen(128)
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = uint64(random.Int63())
+	acc.Balance = *balance
+	acc.Root = EmptyRoot
+	acc.CodeHash = codeHash1
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
+	assert.Nil(t, err, "should successfully insert code")
+
+	codeValue2 := genRandomByteArrayOfLen(128)
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+
+	acc.CodeHash = codeHash2
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err = trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue2)
+	assert.Nil(t, err, "should successfully insert code")
 }
 
 func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
-	assert.Fail(t, "not implemented")
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
+
+	address := getAddressForIndex(0)
+
+	codeValue1 := genRandomByteArrayOfLen(128)
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = uint64(random.Int63())
+	acc.Balance = *balance
+	acc.Root = EmptyRoot
+	acc.CodeHash = codeHash1
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
+	assert.Nil(t, err, "should successfully insert code")
+
+	codeValue2 := genRandomByteArrayOfLen(128)
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+
+	codeValue3 := genRandomByteArrayOfLen(128)
+
+	acc.CodeHash = codeHash2
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err = trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue3)
+	assert.Error(t, err, "should NOT be able to insert code with wrong hash")
 }
