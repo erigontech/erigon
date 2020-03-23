@@ -50,7 +50,7 @@ func (pg *ResolveSetBuilder) extractCodeTouches() map[common.Hash]struct{} {
 
 // ReadCode registers that given contract code has been accessed during current block's execution
 func (pg *ResolveSetBuilder) ReadCode(codeHash common.Hash) {
-	if _, ok := pg.createdCodes[codeHash]; !ok {
+	if _, ok := pg.proofCodes[codeHash]; !ok {
 		pg.proofCodes[codeHash] = struct{}{}
 	}
 }

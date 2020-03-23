@@ -134,7 +134,7 @@ func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash
 	if code, ok := s.t.GetAccountCode(addrHash[:]); ok {
 		return code, nil
 	}
-	return nil, fmt.Errorf("could not find bytecode for acc: %s hash %x", address, codeHash)
+	return nil, fmt.Errorf("could not find bytecode for acc: %x hash %x", address, codeHash)
 }
 
 // ReadAccountCodeSize is a part of the StateReader interface
