@@ -967,7 +967,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 		}
 
 		for addrHash, newCode := range b.codeUpdates {
-			fmt.Printf("updateTrieRoots updating account %x\n", addrHash[:])
 			if err := tds.t.UpdateAccountCode(addrHash[:], newCode); err != nil {
 				return nil, err
 			}
