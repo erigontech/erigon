@@ -38,7 +38,6 @@ var (
 )
 
 func init() {
-	setupLogger()
 
 	// Initialize the CLI app and start Geth
 	app.Action = tester
@@ -121,6 +120,8 @@ func setupLogger() {
 }
 
 func tester(cliCtx *cli.Context) error {
+	setupLogger()
+
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {
@@ -157,6 +158,7 @@ func tester(cliCtx *cli.Context) error {
 }
 
 func genesisCmd(cliCtx *cli.Context) error {
+	setupLogger()
 	res, err := json.Marshal(genesis())
 	if err != nil {
 		return err
@@ -169,6 +171,7 @@ func genesisCmd(cliCtx *cli.Context) error {
 }
 
 func mgrCmd(cliCtx *cli.Context) error {
+	setupLogger()
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {
