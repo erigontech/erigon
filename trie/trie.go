@@ -304,6 +304,11 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
 	}
 
+	actualCodeHash := crypto.Keccak256(code)
+	if !bytes.Equal(accNode.CodeHash[:], actualCodeHash) {
+		return fmt.Errorf("inserted code mismatch account hash (acc.CodeHash=%x codeHash=%x)", accNode.CodeHash[:], actualCodeHash)
+	}
+
 	accNode.code = code
 
 	_, t.root = t.insert(t.root, hex, 0, accNode)
@@ -460,6 +465,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		if origNok && vnok {
 			updated = !origAccN.Equals(&vAccN.Account)
 			if updated {
+				if !bytes.Equal(origAccN.CodeHash[:], vAccN.CodeHash[:]) {
+					origAccN.code = nil
+				}
 				origAccN.Account.Copy(&vAccN.Account)
 				origAccN.rootCorrect = false
 			}

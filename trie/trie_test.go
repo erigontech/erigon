@@ -825,3 +825,68 @@ func TestCodeNodeUpdateAccountAndCodeInvalidHash(t *testing.T) {
 	err = trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue3)
 	assert.Error(t, err, "should NOT be able to insert code with wrong hash")
 }
+
+func TestCodeNodeUpdateAccountChangeCodeHash(t *testing.T) {
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
+
+	address := getAddressForIndex(0)
+
+	codeValue1 := genRandomByteArrayOfLen(128)
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = uint64(random.Int63())
+	acc.Balance = *balance
+	acc.Root = EmptyRoot
+	acc.CodeHash = codeHash1
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
+	assert.Nil(t, err, "should successfully insert code")
+
+	codeValue2 := genRandomByteArrayOfLen(128)
+	codeHash2 := common.BytesToHash(crypto.Keccak256(codeValue2))
+
+	acc.CodeHash = codeHash2
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
+	assert.Nil(t, value, "the value should reset after the code change happen")
+	assert.False(t, gotValue, "should indicate that the code isn't in the cache")
+}
+
+func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
+	trie := newEmpty()
+
+	random := rand.New(rand.NewSource(0))
+
+	address := getAddressForIndex(0)
+
+	codeValue1 := genRandomByteArrayOfLen(128)
+	codeHash1 := common.BytesToHash(crypto.Keccak256(codeValue1))
+
+	balance := new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+
+	acc := accounts.NewAccount()
+	acc.Nonce = uint64(random.Int63())
+	acc.Balance = *balance
+	acc.Root = EmptyRoot
+	acc.CodeHash = codeHash1
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	err := trie.UpdateAccountCode(crypto.Keccak256(address[:]), codeValue1)
+	assert.Nil(t, err, "should successfully insert code")
+
+	acc.Nonce = uint64(random.Int63())
+	balance = new(big.Int).Rand(random, new(big.Int).Exp(common.Big2, common.Big256, nil))
+	acc.Balance = *balance
+
+	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
+	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
+	assert.Equal(t, value, codeValue1, "the value should NOT reset after account's non codehash had changed")
+	assert.True(t, gotValue, "should indicate that the code is still in the cache")
+}
