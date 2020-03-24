@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState} from 'react';
 
 import {Col, Container, Nav, Row} from 'react-bootstrap';
 import API from './utils/API.js'
@@ -9,9 +9,8 @@ import StorageTombstonesPage from './page/StorageTombstonesPage';
 import {ReactComponent as Logo} from './logo.svg';
 import './App.css';
 import StoragePage from './page/Storage';
-import RemoteDBForm from './components/RemoteDBForm';
+import RemoteSidebar from './components/RemoteSidebar';
 
-const api = new API('http://localhost:8080')
 const sidebar = [
     {
         url: '/accounts',
@@ -28,6 +27,15 @@ const sidebar = [
 ];
 
 function App() {
+    const [host, setHost] = useState('localhost');
+    const [port, setPort] = useState('8080');
+    const onApiChange = (data) => {
+        setHost(data.host)
+        setPort(data.port)
+    }
+
+    const api = new API('http://' + host + ':' + port)
+
     return (
         <ErrorCatcher>
             <Router>
@@ -47,7 +55,8 @@ function App() {
                                         <div className="active-pointer"/>
                                     </NavLink>
                                 )}
-                                <RemoteDBForm api={api}/>
+                                <div className="mt-5 border-secondary border-top"/>
+                                <RemoteSidebar api={api} restHost={host} restPort={port} onApiChange={onApiChange}/>
                             </Nav>
                         </Col>
                         <Col xs={9} md={10} lg={11}>

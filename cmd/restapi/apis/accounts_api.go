@@ -8,7 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func RegisterAccountAPI(router *gin.RouterGroup, e *Env) error {
@@ -42,13 +42,13 @@ func jsonifyAccount(account *accounts.Account) map[string]interface{} {
 	return result
 }
 
-func findAccountByID(accountID string, remoteDB *remote.DB) (*accounts.Account, error) {
+func findAccountByID(accountID string, remoteDB ethdb.KV) (*accounts.Account, error) {
 
 	possibleKeys := getPossibleKeys(accountID)
 
 	var account *accounts.Account
 
-	err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
+	err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
 		bucket := tx.Bucket(dbutils.AccountsBucket)
 
 		for _, key := range possibleKeys {

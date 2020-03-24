@@ -271,7 +271,7 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.KV); ok {
+	if hasBolt, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasBolt.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
@@ -333,7 +333,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	}
 
 	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.KV); ok {
+	if hasKV, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasKV.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
@@ -377,7 +377,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 
 func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
 	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.KV); ok {
+	if hasKV, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasKV.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)

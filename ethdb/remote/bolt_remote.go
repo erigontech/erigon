@@ -139,7 +139,7 @@ type conn struct {
 }
 
 type DbOpts struct {
-	dialAddress    string
+	DialAddress    string
 	DialFunc       DialFunc
 	DialTimeout    time.Duration
 	PingTimeout    time.Duration
@@ -157,7 +157,7 @@ var DefaultOpts = DbOpts{
 }
 
 func (opts DbOpts) Addr(v string) DbOpts {
-	opts.dialAddress = v
+	opts.DialAddress = v
 	return opts
 }
 
@@ -261,10 +261,10 @@ func (closer notifyOnClose) Close() error {
 func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	if opts.DialFunc == nil {
 		opts.DialFunc = func(ctx context.Context) (in io.Reader, out io.Writer, closer io.Closer, err error) {
-			if opts.dialAddress == "" {
-				return nil, nil, nil, fmt.Errorf("please set opts.dialAddress or opts.DialFunc")
+			if opts.DialAddress == "" {
+				return nil, nil, nil, fmt.Errorf("please set opts.DialAddress or opts.DialFunc")
 			}
-			return defaultDialFunc(ctx, opts.dialAddress)
+			return defaultDialFunc(ctx, opts.DialAddress)
 		}
 	}
 
@@ -341,10 +341,6 @@ func (db *DB) autoReconnect(ctx context.Context) {
 			}
 		}
 	}
-}
-
-func (db *DB) GetDialAddr() string {
-	return db.opts.dialAddress
 }
 
 // Close closes DB by using the closer field
