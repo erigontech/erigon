@@ -116,7 +116,7 @@ func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw
 
 			i += len(res.Operators)
 			j++
-			fmt.Printf("Messages: %d, Operators: %dK\n", i/1000, j/1000)
+			fmt.Printf("Messages: %d, Operators: %d\n", i, j)
 		}
 	}
 }
