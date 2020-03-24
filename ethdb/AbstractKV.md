@@ -9,7 +9,47 @@ Known problems: mutation.Put does copy internally.
 - Low-level API: as close to original Bolt/Badger as possible.
 - Expose concept of transaction - app-level code can .Rollback() or .Commit() at once. 
 
-## Abstraction to support: 
+## Result interface:
+
+```
+type DB interface {
+	View(ctx context.Context, f func(tx Tx) error) (err error)
+	Update(ctx context.Context, f func(tx Tx) error) (err error)
+	Close() error
+}
+
+type Tx interface {
+	Bucket(name []byte) Bucket
+}
+
+type Bucket interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
+	Cursor() Cursor
+}
+
+type Cursor interface {
+	Prefix(v []byte) Cursor
+	MatchBits(uint) Cursor
+	Prefetch(v uint) Cursor
+	NoValues() NoValuesCursor
+
+	First() ([]byte, []byte, error)
+	Seek(seek []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
+	Walk(walker func(k, v []byte) (bool, error)) error
+}
+
+type NoValuesCursor interface {
+	First() ([]byte, uint64, error)
+	Seek(seek []byte) ([]byte, uint64, error)
+	Next() ([]byte, uint64, error)
+	Walk(walker func(k []byte, vSize uint64) (bool, error)) error
+}
+```
+
+## Rationale and Features list: 
 
 #### Buckets concept:
 - Bucket is an interface, can’t be nil, can't return error
@@ -62,49 +102,3 @@ Known problems: mutation.Put does copy internally.
 - Monotonic int DB.GetSequence 
 - Nested Buckets
 - Backups, tx.WriteTo
-
-## Result interface:
-
-```
-type DB interface {
-	View(ctx context.Context, f func(tx Tx) error) (err error)
-	Update(ctx context.Context, f func(tx Tx) error) (err error)
-	Close() error
-}
-
-type Tx interface {
-	Bucket(name []byte) Bucket
-}
-
-type Bucket interface {
-	Get(key []byte) (val []byte, err error)
-	Put(key []byte, value []byte) error
-	Delete(key []byte) error
-	Cursor() Cursor
-}
-
-type Cursor interface {
-	Prefix(v []byte) Cursor
-	MatchBits(uint) Cursor
-	Prefetch(v uint) Cursor
-	NoValues() NoValuesCursor
-
-	First() ([]byte, []byte, error)
-	Seek(seek []byte) ([]byte, []byte, error)
-	Next() ([]byte, []byte, error)
-	Walk(walker func(k, v []byte) (bool, error)) error
-}
-
-type NoValuesCursor interface {
-	First() ([]byte, uint64, error)
-	Seek(seek []byte) ([]byte, uint64, error)
-	Next() ([]byte, uint64, error)
-	Walk(walker func(k []byte, vSize uint64) (bool, error)) error
-}
-```
-
-## Naming: 
-- `Iter` shorter `Cursor` shorter `Iterator`
-- `Opts` shorter `Options`
-- `Walk` shorter `ForEach`
-
