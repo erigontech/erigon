@@ -130,14 +130,14 @@ func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error)
 	}
 	res = append(res, check1)
 
-	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefetch(1000)
+	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefetch(1000).NoValues()
 	storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(10).NoValues()
 
-	for k, v, err := inter.First(); k != nil || err != nil; k, v, err = inter.Next() {
+	for k, vSize, err := inter.First(); k != nil || err != nil; k, vSize, err = inter.Next() {
 		if err != nil {
 			return nil, err
 		}
-		if len(v) > 0 {
+		if vSize > 0 {
 			continue
 		}
 
