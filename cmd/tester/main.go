@@ -145,6 +145,7 @@ func tester(cliCtx *cli.Context) error {
 	}
 	defer tp.forkFeeder.Close()
 	tp.protocolVersion = uint32(eth.ProtocolVersions[2])
+	tp.networkId = 1 // Mainnet
 	tp.genesisBlockHash = params.MainnetGenesisHash
 	server := makeP2PServer(ctx, tp, []string{eth.ProtocolName, eth.DebugName})
 	// Add protocol
