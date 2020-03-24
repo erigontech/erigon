@@ -351,6 +351,7 @@ func (i *limitIterator) HasMore() bool {
 	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
+
 	return true
 }
 
