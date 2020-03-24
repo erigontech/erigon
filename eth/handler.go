@@ -1342,27 +1342,29 @@ func (pm *ProtocolManager) handleMgrMsg(p *mgrPeer) error {
 		if err := msgStream.Decode(&knownPrefixes); err != nil {
 			return fmt.Errorf("msgStream.Decode: %w", err)
 		}
-
 		tds, err := pm.blockchain.GetTrieDbState()
 		if err != nil {
 			panic(err)
 		}
-		fmt.Printf("Received MGRStatus. len(knownPrefixes)=%d\n", len(knownPrefixes))
 
-		for _, prefix := range knownPrefixes {
+		fmt.Printf("Received MGRStatus. len(knownPrefixes)=%d\n", len(knownPrefixes))
+		buf := bytes.NewBuffer([]byte{})
+
+		epoch := tds.GetBlockNr() / 4096
+		subtree := epoch % 256
+		for i := 0; i < 256; i++ { // spread witness of each subtree
+			prefix := []byte{byte(subtree), byte(i)}
 			witness, err := tds.ExtractWitnessForPrefix(prefix, false, false)
 			if err != nil {
 				return err
 			}
-			buf := bytes.NewBuffer([]byte{})
-			_, err = witness.WriteTo(buf)
-			if err != nil {
-				panic(err)
+			buf.Reset()
+			if _, err := witness.WriteTo(buf); err != nil {
+				return err
 			}
-			fmt.Printf("Sernding MGRWitness\n")
-			err = p2p.Send(p.rw, MGRWitness, buf.Bytes())
-			if err != nil {
-				panic(err)
+			fmt.Printf("Sernding MGRWitness: %x, of size %d\n", prefix, buf.Len())
+			if err := p2p.Send(p.rw, MGRWitness, buf.Bytes()); err != nil {
+				return err
 			}
 		}
 	case MGRWitness:

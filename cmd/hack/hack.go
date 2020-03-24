@@ -407,7 +407,7 @@ func bucketPrefixStats(chaindata string) {
 	db.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.StorageBucket).Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
-			stats[k[0]] = stats[k[0]] + uint64(len(v))
+			stats[k[0]] += uint64(len(v))
 		}
 		return nil
 	})
