@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -63,7 +64,13 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return err
 		}
 
-		expectedAccountChanges, err := changeset.EncodeChangeSet(csw.GetAccountChanges())
+		accountChanges := csw.GetAccountChanges()
+		var expectedAccountChanges []byte
+		if debug.IsThinHistory() {
+			expectedAccountChanges, err = changeset.EncodeAccounts(accountChanges)
+		} else {
+			expectedAccountChanges, err = changeset.EncodeChangeSet(accountChanges)
+		}
 		if err != nil {
 			return err
 		}
@@ -82,7 +89,11 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		expectedStorageChanges := csw.GetStorageChanges()
 		expectedtorageSerialized := make([]byte, 0)
 		if expectedStorageChanges.Len() > 0 {
-			expectedtorageSerialized, err = changeset.EncodeChangeSet(expectedStorageChanges)
+			if debug.IsThinHistory() {
+				expectedtorageSerialized, err = changeset.EncodeStorage(expectedStorageChanges)
+			} else {
+				expectedtorageSerialized, err = changeset.EncodeChangeSet(expectedStorageChanges)
+			}
 			if err != nil {
 				return err
 			}
