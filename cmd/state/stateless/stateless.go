@@ -309,7 +309,7 @@ func Stateless(
 		execTime1 := time.Since(execStart)
 		execStart = time.Now()
 
-		ctx := chainConfig.WithEIPsFlags(context.Background(), header.Number)
+		ctx := chainConfig.WithEIPsFlags(ctx, header.Number)
 		if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 			fmt.Printf("FinalizeTx of block %d failed: %v\n", blockNum, err)
 			return
