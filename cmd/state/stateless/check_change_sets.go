@@ -21,7 +21,7 @@ import (
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(blockNum uint64, chaindata string) error {
+func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error {
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -32,16 +32,23 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 		interruptCh <- true
 	}()
 
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+	chainDb, err := ethdb.NewBoltDatabase(chaindata)
 	if err != nil {
 		return err
 	}
-	defer ethDb.Close()
+	defer chainDb.Close()
+	stateDb := chainDb
+	if chaindata != statefile {
+		stateDb, err = ethdb.NewBoltDatabase(statefile)
+		if err != nil {
+			return err
+		}
+	}
 
 	chainConfig := params.MainnetChainConfig
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
-	bc, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vmConfig, nil)
+	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil)
 	if err != nil {
 		return err
 	}
@@ -55,7 +62,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			break
 		}
 
-		dbstate := state.NewDbState(ethDb, block.NumberU64()-1)
+		dbstate := state.NewDbState(stateDb, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 
@@ -68,7 +75,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			return err
 		}
 
-		dbAccountChanges, err := ethDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
+		dbAccountChanges, err := stateDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
 		if err != nil {
 			return err
 		}
@@ -88,7 +95,7 @@ func CheckChangeSets(blockNum uint64, chaindata string) error {
 			}
 		}
 
-		dbStorageChanges, err := ethDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
+		dbStorageChanges, err := stateDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
 		if err != nil {
 			return err
 		}
