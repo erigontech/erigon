@@ -44,8 +44,8 @@ func findStorageTombstoneByPrefix(prefixS string, remoteDB ethdb.KV) ([]*Storage
 	prefix := common.FromHex(prefixS)
 	if err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
 		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		c := interBucket.Cursor()
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(1)
+		c := interBucket.Cursor().Prefix(prefix).NoValues()
+		storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(1).NoValues()
 
 		for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
 			if err != nil {
@@ -124,16 +124,11 @@ func storageTombstonesIntegrityDBCheck(remoteDB ethdb.KV) ([]*IntegrityCheck, er
 
 func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error) {
 	var res []*IntegrityCheck
-	var check1 = &IntegrityCheck{
-		Name:  "1 trie prefix must be covered only by 1 tombstone",
-		Value: "ok",
-	}
-	res = append(res, check1)
-	check2 := &IntegrityCheck{
+	check1 := &IntegrityCheck{
 		Name:  "tombstone must hide at least 1 storage",
 		Value: "ok",
 	}
-	res = append(res, check2)
+	res = append(res, check1)
 
 	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefetch(1000)
 	storage := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(10).NoValues()
@@ -144,23 +139,6 @@ func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error)
 		}
 		if len(v) > 0 {
 			continue
-		}
-
-		// 1 prefix must be covered only by 1 tombstone
-		pref := append(k, []byte{0, 0}...)
-		c2 := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Prefix(pref).Prefetch(10)
-		for overlapK, overlapV, err := c2.First(); overlapK != nil || err != nil; overlapK, overlapV, err = c2.Next() {
-			if err != nil {
-				return nil, err
-			}
-			if len(overlapV) > 0 {
-				continue
-			}
-
-			if bytes.HasPrefix(overlapK, k) {
-				check1.Value = fmt.Sprintf("%x is prefix of %x\n", overlapK, k)
-				break
-			}
 		}
 
 		// each tombstone must hide at least 1 storage
@@ -187,7 +165,7 @@ func storageTombstonesIntegrityDBCheckTx(tx ethdb.Tx) ([]*IntegrityCheck, error)
 			}
 
 			if !hideStorage {
-				check2.Value = fmt.Sprintf("tombstone %x has no storage to hide\n", k)
+				check1.Value = fmt.Sprintf("tombstone %x has no storage to hide\n", k)
 				break
 			}
 		}
