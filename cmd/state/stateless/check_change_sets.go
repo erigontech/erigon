@@ -75,7 +75,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 			return err
 		}
 
-		dbAccountChanges, err := stateDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum+1)
+		dbAccountChanges, err := stateDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
 		if err != nil {
 			return err
 		}
