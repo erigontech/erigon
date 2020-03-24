@@ -54,8 +54,10 @@ var statelessCmd = &cobra.Command{
 		createDb := func(path string) (ethdb.Database, error) {
 			return ethdb.NewBoltDatabase(path)
 		}
+		ctx := getContext()
 
 		stateless.Stateless(
+			ctx,
 			block,
 			chaindata,
 			statefile,

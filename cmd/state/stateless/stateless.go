@@ -132,6 +132,7 @@ func starkData(witness *trie.Witness, starkStatsBase string, blockNum uint64) er
 type CreateDbFunc func(string) (ethdb.Database, error)
 
 func Stateless(
+	ctx context.Context,
 	blockNum uint64,
 	chaindata string,
 	statefile string,
@@ -265,6 +266,12 @@ func Stateless(
 	}
 
 	for !interrupt {
+		select {
+		case <-ctx.Done():
+			panic(ctx.Err())
+		default:
+		}
+
 		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
@@ -350,6 +357,7 @@ func Stateless(
 		finalRootFail := false
 		execStart = time.Now()
 		if blockNum >= witnessThreshold && blockWitness != nil { // blockWitness == nil means the extraction fails
+
 			var s *state.Stateless
 			var w *trie.Witness
 			w, err = trie.NewWitnessFromReader(bytes.NewReader(blockWitness), false)
@@ -466,7 +474,7 @@ func Stateless(
 		blockNum++
 		processed++
 
-		if blockNum%10 == 0 {
+		if blockNum%1000 == 0 {
 			// overwrite terminal line, if no snapshot was made and not the first line
 			if blockNum > 0 && !willSnapshot {
 				fmt.Printf("\r")
