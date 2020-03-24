@@ -6,12 +6,12 @@ func (t *Trie) ExtractWitness(blockNr uint64, trace bool, rs *ResolveSet) (*Witn
 	return extractWitnessFromRootNode(t.root, blockNr, trace, rs)
 }
 
-func (t *Trie) ExtractWitnessForPrefix(prefix []byte, blockNr uint64, trace bool, rs *ResolveSet, codeMap CodeMap) (*Witness, error) {
+func (t *Trie) ExtractWitnessForPrefix(prefix []byte, blockNr uint64, trace bool, rs *ResolveSet) (*Witness, error) {
 	node, _, found := t.getNode(prefix, false)
 	if !found {
 		return nil, errors.New("no data found for given prefix")
 	}
-	return extractWitnessFromRootNode(node, blockNr, trace, rs, codeMap)
+	return extractWitnessFromRootNode(node, blockNr, trace, rs)
 }
 
 // extractWitnessFromRootNode extracts a witness for a subtrie starting from the specified root
