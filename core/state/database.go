@@ -294,6 +294,9 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 			return nil
 		}
 
+		buf := pool.GetBuffer(256)
+		defer pool.PutBuffer(buf)
+
 		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
 		for ; incarnation > 0; incarnation-- {
 			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
@@ -306,8 +309,9 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 					break
 				}
 
-				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				toPut = append(toPut, common.CopyBytes(kNoInc[:common.HashLength+1]))
+				buf.Reset()
+				dbutils.RemoveIncarnationFromKey(k, &buf.B)
+				toPut = append(toPut, common.CopyBytes(buf.B[:common.HashLength+1]))
 			}
 		}
 		return nil
@@ -412,6 +416,9 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 		kWithInc.B = append(kWithInc.B, storageK[:common.HashLength+8]...)
 		kWithInc.B = append(kWithInc.B, storageKeyNoInc[common.HashLength:]...)
 
+		buf := pool.GetBuffer(256)
+		defer pool.PutBuffer(buf)
+
 		for i := common.HashLength + 1; i < len(storageKeyNoInc)-1; i++ { // +1 because first step happened during account re-creation
 			tombStone, _ := interBucket.Get(storageKeyNoInc[:i])
 			foundTombstone := tombStone != nil && len(tombStone) == 0
@@ -431,7 +438,9 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 					continue
 				}
 
-				toPut = append(toPut, dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]))
+				buf.Reset()
+				dbutils.RemoveIncarnationFromKey(storageK[:i+1+8], &buf.B)
+				toPut = append(toPut, common.CopyBytes(buf.B))
 			}
 			toDelete = append(toDelete, common.CopyBytes(storageKeyNoInc[:i]))
 			break

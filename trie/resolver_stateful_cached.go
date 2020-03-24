@@ -351,12 +351,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	startkey := startkeys[rangeIdx]
 
 	startKeyNoInc.Reset()
-	if len(startkey) <= common.HashLength {
-		startKeyNoInc.B = append(startKeyNoInc.B, startkey...)
-	} else {
-		startKeyNoInc.B = append(startKeyNoInc.B, startkey[:common.HashLength]...)
-		startKeyNoInc.B = append(startKeyNoInc.B, startkey[common.HashLength+8:]...)
-	}
+	dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
 
 	err := db.View(func(tx *bolt.Tx) error {
 		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
@@ -443,13 +438,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
 						startKeyNoInc.Reset()
-						if len(startkey) <= common.HashLength {
-							startKeyNoInc.B = append(startKeyNoInc.B, startkey...)
-						} else {
-							startKeyNoInc.B = append(startKeyNoInc.B, startkey[:common.HashLength]...)
-							startKeyNoInc.B = append(startKeyNoInc.B, startkey[common.HashLength+8:]...)
-						}
-
+						dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
 					}
 				}
 			}
