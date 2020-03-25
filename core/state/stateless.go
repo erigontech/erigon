@@ -34,7 +34,7 @@ import (
 // during the execution of block(s)
 type Stateless struct {
 	t              *trie.Trie             // State trie
-	codeMap        map[common.Hash][]byte // Lookup index from code hashes to corresponding bytecode
+	codeUpdates    map[common.Hash][]byte // Lookup index from code hashes to corresponding bytecode
 	blockNr        uint64                 // Current block number
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	accountUpdates map[common.Hash]*accounts.Account
@@ -47,10 +47,11 @@ type Stateless struct {
 // It deserialises the block witness and creates the state trie out of it, checking that the root of the constructed
 // state trie matches the value of `stateRoot` parameter
 func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uint64, trace bool, isBinary bool) (*Stateless, error) {
-	t, codeMap, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
+	t, err := trie.BuildTrieFromWitness(blockWitness, isBinary, trace)
 	if err != nil {
 		return nil, err
 	}
+
 	if !isBinary {
 		if t.Hash() != stateRoot {
 			filename := fmt.Sprintf("root_%d.txt", blockNr)
@@ -64,7 +65,7 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	}
 	return &Stateless{
 		t:              t,
-		codeMap:        codeMap,
+		codeUpdates:    make(map[common.Hash][]byte),
 		storageUpdates: make(map[common.Hash]map[common.Hash][]byte),
 		accountUpdates: make(map[common.Hash]*accounts.Account),
 		deleted:        make(map[common.Hash]struct{}),
@@ -113,7 +114,6 @@ func (s *Stateless) ReadAccountStorage(address common.Address, incarnation uint6
 }
 
 // ReadAccountCode is a part of the StateReader interface
-// This implementation looks the code up in the codeMap, failing if the code is not found.
 func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -121,10 +121,20 @@ func (s *Stateless) ReadAccountCode(address common.Address, codeHash common.Hash
 	if s.trace {
 		fmt.Printf("Getting code for %x\n", codeHash)
 	}
-	if code, ok := s.codeMap[codeHash]; ok {
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return nil, err
+	}
+
+	if code, ok := s.codeUpdates[addrHash]; ok {
 		return code, nil
 	}
-	return nil, fmt.Errorf("could not find bytecode for hash %x", codeHash)
+
+	if code, ok := s.t.GetAccountCode(addrHash[:]); ok {
+		return code, nil
+	}
+	return nil, fmt.Errorf("could not find bytecode for acc: %x hash %x", address, codeHash)
 }
 
 // ReadAccountCodeSize is a part of the StateReader interface
@@ -134,9 +144,20 @@ func (s *Stateless) ReadAccountCodeSize(address common.Address, codeHash common.
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return 0, nil
 	}
-	if code, ok := s.codeMap[codeHash]; ok {
+
+	addrHash, err := common.HashData(address[:])
+	if err != nil {
+		return 0, err
+	}
+
+	if code, ok := s.codeUpdates[addrHash]; ok {
 		return len(code), nil
 	}
+
+	if code, ok := s.t.GetAccountCode(addrHash[:]); ok {
+		return len(code), nil
+	}
+
 	return 0, fmt.Errorf("could not find bytecode for hash %x", codeHash)
 }
 
@@ -172,9 +193,9 @@ func (s *Stateless) DeleteAccount(_ context.Context, address common.Address, ori
 // UpdateAccountCode is a part of the StateWriter interface
 // This implementation adds the code to the codeMap to make it available for further accesses
 func (s *Stateless) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
-	if _, ok := s.codeMap[codeHash]; !ok {
-		s.codeMap[codeHash] = code
-	}
+
+	s.codeUpdates[codeHash] = code
+
 	if s.trace {
 		fmt.Printf("Stateless: UpdateAccountCode %x codeHash %x\n", addrHash, codeHash)
 	}
@@ -310,8 +331,4 @@ func (s *Stateless) CheckRoot(expected common.Hash) error {
 
 func (s *Stateless) GetTrie() *trie.Trie {
 	return s.t
-}
-
-func (s *Stateless) GetCodeMap() map[common.Hash][]byte {
-	return s.codeMap
 }

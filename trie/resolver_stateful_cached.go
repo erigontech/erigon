@@ -184,7 +184,7 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.KV); ok {
+	if hasBolt, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasBolt.KV()
 	}
 

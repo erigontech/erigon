@@ -1179,7 +1179,6 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps := func() {
 		if err := db.KV().View(func(tx *bolt.Tx) error {
 			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 
 			for k, v := inter.First(); k != nil; k, v = inter.Next() {
@@ -1187,21 +1186,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 					continue
 				}
 
-				// 1 prefix must be covered only by 1 tombstone
-				from := append(k, []byte{0, 0}...)
-				for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
-					if !bytes.HasPrefix(overlapK, from) {
-						overlapK = nil
-					}
-					if len(overlapV) > 0 {
-						continue
-					}
-
-					if bytes.HasPrefix(overlapK, k) {
-						panic(fmt.Sprintf("%x is prefix of %x\n", overlapK, k))
-					}
-				}
-
+				// each tomb must cover storage
 				addrHash := common.CopyBytes(k[:common.HashLength])
 				storageK, _ := storage.Seek(addrHash)
 				if !bytes.HasPrefix(storageK, addrHash) {
@@ -1230,7 +1215,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 
 	//printBucket := func() {
 	//	fmt.Printf("IH bucket print\n")
-	//	_ = db.KV().View(func(tx *bolt.Tx) error {
+	//	_ = db.HasKV().View(func(tx *bolt.Tx) error {
 	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
 	//			if len(v) == 0 {
 	//				fmt.Printf("IH: %x\n", k)
@@ -1358,10 +1343,12 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	checkProps()
 
 	checks = map[string]bool{
-		accKey:          true,
-		untouchedAcc:    false,
-		accKey + "2233": false, // was true on previous step
+		accKey:       true,
+		untouchedAcc: false,
 
+		// accKey + "2233" was true on previous step, don't delete this tombstone even one with shorter prefix exists.
+		// Because account creation must do predictable amount of operations.
+		accKey + "2233": true,
 	}
 
 	for k, expect := range checks {
@@ -1369,4 +1356,52 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
+}
+
+func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+
+	db := ethdb.NewMemDatabase()
+	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
+	if err != nil {
+		t.Errorf("could not create TrieDbState: %v", err)
+	}
+	tsw := tds.TrieStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+
+	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, oldCode)
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	tds.ComputeTrieRoots()
+
+	oldCodeHash := common.BytesToHash(crypto.Keccak256(oldCode))
+
+	trieCode, err := tds.ReadAccountCode(contract, oldCodeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, oldCode, trieCode, "new code should be received")
+
+	tds.StartNewBuffer()
+
+	newCode := []byte{0x04, 0x04, 0x04, 0x04}
+	intraBlockState.SetCode(contract, newCode)
+
+	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	tds.ComputeTrieRoots()
+
+	newCodeHash := common.BytesToHash(crypto.Keccak256(newCode))
+	trieCode, err = tds.ReadAccountCode(contract, newCodeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, newCode, trieCode, "new code should be received")
 }

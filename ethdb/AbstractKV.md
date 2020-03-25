@@ -2,22 +2,6 @@
 
 To build 1 key-value abstraction on top of Bolt, Badger and RemoteDB (our own read-only TCP protocol for key-value databases).
 
-## Vision: 
-
-Ethereum gives users a powerful resource (which is hard to give) which is not explicitely priced - 
-transaction atomicity and "serialisable" isolation (the highest level of isolation you can get in the databases). 
-Which means that transaction does not even need to declare in advance what it wants to lock, the entire 
-state is deemed "locked" for its execution. I wonder if the weaker isolation models would make sense. 
-For example, ["read committed"](https://en.wikipedia.org/wiki/Isolation_(database_systems)#Read_committed)
-
-with the weaker isolation, you might be able to split any transaction into smaller parts, each of which 
-does not perform any Dynamic State Access (I have no proof of that though).
-
-It is similar to Tendermint strategy, but even more granular. You can view it as a support for "continuations". 
-Transactions starts, and whenever it hits dynamic access, its execution stops, gas is charged, and the continuation 
-is added to the state. Then, transaction can be resumed, because by committing to some continuation, it makes its 
-next dynamic state access static.
-
 ## Design principles:
 - No internal copies/allocations - all must be delegated to user. 
 Make it part of contract - written clearly in docs, because it's unsafe (unsafe to put slice to DB and then change it). 
@@ -25,7 +9,47 @@ Known problems: mutation.Put does copy internally.
 - Low-level API: as close to original Bolt/Badger as possible.
 - Expose concept of transaction - app-level code can .Rollback() or .Commit() at once. 
 
-## Abstraction to support: 
+## Result interface:
+
+```
+type DB interface {
+	View(ctx context.Context, f func(tx Tx) error) (err error)
+	Update(ctx context.Context, f func(tx Tx) error) (err error)
+	Close() error
+}
+
+type Tx interface {
+	Bucket(name []byte) Bucket
+}
+
+type Bucket interface {
+	Get(key []byte) (val []byte, err error)
+	Put(key []byte, value []byte) error
+	Delete(key []byte) error
+	Cursor() Cursor
+}
+
+type Cursor interface {
+	Prefix(v []byte) Cursor
+	MatchBits(uint) Cursor
+	Prefetch(v uint) Cursor
+	NoValues() NoValuesCursor
+
+	First() ([]byte, []byte, error)
+	Seek(seek []byte) ([]byte, []byte, error)
+	Next() ([]byte, []byte, error)
+	Walk(walker func(k, v []byte) (bool, error)) error
+}
+
+type NoValuesCursor interface {
+	First() ([]byte, uint64, error)
+	Seek(seek []byte) ([]byte, uint64, error)
+	Next() ([]byte, uint64, error)
+	Walk(walker func(k []byte, vSize uint64) (bool, error)) error
+}
+```
+
+## Rationale and Features list: 
 
 #### Buckets concept:
 - Bucket is an interface, can’t be nil, can't return error
@@ -78,48 +102,3 @@ Known problems: mutation.Put does copy internally.
 - Monotonic int DB.GetSequence 
 - Nested Buckets
 - Backups, tx.WriteTo
-
-## Result interface:
-
-```
-type DB interface {
-	View(ctx context.Context, f func(tx Tx) error) (err error)
-	Update(ctx context.Context, f func(tx Tx) error) (err error)
-	Close() error
-}
-
-type Tx interface {
-	Bucket(name []byte) Bucket
-}
-
-type Bucket interface {
-	Get(key []byte) (val []byte, err error)
-	Put(key []byte, value []byte) error
-	Delete(key []byte) error
-	Cursor() Cursor
-}
-
-type Cursor interface {
-	Prefix(v []byte) Cursor
-	From(v []byte) Cursor
-	MatchBits(uint) Cursor
-	Prefetch(v uint) Cursor
-	NoValues() Cursor
-
-	First() ([]byte, []byte, error)
-	Seek(seek []byte) ([]byte, []byte, error)
-	Next() ([]byte, []byte, error)
-	FirstKey() ([]byte, uint64, error)
-	SeekKey(seek []byte) ([]byte, uint64, error)
-	NextKey() ([]byte, uint64, error)
-
-	Walk(walker func(k, v []byte) (bool, error)) error
-	WalkKeys(walker func(k []byte, vSize uint64) (bool, error)) error
-}
-```
-
-## Naming: 
-- `Iter` shorter `Cursor` shorter `Iterator`
-- `Opts` shorter `Options`
-- `Walk` shorter `ForEach`
-

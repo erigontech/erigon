@@ -1,7 +1,6 @@
 package apis
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"net/http"
@@ -9,7 +8,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func RegisterStorageAPI(router *gin.RouterGroup, e *Env) error {
@@ -32,18 +31,15 @@ type StorageResponse struct {
 	Value  string `json:"value"`
 }
 
-func findStorageByPrefix(prefixS string, remoteDB *remote.DB) ([]*StorageResponse, error) {
+func findStorageByPrefix(prefixS string, remoteDB ethdb.KV) ([]*StorageResponse, error) {
 	var results []*StorageResponse
 	prefix := common.FromHex(prefixS)
-	if err := remoteDB.View(context.TODO(), func(tx *remote.Tx) error {
-		c := tx.Bucket(dbutils.StorageBucket).Cursor(remote.DefaultCursorOpts)
+	if err := remoteDB.View(context.TODO(), func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.StorageBucket).Cursor().Prefix(prefix).Prefetch(200)
 
-		for k, v, err := c.Seek(prefix); k != nil; k, v, err = c.Next() {
+		for k, v, err := c.First(); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
 				return err
-			}
-			if !bytes.HasPrefix(k, prefix) {
-				return nil
 			}
 
 			results = append(results, &StorageResponse{

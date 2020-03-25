@@ -712,8 +712,7 @@ func (pm *ProtocolManager) handleMsg(p *peer) error {
 			}
 
 			// Now attempt to get the byte code
-			var zeroAddress common.Address
-			code, err := tds.ReadAccountCode(zeroAddress, hash)
+			code, err := tds.ReadCodeByHash(hash)
 			if err == nil {
 				data = append(data, code)
 				bytes += len(code)

@@ -70,7 +70,7 @@ func runBlock(ibs *state.IntraBlockState, txnWriter state.StateWriter, blockWrit
 	return nil
 }
 
-func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number uint64) error {
+func statePicture(t *trie.Trie, number uint64) error {
 	filename := fmt.Sprintf("state_%d.dot", number)
 	f, err := os.Create(filename)
 	if err != nil {
@@ -85,7 +85,6 @@ func statePicture(t *trie.Trie, codeMap map[common.Hash][]byte, number uint64) e
 		FontColors:     fontColors,
 		Values:         true,
 		CutTerminals:   0,
-		CodeMap:        codeMap,
 		CodeCompressed: false,
 		ValCompressed:  false,
 		ValHex:         true,
@@ -375,7 +374,7 @@ func Stateless(
 				return
 			}
 			if _, ok := starkBlocks[blockNum-1]; ok {
-				err = statePicture(s.GetTrie(), s.GetCodeMap(), blockNum-1)
+				err = statePicture(s.GetTrie(), blockNum-1)
 				check(err)
 			}
 			ibs := state.New(s)

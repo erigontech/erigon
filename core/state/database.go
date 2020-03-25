@@ -28,7 +28,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	lru "github.com/hashicorp/golang-lru"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -95,6 +94,8 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // Structure holding updates, deletes, and reads registered within one change period
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
+	codeReads      map[common.Hash]common.Hash
+	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
 	accountUpdates map[common.Hash]*accounts.Account
@@ -105,6 +106,8 @@ type Buffer struct {
 
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
+	b.codeReads = make(map[common.Hash]common.Hash)
+	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
 	b.accountUpdates = make(map[common.Hash]*accounts.Account)
@@ -124,6 +127,14 @@ func (b *Buffer) detachAccounts() {
 
 // Merges the content of another buffer into this one
 func (b *Buffer) merge(other *Buffer) {
+	for addrHash, codeHash := range other.codeReads {
+		b.codeReads[addrHash] = codeHash
+	}
+
+	for addrHash, code := range other.codeUpdates {
+		b.codeUpdates[addrHash] = code
+	}
+
 	for addrHash, om := range other.storageUpdates {
 		m, ok := b.storageUpdates[addrHash]
 		if !ok {
@@ -167,8 +178,6 @@ type TrieDbState struct {
 	buffers                []*Buffer
 	aggregateBuffer        *Buffer // Merge of all buffers
 	currentBuffer          *Buffer
-	codeCache              *lru.Cache
-	codeSizeCache          *lru.Cache
 	historical             bool
 	noHistory              bool
 	resolveReads           bool
@@ -183,14 +192,6 @@ type TrieDbState struct {
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
-	csc, err := lru.New(100000)
-	if err != nil {
-		return nil, err
-	}
-	cc, err := lru.New(10000)
-	if err != nil {
-		return nil, err
-	}
 	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
@@ -199,8 +200,6 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tMu:               new(sync.Mutex),
 		db:                db,
 		blockNr:           blockNr,
-		codeCache:         cc,
-		codeSizeCache:     csc,
 		resolveSetBuilder: trie.NewResolveSetBuilder(),
 		tp:                tp,
 		savePreimages:     true,
@@ -272,12 +271,13 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 	}
 
 	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.KV); ok {
+	if hasBolt, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasBolt.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 
+	var toPut [][]byte
 	if err := boltDb.Update(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
@@ -297,7 +297,6 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
 		for ; incarnation > 0; incarnation-- {
 			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
-
 			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
 				if !bytes.HasPrefix(k, accWithInc) {
 					k = nil
@@ -308,15 +307,17 @@ func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Ha
 				}
 
 				kNoInc := dbutils.RemoveIncarnationFromKey(k)
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(kNoInc[:common.HashLength+1]), []byte{}); err != nil {
-					return err
-				}
+				toPut = append(toPut, common.CopyBytes(kNoInc[:common.HashLength+1]))
 			}
 		}
-
 		return nil
 	}); err != nil {
 		return err
+	}
+	for _, k := range toPut {
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
+			return err
+		}
 	}
 
 	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
@@ -332,7 +333,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	}
 
 	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.KV); ok {
+	if hasKV, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasKV.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
@@ -341,7 +342,8 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 	buf := pool.GetBuffer(64)
 	defer pool.PutBuffer(buf)
 
-	return boltDb.View(func(tx *bolt.Tx) error {
+	hasStorage := false
+	if err := boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
 				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
@@ -350,28 +352,7 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			}()
 		}
 
-		// cleanup all previous under given account
-		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		c := interBucket.Cursor()
-		for k, v := c.Seek(addrHash); k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, addrHash) {
-				k = nil
-			}
-			if k == nil {
-				break
-			}
-
-			if len(v) > 0 {
-				continue
-			}
-
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(k)); err != nil {
-				return err
-			}
-		}
-
 		// place 1 tombstone to account if it has storage
-		hasStorage := false
 		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
 		k, _ := storage.Seek(addrHash)
 		if !bytes.HasPrefix(k, addrHash) {
@@ -382,22 +363,29 @@ func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error 
 			hasStorage = true
 		}
 
-		if !hasStorage {
-			return nil
-		}
+		return nil
+	}); err != nil {
+		return err
+	}
 
-		return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
-	})
+	if !hasStorage {
+		return nil
+	}
+
+	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
 }
 
 func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
 	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.KV); ok {
+	if hasKV, ok := db.(ethdb.HasKV); ok {
 		boltDb = hasKV.KV()
 	} else {
 		return fmt.Errorf("only Bolt supported yet, given: %T", db)
 	}
 	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
+
+	var toPut [][]byte
+	var toDelete [][]byte
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		if debug.IntermediateTrieHashAssertDbIntegrity {
 			defer func() {
@@ -443,19 +431,26 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 					continue
 				}
 
-				k := dbutils.RemoveIncarnationFromKey(storageK[:i+1+8])
-				if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-					return err
-				}
+				toPut = append(toPut, dbutils.RemoveIncarnationFromKey(storageK[:i+1+8]))
 			}
-			if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
-				return err
-			}
+			toDelete = append(toDelete, common.CopyBytes(storageKeyNoInc[:i]))
 			break
 		}
 		return nil
 	}); err != nil {
 		return err
+	}
+
+	for _, k := range toPut {
+		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
+			return err
+		}
+	}
+
+	for _, k := range toDelete {
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -573,8 +568,6 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		buffers:           buffers,
 		aggregateBuffer:   aggregateBuffer,
 		currentBuffer:     currentBuffer,
-		codeCache:         tds.codeCache,
-		codeSizeCache:     tds.codeSizeCache,
 		historical:        tds.historical,
 		noHistory:         tds.noHistory,
 		resolveReads:      tds.resolveReads,
@@ -704,6 +697,10 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
+func (tds *TrieDbState) buildCodeTouches(withReads bool) map[common.Hash]common.Hash {
+	return tds.aggregateBuffer.codeReads
+}
+
 // Builds a sorted list of all address hashes that were touched within the
 // period for which we are aggregating updates
 func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (common.Hashes, []*accounts.Account) {
@@ -748,9 +745,30 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 	return accountTouches, aValues
 }
 
+func (tds *TrieDbState) resolveCodeTouches(codeTouches map[common.Hash]common.Hash, resolveFunc trie.ResolveFunc) error {
+	firstRequest := true
+	for address, codeHash := range codeTouches {
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash); need {
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
+			}
+			firstRequest = false
+			tds.resolver.AddCodeRequest(req)
+		}
+	}
+
+	if !firstRequest {
+		return resolveFunc(tds.resolver)
+	}
+	return nil
+}
+
 // Expands the accounts trie (by loading data from the database) if it is required
 // for accessing accounts whose addresses are contained in the accountTouches
-func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc func(*trie.Resolver) error) error {
+func (tds *TrieDbState) resolveAccountTouches(accountTouches common.Hashes, resolveFunc trie.ResolveFunc) error {
 	var firstRequest = true
 	for _, addrHash := range accountTouches {
 		if need, req := tds.t.NeedResolution(nil, addrHash[:]); need {
@@ -784,7 +802,7 @@ func (tds *TrieDbState) ExtractTouches() (accountTouches [][]byte, storageTouche
 	return tds.resolveSetBuilder.ExtractTouches()
 }
 
-func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc func(*trie.Resolver) error) error {
+func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) error {
 	// Aggregating the current buffer, if any
 	if tds.currentBuffer != nil {
 		if tds.aggregateBuffer == nil {
@@ -805,9 +823,17 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc func(*trie.Resolver
 
 	// Prepare (resolve) accounts trie so that actual modifications can proceed without database access
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
+
+	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
+	codeTouches := tds.buildCodeTouches(tds.resolveReads)
+
 	var err error
 
 	if err = tds.resolveAccountTouches(accountTouches, resolveFunc); err != nil {
+		return err
+	}
+
+	if err = tds.resolveCodeTouches(codeTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -943,6 +969,13 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				tds.t.UpdateAccount(addrHash[:], account)
 			} else {
 				tds.t.Delete(addrHash[:])
+				delete(b.codeUpdates, addrHash)
+			}
+		}
+
+		for addrHash, newCode := range b.codeUpdates {
+			if err := tds.t.UpdateAccountCode(addrHash[:], newCode); err != nil {
+				return nil, err
 			}
 		}
 		for addrHash, m := range b.storageUpdates {
@@ -1331,18 +1364,35 @@ func (tds *TrieDbState) ReadAccountStorage(address common.Address, incarnation u
 	return enc, nil
 }
 
+func (tds *TrieDbState) ReadCodeByHash(codeHash common.Hash) (code []byte, err error) {
+	if bytes.Equal(codeHash[:], emptyCodeHash) {
+		return nil, nil
+	}
+
+	code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
+	if tds.resolveReads {
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.resolveSetBuilder.ReadCode(codeHash)
+	}
+	return code, err
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
 	}
-	if cached, ok := tds.codeCache.Get(codeHash); ok {
-		code, err = cached.([]byte), nil
+
+	addrHash, err := tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return nil, err
+	}
+
+	if cached, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+		code, err = cached, nil
 	} else {
 		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
-		if err == nil {
-			tds.codeSizeCache.Add(codeHash, len(code))
-			tds.codeCache.Add(codeHash, code)
-		}
 	}
 	if tds.resolveReads {
 		addrHash, err1 := common.HashData(address[:])
@@ -1352,25 +1402,23 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
-		tds.resolveSetBuilder.ReadCode(codeHash, code)
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.currentBuffer.codeReads[addrHash] = codeHash
+		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return code, err
 }
 
 func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash common.Hash) (codeSize int, err error) {
-	var code []byte
-	if cached, ok := tds.codeSizeCache.Get(codeHash); ok {
-		codeSize, err = cached.(int), nil
-		if tds.resolveReads {
-			if cachedCode, ok := tds.codeCache.Get(codeHash); ok {
-				code, err = cachedCode.([]byte), nil
-			} else {
-				code, err = tds.ReadAccountCode(address, codeHash)
-				if err != nil {
-					return 0, err
-				}
-			}
-		}
+	addrHash, err := tds.HashAddress(address, false /*save*/)
+	if err != nil {
+		return 0, err
+	}
+
+	if code, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+		codeSize, err = len(code), nil
 	} else {
 		code, err = tds.ReadAccountCode(address, codeHash)
 		if err != nil {
@@ -1386,7 +1434,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		if _, ok := tds.currentBuffer.accountUpdates[addrHash]; !ok {
 			tds.currentBuffer.accountReads[addrHash] = struct{}{}
 		}
-		tds.resolveSetBuilder.ReadCode(codeHash, code)
+		// we have to be careful, because the code might change
+		// during the block executuion, so we are always
+		// storing the latest code hash
+		tds.currentBuffer.codeReads[addrHash] = codeHash
+		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return codeSize, nil
 }
@@ -1519,8 +1571,9 @@ func (tsw *TrieStateWriter) DeleteAccount(_ context.Context, address common.Addr
 
 func (tsw *TrieStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
 	if tsw.tds.resolveReads {
-		tsw.tds.resolveSetBuilder.CreateCode(codeHash, code)
+		tsw.tds.resolveSetBuilder.CreateCode(codeHash)
 	}
+	tsw.tds.currentBuffer.codeUpdates[addrHash] = code
 	return nil
 }
 
@@ -1551,12 +1604,12 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form
 func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness, error) {
-	rs, codeMap := tds.resolveSetBuilder.Build(isBinary)
+	rs := tds.resolveSetBuilder.Build(isBinary)
 
-	return tds.makeBlockWitness(trace, rs, codeMap, isBinary)
+	return tds.makeBlockWitness(trace, rs, isBinary)
 }
 
-func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, codeMap map[common.Hash][]byte, isBinary bool) (*trie.Witness, error) {
+func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, isBinary bool) (*trie.Witness, error) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 
@@ -1565,7 +1618,7 @@ func (tds *TrieDbState) makeBlockWitness(trace bool, rs *trie.ResolveSet, codeMa
 		t = trie.HexToBin(tds.t).Trie()
 	}
 
-	return t.ExtractWitness(tds.blockNr, trace, rs, codeMap)
+	return t.ExtractWitness(tds.blockNr, trace, rs)
 }
 
 func (tsw *TrieStateWriter) CreateContract(address common.Address) error {

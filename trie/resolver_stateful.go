@@ -186,6 +186,20 @@ func (tr *ResolverStateful) RebuildTrie(
 	return nil
 }
 
+func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*ResolveRequestForCode) error {
+	for _, req := range requests {
+		codeHash := req.codeHash
+		code, err := db.Get(dbutils.CodeBucket, codeHash[:])
+		if err != nil {
+			return err
+		}
+		if err := req.t.UpdateAccountCode(req.addrHash[:], codeNode(code)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (tr *ResolverStateful) WalkerAccounts(keyIdx int, k []byte, v []byte) error {
 	return tr.Walker(true, keyIdx, k, v)
 }

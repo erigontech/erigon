@@ -7,7 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ledgerwatch/turbo-geth/cmd/restapi/apis"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 )
 
 func printError(name string, err error) {
@@ -29,7 +29,7 @@ func ServeREST(localAddress, remoteDbAddress string) error {
 		}
 	})
 
-	db, err := remote.Open(context.Background(), remote.DefaultOpts.Addr(remoteDbAddress))
+	db, err := ethdb.NewRemote().Path(remoteDbAddress).Open(context.TODO())
 	if err != nil {
 		return err
 	}
