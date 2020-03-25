@@ -19,6 +19,7 @@ var (
 	starkStatsBase    string
 	statelessResolver bool
 	witnessDatabase   string
+	writeHistory      bool
 )
 
 func init() {
@@ -38,6 +39,7 @@ func init() {
 	statelessCmd.Flags().StringVar(&starkStatsBase, "starkStatsBase", "stark_stats", "template for names of the files to write stark stats in")
 	statelessCmd.Flags().BoolVar(&statelessResolver, "statelessResolver", false, "use a witness DB instead of the state when resolving tries")
 	statelessCmd.Flags().StringVar(&witnessDatabase, "witnessDbFile", "", "optional path to a database where to store witnesses (empty string -- do not store witnesses")
+	statelessCmd.Flags().BoolVar(&writeHistory, "writeHistory", false, "write history buckets and changeset buckets into the statefile")
 	if err := statelessCmd.MarkFlagFilename("witnessDbFile", ""); err != nil {
 		panic(err)
 	}
@@ -74,6 +76,7 @@ var statelessCmd = &cobra.Command{
 			starkStatsBase,
 			statelessResolver,
 			witnessDatabase,
+			writeHistory,
 		)
 
 		return nil

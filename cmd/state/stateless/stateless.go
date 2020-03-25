@@ -148,7 +148,9 @@ func Stateless(
 	starkBlocksFile string,
 	starkStatsBase string,
 	useStatelessResolver bool,
-	witnessDatabasePath string) {
+	witnessDatabasePath string,
+	writeHistory bool,
+	) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -220,7 +222,7 @@ func Stateless(
 		tds.Rebuild()
 	}
 	tds.SetResolveReads(false)
-	tds.SetNoHistory(true)
+	tds.SetNoHistory(!writeHistory)
 	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
 	var blockWitness []byte
