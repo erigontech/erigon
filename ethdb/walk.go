@@ -18,6 +18,7 @@ package ethdb
 
 import (
 	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 
@@ -48,22 +49,17 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				m[bucketStr] = t
 			}
 
+			walker := func(kk, vv []byte) error {
+				if _, ok = t[string(kk)]; !ok {
+					t[string(kk)] = vv
+				}
+				return nil
+			}
 			var innerErr error
-
 			if debug.IsThinHistory() {
-				innerErr = changeset.AccountChangeSetBytes(v).Walk(func(kk, vv []byte) error {
-					if _, ok = t[string(kk)]; !ok {
-						t[string(kk)] = vv
-					}
-					return nil
-				})
+				innerErr = changeset.AccountChangeSetBytes(v).Walk(walker)
 			} else {
-				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
-					if _, ok = t[string(kk)]; !ok {
-						t[string(kk)] = vv
-					}
-					return nil
-				})
+				innerErr = changeset.Walk(v, walker)
 			}
 			if innerErr != nil {
 				return false, innerErr
@@ -88,23 +84,18 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 				m[bucketStr] = t
 			}
 
+			walker := func(kk, vv []byte) error {
+				if _, ok = t[string(kk)]; !ok {
+					t[string(kk)] = vv
+				}
+				return nil
+			}
 			var innerErr error
 			v = common.CopyBytes(v) // Making copy because otherwise it will be invalid after the transaction
 			if debug.IsThinHistory() {
-				innerErr = changeset.StorageChangeSetBytes(v).Walk(func(kk, vv []byte) error {
-					if _, ok = t[string(kk)]; !ok {
-						t[string(kk)] = vv
-					}
-					return nil
-				})
+				innerErr = changeset.StorageChangeSetBytes(v).Walk(walker)
 			} else {
-				innerErr = changeset.Walk(v, func(kk, vv []byte) error {
-					if _, ok = t[string(kk)]; !ok {
-						t[string(kk)] = vv
-					}
-					return nil
-				})
-
+				innerErr = changeset.Walk(v, walker)
 			}
 			if innerErr != nil {
 				return false, innerErr
@@ -135,17 +126,16 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 		if keyTimestamp > endTimestamp {
 			return false, nil
 		}
+
+		walker := func(k, _ []byte) error {
+			keys = append(keys, k)
+			return nil
+		}
 		var innerErr error
 		if debug.IsThinHistory() {
-			innerErr = changeset.AccountChangeSetBytes(v).Walk(func(k, _ []byte) error {
-				keys = append(keys, k)
-				return nil
-			})
+			innerErr = changeset.AccountChangeSetBytes(v).Walk(walker)
 		} else {
-			innerErr = changeset.Walk(v, func(k, _ []byte) error {
-				keys = append(keys, k)
-				return nil
-			})
+			innerErr = changeset.Walk(v, walker)
 		}
 		if innerErr != nil {
 			return false, innerErr
