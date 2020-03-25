@@ -16,12 +16,13 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error {
+func CheckChangeSets(blockNum uint64, chaindata string, historyfile string) error {
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -37,9 +38,9 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 		return err
 	}
 	defer chainDb.Close()
-	stateDb := chainDb
-	if chaindata != statefile {
-		stateDb, err = ethdb.NewBoltDatabase(statefile)
+	historyDb := chainDb
+	if chaindata != historyfile {
+		historyDb, err = ethdb.NewBoltDatabase(historyfile)
 		if err != nil {
 			return err
 		}
@@ -62,7 +63,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 			break
 		}
 
-		dbstate := state.NewDbState(stateDb, block.NumberU64()-1)
+		dbstate := state.NewDbState(historyDb, block.NumberU64()-1)
 		intraBlockState := state.New(dbstate)
 		csw := state.NewChangeSetWriter()
 
@@ -75,7 +76,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 			return err
 		}
 
-		dbAccountChanges, err := stateDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
+		dbAccountChanges, err := historyDb.GetChangeSetByBlock(dbutils.AccountsHistoryBucket, blockNum)
 		if err != nil {
 			return err
 		}
@@ -95,7 +96,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 			}
 		}
 
-		dbStorageChanges, err := stateDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
+		dbStorageChanges, err := historyDb.GetChangeSetByBlock(dbutils.StorageHistoryBucket, blockNum)
 		if err != nil {
 			return err
 		}
@@ -107,7 +108,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 
 		blockNum++
 		if blockNum%1000 == 0 {
-			fmt.Printf("Checked %d blocks\n", blockNum)
+			log.Info("Checked", "blocks", blockNum)
 		}
 
 		// Check for interrupts
@@ -118,9 +119,6 @@ func CheckChangeSets(blockNum uint64, chaindata string, statefile string) error 
 		}
 	}
 
-	fmt.Printf("Checked %d blocks\n", blockNum)
-	fmt.Printf("Next time specify --block %d\n", blockNum)
-	fmt.Printf("CheckChangeSets took %s\n", time.Since(startTime))
-
+	log.Info("Checked", "blocks", blockNum, "next time specify --block", blockNum, "duration", time.Since(startTime))
 	return nil
 }
