@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -103,19 +102,13 @@ func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw
 		}
 		switch msg.Code {
 		case eth.MGRWitness:
-			msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
-			var marshaledWitness []byte
-			if err := msgStream.Decode(&marshaledWitness); err != nil {
-				return fmt.Errorf("msgStream.Decode: %w", err)
-			}
-
-			res, err := trie.NewWitnessFromReader(bytes.NewReader(marshaledWitness), false)
+			res, err := trie.NewWitnessFromReader(msg.Payload, false)
 			if err != nil {
 				panic(err)
 			}
 
-			i += len(res.Operators)
-			j++
+			i++
+			j += len(res.Operators)
 			fmt.Printf("Messages: %d, Operators: %d\n", i, j)
 		}
 	}

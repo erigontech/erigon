@@ -1349,8 +1349,8 @@ func (pm *ProtocolManager) handleMgrMsg(p *mgrPeer) error {
 
 		fmt.Printf("Received MGRStatus. len(knownPrefixes)=%d\n", len(knownPrefixes))
 		buf := bytes.NewBuffer([]byte{})
-
-		epoch := tds.GetBlockNr() / 4096
+		blockNr := tds.GetBlockNr()
+		epoch := blockNr / 4096
 		subtree := epoch % 256
 		for i := 0; i < 256; i++ { // spread witness of each subtree
 			prefix := []byte{byte(subtree), byte(i)}
@@ -1362,8 +1362,12 @@ func (pm *ProtocolManager) handleMgrMsg(p *mgrPeer) error {
 			if _, err := witness.WriteTo(buf); err != nil {
 				return err
 			}
-			fmt.Printf("Sernding MGRWitness: %x, of size %d\n", prefix, buf.Len())
-			if err := p2p.Send(p.rw, MGRWitness, buf.Bytes()); err != nil {
+			//fmt.Printf("Sernding MGRWitness: %x, of %d\n", prefix, buf.Len())
+			//for _, o := range witness.Operators {
+			//fmt.Printf("%x\n", o)
+			//}
+
+			if err := p.rw.WriteMsg(p2p.Msg{Code: MGRWitness, Size: 0, Payload: buf}); err != nil {
 				return err
 			}
 		}
