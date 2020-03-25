@@ -400,22 +400,6 @@ func bucketStats(chaindata string) {
 	})
 }
 
-func bucketPrefixStats(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	stats := map[uint8]uint64{}
-	db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(dbutils.StorageBucket).Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			stats[k[0]] += uint64(len(v))
-		}
-		return nil
-	})
-	for k, v := range stats {
-		fmt.Printf("%x %dKb\n", k, v)
-	}
-}
-
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -925,56 +909,28 @@ func testResolveCached() {
 	*/
 }
 
-func dbSlice(chaindata string, prefix []byte) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	defer db.Close()
-	err = db.View(func (tx *bolt.Tx) error {
-		ab := tx.Bucket(dbutils.AccountsBucket)
-		c := ab.Cursor()
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.AccountsBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
-		}
-		sb := tx.Bucket(dbutils.StorageBucket)
-		c = sb.Cursor()
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.StorageBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
-		}
-		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		c = ib.Cursor()
-		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
-			fmt.Printf("db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
-		}
-		return nil
-	})
-	check(err)
-}
-
 func testResolve(chaindata string) {
 	startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	//check(err)
-	/*
+	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	check(err)
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
-	*/
-	currentBlockNr := 4155652
 	var contract []byte
 	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
 	r := trie.NewResolver(10, true, 10000000)
-	r.SetHistorical(false)
+	r.SetHistorical(true)
 	var key []byte
-	key = common.FromHex("0d050f050306070a0b05090d0a050908000a03050d0008030a01030e0e0808000d0c000b0b050b0c0a0601050a000308010601090005010808040f06010b090d10")
-	resolveHash := common.FromHex("8894372f37cc47e5b342f1caca60668089cf12c95a7984f1d73d220c325fffa9")
+	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
+	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 5, resolveHash)
+	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, 10000000)
 	if err != nil {
@@ -1591,6 +1547,36 @@ func generateLoop(db ethdb.Database, startBlock uint64, interruptCh chan bool) (
 	return blockNum, finished
 }
 
+func generateLoop1(db ethdb.Database, startBlock uint64, interruptCh chan bool) (uint64, bool) {
+	f, _ := os.OpenFile(".lookups.tmp",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer f.Close()
+	entry := make([]byte, 36)
+	var blockNum = startBlock
+	var interrupt bool
+	var finished = true
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		if body == nil {
+			break
+		}
+		for _, tx := range body.Transactions {
+			copy(entry[:32], tx.Hash().Bytes())
+			binary.BigEndian.PutUint32(entry[32:], uint32(blockNum))
+			_, _ = f.Write(append(entry, '\n'))
+		}
+		blockNum++
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	return blockNum, finished
+}
+
 func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
 	for j := start; j < end; j++ {
 		binary.BigEndian.PutUint64(entry[:], lookups[j])
@@ -1671,6 +1657,167 @@ func GenerateTxLookups1(chaindata string, block int) {
 	log.Info("Tx committing done", "duration", time.Since(startTime))
 }
 
+func GenerateTxLookups2(chaindata string) {
+	startTime := time.Now()
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	//nolint: errcheck
+	db.DeleteBucket(dbutils.TxLookupPrefix)
+	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
+	startTime = time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	generateTxLookups2(db, blockNum, interruptCh)
+	log.Info("All done", "duration", time.Since(startTime))
+}
+
+type firstEntry struct {
+	bytes [35]byte
+	id    int
+}
+
+func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+	var count uint64 = 10000000
+	entries := make([][35]byte, count)
+	bn := make([]byte, 3)
+	var firstEntries []firstEntry
+	var iterations uint64
+	var blockNum = startBlock
+	var interrupt bool
+	filename := fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+
+		if body == nil {
+			log.Info("Now Inserting to file")
+			firstEntries = append(firstEntries, firstEntry{entries[0], len(firstEntries)})
+			iterations = 0
+			sort.Slice(entries, func(i, j int) bool {
+				if entries[i][0] != entries[j][0] {
+					return entries[i][0] < entries[j][0]
+				} else if entries[i][1] != entries[j][1] {
+					return entries[i][1] < entries[j][1]
+				} else if entries[i][2] != entries[j][2] {
+					return entries[i][2] < entries[j][2]
+				} else if entries[i][3] != entries[j][3] {
+					return entries[i][3] < entries[j][3]
+				}
+				return entries[i][4] < entries[j][4]
+			})
+			var stuff []byte
+			for i, entry := range entries {
+				stuff = append(stuff, entry[:]...)
+				if i%100000 == 0 {
+					log.Info("Packing data", "progress count", i)
+				}
+			}
+			_, err := fileTmp.Write(stuff)
+			check(err)
+			fileTmp.Close()
+			if body == nil {
+				break
+			}
+			filename = fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+			fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+			log.Info("File Insertion Occured")
+		}
+
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+		bn[0] = byte(blockNum >> 16)
+		bn[1] = byte(blockNum >> 8)
+		bn[2] = byte(blockNum)
+
+		for _, tx := range body.Transactions {
+			copy(entries[iterations][:], tx.Hash().Bytes())
+			copy(entries[iterations][32:], bn)
+			iterations++
+			if iterations == count {
+				log.Info("Now Inserting to file")
+				firstEntries = append(firstEntries, firstEntry{entries[0], len(firstEntries)})
+				iterations = 0
+				sort.Slice(entries, func(i, j int) bool {
+					if entries[i][0] != entries[j][0] {
+						return entries[i][0] < entries[j][0]
+					} else if entries[i][1] != entries[j][1] {
+						return entries[i][1] < entries[j][1]
+					} else if entries[i][2] != entries[j][2] {
+						return entries[i][2] < entries[j][2]
+					} else if entries[i][3] != entries[j][3] {
+						return entries[i][3] < entries[j][3]
+					}
+					return entries[i][4] < entries[j][4]
+				})
+				var stuff []byte
+				for i, entry := range entries {
+					stuff = append(stuff, entry[:]...)
+					if i%100000 == 0 {
+						log.Info("Packing data", "progress count", i)
+					}
+				}
+				_, err := fileTmp.Write(stuff)
+				check(err)
+				fileTmp.Close()
+				if body == nil {
+					break
+				}
+				filename = fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+				fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+				log.Info("File Insertion Occured")
+			}
+		}
+		blockNum++
+		if blockNum%100000 == 0 {
+			log.Info("Processed", "blocks", blockNum, "iterations", iterations)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		}
+	}
+
+	sort.Slice(firstEntries, func(i, j int) bool {
+		if firstEntries[i].bytes[0] != firstEntries[j].bytes[0] {
+			return firstEntries[i].bytes[0] < firstEntries[j].bytes[0]
+		} else if firstEntries[i].bytes[1] != firstEntries[j].bytes[1] {
+			return firstEntries[i].bytes[1] < firstEntries[j].bytes[1]
+		} else if firstEntries[i].bytes[2] != firstEntries[j].bytes[2] {
+			return firstEntries[i].bytes[2] < firstEntries[j].bytes[2]
+		} else if firstEntries[i].bytes[3] != firstEntries[j].bytes[3] {
+			return firstEntries[i].bytes[3] < firstEntries[j].bytes[3]
+		}
+		return firstEntries[i].bytes[4] < firstEntries[j].bytes[4]
+	})
+
+	for phase, entry := range firstEntries {
+		log.Info("Writting Lookups into DB", "phase", phase)
+		filename := fmt.Sprintf(".lookups_%d.tmp", entry.id)
+		dat, _ := ioutil.ReadFile(filename)
+		batch := db.NewBatch()
+		for i := 0; i < len(dat); i += 35 {
+			err := batch.Put(dbutils.TxLookupPrefix, dat[i:i+32], dat[i+32:i+35])
+			check(err)
+			if i%35000000 == 0 {
+				log.Info("Commit Occured", "progress", i/35)
+				batch.Commit()
+			}
+		}
+		os.Remove(filename)
+		batch.Commit()
+	}
+	log.Info("New", "disk size", db.DiskSize())
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -1706,9 +1853,6 @@ func main() {
 	//defer db.Close()
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
-	}
-	if *action == "bucketPrefixStats" {
-		bucketPrefixStats(*chaindata)
 	}
 	if *action == "syncChart" {
 		mychart()
@@ -1786,7 +1930,8 @@ func main() {
 	if *action == "gen-tx-lookup-1" {
 		GenerateTxLookups1(*chaindata, *block)
 	}
-	if *action == "dbslice" {
-		dbSlice(*chaindata, common.FromHex(*name))
+
+	if *action == "gen-tx-lookup-2" {
+		GenerateTxLookups2(*chaindata)
 	}
 }
