@@ -400,6 +400,22 @@ func bucketStats(chaindata string) {
 	})
 }
 
+func bucketPrefixStats(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	stats := map[uint8]uint64{}
+	db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(dbutils.StorageBucket).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			stats[k[0]] += uint64(len(v))
+		}
+		return nil
+	})
+	for k, v := range stats {
+		fmt.Printf("%x %dKb\n", k, v)
+	}
+}
+
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -1662,6 +1678,9 @@ func main() {
 	//defer db.Close()
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
+	}
+	if *action == "bucketPrefixStats" {
+		bucketPrefixStats(*chaindata)
 	}
 	if *action == "syncChart" {
 		mychart()

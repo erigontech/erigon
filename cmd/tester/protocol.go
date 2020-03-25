@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,11 +9,13 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/rlp"
+	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 type statusData struct {
@@ -21,6 +24,7 @@ type statusData struct {
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash
+	ForkID          forkid.ID
 }
 
 type TesterProtocol struct {
@@ -55,7 +59,64 @@ func (tp *TesterProtocol) markBlockSent(blockNumber uint) bool {
 	return result
 }
 
-func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+// nextSubtree does []byte++. Returns false if overflow.
+func nextSubtree(in []byte) ([]byte, bool) {
+	r := make([]byte, len(in))
+	copy(r, in)
+	for i := len(r) - 1; i >= 0; i-- {
+		if r[i] != 255 {
+			r[i]++
+			return r, true
+		}
+
+		r[i] = 0
+	}
+	return nil, false
+}
+
+func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+	amountOfPrefixes := 100
+	prefixes := make([][]byte, 0, amountOfPrefixes)
+	from := []byte{1, 1, 1, 1, 1, 1}
+	for next, ok := nextSubtree(from); ok && amountOfPrefixes > 0; next, ok = nextSubtree(from) {
+		amountOfPrefixes--
+		prefixes = append(prefixes, next)
+	}
+
+	err := p2p.Send(rw, eth.MGRStatus, prefixes)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("Sent MGRStatus\n")
+
+	i := 0
+	j := 0
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		msg, err := rw.ReadMsg()
+		if err != nil {
+			return err
+		}
+		switch msg.Code {
+		case eth.MGRWitness:
+			res, err := trie.NewWitnessFromReader(msg.Payload, false)
+			if err != nil {
+				panic(err)
+			}
+
+			i++
+			j += len(res.Operators)
+			fmt.Printf("Messages: %d, Operators: %d\n", i, j)
+		}
+	}
+}
+
+func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	v, err := json.Marshal(genesis())
 	if err != nil {
 		return err
@@ -93,7 +154,7 @@ func (tp *TesterProtocol) debugProtocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter)
 	return nil
 }
 
-func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) error {
+func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
 	<-tp.genesisReady
 	log.Info("Ethereum peer connected", "peer", peer.Name())
 	log.Debug("Protocol version", "version", tp.protocolVersion)
@@ -105,6 +166,7 @@ func (tp *TesterProtocol) protocolRun(peer *p2p.Peer, rw p2p.MsgReadWriter) erro
 		TD:              tp.blockFeeder.TotalDifficulty(),
 		CurrentBlock:    tp.blockFeeder.LastBlock().Hash(),
 		GenesisBlock:    tp.genesisBlockHash,
+		ForkID:          tp.blockFeeder.ForkID(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to send status message to peer: %w", err)

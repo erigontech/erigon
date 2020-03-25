@@ -578,6 +578,9 @@ func (s *Ethereum) Protocols() []p2p.Protocol {
 	// Debug
 	protos = append(protos, s.protocolManager.makeDebugProtocol())
 
+	// MGR
+	protos = append(protos, s.protocolManager.makeMgrProtocol())
+
 	if s.lesServer != nil {
 		protos = append(protos, s.lesServer.Protocols()...)
 	}

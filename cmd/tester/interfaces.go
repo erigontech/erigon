@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 )
 
@@ -16,4 +17,5 @@ type BlockFeeder interface {
 	GetTdByNumber(number uint64) *big.Int
 	TotalDifficulty() *big.Int
 	LastBlock() *types.Block
+	ForkID() forkid.ID
 }

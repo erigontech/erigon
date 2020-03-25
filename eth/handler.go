@@ -17,6 +17,7 @@
 package eth
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/json"
@@ -267,6 +268,36 @@ func (pm *ProtocolManager) makeDebugProtocol() p2p.Protocol {
 	}
 }
 
+func (pm *ProtocolManager) makeMgrProtocol() p2p.Protocol {
+	// Initiate Debug protocol
+	log.Info("Initialising Debug protocol", "versions", FirehoseVersions)
+	return p2p.Protocol{
+		Name:    MGRName,
+		Version: MGRVersions[0],
+		Length:  MGRLengths[MGRVersions[0]],
+		Run: func(p *p2p.Peer, rw p2p.MsgReadWriter) error {
+			peer := &mgrPeer{Peer: p, rw: rw}
+			select {
+			case <-pm.quitSync:
+				return p2p.DiscQuitting
+			default:
+				pm.wg.Add(1)
+				defer pm.wg.Done()
+				return pm.handleMgr(peer)
+			}
+		},
+		NodeInfo: func() interface{} {
+			return pm.NodeInfo()
+		},
+		PeerInfo: func(id enode.ID) interface{} {
+			if p := pm.peers.Peer(fmt.Sprintf("%x", id[:8])); p != nil {
+				return p.Info()
+			}
+			return nil
+		},
+	}
+}
+
 func (pm *ProtocolManager) makeProtocol(version uint) p2p.Protocol {
 	length, ok := ProtocolLengths[version]
 	if !ok {
@@ -450,6 +481,15 @@ func (pm *ProtocolManager) handleDebug(p *debugPeer) error {
 	for {
 		if err := pm.handleDebugMsg(p); err != nil {
 			p.Log().Debug("Debug message handling failed", "err", err)
+			return err
+		}
+	}
+}
+
+func (pm *ProtocolManager) handleMgr(p *mgrPeer) error {
+	for {
+		if err := pm.handleMgrMsg(p); err != nil {
+			p.Log().Debug("MGR message handling failed", "err", err)
 			return err
 		}
 	}
@@ -1259,6 +1299,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
+		pm.forkFilter = forkid.NewFilter(pm.blockchain)
 		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
@@ -1278,6 +1319,73 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
+		return nil
+	default:
+		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
+	}
+	return nil
+}
+
+func (pm *ProtocolManager) handleMgrMsg(p *mgrPeer) error {
+	msg, readErr := p.rw.ReadMsg()
+	if readErr != nil {
+		return fmt.Errorf("handleDebugMsg p.rw.ReadMsg: %w", readErr)
+	}
+	if msg.Size > MGRMaxMsgSize {
+		return errResp(ErrMsgTooLarge, "%v > %v", msg.Size, DebugMaxMsgSize)
+	}
+	defer msg.Discard()
+
+	switch msg.Code {
+	case MGRStatus:
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var knownPrefixes [][]byte
+		if err := msgStream.Decode(&knownPrefixes); err != nil {
+			return fmt.Errorf("msgStream.Decode: %w", err)
+		}
+		tds, err := pm.blockchain.GetTrieDbState()
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Received MGRStatus. len(knownPrefixes)=%d\n", len(knownPrefixes))
+		buf := bytes.NewBuffer([]byte{})
+		blockNr := tds.GetBlockNr()
+		epoch := blockNr / 4096
+		subtree := epoch % 256
+		for i := 0; i < 256; i++ { // spread witness of each subtree
+			prefix := []byte{byte(subtree), byte(i)}
+			witness, err := tds.ExtractWitnessForPrefix(prefix, false, false)
+			if err != nil {
+				return err
+			}
+			buf.Reset()
+			if _, err := witness.WriteTo(buf); err != nil {
+				return err
+			}
+			//fmt.Printf("Sernding MGRWitness: %x, of %d\n", prefix, buf.Len())
+			//for _, o := range witness.Operators {
+			//fmt.Printf("%x\n", o)
+			//}
+
+			if err := p.rw.WriteMsg(p2p.Msg{Code: MGRWitness, Size: 0, Payload: buf}); err != nil {
+				return err
+			}
+		}
+	case MGRWitness:
+		msgStream := rlp.NewStream(msg.Payload, uint64(msg.Size))
+		var marshaledWitness []byte
+		if err := msgStream.Decode(&marshaledWitness); err != nil {
+			return fmt.Errorf("msgStream.Decode: %w", err)
+		}
+
+		res, err := trie.NewWitnessFromReader(bytes.NewReader(marshaledWitness), false)
+		if err != nil {
+			panic(err)
+		}
+
+		fmt.Printf("Received MGRWitness: %v\n", res)
+
 		return nil
 	default:
 		return errResp(ErrInvalidMsgCode, "%v", msg.Code)
