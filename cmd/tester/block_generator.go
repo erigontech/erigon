@@ -17,8 +17,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -39,6 +41,7 @@ type BlockGenerator struct {
 	tdByNumber          map[uint64]*big.Int
 	lastBlock           *types.Block
 	totalDifficulty     *big.Int
+	forkId              forkid.ID
 }
 
 func (bg *BlockGenerator) Close() {
@@ -89,6 +92,10 @@ func (bg *BlockGenerator) TotalDifficulty() *big.Int {
 
 func (bg *BlockGenerator) LastBlock() *types.Block {
 	return bg.lastBlock
+}
+
+func (bg *BlockGenerator) ForkID() forkid.ID {
+	return bg.forkId
 }
 
 func randAddress(r *rand.Rand) common.Address {
@@ -367,6 +374,12 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
 
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	bg.forkId = forkid.NewID(blockchain)
+
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
@@ -520,6 +533,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
+
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	bg.forkId = forkid.NewID(blockchain)
+
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
 	if err != nil {

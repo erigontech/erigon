@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/forkid"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -23,6 +24,7 @@ type statusData struct {
 	TD              *big.Int
 	CurrentBlock    common.Hash
 	GenesisBlock    common.Hash
+	ForkID          forkid.ID
 }
 
 type TesterProtocol struct {
@@ -164,6 +166,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		TD:              tp.blockFeeder.TotalDifficulty(),
 		CurrentBlock:    tp.blockFeeder.LastBlock().Hash(),
 		GenesisBlock:    tp.genesisBlockHash,
+		ForkID:          tp.blockFeeder.ForkID(),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to send status message to peer: %w", err)

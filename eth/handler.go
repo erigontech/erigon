@@ -1299,6 +1299,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
+		pm.forkFilter = forkid.NewFilter(pm.blockchain)
 		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
