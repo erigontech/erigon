@@ -119,14 +119,15 @@ func DecodeIncarnation(buf []byte) uint64 {
 	return incarnation ^ ^uint64(0)
 }
 
-func RemoveIncarnationFromKey(storageKey []byte) []byte {
-	if len(storageKey) <= common.HashLength {
-		return storageKey
+func RemoveIncarnationFromKey(key []byte, buf *[]byte) {
+	tmp := *buf
+	if len(key) <= common.HashLength {
+		tmp = append(tmp, key...)
+	} else {
+		tmp = append(tmp, key[:common.HashLength]...)
+		tmp = append(tmp, key[common.HashLength+8:]...)
 	}
-	buf := make([]byte, 0, common.HashLength*2)
-	buf = append(buf, storageKey[:common.HashLength]...)
-	buf = append(buf, storageKey[common.HashLength+8:]...)
-	return buf
+	*buf = tmp
 }
 
 // Key + blockNum
