@@ -69,7 +69,7 @@ func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i].Bytes(), h[j
 func TestAccountRange(t *testing.T) {
 	var (
 		db      = ethdb.NewMemDatabase()
-		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
 		statedb = state.NewDbState(db, 0)
 		state   = state.New(tds)
 		addrs   = [AccountRangeMaxResults * 2]common.Address{}
@@ -180,7 +180,7 @@ func TestStorageRangeAt(t *testing.T) {
 	// Create a state where account 0x010000... has a few storage entries.
 	var (
 		db      = ethdb.NewMemDatabase()
-		tds, _  = state.NewTrieDbState(common.Hash{}, db, 0)
+		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
 		statedb = state.New(tds)
 		addr    = common.Address{0x01}
 		keys    = []common.Hash{ // hashes of Keys of storage

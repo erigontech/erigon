@@ -246,10 +246,8 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
-	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
-	if err != nil {
-		return nil, nil, nil, err
-	}
+	tds := state.NewTrieDbState(common.Hash{}, db, 0)
+
 	tds.StartNewBuffer()
 	statedb := state.New(tds)
 	for addr, account := range g.Alloc {
@@ -264,7 +262,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 			statedb.SetIncarnation(addr, 1)
 		}
 	}
-	err = statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
+	err := statedb.FinalizeTx(context.Background(), tds.TrieStateWriter())
 	if err != nil {
 		return nil, nil, nil, err
 	}

@@ -150,7 +150,7 @@ func Stateless(
 	useStatelessResolver bool,
 	witnessDatabasePath string,
 	writeHistory bool,
-	) {
+) {
 
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
@@ -216,8 +216,7 @@ func Stateless(
 			fmt.Printf("Failed to commit batch: %v\n", err)
 		}
 	}()
-	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
-	check(err)
+	tds := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	if blockNum > 1 {
 		tds.Rebuild()
 	}

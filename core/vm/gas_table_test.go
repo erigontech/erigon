@@ -83,7 +83,7 @@ func TestEIP2200(t *testing.T) {
 		address := common.BytesToAddress([]byte("contract"))
 
 		db := ethdb.NewMemDatabase()
-		tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+		tds := state.NewTrieDbState(common.Hash{}, db, 0)
 		s := state.New(tds)
 		s.CreateAccount(address, true)
 		s.SetCode(address, hexutil.MustDecode(tt.input))

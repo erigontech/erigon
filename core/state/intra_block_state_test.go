@@ -44,7 +44,7 @@ import (
 func TestUpdateLeaks(t *testing.T) {
 	// Create an empty state database
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 
 	// Update it with some accounts
@@ -87,10 +87,10 @@ func TestIntermediateLeaks(t *testing.T) {
 	// Create two state databases, one transitioning to the final state, the other final from the beginning
 	transDb := ethdb.NewMemDatabase()
 	finalDb := ethdb.NewMemDatabase()
-	transTds, _ := NewTrieDbState(common.Hash{}, transDb, 0)
+	transTds := NewTrieDbState(common.Hash{}, transDb, 0)
 	transState := New(transTds)
 	transTds.StartNewBuffer()
-	finalTds, _ := NewTrieDbState(common.Hash{}, finalDb, 0)
+	finalTds := NewTrieDbState(common.Hash{}, finalDb, 0)
 	finalState := New(finalTds)
 	finalTds.StartNewBuffer()
 
@@ -479,7 +479,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{1}
 	state.CreateAccount(addr, true)
@@ -491,7 +491,7 @@ func TestIntraBlockStateNewEmptyAccount(t *testing.T) {
 
 func TestIntraBlockStateNewContractAccount(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	addr := common.Address{2}
 	newObj := state.createObject(addr, nil)
