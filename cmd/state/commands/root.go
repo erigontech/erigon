@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"runtime"
 	"runtime/pprof"
 	"syscall"
 
@@ -17,13 +16,10 @@ import (
 var (
 	cpuprofile     string
 	cpuProfileFile io.WriteCloser
-
-	memprofile string
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
-	rootCmd.PersistentFlags().StringVar(&memprofile, "memprofile", "", "write memory profile `file`")
 }
 
 func getContext() context.Context {
@@ -86,17 +82,5 @@ func stopProfilingIfNeeded() {
 
 	if cpuProfileFile != nil {
 		cpuProfileFile.Close()
-	}
-	if memprofile != "" {
-		f, err := os.Create(memprofile)
-		if err != nil {
-			log.Error("could not create mem profile", "error", err)
-			return
-		}
-		runtime.GC() // get up-to-date statistics
-		if err := pprof.WriteHeapProfile(f); err != nil {
-			log.Error("could not write memory profile", "error", err)
-			return
-		}
 	}
 }

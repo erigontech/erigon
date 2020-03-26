@@ -400,6 +400,22 @@ func bucketStats(chaindata string) {
 	})
 }
 
+func bucketPrefixStats(chaindata string) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	stats := map[uint8]uint64{}
+	db.View(func(tx *bolt.Tx) error {
+		c := tx.Bucket(dbutils.StorageBucket).Cursor()
+		for k, v := c.First(); k != nil; k, v = c.Next() {
+			stats[k[0]] += uint64(len(v))
+		}
+		return nil
+	})
+	for k, v := range stats {
+		fmt.Printf("%x %dKb\n", k, v)
+	}
+}
+
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -909,28 +925,56 @@ func testResolveCached() {
 	*/
 }
 
+func dbSlice(chaindata string, prefix []byte) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	err = db.View(func (tx *bolt.Tx) error {
+		ab := tx.Bucket(dbutils.AccountsBucket)
+		c := ab.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.AccountsBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		sb := tx.Bucket(dbutils.StorageBucket)
+		c = sb.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.StorageBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		c = ib.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		return nil
+	})
+	check(err)
+}
+
 func testResolve(chaindata string) {
 	startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	check(err)
+	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//check(err)
+	/*
 	currentBlock := bc.CurrentBlock()
 	currentBlockNr := currentBlock.NumberU64()
 	fmt.Printf("Current block number: %d\n", currentBlockNr)
 	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
 	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
 	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
+	*/
+	currentBlockNr := 4155652
 	var contract []byte
 	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
 	r := trie.NewResolver(10, true, 10000000)
-	r.SetHistorical(true)
+	r.SetHistorical(false)
 	var key []byte
-	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
-	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
+	key = common.FromHex("0d050f050306070a0b05090d0a050908000a03050d0008030a01030e0e0808000d0c000b0b050b0c0a0601050a000308010601090005010808040f06010b090d10")
+	resolveHash := common.FromHex("8894372f37cc47e5b342f1caca60668089cf12c95a7984f1d73d220c325fffa9")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 0, resolveHash)
+	req := t.NewResolveRequest(contract, key, 5, resolveHash)
 	r.AddRequest(req)
 	err = r.ResolveWithDb(ethDb, 10000000)
 	if err != nil {
@@ -1663,6 +1707,9 @@ func main() {
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
 	}
+	if *action == "bucketPrefixStats" {
+		bucketPrefixStats(*chaindata)
+	}
 	if *action == "syncChart" {
 		mychart()
 	}
@@ -1738,5 +1785,8 @@ func main() {
 	}
 	if *action == "gen-tx-lookup-1" {
 		GenerateTxLookups1(*chaindata, *block)
+	}
+	if *action == "dbslice" {
+		dbSlice(*chaindata, common.FromHex(*name))
 	}
 }
