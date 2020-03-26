@@ -385,7 +385,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	if err := output.Flush(); err != nil {
 		return nil, err
 	}
-	outputF.Close()
+	if err := outputF.Close(); err != nil {
+		return nil, err
+	}
 
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
@@ -550,7 +552,9 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	if err := output.Flush(); err != nil {
 		return nil, err
 	}
-	outputF.Close()
+	if err := outputF.Close(); err != nil {
+		return nil, err
+	}
 
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
