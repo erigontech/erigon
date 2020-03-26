@@ -13,7 +13,7 @@ const (
 	mgr1 = 1
 )
 
-var MGRName = "mgr" // Parity only supports 3 letter capabilities
+const MGRName = "mgr" // Parity only supports 3 letter capabilities
 var MGRVersions = []uint{mgr1}
 var MGRLengths = map[uint]uint64{mgr1: 2}
 

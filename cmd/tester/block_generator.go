@@ -347,7 +347,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			for _, block := range blocksSlice {
 				blocks <- block
 			}
-			if height%1000 == 0 {
+			if height%10000 == 0 {
 				log.Info(fmt.Sprintf("block gen %dK, %s", height/1000, time.Since(now)))
 			}
 		}
