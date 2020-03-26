@@ -6,14 +6,14 @@ import (
 )
 
 var (
-	historyfile       string
-	nocheck           bool
+	historyfile string
+	nocheck     bool
 )
 
 func init() {
 	withBlock(checkChangeSetsCmd)
 	withChaindata(checkChangeSetsCmd)
-	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", chaindata, "path to the file where the changesets and history are expected to be. If omitted, the same as --chaindata")
+	checkChangeSetsCmd.Flags().StringVar(&historyfile, "historyfile", "", "path to the file where the changesets and history are expected to be. If omitted, the same as --chaindata")
 	checkChangeSetsCmd.Flags().BoolVar(&nocheck, "nocheck", false, "set to turn off the changeset checking and only execute transaction (for performance testing)")
 	rootCmd.AddCommand(checkChangeSetsCmd)
 }

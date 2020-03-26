@@ -10,6 +10,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
@@ -23,6 +24,10 @@ import (
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
 func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+	if len(historyfile) == 0 {
+		historyfile = chaindata
+	}
+
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -78,7 +83,13 @@ func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, noch
 		}
 
 		if !nocheck {
-			expectedAccountChanges, err := changeset.EncodeChangeSet(csw.GetAccountChanges())
+			accountChanges := csw.GetAccountChanges()
+			var expectedAccountChanges []byte
+			if debug.IsThinHistory() {
+				expectedAccountChanges, err = changeset.EncodeAccounts(accountChanges)
+			} else {
+				expectedAccountChanges, err = changeset.EncodeChangeSet(accountChanges)
+			}
 			if err != nil {
 				return err
 			}
@@ -97,7 +108,11 @@ func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, noch
 			expectedStorageChanges := csw.GetStorageChanges()
 			expectedtorageSerialized := make([]byte, 0)
 			if expectedStorageChanges.Len() > 0 {
-				expectedtorageSerialized, err = changeset.EncodeChangeSet(expectedStorageChanges)
+				if debug.IsThinHistory() {
+					expectedtorageSerialized, err = changeset.EncodeStorage(expectedStorageChanges)
+				} else {
+					expectedtorageSerialized, err = changeset.EncodeChangeSet(expectedStorageChanges)
+				}
 				if err != nil {
 					return err
 				}

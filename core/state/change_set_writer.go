@@ -8,6 +8,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
@@ -48,21 +49,9 @@ func (w *ChangeSetWriter) GetStorageChanges() *changeset.ChangeSet {
 	return cs
 }
 
-func accountData(original *accounts.Account) []byte {
-	var originalData []byte
-	if !original.Initialised {
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-	}
-	return originalData
-}
-
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	if !accountsEqual(original, account) || w.storageChanged[address] {
-		w.accountChanges[address] = accountData(original)
+		w.accountChanges[address] = originalAccountData(original, debug.IsThinHistory())
 	}
 	return nil
 }
@@ -72,7 +61,7 @@ func (w *ChangeSetWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 }
 
 func (w *ChangeSetWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
-	w.accountChanges[address] = accountData(original)
+	w.accountChanges[address] = originalAccountData(original, false)
 	return nil
 }
 
