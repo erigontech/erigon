@@ -152,11 +152,9 @@ func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) *c
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	if t, ok := m.puts[string(bucket)]; ok {
-		value, ok := t.Get(key)
-		if ok && value == nil {
-			return nil, ErrKeyNotFound
+		if value, ok := t.Get(key); ok {
+			return value, nil
 		}
-		return value, nil
 	}
 	if m.db != nil {
 		return m.db.Get(bucket, key)
@@ -392,7 +390,7 @@ func (m *mutation) Commit() (uint64, error) {
 				}
 				index := dbutils.WrapHistoryIndex(value)
 				index.Append(timestamp)
-				m.puts.Set(dbutils.AccountsHistoryBucket, []byte(k), *index)
+				m.puts.Set(dbutils.AccountsHistoryBucket, key, *index)
 			}
 		}
 		sort.Sort(changes)
