@@ -63,7 +63,9 @@ func (bg *BlockGenerator) GetTdByNumber(number uint64) *big.Int {
 }
 
 func (bg *BlockGenerator) readBlockFromOffset(offset uint64) (*types.Block, error) {
-	bg.input.Seek(int64(offset), 0)
+	if _, err := bg.input.Seek(int64(offset), 0); err != nil {
+		return nil, err
+	}
 	stream := rlp.NewStream(bg.input, 0)
 	var b types.Block
 	if err := stream.Decode(&b); err != nil {
@@ -380,6 +382,13 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	}
 	bg.forkId = forkid.NewID(blockchain)
 
+	if err := output.Flush(); err != nil {
+		return nil, err
+	}
+	if err := outputF.Close(); err != nil {
+		return nil, err
+	}
+
 	// Reopen the file for reading
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
@@ -540,7 +549,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	bg.forkId = forkid.NewID(blockchain)
 
-	// Reopen the file for reading
+	if err := output.Flush(); err != nil {
+		return nil, err
+	}
+	if err := outputF.Close(); err != nil {
+		return nil, err
+	}
+
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
 		return nil, err

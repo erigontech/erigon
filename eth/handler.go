@@ -1288,8 +1288,8 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		// Clean up: reuse engine... probably we can
-		pm.noMorePeers <- struct{}{}     // exit pm.syncer loop
-		time.Sleep(2 * time.Millisecond) // wait for pm.syncer finish
+		pm.noMorePeers <- struct{}{}       // exit pm.syncer loop
+		time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
@@ -1315,8 +1315,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		debug.IntermediateTrieHashAssertDbIntegrity = true
 
 		log.Warn("Succeed to set new Genesis")
-		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
-		if err != nil {
+		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
 		return nil

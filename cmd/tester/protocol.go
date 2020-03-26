@@ -83,8 +83,7 @@ func (tp *TesterProtocol) mgrProtocolRun(ctx context.Context, peer *p2p.Peer, rw
 		prefixes = append(prefixes, next)
 	}
 
-	err := p2p.Send(rw, eth.MGRStatus, prefixes)
-	if err != nil {
+	if err := p2p.Send(rw, eth.MGRStatus, prefixes); err != nil {
 		panic(err)
 	}
 	fmt.Printf("Sent MGRStatus\n")
@@ -126,7 +125,8 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 		return fmt.Errorf("failed to send DebugSetGenesisMsg message to peer: %w", err)
 	}
 
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
+
 	tp.genesisReady <- true
 
 	/* todo: Server does send DebugSetGenesisMsg, but next code does timeout
@@ -254,7 +254,11 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 		default:
 			log.Debug("Next message", "msg", msg)
 		}
+		if signaledHead {
+			break
+		}
 	}
+	log.Info("All fork blocks sent")
 	return nil
 }
 
@@ -382,7 +386,9 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 			bodies = append(bodies, data)
 		}
 	}
-	p2p.Send(rw, eth.BlockBodiesMsg, bodies)
+	if err := p2p.Send(rw, eth.BlockBodiesMsg, bodies); err != nil {
+		return newSentBlocks, err
+	}
 	log.Info("Sending bodies", "progress", newSentBlocks)
 
 	return newSentBlocks, nil

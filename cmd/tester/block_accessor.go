@@ -34,7 +34,9 @@ func (ba *BlockAccessor) GetHeaderByNumber(number uint64) *types.Header {
 }
 
 func (ba *BlockAccessor) readBlockFromOffset(offset uint64) (*types.Block, error) {
-	ba.input.Seek(int64(offset), 0)
+	if _, err := ba.input.Seek(int64(offset), 0); err != nil {
+		return nil, err
+	}
 	stream := rlp.NewStream(ba.input, 0)
 	var b types.Block
 	if err := stream.Decode(&b); err != nil {
