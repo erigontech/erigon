@@ -99,7 +99,7 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := state.NewTrieDbState(common.Hash{}, db, 0)
+	tds := state.NewTrieDbState(common.Hash{}, db, 0)
 	state := state.New(tds)
 	address := common.HexToAddress("0x0a")
 	state.SetCode(address, []byte{
@@ -156,7 +156,7 @@ func BenchmarkCall(b *testing.B) {
 }
 func benchmarkEVM_Create(bench *testing.B, code string) {
 	var (
-		tds, _   = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
+		tds      = state.NewTrieDbState(common.Hash{}, ethdb.NewMemDatabase(), 0)
 		statedb  = state.New(tds)
 		sender   = common.BytesToAddress([]byte("sender"))
 		receiver = common.BytesToAddress([]byte("receiver"))

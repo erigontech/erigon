@@ -191,7 +191,7 @@ type TrieDbState struct {
 	incarnationMap         map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
-func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieDbState, error) {
+func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
 	tp := trie.NewTriePruning(blockNr)
 
@@ -213,7 +213,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) (*TrieD
 		tp.SetCreateNodeFunc(tds.delIntermediateHash)
 	}
 
-	return tds, nil
+	return tds
 }
 
 func (tds *TrieDbState) EnablePreimages(ep bool) {

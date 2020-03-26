@@ -502,10 +502,8 @@ func dump(ctx *cli.Context) error {
 			fmt.Println("{}")
 			utils.Fatalf("block not found")
 		} else {
-			tds, err := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64())
-			if err != nil {
-				utils.Fatalf("could not create new state: %v", err)
-			}
+			tds := state.NewTrieDbState(block.Root(), chainDb, block.NumberU64())
+
 			excludeCode := ctx.Bool(utils.ExcludeCodeFlag.Name)
 			excludeStorage := ctx.Bool(utils.ExcludeStorageFlag.Name)
 			includeMissing := ctx.Bool(utils.IncludeIncompletesFlag.Name)

@@ -708,8 +708,7 @@ func extractTrie(block int) {
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds, err := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	check(err)
+	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
@@ -741,9 +740,8 @@ func testRewind(chaindata string, block, rewind int) {
 	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
 	db := ethDb.NewBatch()
 	defer db.Rollback()
-	tds, err := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
+	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	check(err)
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
@@ -929,7 +927,7 @@ func dbSlice(chaindata string, prefix []byte) {
 	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
-	err = db.View(func (tx *bolt.Tx) error {
+	err = db.View(func(tx *bolt.Tx) error {
 		ab := tx.Bucket(dbutils.AccountsBucket)
 		c := ab.Cursor()
 		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
@@ -958,12 +956,12 @@ func testResolve(chaindata string) {
 	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	//check(err)
 	/*
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	fmt.Printf("Current block number: %d\n", currentBlockNr)
-	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
-	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
+		currentBlock := bc.CurrentBlock()
+		currentBlockNr := currentBlock.NumberU64()
+		fmt.Printf("Current block number: %d\n", currentBlockNr)
+		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
+		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
+		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
 	*/
 	currentBlockNr := 4155652
 	var contract []byte

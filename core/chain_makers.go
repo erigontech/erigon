@@ -258,10 +258,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		return nil, nil
 	}
 
-	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
-	if err != nil {
-		panic(err)
-	}
+	tds := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
 	//if err := tds.Rebuild(); err != nil {
 	//	panic(err)
 	//}
