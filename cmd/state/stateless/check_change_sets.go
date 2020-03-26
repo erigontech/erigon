@@ -24,6 +24,10 @@ import (
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
 func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+	if len(historyfile) == 0 {
+		historyfile = chaindata
+	}
+
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
