@@ -382,7 +382,9 @@ func (tp *TesterProtocol) handleGetBlockBodiesMsg(msg p2p.Msg, rw p2p.MsgReadWri
 			bodies = append(bodies, data)
 		}
 	}
-	p2p.Send(rw, eth.BlockBodiesMsg, bodies)
+	if err := p2p.Send(rw, eth.BlockBodiesMsg, bodies); err != nil {
+		return newSentBlocks, err
+	}
 	log.Info("Sending bodies", "progress", newSentBlocks)
 
 	return newSentBlocks, nil
