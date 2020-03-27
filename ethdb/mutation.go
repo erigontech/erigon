@@ -379,7 +379,17 @@ func (m *mutation) Commit() (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	for timestamp, changes := range m.accountChangeSetByBlock {
+	// we need sorted timestamps for thin history index
+	accountTimestamps := make([]uint64, 0)
+	for ts := range m.accountChangeSetByBlock {
+		accountTimestamps = append(accountTimestamps, ts)
+	}
+	sort.Slice(accountTimestamps, func(i, j int) bool { return accountTimestamps[i] < accountTimestamps[j] })
+
+	for _, timestamp := range accountTimestamps {
+		changes := m.accountChangeSetByBlock[timestamp]
+		sort.Sort(changes)
+
 		if debug.IsThinHistory() {
 			changedKeys := changes.ChangedKeys()
 			for k := range changedKeys {
@@ -393,7 +403,7 @@ func (m *mutation) Commit() (uint64, error) {
 				m.puts.Set(dbutils.AccountsHistoryBucket, key, *index)
 			}
 		}
-		sort.Sort(changes)
+
 		var (
 			dat []byte
 			err error
@@ -410,12 +420,20 @@ func (m *mutation) Commit() (uint64, error) {
 		m.puts.Set(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
 	}
 
-	for timestamp, changes := range m.storageChangeSetByBlock {
+	storageTimestamps := make([]uint64, 0)
+	for ts := range m.storageChangeSetByBlock {
+		storageTimestamps = append(storageTimestamps, ts)
+	}
+	sort.Slice(storageTimestamps, func(i, j int) bool { return storageTimestamps[i] < storageTimestamps[j] })
+
+	for _, timestamp := range storageTimestamps {
+		changes := m.storageChangeSetByBlock[timestamp]
+		sort.Sort(changes)
+
 		var (
 			dat []byte
 			err error
 		)
-		sort.Sort(changes)
 
 		if debug.IsThinHistory() {
 			changedKeys := changes.ChangedKeys()
