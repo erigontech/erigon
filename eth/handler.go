@@ -1300,16 +1300,16 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
 		pm.forkFilter = forkid.NewFilter(pm.blockchain)
-		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
+		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
 		remotedbserver.StartDeprecated(ethDb, "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
-		//downloader.MaxHashFetch = 512 * 10
-		//downloader.MaxBlockFetch = 128 * 10
-		//downloader.MaxHeaderFetch = 192 * 10
-		//downloader.MaxReceiptFetch = 256 * 10
+		downloader.MaxHashFetch = 512 * 10
+		downloader.MaxBlockFetch = 128 * 10
+		downloader.MaxHeaderFetch = 192 * 10
+		downloader.MaxReceiptFetch = 256 * 10
 
 		// hacks to enable asserts
 		debug.IntermediateTrieHashAssertDbIntegrity = true
