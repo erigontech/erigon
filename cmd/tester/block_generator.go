@@ -156,9 +156,14 @@ func genBlock(db ethdb.Database,
 	extra []byte,
 	coinbaseKey *ecdsa.PrivateKey,
 	r *rand.Rand,
-) func(txOpts *bind.TransactOpts, coinbase common.Address, i int, gen *core.BlockGen) {
+) func(coinbase common.Address, i int, gen *core.BlockGen) {
 	var err error
 	amount := big.NewInt(1) // 1 wei
+
+	txOpts := bind.NewKeyedTransactor(coinbaseKey)
+	txOpts.GasPrice = big.NewInt(1)
+	txOpts.GasLimit = 3 * params.TxGasContractCreation
+	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
 
 	var revive *contracts.Revive2
 	var phoenix *contracts.Phoenix
@@ -166,7 +171,7 @@ func genBlock(db ethdb.Database,
 	var phoenixAddress common.Address
 	backend := &NoopBackend{db: db, genesis: genesis}
 
-	return func(txOpts *bind.TransactOpts, coinbase common.Address, i int, gen *core.BlockGen) {
+	return func(coinbase common.Address, i int, gen *core.BlockGen) {
 		blockNr := int(gen.Number().Uint64())
 
 		gen.SetCoinbase(coinbase)
@@ -330,14 +335,9 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	}
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 
-	txOpts := bind.NewKeyedTransactor(coinbaseKey)
-	//txOpts.GasPrice = big.NewInt(1)
-	txOpts.GasLimit = 3 * params.TxGasContractCreation
-	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
-
 	genBlockFunc := genBlock(db, genesis, extra, coinbaseKey, r)
 	genBlock := func(i int, gen *core.BlockGen) {
-		genBlockFunc(txOpts, coinbase, i, gen)
+		genBlockFunc(coinbase, i, gen)
 	}
 
 	blocks := make(chan *types.Block, 10000)
@@ -414,29 +414,39 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
 
-	txOpts := bind.NewKeyedTransactor(coinbaseKey)
-	txOpts.GasPrice = big.NewInt(1)
-	txOpts.GasLimit = 3 * params.TxGasContractCreation
-	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
-
 	genBlockFunc := genBlock(db, genesis, extra, coinbaseKey, r)
 	genBlock := func(i int, gen *core.BlockGen) {
 		if gen.Number().Uint64() >= forkBase {
 			coinbase = forkCoinbase
 		}
-		genBlockFunc(txOpts, coinbase, i, gen)
+		genBlockFunc(coinbase, i, gen)
 	}
 
 	blocks := make(chan *types.Block, 10000)
 	go func() {
 		defer close(blocks)
-		parent, err := base.GetBlockByNumber(forkBase)
-		if err != nil {
-			panic(err)
-		}
-		blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, int(forkHeight), genBlock)
-		for _, block := range blocksSlice {
-			blocks <- block
+		parent := genesisBlock
+		n := 1000
+		//if ReduceComplexity {
+		//	n = 1 // 1 block per transaction
+		//}
+		for height, stop := n, false; !stop; height += n {
+			if height > int(forkBase+forkHeight) {
+				n = int(forkBase+forkHeight) + n - height
+				stop = true
+				if n == 0 {
+					break
+				}
+			}
+
+			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
+			parent = blocksSlice[len(blocksSlice)-1]
+			for _, block := range blocksSlice {
+				blocks <- block
+			}
+			if height%10000 == 0 {
+				log.Info(fmt.Sprintf("fork gen %dK", (height+1)/1000))
+			}
 		}
 		log.Info(fmt.Sprintf("fork gen %d", forkHeight))
 	}()
