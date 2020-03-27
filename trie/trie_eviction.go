@@ -27,7 +27,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
-type TriePruning struct {
+type TrieEviction struct {
 	accountTimestamps map[string]uint64
 
 	// Maps timestamp (uint64) to set of prefixes of nodes (string)
@@ -49,8 +49,8 @@ type TriePruning struct {
 	unloadNodeFunc func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
 }
 
-func NewTriePruning(oldestGeneration uint64) *TriePruning {
-	return &TriePruning{
+func NewTrieEviction(oldestGeneration uint64) *TrieEviction {
+	return &TrieEviction{
 		oldestGeneration:  oldestGeneration,
 		blockNr:           oldestGeneration,
 		accountTimestamps: make(map[string]uint64),
@@ -60,19 +60,19 @@ func NewTriePruning(oldestGeneration uint64) *TriePruning {
 	}
 }
 
-func (tp *TriePruning) SetBlockNr(blockNr uint64) {
+func (tp *TrieEviction) SetBlockNr(blockNr uint64) {
 	tp.blockNr = blockNr
 }
 
-func (tp *TriePruning) BlockNr() uint64 {
+func (tp *TrieEviction) BlockNr() uint64 {
 	return tp.blockNr
 }
 
-func (tp *TriePruning) SetCreateNodeFunc(f func(prefixAsNibbles []byte)) {
+func (tp *TrieEviction) SetCreateNodeFunc(f func(prefixAsNibbles []byte)) {
 	tp.createNodeFunc = f
 }
 
-func (tp *TriePruning) SetUnloadNodeFunc(f func(prefix []byte, nodeHash []byte)) {
+func (tp *TrieEviction) SetEvictNodeFunc(f func(prefix []byte, nodeHash []byte)) {
 	tp.unloadNodeFunc = f
 }
 
@@ -82,7 +82,7 @@ func (tp *TriePruning) SetUnloadNodeFunc(f func(prefix []byte, nodeHash []byte))
 // parent is the node that needs to be modified to unload the touched node
 // exists is true when the node existed before, and false if it is a new one
 // prevTimestamp is the timestamp the node current has
-func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
+func (tp *TrieEviction) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
 	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hexS, exists, prevTimestamp, del, newTimestamp)
 	if exists && !del && prevTimestamp == newTimestamp {
 		return
@@ -120,7 +120,7 @@ func (tp *TriePruning) touch(hexS string, exists bool, prevTimestamp uint64, del
 	}
 }
 
-func (tp *TriePruning) Timestamp(hex []byte) uint64 {
+func (tp *TrieEviction) Timestamp(hex []byte) uint64 {
 	ts := tp.accountTimestamps[string(hex)]
 	return ts
 }
@@ -129,7 +129,7 @@ func (tp *TriePruning) Timestamp(hex []byte) uint64 {
 // contract is effectively address of the smart contract
 // hex is the prefix of the key
 // parent is the node that needs to be modified to unload the touched node
-func (tp *TriePruning) Touch(hex []byte, del bool) {
+func (tp *TrieEviction) Touch(hex []byte, del bool) {
 	var exists = false
 	var prevTimestamp uint64
 	hexS := string(common.CopyBytes(hex))
@@ -151,7 +151,7 @@ func (tp *TriePruning) Touch(hex []byte, del bool) {
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
 }
 
-func pruneMap(t *Trie, m map[string]struct{}) bool {
+func evictMap(t *Trie, m map[string]struct{}) bool {
 	hexes := make([]string, len(m))
 	i := 0
 	for hexS := range m {
@@ -172,8 +172,8 @@ func pruneMap(t *Trie, m map[string]struct{}) bool {
 	return empty
 }
 
-// Prunes all nodes that are older than given timestamp
-func (tp *TriePruning) PruneToTimestamp(
+// EvictToTimestamp evicts all nodes that are older than given timestamp
+func (tp *TrieEviction) EvictToTimestamp(
 	accountsTrie *Trie,
 	targetTimestamp uint64,
 ) {
@@ -217,7 +217,7 @@ func (tp *TriePruning) PruneToTimestamp(
 		}
 	}
 
-	pruneMap(accountsTrie, aggregateAccounts)
+	evictMap(accountsTrie, aggregateAccounts)
 
 	// Remove fom the timestamp structure
 	for hexS := range aggregateAccounts {
@@ -226,9 +226,9 @@ func (tp *TriePruning) PruneToTimestamp(
 	tp.oldestGeneration = targetTimestamp
 }
 
-// Prunes mininum number of generations necessary so that the total
+// EvictTo evicts mininum number of generations necessary so that the total
 // number of prunable nodes is at most `targetNodeCount`
-func (tp *TriePruning) PruneTo(
+func (tp *TrieEviction) EvictTo(
 	accountsTrie *Trie,
 	targetNodeCount int,
 ) bool {
@@ -243,20 +243,20 @@ func (tp *TriePruning) PruneTo(
 		pruneGeneration++
 	}
 	//fmt.Printf("Will prune to generation %d, nodes to prune: %d, excess %d\n", pruneGeneration, prunable, excess)
-	tp.PruneToTimestamp(accountsTrie, pruneGeneration)
+	tp.EvictToTimestamp(accountsTrie, pruneGeneration)
 	return true
 }
 
-func (tp *TriePruning) NodeCount() int {
+func (tp *TrieEviction) NodeCount() int {
 	return tp.nodeCount
 }
 
-func (tp *TriePruning) GenCounts() map[uint64]int {
+func (tp *TrieEviction) GenCounts() map[uint64]int {
 	return tp.generationCounts
 }
 
 // DebugDump is used in the tests to ensure that there are no prunable entries (in such case, this function returns empty string)
-func (tp *TriePruning) DebugDump() string {
+func (tp *TrieEviction) DebugDump() string {
 	var sb strings.Builder
 	for timestamp, m := range tp.accounts {
 		for account := range m {

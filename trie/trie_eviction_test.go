@@ -27,7 +27,7 @@ import (
 )
 
 func TestOnePerTimestamp(t *testing.T) {
-	tp := NewTriePruning(0)
+	tp := NewTrieEviction(0)
 	tr := New(common.Hash{})
 	tr.SetTouchFunc(tp.Touch)
 	var key [4]byte
@@ -53,7 +53,7 @@ func TestOnePerTimestamp(t *testing.T) {
 	}
 	prunableNodes := tr.CountPrunableNodes()
 	fmt.Printf("Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tp.NodeCount())
-	if b := tp.PruneTo(tr, 4); !b {
+	if b := tp.EvictTo(tr, 4); !b {
 		t.Fatal("Not pruned")
 	}
 	prunableNodes = tr.CountPrunableNodes()

@@ -180,7 +180,7 @@ type TrieDbState struct {
 	resolveReads      bool
 	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TriePruning
+	tp                *trie.TrieEviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
@@ -189,7 +189,7 @@ type TrieDbState struct {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewTriePruning(blockNr)
+	tp := trie.NewTrieEviction(blockNr)
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -204,7 +204,7 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	}
 	t.SetTouchFunc(tp.Touch)
 
-	tp.SetUnloadNodeFunc(tds.putIntermediateHash)
+	tp.SetEvictNodeFunc(tds.putIntermediateHash)
 	tp.SetCreateNodeFunc(tds.delIntermediateHash)
 
 	return tds
@@ -232,7 +232,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewTriePruning(n)
+	tp := trie.NewTrieEviction(n)
 
 	cpy := TrieDbState{
 		t:              &tcopy,
@@ -244,7 +244,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
+	cpy.tp.SetEvictNodeFunc(cpy.putIntermediateHash)
 	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 
 	return &cpy
@@ -1212,7 +1212,7 @@ func (tds *TrieDbState) PruneTries(print bool) {
 		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
 	}
 
-	tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
+	tds.tp.EvictTo(tds.t, int(MaxTrieCacheGen))
 
 	if print {
 		prunableNodes := tds.t.CountPrunableNodes()
