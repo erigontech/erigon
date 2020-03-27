@@ -931,7 +931,7 @@ func (bc *BlockChain) Stop() {
 	if bc.pruner != nil {
 		bc.pruner.Stop()
 	}
-	log.Info("Blockchain manager stopped")
+	log.Info("Blockchain stopped")
 }
 
 func (bc *BlockChain) procFutureBlocks() {
