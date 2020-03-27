@@ -45,8 +45,8 @@ type TrieEviction struct {
 	// Current timestamp
 	blockNr uint64
 
-	createNodeFunc func(prefixAsNibbles []byte)
-	unloadNodeFunc func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
+	onNodeCreated func(prefixAsNibbles []byte)
+	onNodeEvicted func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
 }
 
 func NewTrieEviction(oldestGeneration uint64) *TrieEviction {
@@ -56,7 +56,7 @@ func NewTrieEviction(oldestGeneration uint64) *TrieEviction {
 		accountTimestamps: make(map[string]uint64),
 		accounts:          make(map[uint64]map[string]struct{}),
 		generationCounts:  make(map[uint64]int),
-		createNodeFunc:    func([]byte) {},
+		onNodeCreated:     func([]byte) {},
 	}
 }
 
@@ -68,12 +68,12 @@ func (tp *TrieEviction) BlockNr() uint64 {
 	return tp.blockNr
 }
 
-func (tp *TrieEviction) SetCreateNodeFunc(f func(prefixAsNibbles []byte)) {
-	tp.createNodeFunc = f
+func (tp *TrieEviction) SetOnNodeCreated(f func(prefixAsNibbles []byte)) {
+	tp.onNodeCreated = f
 }
 
-func (tp *TrieEviction) SetEvictNodeFunc(f func(prefix []byte, nodeHash []byte)) {
-	tp.unloadNodeFunc = f
+func (tp *TrieEviction) SetOnNodeEvicted(f func(prefix []byte, nodeHash []byte)) {
+	tp.onNodeEvicted = f
 }
 
 // Updates a node to the current timestamp
@@ -145,7 +145,7 @@ func (tp *TrieEviction) Touch(hex []byte, del bool) {
 		tp.accountTimestamps[hexS] = tp.blockNr
 	}
 	if !exists {
-		tp.createNodeFunc([]byte(hexS))
+		tp.onNodeCreated([]byte(hexS))
 	}
 
 	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
@@ -197,23 +197,16 @@ func (tp *TrieEviction) EvictToTimestamp(
 			continue
 		}
 
-		nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
-		if !ok {
-			continue
-		}
-		switch nd.(type) {
-		case *duoNode, *fullNode:
-			// will work only with these types of nodes
-		default:
-			continue
-		}
-		switch parent.(type) { // without this condition - doesn't work. Need investigate why.
-		case *duoNode, *fullNode:
-			// will work only with these types of nodes
-			CompressNibbles([]byte(prefix), &key.B)
-			tp.unloadNodeFunc(key.B, nd.reference())
-		default:
-			continue
+			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
+			if !ok {
+				continue
+			}
+			switch parent.(type) {
+			case *duoNode, *fullNode:
+				CompressNibbles([]byte(prefix), &key.B)
+				tp.onNodeEvicted(key.B, nd.reference())
+			default:
+			}
 		}
 	}
 
