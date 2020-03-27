@@ -167,6 +167,8 @@ func genBlock(db ethdb.Database,
 	backend := &NoopBackend{db: db, genesis: genesis}
 
 	return func(txOpts *bind.TransactOpts, coinbase common.Address, i int, gen *core.BlockGen) {
+		blockNr := int(gen.Number().Uint64())
+
 		gen.SetCoinbase(coinbase)
 		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
 			return
@@ -178,14 +180,14 @@ func genBlock(db ethdb.Database,
 
 		var tx *types.Transaction
 		switch true {
-		case i == 10001: // create 0 account
+		case blockNr == 10001: // create 0 account
 			tx = types.NewTransaction(txOpts.Nonce.Uint64(), common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
-		case i == 10002: // deploy factory
+		case blockNr == 10002: // deploy factory
 			reviveAddress, tx, revive, err = contracts.DeployRevive2(txOpts, backend)
 			if err != nil {
 				panic(err)
@@ -201,7 +203,7 @@ func genBlock(db ethdb.Database,
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case i == 10003: // call .deploy() method on factory
+		case blockNr == 10003: // call .deploy() method on factory
 			tx, err = revive.Deploy(txOpts, [32]byte{})
 			if err != nil {
 				panic(err)
@@ -213,13 +215,13 @@ func genBlock(db ethdb.Database,
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case i == 20001: // kill contract with big storage
+		case blockNr == 20001: // kill contract with big storage
 			tx, err = phoenix.Die(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case i == 20002: // revive Phoenix and add to it some storage in same Tx
+		case blockNr == 20002: // revive Phoenix and add to it some storage in same Tx
 			tx, err = revive.Deploy(txOpts, [32]byte{})
 			if err != nil {
 				panic(err)
@@ -237,7 +239,7 @@ func genBlock(db ethdb.Database,
 				panic(err)
 			}
 			gen.AddTx(tx)
-		case i == 20003: // add some storage and kill Phoenix in same Tx
+		case blockNr == 20003: // add some storage and kill Phoenix in same Tx
 			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
@@ -419,7 +421,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 
 	genBlockFunc := genBlock(db, genesis, extra, coinbaseKey, r)
 	genBlock := func(i int, gen *core.BlockGen) {
-		if i >= int(forkBase) {
+		if gen.Number().Uint64() >= forkBase {
 			coinbase = forkCoinbase
 		}
 		genBlockFunc(txOpts, coinbase, i, gen)

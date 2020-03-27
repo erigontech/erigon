@@ -226,7 +226,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		}
 		// Execute any user modifications to the block
 		if gen != nil {
-			gen(int(b.header.Number.Int64()), b)
+			gen(i, b)
 		}
 		if b.engine != nil {
 			// Finalize and seal the block
