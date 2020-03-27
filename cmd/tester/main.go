@@ -34,7 +34,13 @@ var (
 	// The app that holds all commands and flags.
 	app = utils.NewApp(gitCommit, "", "Ethereum Tester")
 	// flags that configure the node
-	flags = []cli.Flag{}
+	VerbosityFlag = cli.IntFlag{
+		Name:  "verbosity",
+		Usage: "Logging verbosity: 0=silent, 1=error, 2=warn, 3=info, 4=debug, 5=detail",
+		Value: 3,
+	}
+
+	flags = []cli.Flag{VerbosityFlag}
 )
 
 func init() {
@@ -102,7 +108,7 @@ func rootContext() context.Context {
 	return ctx
 }
 
-func setupLogger() {
+func setupLogger(cliCtx *cli.Context) {
 	var (
 		ostream log.Handler
 		glogger *log.GlogHandler
@@ -116,11 +122,11 @@ func setupLogger() {
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 	glogger = log.NewGlogHandler(ostream)
 	log.Root().SetHandler(glogger)
-	glogger.Verbosity(log.LvlTrace)
+	glogger.Verbosity(log.Lvl(cliCtx.GlobalInt(VerbosityFlag.Name)))
 }
 
 func tester(cliCtx *cli.Context) error {
-	setupLogger()
+	setupLogger(cliCtx)
 
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
@@ -159,7 +165,7 @@ func tester(cliCtx *cli.Context) error {
 }
 
 func genesisCmd(cliCtx *cli.Context) error {
-	setupLogger()
+	setupLogger(cliCtx)
 	res, err := json.Marshal(genesis())
 	if err != nil {
 		return err
@@ -172,7 +178,7 @@ func genesisCmd(cliCtx *cli.Context) error {
 }
 
 func mgrCmd(cliCtx *cli.Context) error {
-	setupLogger()
+	setupLogger(cliCtx)
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {

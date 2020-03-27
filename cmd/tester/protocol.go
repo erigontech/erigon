@@ -193,7 +193,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	if statusResp.ProtocolVersion != tp.protocolVersion {
 		return fmt.Errorf("mismatched protocol version %d (!= %d)", statusResp.ProtocolVersion, tp.protocolVersion)
 	}
-	log.Info(fmt.Sprintf("eth handshake complete, block hash: %x, block difficulty: %s\n", statusResp.CurrentBlock, statusResp.TD))
+	log.Info(fmt.Sprintf("eth handshake complete, block hash: %x, block difficulty: %s", statusResp.CurrentBlock, statusResp.TD))
 
 	//lastBlockNumber := int(tp.blockFeeder.LastBlock().NumberU64())
 	sentBlocks := 0
@@ -341,7 +341,7 @@ func (tp *TesterProtocol) handleGetBlockHeaderMsg(msg p2p.Msg, rw p2p.MsgReadWri
 	if err := p2p.Send(rw, eth.BlockHeadersMsg, headers); err != nil {
 		return newEmptyBlocks, fmt.Errorf("failed to send headers: %w", err)
 	}
-	log.Info(fmt.Sprintf("Sent %d headers, empty blocks so far %d\n", len(headers), newEmptyBlocks))
+	log.Info(fmt.Sprintf("Sent %d headers, empty blocks so far %d", len(headers), newEmptyBlocks))
 	return newEmptyBlocks, nil
 }
 
