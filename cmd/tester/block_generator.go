@@ -160,6 +160,7 @@ func genBlock(db ethdb.Database,
 	var err error
 	amount := big.NewInt(1) // 1 wei
 
+	var nonce uint64
 	txOpts := bind.NewKeyedTransactor(coinbaseKey)
 	txOpts.GasPrice = big.NewInt(1)
 	txOpts.GasLimit = 3 * params.TxGasContractCreation
@@ -179,14 +180,15 @@ func genBlock(db ethdb.Database,
 			return
 		}
 		gen.SetExtra(extra)
-		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
+		gen.SetNonce(types.EncodeNonce(nonce))
 
 		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 
 		var tx *types.Transaction
 		switch true {
 		case blockNr == 10001: // create 0 account
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
+			account0 := common.HexToAddress("0000000000000000000000000000000000000000")
+			tx = types.NewTransaction(nonce, account0, amount, params.TxGas, nil, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
@@ -232,13 +234,15 @@ func genBlock(db ethdb.Database,
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
@@ -250,25 +254,29 @@ func genBlock(db ethdb.Database,
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Die(txOpts)
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = revive.Deploy(txOpts, [32]byte{})
 			if err != nil {
 				panic(err)
 			}
 			gen.AddTx(tx)
-			txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Store(txOpts)
 			if err != nil {
 				panic(err)
@@ -276,14 +284,15 @@ func genBlock(db ethdb.Database,
 			gen.AddTx(tx)
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
+			tx = types.NewTransaction(nonce, to, amount, params.TxGas, txOpts.GasPrice, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
 		}
-		txOpts.Nonce.Add(txOpts.Nonce, common.Big1)
+		nonce++
+		txOpts.Nonce.SetUint64(nonce)
 	}
 }
 
