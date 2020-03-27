@@ -526,7 +526,7 @@ func Listen(ctx context.Context, ln net.Listener, db ethdb.HasKV) {
 	defer close(ch)
 
 	go func() {
-		ticker := time.NewTicker(30 * time.Second)
+		ticker := time.NewTicker(3 * time.Second)
 		defer ticker.Stop()
 
 		for {
