@@ -1677,20 +1677,43 @@ func GenerateTxLookups2(chaindata string) {
 	log.Info("All done", "duration", time.Since(startTime))
 }
 
-type firstEntry struct {
-	bytes [35]byte
-	id    int
+type LookupFile struct {
+	file *os.File
+	pos  int64
+}
+
+type Entries []byte
+
+func (a Entries) Len() int {
+	return len(a) / 35
+}
+
+func (a Entries) Less(i, j int) bool {
+	return bytes.Compare(a[35*i:35*i+4], a[35*j:35*j+4]) <= 0
+}
+
+func (a Entries) Swap(i, j int) {
+	tmp := common.CopyBytes(a[35*i : 35*i+35])
+	copy(a[35*i:35*i+35], common.CopyBytes(a[35*j:35*j+35]))
+	copy(a[35*j:35*j+35], tmp)
+}
+
+func insertInFileForLookups2(file *os.File, entries Entries, it uint64) {
+	sort.Sort(entries)
+	_, err := file.Write(entries[:it*35])
+	check(err)
+	log.Info("File Insertion Occured")
 }
 
 func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
-	var count uint64 = 10000000
-	entries := make([][35]byte, count)
+	var count uint64 = 5000000
+	var entries Entries = make([]byte, count*35)
 	bn := make([]byte, 3)
-	var firstEntries []firstEntry
+	var lookups []LookupFile
 	var iterations uint64
 	var blockNum = startBlock
 	var interrupt bool
-	filename := fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+	filename := fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 	for !interrupt {
 		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
@@ -1698,36 +1721,12 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 
 		if body == nil {
 			log.Info("Now Inserting to file")
-			firstEntries = append(firstEntries, firstEntry{entries[0], len(firstEntries)})
+			insertInFileForLookups2(fileTmp, entries, iterations)
+			lookups = append(lookups, LookupFile{fileTmp, 0})
 			iterations = 0
-			sort.Slice(entries, func(i, j int) bool {
-				if entries[i][0] != entries[j][0] {
-					return entries[i][0] < entries[j][0]
-				} else if entries[i][1] != entries[j][1] {
-					return entries[i][1] < entries[j][1]
-				} else if entries[i][2] != entries[j][2] {
-					return entries[i][2] < entries[j][2]
-				} else if entries[i][3] != entries[j][3] {
-					return entries[i][3] < entries[j][3]
-				}
-				return entries[i][4] < entries[j][4]
-			})
-			var stuff []byte
-			for i, entry := range entries {
-				stuff = append(stuff, entry[:]...)
-				if i%100000 == 0 {
-					log.Info("Packing data", "progress count", i)
-				}
-			}
-			_, err := fileTmp.Write(stuff)
-			check(err)
-			fileTmp.Close()
-			if body == nil {
-				break
-			}
-			filename = fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+			filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 			fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-			log.Info("File Insertion Occured")
+			break
 		}
 
 		select {
@@ -1740,41 +1739,16 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		bn[2] = byte(blockNum)
 
 		for _, tx := range body.Transactions {
-			copy(entries[iterations][:], tx.Hash().Bytes())
-			copy(entries[iterations][32:], bn)
+			copy(entries[35*iterations:], tx.Hash().Bytes())
+			copy(entries[35*iterations+32:], bn)
 			iterations++
 			if iterations == count {
 				log.Info("Now Inserting to file")
-				firstEntries = append(firstEntries, firstEntry{entries[0], len(firstEntries)})
+				insertInFileForLookups2(fileTmp, entries, iterations)
+				lookups = append(lookups, LookupFile{fileTmp, 0})
 				iterations = 0
-				sort.Slice(entries, func(i, j int) bool {
-					if entries[i][0] != entries[j][0] {
-						return entries[i][0] < entries[j][0]
-					} else if entries[i][1] != entries[j][1] {
-						return entries[i][1] < entries[j][1]
-					} else if entries[i][2] != entries[j][2] {
-						return entries[i][2] < entries[j][2]
-					} else if entries[i][3] != entries[j][3] {
-						return entries[i][3] < entries[j][3]
-					}
-					return entries[i][4] < entries[j][4]
-				})
-				var stuff []byte
-				for i, entry := range entries {
-					stuff = append(stuff, entry[:]...)
-					if i%100000 == 0 {
-						log.Info("Packing data", "progress count", i)
-					}
-				}
-				_, err := fileTmp.Write(stuff)
-				check(err)
-				fileTmp.Close()
-				if body == nil {
-					break
-				}
-				filename = fmt.Sprintf(".lookups_%d.tmp", len(firstEntries))
+				filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 				fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-				log.Info("File Insertion Occured")
 			}
 		}
 		blockNum++
@@ -1786,36 +1760,47 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		}
 	}
 
-	sort.Slice(firstEntries, func(i, j int) bool {
-		if firstEntries[i].bytes[0] != firstEntries[j].bytes[0] {
-			return firstEntries[i].bytes[0] < firstEntries[j].bytes[0]
-		} else if firstEntries[i].bytes[1] != firstEntries[j].bytes[1] {
-			return firstEntries[i].bytes[1] < firstEntries[j].bytes[1]
-		} else if firstEntries[i].bytes[2] != firstEntries[j].bytes[2] {
-			return firstEntries[i].bytes[2] < firstEntries[j].bytes[2]
-		} else if firstEntries[i].bytes[3] != firstEntries[j].bytes[3] {
-			return firstEntries[i].bytes[3] < firstEntries[j].bytes[3]
-		}
-		return firstEntries[i].bytes[4] < firstEntries[j].bytes[4]
-	})
-
-	for phase, entry := range firstEntries {
-		log.Info("Writting Lookups into DB", "phase", phase)
-		filename := fmt.Sprintf(".lookups_%d.tmp", entry.id)
-		dat, _ := ioutil.ReadFile(filename)
-		batch := db.NewBatch()
-		for i := 0; i < len(dat); i += 35 {
-			err := batch.Put(dbutils.TxLookupPrefix, dat[i:i+32], dat[i+32:i+35])
-			check(err)
-			if i%35000000 == 0 {
-				log.Info("Commit Occured", "progress", i/35)
-				batch.Commit()
+	var minIndex int
+	var minVal []byte
+	batch := db.NewBatch()
+	val := make([]byte, 35)
+	iterations = 0
+	for !interrupt {
+		minIndex = -1
+		minVal = nil
+		for i, lookup := range lookups {
+			_, err := lookup.file.ReadAt(val, lookup.pos)
+			if err != nil {
+				os.Remove(lookup.file.Name())
+				lookups[i] = lookups[0]
+				lookups = lookups[1:]
+				fmt.Println(iterations)
+				continue
+			}
+			if bytes.Compare(val, minVal) <= 0 || minVal == nil {
+				minVal = common.CopyBytes(val)
+				minIndex = i
 			}
 		}
-		os.Remove(filename)
-		batch.Commit()
+
+		if minIndex == -1 {
+			break
+		}
+		err := batch.Put(dbutils.TxLookupPrefix, minVal[:32], minVal[32:])
+		lookups[minIndex].pos += 35
+		check(err)
+		iterations++
+		if iterations%10000000 == 0 {
+			batch.Commit()
+			log.Info("Commit Occured", "progress", iterations)
+		}
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
 	}
-	log.Info("New", "disk size", db.DiskSize())
+	batch.Commit()
 }
 
 func main() {
