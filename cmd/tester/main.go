@@ -154,7 +154,7 @@ func tester(cliCtx *cli.Context) error {
 	}
 	server.AddPeer(nodeToConnect)
 
-	_ = <-ctx.Done()
+	<-ctx.Done()
 	return nil
 }
 
@@ -188,7 +188,7 @@ func mgrCmd(cliCtx *cli.Context) error {
 	}
 	server.AddPeer(nodeToConnect)
 
-	_ = <-ctx.Done()
+	<-ctx.Done()
 	return nil
 }
 

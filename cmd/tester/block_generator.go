@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"math/big"
 	"math/rand"
+	"net/http"
+	"net/http/pprof"
 	"os"
 	"time"
 
@@ -27,6 +29,22 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
+
+func init() {
+	// go tool pprof -http=:8081 http://localhost:6060/
+	_ = pprof.Handler // just to avoid adding manually: import _ "net/http/pprof"
+	go func() {
+		r := rand.New(rand.NewSource(int64(time.Now().Nanosecond())))
+		randomPort := func(min, max int) int {
+			return r.Intn(max-min) + min
+		}
+		port := randomPort(6000, 7000)
+
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "\\?seconds\\=20")
+		fmt.Fprintf(os.Stderr, "go tool pprof -lines -http=: :%d/%s\n", port, "debug/pprof/heap")
+		fmt.Fprintf(os.Stderr, "%s\n", http.ListenAndServe(fmt.Sprintf("127.0.0.1:%d", port), nil))
+	}()
+}
 
 const ReduceComplexity = false
 
@@ -159,21 +177,16 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	defer outputF.Close()
 	output := bufio.NewWriterSize(outputF, 128*1024)
 
-	db := ethdb.NewMemDatabase()
-	genesis := genesis()
+	db, genesis, extra, engine := ethdb.NewMemDatabase(), genesis(), []byte("BlockGenerator"), ethash.NewFullFaker()
+	r := rand.New(rand.NewSource(4589489854))
+
 	genesisBlock := genesis.MustCommit(db)
-	extra := []byte("BlockGenerator")
 	coinbaseKey, err2 := crypto.HexToECDSA("ad0f3019b6b8634c080b574f3d8a47ef975f0e4b9f63e82893e9a7bb59c2d609")
 	if err2 != nil {
 		return nil, err2
 	}
 	log.Debug(fmt.Sprintf("Generated private key: %x\n", crypto.FromECDSA(coinbaseKey)))
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
-
-	gasPrice := big.NewInt(1)
-	txOpts := bind.NewKeyedTransactor(coinbaseKey)
-	txOpts.GasPrice = gasPrice
-	txOpts.GasLimit = params.TxGas
 
 	var pos uint64
 	td := new(big.Int)
@@ -189,37 +202,32 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
 
-	r := rand.New(rand.NewSource(4589489854))
 	amount := big.NewInt(1) // 1 wei
-	engine := ethash.NewFullFaker()
 
 	var revive *contracts.Revive2
 	var phoenix *contracts.Phoenix
 	var reviveAddress common.Address
 	var phoenixAddress common.Address
-	//var nonce uint64 // nonce of the sender (coinbase)
-	txOpts.Nonce = big.NewInt(0)
+
+	txOpts := bind.NewKeyedTransactor(coinbaseKey)
+	txOpts.GasPrice = big.NewInt(10000000)
+	txOpts.GasLimit = params.TxGas
+	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
 
 	backend := &NoopBackend{db: db, genesis: genesis}
 	genBlock := func(i int, gen *core.BlockGen) {
-		select {
-		case <-ctx.Done():
-			panic(ctx.Err())
-		default:
-		}
-
-		gen.SetExtra(extra)
 		gen.SetCoinbase(coinbase)
 		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
 			return
 		}
+		gen.SetExtra(extra)
 		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
-		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
-		var tx *types.Transaction
 
 		txOpts.GasLimit = 3 * params.TxGasContractCreation
-		//fmt.Println("Alex")
-		//time.Sleep(5 * time.Second)
+
+		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
+
+		var tx *types.Transaction
 		switch true {
 		case txOpts.Nonce.Uint64() == 1: // create 0 account
 			tx = types.NewTransaction(txOpts.Nonce.Uint64(), common.HexToAddress("0000000000000000000000000000000000000000"), amount, params.TxGas, nil, nil)
@@ -313,7 +321,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 			gen.AddTx(tx)
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, nil, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
@@ -405,10 +413,11 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	defer outputF.Close()
 	output := bufio.NewWriterSize(outputF, 128*1024)
-	db := ethdb.NewMemDatabase()
-	genesis := genesis()
+	db, genesis, extra, engine := ethdb.NewMemDatabase(), genesis(), []byte("BlockGenerator"), ethash.NewFullFaker()
+	r := rand.New(rand.NewSource(4589489854))
+
 	genesisBlock := genesis.MustCommit(db)
-	extra := []byte("BlockGenerator")
+
 	coinbaseKey := base.coinbaseKey
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 	forkCoinbaseKey, err := crypto.HexToECDSA("048d914460c9b5feb28d79df9c89a44465b1c9c0fa97d4bda32ede37fc178b8d")
@@ -416,6 +425,9 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return nil, err
 	}
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
+
+	currenCoinbaseKey, currenCoinbase := coinbaseKey, coinbase
+
 	var pos uint64
 	td := new(big.Int)
 	bg := &BlockGenerator{
@@ -429,38 +441,34 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	bg.headersByHash[genesisBlock.Header().Hash()] = genesisBlock.Header()
 	bg.headersByNumber[0] = genesisBlock.Header()
-	r := rand.New(rand.NewSource(4589489854))
-	amount := big.NewInt(1) // 1 wei
-	gasPrice := big.NewInt(10000000)
-	engine := ethash.NewFullFaker()
 
-	txOpts := bind.NewKeyedTransactor(coinbaseKey)
-	txOpts.GasPrice = gasPrice
+	amount := big.NewInt(1) // 1 wei
+
+	txOpts := bind.NewKeyedTransactor(currenCoinbaseKey)
+	txOpts.GasPrice = big.NewInt(10000000)
 	txOpts.GasLimit = params.TxGas
-	txOpts.Nonce = big.NewInt(0)
+	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
 
 	//backend := &NoopBackend{db: db, genesis: genesis}
 	genBlock := func(i int, gen *core.BlockGen) {
-		select {
-		case <-ctx.Done():
-			panic(ctx.Err())
-		default:
-		}
-
-		gen.SetExtra(extra)
-		gen.SetCoinbase(coinbase)
+		gen.SetCoinbase(currenCoinbase)
 		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
 			return
 		}
-		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
-		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
-		var tx *types.Transaction
 
+		gen.SetExtra(extra)
+		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
+
+		txOpts.From = crypto.PubkeyToAddress(currenCoinbaseKey.PublicKey)
 		txOpts.GasLimit = 3 * params.TxGasContractCreation
+
+		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
+
+		var tx *types.Transaction
 		switch true {
 		default:
 			to := randAddress(r)
-			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, gasPrice, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
@@ -478,6 +486,7 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		//if ReduceComplexity {
 		//	n = 1 // 1 block per transaction
 		//}
+		ii := 0
 		for height, stop := n, false; !stop; height += n {
 			if height > int(forkBase) {
 				n = int(forkBase) + n - height
@@ -490,15 +499,20 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
 			parent = blocksSlice[len(blocksSlice)-1]
 			for _, block := range blocksSlice {
+				ii++
 				blocks <- block
 			}
 			if height%10000 == 0 {
 				log.Info(fmt.Sprintf("fork gen %dK", (height+1)/1000))
 			}
 		}
+		fmt.Printf("Created before fork: %d\n", ii)
 
 		n = 1000
-		coinbase = forkCoinbase
+		currenCoinbaseKey = forkCoinbaseKey
+		currenCoinbase = forkCoinbase
+
+		i := 0
 		for height, stop := n, false; !stop; height += n {
 			if height > int(forkHeight) {
 				n = int(forkHeight) + n - height
@@ -512,11 +526,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 			blocksSlice, _ := core.GenerateChain(ctx, genesis.Config, parent, engine, db, n, genBlock)
 			parent = blocksSlice[len(blocksSlice)-1]
 			for _, block := range blocksSlice {
+				i++
 				blocks <- block
 			}
 			if height%10000 == 0 {
 				log.Info(fmt.Sprintf("fork reorg gen %dK", (height+1)/1000))
 			}
+			fmt.Printf("Created for fork: %d\n", i)
 		}
 	}()
 
@@ -542,6 +558,8 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	bg.lastBlock = parent
 	bg.totalDifficulty = td
+
+	fmt.Printf("Last blocknr: %d\n", bg.lastBlock.NumberU64())
 
 	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
 	if err != nil {
