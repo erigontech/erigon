@@ -1398,6 +1398,8 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		return nil, err
 	}
 
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	if cached, ok := tds.t.GetAccountCode(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
@@ -1426,6 +1428,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		return 0, err
 	}
 
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
 	if code, ok := tds.t.GetAccountCode(addrHash[:]); ok {
 		codeSize, err = len(code), nil
 	} else {
