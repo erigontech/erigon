@@ -163,7 +163,7 @@ func genBlock(db ethdb.Database,
 	var nonce uint64
 	txOpts := bind.NewKeyedTransactor(coinbaseKey)
 	txOpts.GasPrice = big.NewInt(1)
-	txOpts.GasLimit = 3 * params.TxGasContractCreation
+	txOpts.GasLimit = 20 * params.TxGas
 	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
 
 	var revive *contracts.Revive2
@@ -172,16 +172,33 @@ func genBlock(db ethdb.Database,
 	var phoenixAddress common.Address
 	backend := &NoopBackend{db: db, genesis: genesis}
 
+	var store = func(gen *core.BlockGen) {
+		tx, err := phoenix.Store(txOpts)
+		if err != nil {
+			panic(err)
+		}
+		gen.AddTx(tx)
+	}
+
+	var incr = func(gen *core.BlockGen) {
+		tx, err := phoenix.Increment(txOpts)
+		if err != nil {
+			panic(err)
+		}
+		gen.AddTx(tx)
+	}
+
 	return func(coinbase common.Address, i int, gen *core.BlockGen) {
 		blockNr := int(gen.Number().Uint64())
 
 		gen.SetCoinbase(coinbase)
-		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
+		if gen.GetHeader().GasLimit <= 40*params.TxGas { // ~700 blocks
 			return
 		}
 		gen.SetExtra(extra)
 		gen.SetNonce(types.EncodeNonce(nonce))
 
+		//fmt.Printf("A: %d\n", i)
 		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 
 		var tx *types.Transaction
@@ -217,11 +234,10 @@ func genBlock(db ethdb.Database,
 			}
 			gen.AddTx(tx)
 		case i >= 10004 && i <= 20000: // gen big storage
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			store(gen)
+			nonce++
+			txOpts.Nonce.SetUint64(nonce)
+			incr(gen)
 		case blockNr == 20001: // kill contract with big storage
 			tx, err = phoenix.Die(txOpts)
 			if err != nil {
@@ -236,31 +252,9 @@ func genBlock(db ethdb.Database,
 			gen.AddTx(tx)
 			nonce++
 			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			store(gen)
 		case blockNr == 20003: // add some storage and kill Phoenix in same Tx
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			store(gen)
 			nonce++
 			txOpts.Nonce.SetUint64(nonce)
 			tx, err = phoenix.Die(txOpts)
@@ -277,11 +271,7 @@ func genBlock(db ethdb.Database,
 			gen.AddTx(tx)
 			nonce++
 			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			store(gen)
 		default:
 			to := randAddress(r)
 			tx = types.NewTransaction(nonce, to, amount, params.TxGas, txOpts.GasPrice, nil)

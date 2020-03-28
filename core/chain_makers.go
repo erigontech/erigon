@@ -301,7 +301,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			Difficulty: parent.Difficulty(),
 			UncleHash:  parent.UncleHash(),
 		}),
-		GasLimit: CalcGasLimit(parent, 20*params.TxGasContractCreation, 150*params.TxGasContractCreation),
+
+		GasLimit: CalcGasLimit(parent, 100*params.TxGas, 1000*params.TxGasContractCreation),
 		Number:   number,
 		Time:     time,
 	}
