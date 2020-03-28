@@ -1388,6 +1388,12 @@ func (tds *TrieDbState) ReadCodeByHash(codeHash common.Hash) (code []byte, err e
 	return code, err
 }
 
+func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	return tds.t.GetAccountCode(addrHash)
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -1398,7 +1404,7 @@ func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.
 		return nil, err
 	}
 
-	if cached, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+	if cached, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		code, err = cached, nil
 	} else {
 		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
@@ -1426,7 +1432,7 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		return 0, err
 	}
 
-	if code, ok := tds.t.GetAccountCode(addrHash[:]); ok {
+	if code, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
 		codeSize, err = len(code), nil
 	} else {
 		code, err = tds.ReadAccountCode(address, codeHash)
