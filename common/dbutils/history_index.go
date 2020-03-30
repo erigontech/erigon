@@ -2,7 +2,7 @@ package dbutils
 
 import (
 	"encoding/binary"
-	"fmt"
+
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
 
@@ -112,7 +112,6 @@ Loop:
 
 func (hi *HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	if len(*hi) < 4 {
-		fmt.Println(1)
 		return 0, false
 	}
 	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
@@ -120,7 +119,6 @@ func (hi *HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	var itemLen uint32
 
 	if numOfElements == 0 {
-		fmt.Println(2)
 		return 0, false
 	}
 
