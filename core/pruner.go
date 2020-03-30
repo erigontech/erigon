@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -142,10 +143,6 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 }
 
 func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
-	if !debug.IsIntermediateTrieHash() {
-		return nil
-	}
-
 	keysToRemove := newKeysToRemove()
 	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
@@ -153,14 +150,14 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 		}
 
 		if err := db.Walk(dbutils.StorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, k)
+			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
 			return false, err
 		}
 
 		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, k)
+			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
 			return false, err

@@ -28,10 +28,10 @@ var (
 )
 
 // PhoenixABI is the input ABI used to generate the binding from.
-const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"die\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"store\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
+const PhoenixABI = "[{\"inputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"constructor\"},{\"inputs\":[],\"name\":\"die\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"increment\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"inputs\":[],\"name\":\"store\",\"outputs\":[],\"stateMutability\":\"nonpayable\",\"type\":\"function\"},{\"stateMutability\":\"payable\",\"type\":\"receive\"}]"
 
 // PhoenixBin is the compiled bytecode used for deploying new contracts.
-var PhoenixBin = "0x6080604052348015600f57600080fd5b5060af8061001e6000396000f3fe60806040526004361060295760003560e01c806335f46994146034578063975057e714604857602f565b36602f57005b600080fd5b348015603f57600080fd5b506046605a565b005b348015605357600080fd5b506046605e565b6000ff5b6000805481526001602081905260408220819055815401905556fea2646970667358221220906cbf0d83672df8db0547ebbed7a74a4704d3ba29d7c8f191cc34ba4b1e635264736f6c63430006020033"
+var PhoenixBin = "0x608060405234801561001057600080fd5b50610162806100206000396000f3fe6080604052600436106100385760003560e01c806335f4699414610044578063975057e71461005b578063d09de08a146100705761003f565b3661003f57005b600080fd5b34801561005057600080fd5b50610059610085565b005b34801561006757600080fd5b50610059610089565b34801561007c57600080fd5b506100596100a5565b6000ff5b6000805481526002602052604081206001908190558154019055565b60005460015411156100e85760405162461bcd60e51b81526004018080602001828103825260248152602001806101096024913960400191505060405180910390fd5b60018054600090815260026020526040902080548201905580548101905556fe74727920746f20696e6372656d656e74206e6f7420637265617465642073746f72616765a2646970667358221220774e0afd99cd3bb44defa924b3b87c03e421791c7c5fd3cdf3b97b18443aa96064736f6c63430006040033"
 
 // DeployPhoenix deploys a new Ethereum contract, binding an instance of Phoenix to it.
 func DeployPhoenix(auth *bind.TransactOpts, backend bind.ContractBackend) (common.Address, *types.Transaction, *Phoenix, error) {
@@ -208,6 +208,27 @@ func (_Phoenix *PhoenixSession) Die() (*types.Transaction, error) {
 // Solidity: function die() returns()
 func (_Phoenix *PhoenixTransactorSession) Die() (*types.Transaction, error) {
 	return _Phoenix.Contract.Die(&_Phoenix.TransactOpts)
+}
+
+// Increment is a paid mutator transaction binding the contract method 0xd09de08a.
+//
+// Solidity: function increment() returns()
+func (_Phoenix *PhoenixTransactor) Increment(opts *bind.TransactOpts) (*types.Transaction, error) {
+	return _Phoenix.contract.Transact(opts, "increment")
+}
+
+// Increment is a paid mutator transaction binding the contract method 0xd09de08a.
+//
+// Solidity: function increment() returns()
+func (_Phoenix *PhoenixSession) Increment() (*types.Transaction, error) {
+	return _Phoenix.Contract.Increment(&_Phoenix.TransactOpts)
+}
+
+// Increment is a paid mutator transaction binding the contract method 0xd09de08a.
+//
+// Solidity: function increment() returns()
+func (_Phoenix *PhoenixTransactorSession) Increment() (*types.Transaction, error) {
+	return _Phoenix.Contract.Increment(&_Phoenix.TransactOpts)
 }
 
 // Store is a paid mutator transaction binding the contract method 0x975057e7.

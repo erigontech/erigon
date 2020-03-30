@@ -24,7 +24,6 @@ import (
 	"strings"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
@@ -190,24 +189,23 @@ func (tp *TriePruning) PruneToTimestamp(
 		delete(tp.accounts, gen)
 	}
 
-	if debug.IsIntermediateTrieHash() { // calculate all hashes and send them to hashBucket before unloading from tree
-		key := pool.GetBuffer(64)
-		defer pool.PutBuffer(key)
-		for prefix := range aggregateAccounts {
-			if len(prefix) == 0 || len(prefix)%2 == 1 {
-				continue
-			}
+	// intermediate hashes
+	key := pool.GetBuffer(64)
+	defer pool.PutBuffer(key)
+	for prefix := range aggregateAccounts {
+		if len(prefix) == 0 || len(prefix)%2 == 1 {
+			continue
+		}
 
-			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
-			if !ok {
-				continue
-			}
-			switch parent.(type) {
-			case *duoNode, *fullNode:
-				CompressNibbles([]byte(prefix), &key.B)
-				tp.unloadNodeFunc(key.B, nd.reference())
-			default:
-			}
+		nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
+		if !ok {
+			continue
+		}
+		switch parent.(type) {
+		case *duoNode, *fullNode:
+			CompressNibbles([]byte(prefix), &key.B)
+			tp.unloadNodeFunc(key.B, nd.reference())
+		default:
 		}
 	}
 

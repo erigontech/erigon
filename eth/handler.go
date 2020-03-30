@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1281,7 +1282,11 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		ethDb := ethdb.NewMemDatabase()
+		_ = os.Remove("simulator")
+		ethDb, err := ethdb.NewBoltDatabase("simulator")
+		if err != nil {
+			return err
+		}
 		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)
