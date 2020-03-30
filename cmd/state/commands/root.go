@@ -28,7 +28,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
-func getContext() context.Context {
+func rootContext() context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
 		ch := make(chan os.Signal, 1)
@@ -77,7 +77,7 @@ func genesisFromFile(genesisPath string) *core.Genesis {
 }
 
 func Execute() {
-	if err := rootCmd.Execute(); err != nil {
+	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}

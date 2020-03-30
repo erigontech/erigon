@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
@@ -19,7 +18,7 @@ func TestManagedTx(t *testing.T) {
 	t.Run("Bolt", func(t *testing.T) {
 		var db ethdb.KV
 		var errOpen error
-		db, errOpen = ethdb.NewBolt().InMem(true).Open(ctx)
+		db, errOpen = ethdb.NewBolt().InMem().Open(ctx)
 		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
@@ -76,7 +75,7 @@ func TestManagedTx(t *testing.T) {
 	t.Run("Badger", func(t *testing.T) {
 		var db ethdb.KV
 		var errOpen error
-		db, errOpen = ethdb.NewBadger().InMem(true).Open(ctx)
+		db, errOpen = ethdb.NewBadger().InMem().Open(ctx)
 		assert.NoError(t, errOpen)
 
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
@@ -163,15 +162,20 @@ func TestCancelTest(t *testing.T) {
 
 	var db ethdb.KV
 	var errOpen error
-	db, errOpen = ethdb.NewBolt().InMem(true).Open(ctx)
+	db, errOpen = ethdb.NewBolt().InMem().Open(ctx)
 	assert.NoError(t, errOpen)
-	if err := db.Update(ctx, func(tx ethdb.Tx) error {
+	if err := db.Update(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if err := b.Put([]byte{1}, []byte{1}); err != nil {
 			return err
 		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 
-		c := b.Cursor()
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.AccountsBucket).Cursor()
 		for {
 			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -189,18 +193,23 @@ func TestFilterTest(t *testing.T) {
 
 	var db ethdb.KV
 	var errOpen error
-	db, errOpen = ethdb.NewBolt().InMem(true).Open(ctx)
+	db, errOpen = ethdb.NewBolt().InMem().Open(ctx)
 	assert.NoError(t, errOpen)
 	if err := db.Update(ctx, func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
-		if err := b.Put(common.FromHex("10"), []byte{1}); err != nil {
-			return err
+		for i := uint8(0); i < 10; i++ {
+			if err := b.Put([]byte{i}, []byte{1}); err != nil {
+				return err
+			}
 		}
-		if err := b.Put(common.FromHex("20"), []byte{1}); err != nil {
-			return nil
-		}
+		return nil
+	}); err != nil {
+		panic(err)
+	}
 
-		c := b.Cursor().Prefix(common.FromHex("2"))
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.AccountsBucket)
+		c := b.Cursor().Prefix([]byte{2})
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {
@@ -227,7 +236,7 @@ func TestFilterTest(t *testing.T) {
 			}
 			counter++
 		}
-		assert.Equal(t, 2, counter)
+		assert.Equal(t, 10, counter)
 
 		counter = 0
 		if err := c.Walk(func(_, _ []byte) (bool, error) {
@@ -236,7 +245,7 @@ func TestFilterTest(t *testing.T) {
 		}); err != nil {
 			return err
 		}
-		assert.Equal(t, 2, counter)
+		assert.Equal(t, 10, counter)
 
 		return nil
 	}); err != nil {
@@ -250,7 +259,7 @@ func TestUnmanagedTx(t *testing.T) {
 	t.Run("Bolt", func(t *testing.T) {
 		var db ethdb.KV
 		var errOpen error
-		db, errOpen = ethdb.NewBolt().InMem(true).Open(ctx)
+		db, errOpen = ethdb.NewBolt().InMem().Open(ctx)
 		assert.NoError(t, errOpen)
 		_ = db
 		// db.Begin()

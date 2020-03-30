@@ -15,10 +15,15 @@ type KV interface {
 	View(ctx context.Context, f func(tx Tx) error) (err error)
 	Update(ctx context.Context, f func(tx Tx) error) (err error)
 	Close() error
+
+	Begin(ctx context.Context, writable bool) (Tx, error)
 }
 
 type Tx interface {
 	Bucket(name []byte) Bucket
+
+	Commit(ctx context.Context) error
+	Rollback() error
 }
 
 type Bucket interface {
@@ -41,10 +46,10 @@ type Cursor interface {
 }
 
 type NoValuesCursor interface {
-	First() ([]byte, uint64, error)
-	Seek(seek []byte) ([]byte, uint64, error)
-	Next() ([]byte, uint64, error)
-	Walk(walker func(k []byte, vSize uint64) (bool, error)) error
+	First() ([]byte, uint32, error)
+	Seek(seek []byte) ([]byte, uint32, error)
+	Next() ([]byte, uint32, error)
+	Walk(walker func(k []byte, vSize uint32) (bool, error)) error
 }
 
 type DbProvider uint8
@@ -83,7 +88,7 @@ func NewRemote() Options {
 }
 
 func NewMemDb() Options {
-	return Opts().InMem(true)
+	return Opts().InMem()
 }
 
 func ProviderOpts(provider DbProvider) Options {
@@ -116,12 +121,12 @@ func (opts Options) Path(path string) Options {
 	return opts
 }
 
-func (opts Options) InMem(val bool) Options {
+func (opts Options) InMem() Options {
 	switch opts.provider {
 	case Bolt:
-		opts.Bolt.MemOnly = val
+		opts.Bolt.MemOnly = true
 	case Badger:
-		opts.Badger = opts.Badger.WithInMemory(val)
+		opts.Badger = opts.Badger.WithInMemory(true)
 	case Remote:
 		panic("not supported")
 	}

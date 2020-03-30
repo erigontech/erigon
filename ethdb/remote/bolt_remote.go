@@ -64,7 +64,7 @@ const (
 	// CmdGet (bucketHandle, key): value
 	// requests a value for a key from given bucket.
 	CmdGet
-	// CmdCursor (bucketHandle): cursorHandle
+	// CmdCursor (bucketHandle): (cursorHandle, prefix)
 	// request creating a cursor for the given bucket. It returns cursor's handle (uint64)
 	CmdCursor
 	// CmdCursorSeek (cursorHandle, seekKey): (key, value)
@@ -81,29 +81,31 @@ const (
 	// CmdCursorSeekTo (cursorHandle, seekKey): (key, value)
 	// Moves given cursor to the seekKey, or to the next key after seekKey
 	CmdCursorSeekTo
-	// CmdGetAsOf (bucket, hBucket, key []byte, timestamp uint64): (value)
-	CmdGetAsOf
-	// CmdCursorFirstKey (cursorHandle, number of keys): [(key, valueIsEmpty)]
-	// Moves given cursor to bucket start and streams back the (key, valueIsEmpty) pairs
+	// CmdCursorSeekKey (cursorHandle, number of keys): [(key, valueSize)]
+	// Moves given cursor to bucket start and streams back the (key, valueSize) pairs
+	// Pair with key == nil signifies the end of the stream
+	CmdCursorSeekKey
+	// CmdCursorFirstKey (cursorHandle, number of keys): [(key, valueSize)]
+	// Moves given cursor to bucket start and streams back the (key, valueSize) pairs
 	// Pair with key == nil signifies the end of the stream
 	CmdCursorFirstKey
-	// CmdCursorNextKey (cursorHandle, number of keys): [(key, valueIsEmpty)]
-	// Moves given cursor over the next given number of keys and streams back the (key, valueIsEmpty) pairs
+	// CmdCursorNextKey (cursorHandle, number of keys): [(key, valueSize)]
+	// Moves given cursor over the next given number of keys and streams back the (key, valueSize) pairs
 	// Pair with key == nil signifies the end of the stream
 	CmdCursorNextKey
 )
 
-const DefaultCursorBatchSize uint64 = 1
+const DefaultCursorBatchSize uint = 1
 const CursorMaxBatchSize uint64 = 1 * 1000 * 1000
 const ClientMaxConnections uint64 = 128
 
 var logger = log.New("database", "remote")
 
-func decodeKey(decoder *codec.Decoder, key *[]byte, valueIsEmpty *bool) error {
+func decodeKey(decoder *codec.Decoder, key *[]byte, valueSize *uint32) error {
 	if err := decoder.Decode(key); err != nil {
 		return err
 	}
-	if err := decoder.Decode(valueIsEmpty); err != nil {
+	if err := decoder.Decode(valueSize); err != nil {
 		return err
 	}
 	return nil
@@ -377,67 +379,6 @@ func (db *DB) endTx(ctx context.Context, encoder *codec.Encoder, decoder *codec.
 	return nil
 }
 
-func (db *DB) CmdGetAsOf(ctx context.Context, bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	var err error
-	var responseCode ResponseCode
-	in, out, closer, err := db.getConnection(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	defer func() {
-		if err != nil {
-			closer.Close()
-			return
-		}
-		db.returnConn(ctx, in, out, closer)
-	}()
-
-	decoder := codecpool.Decoder(in)
-	defer codecpool.Return(decoder)
-	encoder := codecpool.Encoder(out)
-	defer codecpool.Return(encoder)
-
-	err = encoder.Encode(CmdGetAsOf)
-	if err != nil {
-		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
-	}
-	err = encoder.Encode(&bucket)
-	if err != nil {
-		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
-	}
-	err = encoder.Encode(&hBucket)
-	if err != nil {
-		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
-	}
-	err = encoder.Encode(&key)
-	if err != nil {
-		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
-	}
-	err = encoder.Encode(timestamp)
-	if err != nil {
-		return nil, fmt.Errorf("could not encode CmdGetAsOf: %w", err)
-	}
-
-	err = decoder.Decode(&responseCode)
-	if err != nil {
-		return nil, err
-	}
-
-	if responseCode != ResponseOk {
-		err = decodeErr(decoder, responseCode)
-		return nil, err
-	}
-
-	var val []byte
-	err = decoder.Decode(&val)
-	if err != nil {
-		return nil, err
-	}
-
-	return val, nil
-}
-
 // View performs read-only transaction on the remote database
 // NOTE: not thread-safe
 func (db *DB) View(ctx context.Context, f func(tx *Tx) error) (err error) {
@@ -502,39 +443,37 @@ type Bucket struct {
 }
 
 type Cursor struct {
-	ctx               context.Context
-	in                io.Reader
-	out               io.Writer
-	opts              CursorOpts
-	cursorHandle      uint64
-	cacheLastIdx      uint64
-	cacheIdx          uint64
-	cacheKeys         [][]byte
-	cacheValues       [][]byte
-	cacheValueIsEmpty []bool
+	prefix         []byte
+	prefetchSize   uint
+	prefetchValues bool
+
+	ctx            context.Context
+	in             io.Reader
+	out            io.Writer
+	cursorHandle   uint64
+	cacheLastIdx   uint
+	cacheIdx       uint
+	cacheKeys      [][]byte
+	cacheValues    [][]byte
+	cacheValueSize []uint32
 
 	bucket      *Bucket
 	initialized bool
 }
 
-type CursorOpts struct {
-	prefetchSize   uint64
-	prefetchValues bool
+func (c *Cursor) Prefix(v []byte) *Cursor {
+	c.prefix = v
+	return c
 }
 
-var DefaultCursorOpts = CursorOpts{
-	prefetchSize:   DefaultCursorBatchSize,
-	prefetchValues: false,
+func (c *Cursor) Prefetch(v uint) *Cursor {
+	c.prefetchSize = v
+	return c
 }
 
-func (opts CursorOpts) PrefetchSize(v uint64) CursorOpts {
-	opts.prefetchSize = v
-	return opts
-}
-
-func (opts CursorOpts) PrefetchValues(v bool) CursorOpts {
-	opts.prefetchValues = v
-	return opts
+func (c *Cursor) NoValues() *Cursor {
+	c.prefetchValues = false
+	return c
 }
 
 // Bucket returns the handle to the bucket in remote DB
@@ -581,16 +520,16 @@ func (b *Bucket) init() error {
 // Get reads a value corresponding to the given key, from the bucket
 // return nil if they key is not present
 func (b *Bucket) Get(key []byte) ([]byte, error) {
-	if !b.initialized {
-		if err := b.init(); err != nil {
-			return nil, err
-		}
-	}
-
 	select {
 	default:
 	case <-b.ctx.Done():
 		return nil, b.ctx.Err()
+	}
+
+	if !b.initialized {
+		if err := b.init(); err != nil {
+			return nil, err
+		}
 	}
 
 	decoder := codecpool.Decoder(b.in)
@@ -627,13 +566,15 @@ func (b *Bucket) Get(key []byte) ([]byte, error) {
 }
 
 // Cursor iterating over bucket keys
-func (b *Bucket) Cursor(opts CursorOpts) *Cursor {
+func (b *Bucket) Cursor() *Cursor {
 	return &Cursor{
 		bucket: b,
 		ctx:    b.ctx,
-		opts:   opts,
 		in:     b.in,
 		out:    b.out,
+
+		prefetchSize:   DefaultCursorBatchSize,
+		prefetchValues: false,
 	}
 }
 
@@ -654,6 +595,9 @@ func (c *Cursor) init() error {
 	}
 	if err := encoder.Encode(c.bucket.bucketHandle); err != nil {
 		return fmt.Errorf("could not encode bucketHandle for CmdCursor: %w", err)
+	}
+	if err := encoder.Encode(c.prefix); err != nil {
+		return fmt.Errorf("could not encode prefix for CmdCursor: %w", err)
 	}
 
 	var responseCode ResponseCode
@@ -681,18 +625,19 @@ func (c *Cursor) init() error {
 }
 
 func (c *Cursor) First() (key []byte, value []byte, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
 	if !c.initialized {
 		if err := c.init(); err != nil {
 			return nil, nil, err
 		}
 	}
 
-	cmd := CmdCursorFirstKey
-	if c.opts.prefetchValues {
-		cmd = CmdCursorFirst
-	}
-
-	if err := c.fetchPage(cmd); err != nil {
+	if err := c.fetchPage(CmdCursorFirst); err != nil {
 		return nil, nil, err
 	}
 	c.cacheIdx = 0
@@ -703,31 +648,91 @@ func (c *Cursor) First() (key []byte, value []byte, err error) {
 
 }
 
-func (c *Cursor) FirstKey() (key []byte, vIsEmpty bool, err error) {
+func (c *Cursor) FirstKey() (key []byte, vSize uint32, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
+
 	if !c.initialized {
 		if err := c.init(); err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
 	}
 
 	if err := c.fetchPage(CmdCursorFirstKey); err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
 	c.cacheIdx = 0
 
-	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueIsEmpty[c.cacheIdx]
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueSize[c.cacheIdx]
 	c.cacheIdx++
 
 	return k, v, nil
 }
 
-func (c *Cursor) SeekKey(seek []byte) (key []byte, vIsEmpty bool, err error) {
-	key, v, err := c.Seek(seek)
-	vIsEmpty = len(v) == 0
-	return key, vIsEmpty, err
+func (c *Cursor) SeekKey(seek []byte) (key []byte, vSize uint32, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
+
+	if !c.initialized {
+		if err := c.init(); err != nil {
+			return nil, 0, err
+		}
+	}
+
+	c.cacheLastIdx = 0 // .Next() cache is invalid after .Seek() and .SeekTo() calls
+
+	select {
+	default:
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	}
+
+	decoder := codecpool.Decoder(c.in)
+	defer codecpool.Return(decoder)
+	encoder := codecpool.Encoder(c.out)
+	defer codecpool.Return(encoder)
+
+	if err := encoder.Encode(CmdCursorSeekKey); err != nil {
+		return nil, 0, fmt.Errorf("could not encode CmdCursorSeekKey: %w", err)
+	}
+	if err := encoder.Encode(c.cursorHandle); err != nil {
+		return nil, 0, fmt.Errorf("could not encode cursorHandle for CmdCursorSeekKey: %w", err)
+	}
+	if err := encoder.Encode(&seek); err != nil {
+		return nil, 0, fmt.Errorf("could not encode key for CmdCursorSeekKey: %w", err)
+	}
+
+	var responseCode ResponseCode
+	if err := decoder.Decode(&responseCode); err != nil {
+		return nil, 0, fmt.Errorf("could not decode ResponseCode for CmdCursorSeekKey: %w", err)
+	}
+
+	if responseCode != ResponseOk {
+		if err := decodeErr(decoder, responseCode); err != nil {
+			return nil, 0, fmt.Errorf("could not decode errorMessage for CmdCursorSeekKey: %w", err)
+		}
+	}
+
+	if err := decodeKey(decoder, &key, &vSize); err != nil {
+		return nil, 0, fmt.Errorf("could not decode key for CmdCursorSeekKey: %w", err)
+	}
+
+	return key, vSize, nil
 }
 
 func (c *Cursor) Seek(seek []byte) (key []byte, value []byte, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
 	if !c.initialized {
 		if err := c.init(); err != nil {
 			return nil, nil, err
@@ -834,6 +839,12 @@ func (c *Cursor) needFetchNextPage() bool {
 }
 
 func (c *Cursor) Next() (keys []byte, values []byte, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, nil, c.ctx.Err()
+	default:
+	}
+
 	if c.needFetchNextPage() {
 		err := c.fetchPage(CmdCursorNext)
 		if err != nil {
@@ -848,16 +859,22 @@ func (c *Cursor) Next() (keys []byte, values []byte, err error) {
 	return k, v, nil
 }
 
-func (c *Cursor) NextKey() (keys []byte, vIsEmpty bool, err error) {
+func (c *Cursor) NextKey() (keys []byte, vSize uint32, err error) {
+	select {
+	case <-c.ctx.Done():
+		return nil, 0, c.ctx.Err()
+	default:
+	}
+
 	if c.needFetchNextPage() {
 		err := c.fetchPage(CmdCursorNextKey)
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
 		c.cacheIdx = 0
 	}
 
-	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueIsEmpty[c.cacheIdx]
+	k, v := c.cacheKeys[c.cacheIdx], c.cacheValueSize[c.cacheIdx]
 	c.cacheIdx++
 
 	return k, v, nil
@@ -865,9 +882,9 @@ func (c *Cursor) NextKey() (keys []byte, vIsEmpty bool, err error) {
 
 func (c *Cursor) fetchPage(cmd Command) error {
 	if c.cacheKeys == nil {
-		c.cacheKeys = make([][]byte, c.opts.prefetchSize)
-		c.cacheValues = make([][]byte, c.opts.prefetchSize)
-		c.cacheValueIsEmpty = make([]bool, c.opts.prefetchSize)
+		c.cacheKeys = make([][]byte, c.prefetchSize)
+		c.cacheValues = make([][]byte, c.prefetchSize)
+		c.cacheValueSize = make([]uint32, c.prefetchSize)
 	}
 
 	decoder := codecpool.Decoder(c.in)
@@ -882,7 +899,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		return fmt.Errorf("could not encode cursorHandle. %w", err)
 	}
 
-	if err := encoder.Encode(c.opts.prefetchSize); err != nil {
+	if err := encoder.Encode(c.prefetchSize); err != nil {
 		return fmt.Errorf("could not encode c.batchSize. %w", err)
 	}
 
@@ -897,7 +914,7 @@ func (c *Cursor) fetchPage(cmd Command) error {
 		}
 	}
 
-	for c.cacheLastIdx = uint64(0); c.cacheLastIdx < c.opts.prefetchSize; c.cacheLastIdx++ {
+	for c.cacheLastIdx = uint(0); c.cacheLastIdx < c.prefetchSize; c.cacheLastIdx++ {
 		select {
 		default:
 		case <-c.ctx.Done():
@@ -910,8 +927,8 @@ func (c *Cursor) fetchPage(cmd Command) error {
 				return fmt.Errorf("could not decode (key, value) for cmd %d: %w", cmd, err)
 			}
 		case CmdCursorFirstKey, CmdCursorNextKey:
-			if err := decodeKey(decoder, &c.cacheKeys[c.cacheLastIdx], &c.cacheValueIsEmpty[c.cacheLastIdx]); err != nil {
-				return fmt.Errorf("could not decode (key, valueIsEmpty) for cmd %d: %w", cmd, err)
+			if err := decodeKey(decoder, &c.cacheKeys[c.cacheLastIdx], &c.cacheValueSize[c.cacheLastIdx]); err != nil {
+				return fmt.Errorf("could not decode (key, vSize) for cmd %d: %w", cmd, err)
 			}
 		}
 

@@ -270,8 +270,10 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
+	var cursorPrefix []byte
 	assert.Nil(encoder.Encode(remote.CmdCursor), "Could not encode CmdCursor")
 	assert.Nil(encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
+	assert.Nil(encoder.Encode(cursorPrefix), "Could not encode prefix for CmdCursor")
 
 	var cursorHandle uint64 = 2
 	var seekKey = []byte("key15") // Should find key2
@@ -340,10 +342,12 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(encoder.Encode(&name), "Could not encode name for CmdBucket")
 
 	var bucketHandle uint64 = 1
+	var cursorPrefix []byte
 	assert.Nil(encoder.Encode(remote.CmdCursor), "Could not encode CmdCursor")
 	assert.Nil(encoder.Encode(bucketHandle), "Could not encode bucketHandler for CmdCursor")
+	assert.Nil(encoder.Encode(cursorPrefix), "Could not encode cursorPrefix for CmdCursor")
 
-	// Logic of test: .Seek(), .Next(), .First(), .Next(), .FirstKey(), .NextKey()
+	// Logic of test: .Seek(), .Next(), .First(), .Next()
 
 	var cursorHandle uint64 = 2
 	var seekKey = []byte("key1") // Should find key1
@@ -366,16 +370,6 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(encoder.Encode(remote.CmdCursorNext), "Could not encode CmdCursorNext")
 	assert.Nil(encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNext")
 	assert.Nil(encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNext")
-
-	// .FirstKey()
-	assert.Nil(encoder.Encode(remote.CmdCursorFirstKey), "Could not encode CmdCursorFirstKey")
-	assert.Nil(encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorFirstKey")
-	assert.Nil(encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorFirstKey")
-
-	// .NextKey()
-	assert.Nil(encoder.Encode(remote.CmdCursorNextKey), "Could not encode CmdCursorNextKey")
-	assert.Nil(encoder.Encode(cursorHandle), "Could not encode cursorHandler for CmdCursorNextKey")
-	assert.Nil(encoder.Encode(numberOfKeys), "Could not encode numberOfKeys for CmdCursorNextKey")
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
@@ -422,11 +416,6 @@ func TestCursorOperations(t *testing.T) {
 	assert.Nil(key, "Unexpected key")
 	assert.Nil(decoder.Decode(&value), "Could not decode response from CmdCursorNext")
 	assert.Nil(value, "Unexpected value")
-
-	assert.Nil(encoder.Encode(remote.CmdBeginTx), "Could not encode CmdBeginTx")
-
-	assert.Nil(encoder.Encode(remote.CmdBucket), "Could not encode CmdBucket")
-	assert.Nil(encoder.Encode(&name), "Could not encode name for CmdBucket")
 }
 
 func TestTxYield(t *testing.T) {
