@@ -22,6 +22,6 @@ var checkChangeSetsCmd = &cobra.Command{
 	Use:   "checkChangeSets",
 	Short: "Re-executes historical transactions in read-only mode and checks that their outputs match the database ChangeSets",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return stateless.CheckChangeSets(block, chaindata, historyfile, nocheck)
+		return stateless.CheckChangeSets(genesis, block, chaindata, historyfile, nocheck)
 	},
 }
