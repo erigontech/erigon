@@ -18,12 +18,11 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/params"
 )
 
 // CheckChangeSets re-executes historical transactions in read-only mode
 // and checks that their outputs match the database ChangeSets.
-func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
+func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, historyfile string, nocheck bool) error {
 	if len(historyfile) == 0 {
 		historyfile = chaindata
 	}
@@ -51,7 +50,7 @@ func CheckChangeSets(blockNum uint64, chaindata string, historyfile string, noch
 		}
 	}
 
-	chainConfig := params.MainnetChainConfig
+	chainConfig := genesis.Config
 	engine := ethash.NewFaker()
 	vmConfig := vm.Config{}
 	bc, err := core.NewBlockChain(chainDb, nil, chainConfig, engine, vmConfig, nil)

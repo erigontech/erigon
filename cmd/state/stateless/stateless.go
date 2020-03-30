@@ -151,7 +151,6 @@ func Stateless(
 	witnessDatabasePath string,
 	writeHistory bool,
 ) {
-
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
