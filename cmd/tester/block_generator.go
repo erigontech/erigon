@@ -155,6 +155,7 @@ func makeGenBlock(db ethdb.Database,
 	genesis *core.Genesis,
 	extra []byte,
 	coinbaseKey *ecdsa.PrivateKey,
+	isFork bool,
 	forkBase, forkHeight uint64,
 	r *rand.Rand,
 ) func(coinbase common.Address, i int, gen *core.BlockGen) {
@@ -261,16 +262,17 @@ func makeGenBlock(db ethdb.Database,
 			gen.AddTx(store())
 		case blockNr == 20001: // kill contract with big storage
 			gen.AddTx(die())
-		case blockNr == 20002: // revive Phoenix and add to it some storage in same Tx
+		case blockNr == forkBase-1: // revive Phoenix and add to it some storage in same Tx
 			gen.AddTx(deploy())
 			gen.AddTx(store())
-		case blockNr == 20003: // add some storage and kill Phoenix in same Tx
-			gen.AddTx(store())
+			gen.AddTx(incr()) // last increment, set last value to 2
+		case !isFork && blockNr == forkBase+1:
 			gen.AddTx(die())
 			gen.AddTx(deploy())
 			gen.AddTx(store())
-		case blockNr >= forkBase && blockNr <= forkHeight:
-			gen.AddTx(incr())
+		case isFork && blockNr == forkBase+1:
+			// skip self-destruct, deploy and store steps
+			// it means in fork we will have value=2, while in non-fork value=1
 		default:
 			nonce++
 			txOpts.Nonce.SetInt64(nonce)
@@ -333,7 +335,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	}
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 
-	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, 0, 0, r)
+	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, false, 0, 0, r)
 	genBlock := func(i int, gen *core.BlockGen) {
 		genBlockFunc(coinbase, i, gen)
 	}
@@ -411,17 +413,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 		return nil, err
 	}
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
-	isFork := false
 
-	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, forkBase, forkHeight, r)
+	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, true, forkBase, forkHeight, r)
 	genBlock := func(i int, gen *core.BlockGen) {
 		if gen.Number().Uint64() >= forkBase {
 			coinbase = forkCoinbase
 		}
 
-		if gen.Number().Uint64() >= forkBase && gen.Number().Uint64() <= forkBase+forkHeight {
-			isFork = true
-		}
 		genBlockFunc(coinbase, i, gen)
 	}
 
