@@ -223,9 +223,6 @@ func makeGenBlock(db ethdb.Database,
 		}
 		gen.SetExtra(extra)
 		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
-
-		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
-
 		var tx *types.Transaction
 		switch true {
 		case blockNr == 10001: // create 0 account
@@ -233,6 +230,7 @@ func makeGenBlock(db ethdb.Database,
 			txOpts.Nonce.SetInt64(nonce)
 			account0 := common.HexToAddress("0000000000000000000000000000000000000000")
 			tx = types.NewTransaction(txOpts.Nonce.Uint64(), account0, amount, params.TxGas, txOpts.GasPrice, nil)
+			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
@@ -278,6 +276,7 @@ func makeGenBlock(db ethdb.Database,
 			txOpts.Nonce.SetInt64(nonce)
 			to := randAddress(r)
 			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
+			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
