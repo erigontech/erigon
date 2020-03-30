@@ -6,7 +6,6 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -144,7 +143,7 @@ const (
 
 // ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
-	if debug.IsIntermediateTrieHash() && !tr.historical {
+	if !tr.historical {
 		return tr.ResolveStatefulCached(db, blockNr)
 	}
 

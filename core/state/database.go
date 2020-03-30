@@ -171,24 +171,23 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                      *trie.Trie
-	tMu                    *sync.Mutex
-	db                     ethdb.Database
-	blockNr                uint64
-	buffers                []*Buffer
-	aggregateBuffer        *Buffer // Merge of all buffers
-	currentBuffer          *Buffer
-	historical             bool
-	noHistory              bool
-	resolveReads           bool
-	savePreimages          bool
-	enableIntermediateHash bool
-	resolveSetBuilder      *trie.ResolveSetBuilder
-	tp                     *trie.TriePruning
-	newStream              trie.Stream
-	hashBuilder            *trie.HashBuilder
-	resolver               *trie.Resolver
-	incarnationMap         map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
+	t                 *trie.Trie
+	tMu               *sync.Mutex
+	db                ethdb.Database
+	blockNr           uint64
+	buffers           []*Buffer
+	aggregateBuffer   *Buffer // Merge of all buffers
+	currentBuffer     *Buffer
+	historical        bool
+	noHistory         bool
+	resolveReads      bool
+	savePreimages     bool
+	resolveSetBuilder *trie.ResolveSetBuilder
+	tp                *trie.TriePruning
+	newStream         trie.Stream
+	hashBuilder       *trie.HashBuilder
+	resolver          *trie.Resolver
+	incarnationMap    map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
@@ -208,10 +207,8 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 	}
 	t.SetTouchFunc(tp.Touch)
 
-	if debug.IsIntermediateTrieHash() {
-		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
-		tp.SetCreateNodeFunc(tds.delIntermediateHash)
-	}
+	tp.SetUnloadNodeFunc(tds.putIntermediateHash)
+	tp.SetCreateNodeFunc(tds.delIntermediateHash)
 
 	return tds
 }
@@ -232,10 +229,6 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
 
-func (tds *TrieDbState) EnableIntermediateHash(v bool) {
-	tds.enableIntermediateHash = v
-}
-
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Lock()
 	tcopy := *tds.t
@@ -254,10 +247,8 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	if debug.IsIntermediateTrieHash() {
-		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
-		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
-	}
+	cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
+	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 
 	return &cpy
 }
@@ -967,9 +958,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
-			if debug.IsIntermediateTrieHash() {
-				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
-			}
+			_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -993,11 +982,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-
-						if debug.IsIntermediateTrieHash() {
-							_ = ClearTombstonesForNewStorage(tds.db, cKey)
-						}
-
+						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -1094,9 +1079,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
-			if debug.IsIntermediateTrieHash() {
-				_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
-			}
+			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}

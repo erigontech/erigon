@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
@@ -222,7 +221,6 @@ func Stateless(
 	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(!writeHistory)
-	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
 	var blockWitness []byte
 	var bw *trie.Witness

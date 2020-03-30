@@ -651,9 +651,6 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	if debug.IsIntermediateTrieHash() && fromScratch {
-		_ = tds.Rebuild()
-	}
 
 	importedBn := tds.GetBlockNr()
 	if importedBn == 0 {
