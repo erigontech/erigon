@@ -408,6 +408,28 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 					break
 				}
 			}
+		case remote.CmdCursorSeekKey:
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+			}
+			if err := decoder.Decode(&seekKey); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+			}
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
+				continue
+			}
+			k, v, err := cursor.Seek(seekKey)
+			if err != nil {
+				return fmt.Errorf("in CmdCursorSeek: %w", err)
+			}
+			if err := encoder.Encode(remote.ResponseOk); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+			}
+			if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
+			}
 		default:
 			logger.Error("unknown", "remote.Command", c)
 			return fmt.Errorf("unknown remote.Command %d", c)
