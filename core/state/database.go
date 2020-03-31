@@ -592,7 +592,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	if _, err := tds.ResolveStateTrie(false); err != nil {
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		return nil, err
 	}
 	return tds.UpdateStateTrie()
@@ -855,7 +855,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness, error) {
+func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
 	var witnesses []*trie.Witness
 
 	resolveFunc := func(resolver *trie.Resolver) error {
@@ -863,7 +863,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 			return nil
 		}
 		resolver.CollectWitnesses(extractWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr, trace); err != nil {
 			return err
 		}
 
@@ -1185,7 +1185,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.ResolveStateTrie(false); err != nil {
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		return err
 	}
 

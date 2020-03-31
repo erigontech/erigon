@@ -1114,7 +1114,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				resolver.SetHistorical(true)
 				resolver.AddRequest(rr)
 
-				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
 					return err2
 				}
 
@@ -1174,7 +1174,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					resolver.SetHistorical(true)
 					resolver.AddRequest(rr)
 
-					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
 						return err2
 					}
 
