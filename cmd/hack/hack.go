@@ -1679,10 +1679,9 @@ func GenerateTxLookups2(chaindata string) {
 }
 
 type LookupFile struct {
-	file      *os.File
-	pos       int64
-	bufferPos int64
-	buffer    []byte
+	file   io.Reader
+	buffer []byte
+	pos    uint64
 }
 
 type Entries []byte
@@ -1699,7 +1698,7 @@ func (h Heap) Len() int {
 }
 
 func (h Heap) Less(i, j int) bool {
-	return bytes.Compare(h[i].val, h[j].val) <= 0
+	return bytes.Compare(h[i].val, h[j].val) < 0
 }
 func (h Heap) Swap(i, j int) {
 	h[i], h[j] = h[j], h[i]
@@ -1724,23 +1723,25 @@ func (a Entries) Len() int {
 }
 
 func (a Entries) Less(i, j int) bool {
-	return bytes.Compare(a[35*i:35*i+35], a[35*j:35*j+35]) <= 0
+	return bytes.Compare(a[35*i:35*i+35], a[35*j:35*j+35]) < 0
 }
 
 func (a Entries) Swap(i, j int) {
 	tmp := common.CopyBytes(a[35*i : 35*i+35])
-	copy(a[35*i:35*i+35], common.CopyBytes(a[35*j:35*j+35]))
+	copy(a[35*i:35*i+35], a[35*j:35*j+35])
 	copy(a[35*j:35*j+35], tmp)
 }
 
 func insertInFileForLookups2(file *os.File, entries Entries, it uint64) {
-	sort.Sort(entries)
-	_, err := file.Write(entries[:it*35])
+	sorted := entries[:35*it]
+	sort.Sort(sorted)
+	_, err := file.Write(sorted)
 	check(err)
 	log.Info("File Insertion Occured")
 }
 
 func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+	var bufferLen int = 143360 // 35 * 4096
 	var count uint64 = 5000000
 	var entries Entries = make([]byte, count*35)
 	bn := make([]byte, 3)
@@ -1757,10 +1758,10 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		if body == nil {
 			log.Info("Now Inserting to file")
 			insertInFileForLookups2(fileTmp, entries, iterations)
-			lookups = append(lookups, LookupFile{fileTmp, 0, 0, nil})
+			lookups = append(lookups, LookupFile{nil, nil, 35})
 			iterations = 0
-			filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
-			fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+			entries = nil
+			fileTmp.Close()
 			break
 		}
 
@@ -1780,8 +1781,10 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 			if iterations == count {
 				log.Info("Now Inserting to file")
 				insertInFileForLookups2(fileTmp, entries, iterations)
-				lookups = append(lookups, LookupFile{fileTmp, 0, 0, nil})
+				entries = nil
+				lookups = append(lookups, LookupFile{nil, nil, 35})
 				iterations = 0
+				fileTmp.Close()
 				filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 				fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
 			}
@@ -1794,44 +1797,57 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 		}
 	}
-	var bufferLen int64 = 1433600 // 35 * 4096
 	batch := db.NewBatch()
-	iterations = 0
 	h := &Heap{}
 	heap.Init(h)
-	for i, lookup := range lookups {
-		lookups[i].buffer = make([]byte, bufferLen)
-		_, err := lookup.file.ReadAt(lookups[i].buffer, 0)
-		heap.Push(h, HeapElem{lookups[i].buffer[:35], i})
-		lookup.pos = bufferLen
+	for i := range lookups {
+		file, err := os.Open(fmt.Sprintf(".lookups_%d.tmp", i))
 		check(err)
+		lookups[i].file = bufio.NewReader(file)
+		lookups[i].buffer = make([]byte, bufferLen)
+		check(err)
+		n, err := lookups[i].file.Read(lookups[i].buffer)
+		if n != bufferLen {
+			lookups[i].buffer = lookups[i].buffer[:n]
+		}
+		heap.Push(h, HeapElem{lookups[i].buffer[:35], i})
 	}
 
-	for !interrupt {
-		if len(*h) == 0 {
-			break
-		}
-
+	for !interrupt && len(*h) != 0 {
 		val := (heap.Pop(h)).(HeapElem)
-		if int(lookups[val.index].bufferPos) >= len(lookups[val.index].buffer) {
-			n, _ := lookups[val.index].file.ReadAt(lookups[val.index].buffer, lookups[val.index].pos)
-			if n == 0 {
-				os.Remove(lookups[val.index].file.Name())
-				lookups[val.index] = lookups[0]
-				lookups = lookups[1:]
+		if lookups[val.index].pos == uint64(bufferLen) {
+			if val.val[32] != 0 {
+				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
+				check(err)
 			} else {
-				lookups[val.index].pos += bufferLen
-				lookups[val.index].bufferPos = 0
+				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
+				check(err)
+			}
+			n, _ := lookups[val.index].file.Read(lookups[val.index].buffer)
+			iterations++
+			if n == 0 {
+				os.Remove(fmt.Sprintf(".lookups_%d.tmp", val.index))
+			} else {
+				if n != bufferLen {
+					lookups[val.index].buffer = lookups[val.index].buffer[:n]
+				}
+				lookups[val.index].pos = 35
 				heap.Push(h, HeapElem{lookups[val.index].buffer[:35], val.index})
 			}
+			continue
 		} else {
-			heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].bufferPos : lookups[val.index].bufferPos+35], val.index})
-			lookups[val.index].bufferPos += 35
+			heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].pos : lookups[val.index].pos+35], val.index})
 		}
-		fmt.Println(val.val)
-		err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], val.val[32:])
-		check(err)
+		lookups[val.index].pos += 35
 		iterations++
+		if val.val[32] != 0 {
+			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
+			check(err)
+		} else {
+			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
+			check(err)
+		}
+
 		if iterations%1000000 == 0 {
 			batch.Commit()
 			log.Info("Commit Occured", "progress", iterations)
@@ -1843,6 +1859,40 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		}
 	}
 	batch.Commit()
+	blockNum = startBlock
+	iterations = 0
+	// Validation Process
+	blockBytes := big.NewInt(0)
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+
+		if body == nil {
+			break
+		}
+
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+		blockBytes.SetUint64(blockNum)
+		bn = blockBytes.Bytes()
+
+		for _, tx := range body.Transactions {
+			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
+			iterations++
+			if iterations%100000 == 0 {
+				batch.Commit()
+				log.Info("Validated", "entries", iterations)
+			}
+			if bytes.Compare(val, bn) != 0 {
+				check(err)
+				panic(fmt.Sprintf("Validation process failed(%d). Expected %b, got %b", iterations, bn, val))
+			}
+		}
+		blockNum++
+	}
 }
 
 func main() {
