@@ -24,6 +24,7 @@ func (opts boltOpts) Path(path string) boltOpts {
 }
 
 func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+
 	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
 	if err != nil {
 		return nil, err
