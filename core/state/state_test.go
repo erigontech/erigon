@@ -101,7 +101,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 func (s *StateSuite) SetUpTest(c *checker.C) {
 	s.db = ethdb.NewMemDatabase()
-	s.tds, _ = NewTrieDbState(common.Hash{}, s.db, 0)
+	s.tds = NewTrieDbState(common.Hash{}, s.db, 0)
 	s.state = New(s.tds)
 	s.tds.StartNewBuffer()
 }
@@ -163,7 +163,7 @@ func (s *StateSuite) TestSnapshotEmpty(c *checker.C) {
 func TestSnapshot2(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	ctx := context.TODO()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 
@@ -284,7 +284,7 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 
 func TestDump(t *testing.T) {
 	db := ethdb.NewMemDatabase()
-	tds, _ := NewTrieDbState(common.Hash{}, db, 0)
+	tds := NewTrieDbState(common.Hash{}, db, 0)
 	state := New(tds)
 	tds.StartNewBuffer()
 

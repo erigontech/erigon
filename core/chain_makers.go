@@ -258,10 +258,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 		return nil, nil
 	}
 
-	tds, err := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
-	if err != nil {
-		panic(err)
-	}
+	tds := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
 	//if err := tds.Rebuild(); err != nil {
 	//	panic(err)
 	//}
@@ -304,7 +301,8 @@ func makeHeader(chain consensus.ChainReader, parent *types.Block, state *state.I
 			Difficulty: parent.Difficulty(),
 			UncleHash:  parent.UncleHash(),
 		}),
-		GasLimit: CalcGasLimit(parent, 20*params.TxGasContractCreation, 150*params.TxGasContractCreation),
+
+		GasLimit: CalcGasLimit(parent, 100*params.TxGas, 1000*params.TxGasContractCreation),
 		Number:   number,
 		Time:     time,
 	}

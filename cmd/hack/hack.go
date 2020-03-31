@@ -636,9 +636,6 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	if debug.IsIntermediateTrieHash() && fromScratch {
-		_ = tds.Rebuild()
-	}
 
 	importedBn := tds.GetBlockNr()
 	if importedBn == 0 {
@@ -693,8 +690,7 @@ func extractTrie(block int) {
 	bc, err := core.NewBlockChain(stateDb, nil, params.TestnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
-	tds, err := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	check(err)
+	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
@@ -726,9 +722,8 @@ func testRewind(chaindata string, block, rewind int) {
 	fmt.Printf("Base block root hash: %x\n", baseBlock.Root())
 	db := ethDb.NewBatch()
 	defer db.Rollback()
-	tds, err := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
+	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	check(err)
 	startTime := time.Now()
 	tds.Rebuild()
 	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
@@ -910,19 +905,47 @@ func testResolveCached() {
 	*/
 }
 
+func dbSlice(chaindata string, prefix []byte) {
+	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	check(err)
+	defer db.Close()
+	err = db.View(func(tx *bolt.Tx) error {
+		ab := tx.Bucket(dbutils.AccountsBucket)
+		c := ab.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.AccountsBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		sb := tx.Bucket(dbutils.StorageBucket)
+		c = sb.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.StorageBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		ib := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		c = ib.Cursor()
+		for k, v := c.Seek(prefix); k != nil && bytes.HasPrefix(k, prefix); k, v = c.Next() {
+			fmt.Printf("db.Put(dbutils.IntermediateTrieHashBucket, common.FromHex(\"%x\"), common.FromHex(\"%x\"))\n", k, v)
+		}
+		return nil
+	})
+	check(err)
+}
+
 func testResolve(chaindata string) {
 	startTime := time.Now()
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	defer ethDb.Close()
-	bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
-	check(err)
-	currentBlock := bc.CurrentBlock()
-	currentBlockNr := currentBlock.NumberU64()
-	fmt.Printf("Current block number: %d\n", currentBlockNr)
-	fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
-	prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
-	fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
+	//bc, err := core.NewBlockChain(ethDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
+	//check(err)
+	/*
+		currentBlock := bc.CurrentBlock()
+		currentBlockNr := currentBlock.NumberU64()
+		fmt.Printf("Current block number: %d\n", currentBlockNr)
+		fmt.Printf("Current block root hash: %x\n", currentBlock.Root())
+		prevBlock := bc.GetBlockByNumber(currentBlockNr - 2)
+		fmt.Printf("Prev block root hash: %x\n", prevBlock.Root())
+	*/
+	currentBlockNr := 4155652
 	var contract []byte
 	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
 	r := trie.NewResolver(10, true, 10000000)

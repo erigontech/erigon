@@ -15,6 +15,25 @@ type DbStateWriter struct {
 	tds *TrieDbState
 }
 
+func originalAccountData(original *accounts.Account, omitHashes bool) []byte {
+	var originalData []byte
+	if !original.Initialised {
+		originalData = []byte{}
+	} else if omitHashes {
+		testAcc := original.SelfCopy()
+		copy(testAcc.CodeHash[:], emptyCodeHash)
+		testAcc.Root = trie.EmptyRoot
+		originalDataLen := testAcc.EncodingLengthForStorage()
+		originalData = make([]byte, originalDataLen)
+		testAcc.EncodeForStorage(originalData)
+	} else {
+		originalDataLen := original.EncodingLengthForStorage()
+		originalData = make([]byte, originalDataLen)
+		original.EncodeForStorage(originalData)
+	}
+	return originalData
+}
+
 func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
@@ -33,23 +52,13 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if accountsEqual(original, account) {
 		return nil
 	}
-	var originalData []byte
-	if !original.Initialised {
-		originalData = []byte{}
-	} else {
-		// we can reduce storage size for history there
-		// because we have accountHash+incarnation -> codehash of contract in separate bucket
-		// and we don't need root in history requests
-		testAcc := original.SelfCopy()
-		if debug.IsThinHistory() {
-			copy(testAcc.CodeHash[:], emptyCodeHash)
-			testAcc.Root = trie.EmptyRoot
-		}
 
-		originalDataLen := testAcc.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		testAcc.EncodeForStorage(originalData)
-	}
+	// we can reduce storage size for history there
+	// because we have accountHash+incarnation -> codehash of contract in separate bucket
+	// and we don't need root in history requests
+	omitHashes := debug.IsThinHistory()
+	originalData := originalAccountData(original, omitHashes)
+
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)
 }
 
@@ -62,16 +71,8 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 		return err
 	}
 
-	var originalData []byte
-	if !original.Initialised {
-		// Account has been created and deleted in the same block
-		originalData = []byte{}
-	} else {
-		originalDataLen := original.EncodingLengthForStorage()
-		originalData = make([]byte, originalDataLen)
-		original.EncodeForStorage(originalData)
-		// We must keep root using thin history on deleting account as is
-	}
+	// We must keep root using thin history on deleting account as is
+	originalData := originalAccountData(original, false)
 
 	noHistory := dsw.tds.noHistory
 	return dsw.tds.db.PutS(dbutils.AccountsHistoryBucket, addrHash[:], originalData, dsw.tds.blockNr, noHistory)

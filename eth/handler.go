@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -1281,15 +1282,19 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		ethDb := ethdb.NewMemDatabase()
+		_ = os.Remove("simulator")
+		ethDb, err := ethdb.NewBoltDatabase("simulator")
+		if err != nil {
+			return err
+		}
 		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)
 		}
 
 		// Clean up: reuse engine... probably we can
-		pm.noMorePeers <- struct{}{}     // exit pm.syncer loop
-		time.Sleep(2 * time.Millisecond) // wait for pm.syncer finish
+		pm.noMorePeers <- struct{}{}       // exit pm.syncer loop
+		time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
 
 		engine := pm.blockchain.Engine()
 		pm.blockchain.ChainDb().Close()
@@ -1300,23 +1305,22 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.blockchain.Stop()
 		pm.blockchain = blockchain
 		pm.forkFilter = forkid.NewFilter(pm.blockchain)
-		initPm(pm, pm.txpool, engine, blockchain, blockchain.ChainDb())
+		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
 		remotedbserver.StartDeprecated(ethDb, "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
-		//downloader.MaxHashFetch = 512 * 10
-		//downloader.MaxBlockFetch = 128 * 10
-		//downloader.MaxHeaderFetch = 192 * 10
-		//downloader.MaxReceiptFetch = 256 * 10
+		downloader.MaxHashFetch = 512 * 10
+		downloader.MaxBlockFetch = 128 * 10
+		downloader.MaxHeaderFetch = 192 * 10
+		downloader.MaxReceiptFetch = 256 * 10
 
 		// hacks to enable asserts
 		debug.IntermediateTrieHashAssertDbIntegrity = true
 
 		log.Warn("Succeed to set new Genesis")
-		err = p2p.Send(p.rw, DebugSetGenesisMsg, "{}")
-		if err != nil {
+		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {
 			return fmt.Errorf("p2p.Send: %w", err)
 		}
 		return nil

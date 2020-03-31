@@ -169,17 +169,14 @@ func (b *SimulatedBackend) emptyPendingBlock() {
 	b.pendingBlock = blocks[0]
 	b.pendingHeader = b.pendingBlock.Header()
 	b.gasPool = new(core.GasPool).AddGas(b.pendingHeader.GasLimit)
-	b.pendingTds, _ = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
 	b.pendingState = state.New(b.pendingTds)
 	b.pendingTds.StartNewBuffer()
 }
 
-func (b *SimulatedBackend) prependingState() (*state.IntraBlockState, error) {
-	tds, err := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
-	if err != nil {
-		return nil, err
-	}
-	return state.New(tds), nil
+func (b *SimulatedBackend) prependingState() *state.IntraBlockState {
+	tds := state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
+	return state.New(tds)
 }
 
 // stateByBlockNumber retrieves a state by a given blocknumber.
@@ -394,10 +391,7 @@ func (b *SimulatedBackend) CallContract(ctx context.Context, call ethereum.CallM
 	if blockNumber != nil && blockNumber.Cmp(b.blockchain.CurrentBlock().Number()) != 0 {
 		return nil, errBlockNumberUnsupported
 	}
-	statedb, err := b.prependingState()
-	if err != nil {
-		return nil, err
-	}
+	statedb := b.prependingState()
 	rval, _, _, err := b.callContract(call, b.blockchain.CurrentBlock(), statedb)
 	return rval, err
 }

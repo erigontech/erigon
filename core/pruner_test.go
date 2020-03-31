@@ -8,7 +8,6 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -134,9 +133,6 @@ func TestCalculateNumOfPrunedBlocks(t *testing.T) {
 
 func TestPruneStorageOfSelfDestructedAccounts(t *testing.T) {
 	t.Skip("disable test, because pruner doesn't delete anything yet, just printing")
-	if !debug.IsIntermediateTrieHash() {
-		t.Skip()
-	}
 
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 

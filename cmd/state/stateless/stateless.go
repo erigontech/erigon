@@ -13,7 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	chart "github.com/wcharczuk/go-chart"
 	"github.com/wcharczuk/go-chart/drawing"
 
@@ -150,8 +149,7 @@ func Stateless(
 	useStatelessResolver bool,
 	witnessDatabasePath string,
 	writeHistory bool,
-	) {
-
+) {
 	state.MaxTrieCacheGen = triesize
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
@@ -216,14 +214,12 @@ func Stateless(
 			fmt.Printf("Failed to commit batch: %v\n", err)
 		}
 	}()
-	tds, err := state.NewTrieDbState(preRoot, batch, blockNum-1)
-	check(err)
+	tds := state.NewTrieDbState(preRoot, batch, blockNum-1)
 	if blockNum > 1 {
 		tds.Rebuild()
 	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(!writeHistory)
-	tds.EnableIntermediateHash(debug.IsIntermediateTrieHash())
 	interrupt := false
 	var blockWitness []byte
 	var bw *trie.Witness
@@ -449,7 +445,8 @@ func Stateless(
 		}
 		tds.SetBlockNr(blockNum)
 
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+		commitBlockCtx := context.Background() // because .CommitBlock must not be interrupted
+		err = statedb.CommitBlock(commitBlockCtx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return

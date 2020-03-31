@@ -152,11 +152,9 @@ func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) *c
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	if t, ok := m.puts[string(bucket)]; ok {
-		value, ok := t.Get(key)
-		if ok && value == nil {
-			return nil, ErrKeyNotFound
+		if value, ok := t.Get(key); ok {
+			return value, nil
 		}
-		return value, nil
 	}
 	if m.db != nil {
 		return m.db.Get(bucket, key)
@@ -380,83 +378,88 @@ func (m *mutation) Commit() (uint64, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if len(m.accountChangeSetByBlock) > 0 {
-		for timestamp, changes := range m.accountChangeSetByBlock {
-			if debug.IsThinHistory() {
-				changedKeys := changes.ChangedKeys()
-				for k := range changedKeys {
-					key := []byte(k)
-					value, err := m.getNoLock(dbutils.AccountsHistoryBucket, key)
-					if err == ErrKeyNotFound {
-						if m.db != nil {
-							value, err = m.db.Get(dbutils.AccountsHistoryBucket, key)
-							if err != nil && err != ErrKeyNotFound {
-								return 0, fmt.Errorf("db.Get failed: %w", err)
-							}
-						}
-					}
-					index := dbutils.WrapHistoryIndex(value)
-					index.Append(timestamp)
-					m.puts.Set(dbutils.AccountsHistoryBucket, []byte(k), *index)
+
+	// we need sorted timestamps for thin history index
+	accountTimestamps := make([]uint64, 0)
+	for ts := range m.accountChangeSetByBlock {
+		accountTimestamps = append(accountTimestamps, ts)
+	}
+	sort.Slice(accountTimestamps, func(i, j int) bool { return accountTimestamps[i] < accountTimestamps[j] })
+
+	for _, timestamp := range accountTimestamps {
+		changes := m.accountChangeSetByBlock[timestamp]
+		sort.Sort(changes)
+
+		if debug.IsThinHistory() {
+			changedKeys := changes.ChangedKeys()
+			for k := range changedKeys {
+				key := []byte(k)
+				value, err := m.getNoLock(dbutils.AccountsHistoryBucket, key)
+				if err != nil && err != ErrKeyNotFound {
+					return 0, fmt.Errorf("db.Get failed: %w", err)
 				}
+				index := dbutils.WrapHistoryIndex(value)
+				index.Append(timestamp)
+				m.puts.Set(dbutils.AccountsHistoryBucket, key, *index)
 			}
-			sort.Sort(changes)
-			var (
-				dat []byte
-				err error
-			)
-			if debug.IsThinHistory() {
-				dat, err = changeset.EncodeAccounts(changes)
-			} else {
-				dat, err = changeset.EncodeChangeSet(changes)
+		}
+
+		var (
+			dat []byte
+			err error
+		)
+		if debug.IsThinHistory() {
+			dat, err = changeset.EncodeAccounts(changes)
+		} else {
+			dat, err = changeset.EncodeChangeSet(changes)
+		}
+
+		if err != nil {
+			return 0, err
+		}
+		m.puts.Set(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
+	}
+
+	storageTimestamps := make([]uint64, 0)
+	for ts := range m.storageChangeSetByBlock {
+		storageTimestamps = append(storageTimestamps, ts)
+	}
+	sort.Slice(storageTimestamps, func(i, j int) bool { return storageTimestamps[i] < storageTimestamps[j] })
+
+	for _, timestamp := range storageTimestamps {
+		changes := m.storageChangeSetByBlock[timestamp]
+		sort.Sort(changes)
+
+		var (
+			dat []byte
+			err error
+		)
+
+		if debug.IsThinHistory() {
+			changedKeys := changes.ChangedKeys()
+			for k := range changedKeys {
+				key := []byte(k)
+				value, innerErr := m.getNoLock(dbutils.StorageHistoryBucket, key)
+				if innerErr != nil && innerErr != ErrKeyNotFound {
+					return 0, fmt.Errorf("db.Get failed: %w", innerErr)
+				}
+				index := dbutils.WrapHistoryIndex(value)
+				index.Append(timestamp)
+				m.puts.Set(dbutils.StorageHistoryBucket, key, *index)
 			}
 
+			dat, err = changeset.EncodeStorage(changes)
 			if err != nil {
 				return 0, err
 			}
-			m.puts.Set(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
-		}
-
-	}
-	if len(m.storageChangeSetByBlock) > 0 {
-		for timestamp, changes := range m.storageChangeSetByBlock {
-			var (
-				dat []byte
-				err error
-			)
-			sort.Sort(changes)
-
-			if debug.IsThinHistory() {
-				changedKeys := changes.ChangedKeys()
-				for k := range changedKeys {
-					key := []byte(k)
-					value, innerErr := m.getNoLock(dbutils.StorageHistoryBucket, key)
-					if innerErr == ErrKeyNotFound {
-						if m.db != nil {
-							value, innerErr = m.db.Get(dbutils.StorageHistoryBucket, key)
-							if innerErr != nil && innerErr != ErrKeyNotFound {
-								return 0, fmt.Errorf("db.Get failed: %w", innerErr)
-							}
-						}
-					}
-					index := dbutils.WrapHistoryIndex(value)
-					index.Append(timestamp)
-					m.puts.Set(dbutils.StorageHistoryBucket, key, *index)
-				}
-
-				dat, err = changeset.EncodeStorage(changes)
-				if err != nil {
-					return 0, err
-				}
-			} else {
-				dat, err = changeset.EncodeChangeSet(changes)
-				if err != nil {
-					return 0, err
-				}
-
+		} else {
+			dat, err = changeset.EncodeChangeSet(changes)
+			if err != nil {
+				return 0, err
 			}
-			m.puts.Set(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
+
 		}
+		m.puts.Set(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(timestamp), dat)
 	}
 
 	m.accountChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)

@@ -5,8 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
 	"sort"
+
+	"github.com/ledgerwatch/turbo-geth/common"
 )
 
 const (
@@ -32,11 +33,10 @@ func NewStorageChangeSet() *ChangeSet {
 Storage ChangeSet is serialized in the following manner in order to facilitate binary search:
 
 numOfElements uint32
-numOfUniqAddrHashes uint32
-numOfUniqKeys uint32
+numOfUniqAddrHashes uint16
 [addrHashes] []common.Hash
 [idOfAddr:idOfKey] [uint8/uint16/uint32:common.Hash...] (depends on numOfUniqAddrHashes)
-numOfUint8Values uint8
+numOfUint8Values uint16
 numOfUint16Values uint16
 numOfUint32Values uint16
 [len(val0), len(val0)+len(val1), ..., len(val0)+len(val1)+...+len(val_{numOfUint8Values-1})] []uint8
@@ -526,11 +526,17 @@ func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 
 	//here should be binary search too
 	elemLength := uint32(getNumOfBytesByLen(int(numOfUniqueItems)))
+	encodedAddHashID := make([]byte, elemLength)
+	writeKeyRow(addHashID, encodedAddHashID)
 	for i := uint32(0); i < numOfItems; i++ {
 		elemStart := storageEnodingStartElem +
 			storageEnodingLengthOfDict +
 			uint32(numOfUniqueItems)*(common.HashLength) +
 			i*(elemLength+common.HashLength)
+
+		if !bytes.Equal(encodedAddHashID, b[elemStart:elemStart+elemLength]) {
+			continue
+		}
 
 		if !bytes.Equal(k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength], b[elemStart+elemLength:elemStart+elemLength+common.HashLength]) {
 			continue

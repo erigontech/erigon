@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +10,8 @@ import (
 	"runtime/pprof"
 	"syscall"
 
+	"github.com/ledgerwatch/turbo-geth/cmd/utils"
+	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
@@ -16,10 +19,13 @@ import (
 var (
 	cpuprofile     string
 	cpuProfileFile io.WriteCloser
+	genesisPath    string
+	genesis        *core.Genesis
 )
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
+	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
 func getContext() context.Context {
@@ -44,12 +50,30 @@ var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
-		startProfilingIfNeeded()
+		genesis = core.DefaultGenesisBlock()
+		if genesisPath != "" {
+			genesis = genesisFromFile(genesisPath)
+		}
 
+		startProfilingIfNeeded()
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
 		stopProfilingIfNeeded()
 	},
+}
+
+func genesisFromFile(genesisPath string) *core.Genesis {
+	file, err := os.Open(genesisPath)
+	if err != nil {
+		utils.Fatalf("Failed to read genesis file: %v", err)
+	}
+	defer file.Close()
+
+	genesis := new(core.Genesis)
+	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+		utils.Fatalf("invalid genesis file: %v", err)
+	}
+	return genesis
 }
 
 func Execute() {

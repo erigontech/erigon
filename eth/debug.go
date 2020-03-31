@@ -8,7 +8,7 @@ const (
 	dbg1 = 1
 )
 
-var DebugName = "dbg" // Parity only supports 3 letter capabilities
+const DebugName = "dbg" // Parity only supports 3 letter capabilities
 var DebugVersions = []uint{dbg1}
 var DebugLengths = map[uint]uint64{dbg1: 2}
 

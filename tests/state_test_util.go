@@ -223,10 +223,7 @@ func (t *StateTest) gasLimit(subtest StateSubtest) uint64 {
 }
 
 func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, *state.TrieDbState, error) {
-	tds, err := state.NewTrieDbState(common.Hash{}, db, blockNr)
-	if err != nil {
-		return nil, nil, err
-	}
+	tds := state.NewTrieDbState(common.Hash{}, db, blockNr)
 	statedb := state.New(tds)
 	tds.StartNewBuffer()
 	for addr, a := range accounts {

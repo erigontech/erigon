@@ -371,20 +371,10 @@ func (bc *BlockChain) setTrieDbState(trieDbState *state.TrieDbState) {
 func (bc *BlockChain) GetTrieDbStateByBlock(root common.Hash, blockNr uint64) (*state.TrieDbState, error) {
 	if bc.trieDbState == nil || bc.trieDbState.LastRoot() != root || bc.trieDbState.GetBlockNr() != blockNr {
 		log.Info("Creating IntraBlockState from latest state", "block", blockNr, "isNIl", bc.trieDbState == nil, "callers", debug.Callers(20))
-		tds, err := state.NewTrieDbState(root, bc.db, blockNr)
-		if err != nil {
-			log.Error("Creation aborted", "error", err)
-			return nil, err
-		}
+		tds := state.NewTrieDbState(root, bc.db, blockNr)
 		tds.SetNoHistory(bc.NoHistory())
 		tds.SetResolveReads(bc.resolveReads)
 		tds.EnablePreimages(bc.enablePreimages)
-		if !debug.IsIntermediateTrieHash() {
-			if err := tds.Rebuild(); err != nil {
-				log.Error("Rebuiling aborted", "error", err)
-				return nil, err
-			}
-		}
 
 		log.Info("Creation complete.")
 		return tds, nil

@@ -43,7 +43,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
 const (
@@ -157,33 +156,21 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			return nil, fmt.Errorf("parent block #%d not found", number-1)
 		}
 	}
-	tds, err := state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64())
-	if err != nil {
-		// If the starting state is missing, allow some number of blocks to be re-executed
-		reexec := defaultTraceReexec
-		if config != nil && config.Reexec != nil {
-			reexec = *config.Reexec
-		}
-		// Find the most recent block that has the state available
-		for i := uint64(0); i < reexec; i++ {
-			start = api.eth.blockchain.GetBlock(start.ParentHash(), start.NumberU64()-1)
-			if start == nil {
-				break
-			}
-			if tds, err = state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64()); err == nil {
-				break
-			}
-		}
-		// If we still don't have the state available, bail out
-		if err != nil {
-			switch err.(type) {
-			case *trie.MissingNodeError:
-				return nil, errors.New("required historical state unavailable")
-			default:
-				return nil, err
-			}
-		}
+	tds := state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64())
+	// If the starting state is missing, allow some number of blocks to be re-executed
+	reexec := defaultTraceReexec
+	if config != nil && config.Reexec != nil {
+		reexec = *config.Reexec
 	}
+	// Find the most recent block that has the state available
+	for i := uint64(0); i < reexec; i++ {
+		start = api.eth.blockchain.GetBlock(start.ParentHash(), start.NumberU64()-1)
+		if start == nil {
+			break
+		}
+		tds = state.NewTrieDbState(start.Root(), api.eth.ChainDb(), start.NumberU64())
+	}
+	// If we still don't have the state available, bail out
 	statedb := state.New(tds)
 	// Execute all the transaction contained within the chain concurrently for each block
 	blocks := int(end.NumberU64() - origin)

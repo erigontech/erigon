@@ -758,30 +758,28 @@ func TestReproduceCrash(t *testing.T) {
 	storageKey2 := common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542")
 	value2 := common.HexToHash("0x58c00a51")
 	db := ethdb.NewMemDatabase()
-	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
-	if err != nil {
-		t.Errorf("could not create TrieDbState: %v", err)
-	}
+	tds := state.NewTrieDbState(common.Hash{}, db, 0)
+
 	tsw := tds.TrieStateWriter()
 	intraBlockState := state.New(tds)
 	ctx := context.Background()
 	// Start the 1st transaction
 	tds.StartNewBuffer()
 	intraBlockState.CreateAccount(contract, true)
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 2nd transaction
 	tds.StartNewBuffer()
 	intraBlockState.SetState(contract, storageKey1, value1)
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 3rd transaction
 	tds.StartNewBuffer()
 	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
 	intraBlockState.SetState(contract, storageKey2, value2)
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 	// Start the 4th transaction - clearing both storage cells
@@ -789,10 +787,10 @@ func TestReproduceCrash(t *testing.T) {
 	intraBlockState.SubBalance(contract, big.NewInt(1000000000))
 	intraBlockState.SetState(contract, storageKey1, value0)
 	intraBlockState.SetState(contract, storageKey2, value0)
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	if _, err = tds.ComputeTrieRoots(); err != nil {
+	if _, err := tds.ComputeTrieRoots(); err != nil {
 		t.Errorf("ComputeTrieRoots failed: %v", err)
 	}
 	// We expect the list of prunable entries to be empty
@@ -1362,10 +1360,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
 	db := ethdb.NewMemDatabase()
-	tds, err := state.NewTrieDbState(common.Hash{}, db, 0)
-	if err != nil {
-		t.Errorf("could not create TrieDbState: %v", err)
-	}
+	tds := state.NewTrieDbState(common.Hash{}, db, 0)
 	tsw := tds.TrieStateWriter()
 	intraBlockState := state.New(tds)
 	ctx := context.Background()
@@ -1377,7 +1372,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 
 	intraBlockState.SetCode(contract, oldCode)
 	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
-	if err = intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 

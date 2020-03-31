@@ -318,6 +318,8 @@ func waitForAccounts(wantAccounts []accounts.Account, ks *KeyStore) error {
 // TestUpdatedKeyfileContents tests that updating the contents of a keystore file
 // is noticed by the watcher, and the account cache is updated accordingly
 func TestUpdatedKeyfileContents(t *testing.T) {
+	t.Skip("This test is unstable")
+
 	t.Parallel()
 
 	// Create a temporary kesytore to test with
