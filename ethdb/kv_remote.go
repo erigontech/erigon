@@ -24,10 +24,10 @@ func (opts remoteOpts) Path(path string) remoteOpts {
 //	require.NoError(t, errOpen)
 //	serverIn, clientOut := io.Pipe()
 //	clientIn, serverOut := io.Pipe()
-//	readDBs, errOpen = ethdb.NewRemote().InMem(serverIn, serverOut).Open(ctx)
+//	readDBs, errOpen = ethdb.NewRemote().InMem(clientIn, clientOut).Open(ctx)
 //	require.NoError(t, errOpen)
 //  go func() {
-// 	    if err := remotedbserver.Server(ctx, writeDb, clientIn, clientOut, nil); err != nil {
+// 	    if err := remotedbserver.Server(ctx, writeDb, serverIn, serverOut, nil); err != nil {
 //		    require.NoError(t, err)
 //  	}
 //  }()

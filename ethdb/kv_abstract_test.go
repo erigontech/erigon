@@ -84,10 +84,10 @@ func TestManagedTx(t *testing.T) {
 
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
 			assert := assert.New(t)
-			ctx, cancel := context.WithTimeout(ctx, time.Microsecond)
+			cancelableCtx, cancel := context.WithTimeout(ctx, time.Microsecond)
 			defer cancel()
 
-			if err := db.View(ctx, func(tx ethdb.Tx) error {
+			if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
 				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
 				for {
 					for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
