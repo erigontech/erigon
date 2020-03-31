@@ -445,7 +445,8 @@ func Stateless(
 		}
 		tds.SetBlockNr(blockNum)
 
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+		commitBlockCtx := context.Background() // because .CommitBlock must not be interrupted
+		err = statedb.CommitBlock(commitBlockCtx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
