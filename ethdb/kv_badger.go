@@ -2,8 +2,11 @@ package ethdb
 
 import (
 	"context"
+	"runtime"
+	"time"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type badgerOpts struct {
@@ -21,11 +24,35 @@ func (opts badgerOpts) InMem() badgerOpts {
 }
 
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
+	logger := log.New("database", opts.Badger.Dir)
+
+	oldMaxProcs := runtime.GOMAXPROCS(0)
+	if oldMaxProcs < minGoMaxProcs {
+		runtime.GOMAXPROCS(minGoMaxProcs)
+		logger.Info("Bumping GOMAXPROCS", "old", oldMaxProcs, "new", minGoMaxProcs)
+	}
+	opts.Badger = opts.Badger.WithMaxTableSize(512 << 20)
+
 	db, err := badger.Open(opts.Badger)
 	if err != nil {
 		return nil, err
 	}
-	return &badgerDB{opts: opts, badger: db}, nil
+
+	ticker := time.NewTicker(gcPeriod)
+	// Start GC in backround
+	go func() {
+		for range ticker.C {
+			err := db.RunValueLogGC(0.5)
+			if err != badger.ErrNoRewrite {
+				logger.Info("Badger GC run", "err", err)
+			}
+		}
+	}()
+
+	return &badgerDB{
+		opts: opts, badger: db,
+		gcTicker: ticker, // Garbage Collector
+	}, nil
 }
 
 func (opts badgerOpts) MustOpen(ctx context.Context) KV {
@@ -37,8 +64,9 @@ func (opts badgerOpts) MustOpen(ctx context.Context) KV {
 }
 
 type badgerDB struct {
-	opts   badgerOpts
-	badger *badger.DB
+	opts     badgerOpts
+	badger   *badger.DB
+	gcTicker *time.Ticker
 }
 
 func NewBadger() badgerOpts {
@@ -48,6 +76,10 @@ func NewBadger() badgerOpts {
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
 func (db *badgerDB) Close() error {
+	if db.gcTicker != nil {
+		db.gcTicker.Stop()
+	}
+
 	return db.badger.Close()
 }
 
