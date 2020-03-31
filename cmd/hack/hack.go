@@ -1702,7 +1702,8 @@ func GenerateTxLookups2(chaindata string) {
 }
 
 type LookupFile struct {
-	file   io.Reader
+	reader io.Reader
+	file   *os.File
 	buffer []byte
 	pos    uint64
 }
@@ -1774,6 +1775,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	var interrupt bool
 	filename := fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	startTime := time.Now()
 	for !interrupt {
 		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
@@ -1781,7 +1783,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		if body == nil {
 			log.Info("Now Inserting to file")
 			insertInFileForLookups2(fileTmp, entries, iterations)
-			lookups = append(lookups, LookupFile{nil, nil, 35})
+			lookups = append(lookups, LookupFile{nil, nil, nil, 35})
 			iterations = 0
 			entries = nil
 			fileTmp.Close()
@@ -1804,8 +1806,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 			if iterations == count {
 				log.Info("Now Inserting to file")
 				insertInFileForLookups2(fileTmp, entries, iterations)
-				entries = nil
-				lookups = append(lookups, LookupFile{nil, nil, 35})
+				lookups = append(lookups, LookupFile{nil, nil, nil, 35})
 				iterations = 0
 				fileTmp.Close()
 				filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
@@ -1826,7 +1827,8 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	for i := range lookups {
 		file, err := os.Open(fmt.Sprintf(".lookups_%d.tmp", i))
 		check(err)
-		lookups[i].file = bufio.NewReader(file)
+		lookups[i].file = file
+		lookups[i].reader = bufio.NewReader(file)
 		lookups[i].buffer = make([]byte, bufferLen)
 		check(err)
 		n, err := lookups[i].file.Read(lookups[i].buffer)
@@ -1846,9 +1848,11 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
 				check(err)
 			}
-			n, _ := lookups[val.index].file.Read(lookups[val.index].buffer)
+			n, _ := lookups[val.index].reader.Read(lookups[val.index].buffer)
 			iterations++
 			if n == 0 {
+				err := lookups[val.index].file.Close()
+				check(err)
 				os.Remove(fmt.Sprintf(".lookups_%d.tmp", val.index))
 			} else {
 				if n != bufferLen {
@@ -1858,9 +1862,9 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 				heap.Push(h, HeapElem{lookups[val.index].buffer[:35], val.index})
 			}
 			continue
-		} else {
-			heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].pos : lookups[val.index].pos+35], val.index})
 		}
+
+		heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].pos : lookups[val.index].pos+35], val.index})
 		lookups[val.index].pos += 35
 		iterations++
 		if val.val[32] != 0 {
@@ -1882,6 +1886,9 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		}
 	}
 	batch.Commit()
+	log.Info("Process done", "duration", time.Since(startTime))
+	log.Info("Validation Start")
+
 	blockNum = startBlock
 	iterations = 0
 	// Validation Process
@@ -1907,7 +1914,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 			iterations++
 			if iterations%100000 == 0 {
 				batch.Commit()
-				log.Info("Validated", "entries", iterations)
+				log.Info("Validated", "entries", iterations, "number", blockNum)
 			}
 			if bytes.Compare(val, bn) != 0 {
 				check(err)
