@@ -6,9 +6,43 @@ import (
 	"github.com/dgraph-io/badger/v2"
 )
 
+type badgerOpts struct {
+	Badger badger.Options
+}
+
+func (opts badgerOpts) Path(path string) badgerOpts {
+	opts.Badger = opts.Badger.WithDir(path).WithValueDir(path)
+	return opts
+}
+
+func (opts badgerOpts) InMem() badgerOpts {
+	opts.Badger = opts.Badger.WithInMemory(true)
+	return opts
+}
+
+func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
+	db, err := badger.Open(opts.Badger)
+	if err != nil {
+		return nil, err
+	}
+	return &badgerDB{opts: opts, badger: db}, nil
+}
+
+func (opts badgerOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
 type badgerDB struct {
-	opts   Options
+	opts   badgerOpts
 	badger *badger.DB
+}
+
+func NewBadger() badgerOpts {
+	return badgerOpts{Badger: badger.DefaultOptions("")}
 }
 
 // Close closes BoltKV
@@ -54,9 +88,6 @@ type badgerCursor struct {
 	err error
 }
 
-func (db *badgerDB) Options() Options {
-	return db.opts
-}
 func (db *badgerDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &badgerTx{db: db, ctx: ctx}
 	return db.badger.View(func(tx *badger.Txn) error {

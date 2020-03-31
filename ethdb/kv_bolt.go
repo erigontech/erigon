@@ -5,10 +5,57 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
+type boltOpts struct {
+	Bolt *bolt.Options
+	path string
+}
+
+func (opts boltOpts) InMem() boltOpts {
+	opts.Bolt.MemOnly = true
+	return opts
+}
+
+func (opts boltOpts) Path(path string) boltOpts {
+	opts.path = path
+	return opts
+}
+
+func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
+	if err := boltDB.Update(func(tx *bolt.Tx) error {
+		for _, name := range dbutils.Buckets {
+			_, createErr := tx.CreateBucketIfNotExists(name, false)
+			if createErr != nil {
+				return createErr
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &BoltKV{opts: opts, bolt: boltDB}, nil
+}
+
+func (opts boltOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func NewBolt() boltOpts {
+	return boltOpts{Bolt: bolt.DefaultOptions}
+}
+
 type BoltKV struct {
-	opts Options
+	opts boltOpts
 	bolt *bolt.DB
 }
 
@@ -23,10 +70,6 @@ func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
 	t := &boltTx{db: db, ctx: ctx}
 	t.bolt, err = db.bolt.Begin(writable)
 	return t, err
-}
-
-func (db *BoltKV) Options() Options {
-	return db.opts
 }
 
 type boltTx struct {

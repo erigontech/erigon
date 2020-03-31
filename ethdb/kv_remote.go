@@ -3,17 +3,66 @@ package ethdb
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 )
 
+type remoteOpts struct {
+	Remote remote.DbOpts
+}
+
+func (opts remoteOpts) Path(path string) remoteOpts {
+	opts.Remote = opts.Remote.Addr(path)
+	return opts
+}
+
+//
+//
+// Example text code:
+//  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
+//	require.NoError(t, errOpen)
+//	serverIn, clientOut := io.Pipe()
+//	clientIn, serverOut := io.Pipe()
+//	readDBs, errOpen = ethdb.NewRemote().InMem(serverIn, serverOut).Open(ctx)
+//	require.NoError(t, errOpen)
+//  go func() {
+// 	    if err := remotedbserver.Server(ctx, writeDb, clientIn, clientOut, nil); err != nil {
+//		    require.NoError(t, err)
+//  	}
+//  }()
+//
+func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
+	opts.Remote.DialFunc = func(ctx context.Context) (io.Reader, io.Writer, io.Closer, error) {
+		return in, out, nil, nil
+	}
+	return opts
+}
+
+func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
+	db, err := remote.Open(ctx, opts.Remote)
+	if err != nil {
+		return nil, err
+	}
+
+	return &remoteDB{opts: opts, remote: db}, nil
+}
+
+func (opts remoteOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
 type remoteDB struct {
-	opts   Options
+	opts   remoteOpts
 	remote *remote.DB
 }
 
-func (db *remoteDB) Options() Options {
-	return db.opts
+func NewRemote() remoteOpts {
+	return remoteOpts{Remote: remote.DefaultOpts}
 }
 
 // Close closes BoltKV

@@ -32,17 +32,9 @@ func setupDatabases() {
 	vsize := 100
 	keysAmount := 1_000
 	ctx := context.Background()
+	boltDb = ethdb.NewBolt().Path("test").MustOpen(ctx)
+	badgerDb = ethdb.NewBadger().Path("test2").MustOpen(ctx)
 	var errOpen error
-
-	boltDb, errOpen = ethdb.NewBolt().Path("test").Open(ctx)
-	if errOpen != nil {
-		panic(errOpen)
-	}
-	badgerDb, errOpen = ethdb.NewBadger().Path("test2").Open(ctx)
-	if errOpen != nil {
-		panic(errOpen)
-	}
-
 	boltOriginDb, errOpen = bolt.Open("test3", 0600, &bolt.Options{})
 	if errOpen != nil {
 		panic(errOpen)

@@ -25,10 +25,12 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
-		if err1 := closer.Close(); err1 != nil {
-			logger.Error("Could not close connection", "err", err1)
+		if closer != nil {
+			if err1 := closer.Close(); err1 != nil {
+				logger.Error("Could not close connection", "err", err1)
+			}
 		}
 	}()
 
@@ -98,7 +100,7 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.AbstractKV().Begin(ctx, false)
+			tx, err = db.Begin(ctx, false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)
@@ -285,7 +287,7 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				return fmt.Errorf("could not encode response to remote.CmdCursorNext: %w", err)
 			}
 
-			for k, v, err := cursor.Next(); numberOfKeys > 0; k, v, err = cursor.Next() {
+			for k, v, err := cursor.Next(); ; k, v, err = cursor.Next() {
 				if err != nil {
 					return fmt.Errorf("in CmdCursorNext: %w", err)
 				}
@@ -301,6 +303,9 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -324,16 +329,18 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				return fmt.Errorf("could not encode response code for remote.CmdCursorFirst: %w", err)
 			}
 
-			for k, v, err := cursor.First(); numberOfKeys > 0; k, v, err = cursor.Next() {
+			for k, v, err := cursor.First(); ; k, v, err = cursor.Next() {
 				if err != nil {
 					return fmt.Errorf("in CmdCursorFirst: %w", err)
 				}
-
 				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) for remote.CmdCursorFirst: %w", err)
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -362,7 +369,7 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				return fmt.Errorf("could not encode response to remote.CmdCursorNextKey: %w", err)
 			}
 
-			for k, v, err := cursor.Next(); numberOfKeys > 0; k, v, err = cursor.Next() {
+			for k, v, err := cursor.Next(); ; k, v, err = cursor.Next() {
 				if err != nil {
 					return fmt.Errorf("in CmdCursorNextKey: %w", err)
 				}
@@ -372,6 +379,9 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -394,7 +404,7 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				return fmt.Errorf("could not encode response code for remote.CmdCursorFirstKey: %w", err)
 			}
 
-			for k, v, err := cursor.First(); numberOfKeys > 0; k, v, err = cursor.Next() {
+			for k, v, err := cursor.First(); ; k, v, err = cursor.Next() {
 				if err != nil {
 					return fmt.Errorf("in CmdCursorFirstKey: %w", err)
 				}
@@ -404,6 +414,9 @@ func Server(ctx context.Context, db ethdb.HasAbstractKV, in io.Reader, out io.Wr
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -477,7 +490,7 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 var netAddr string
 var stopNetInterface context.CancelFunc
 
-func StartDeprecated(db ethdb.HasAbstractKV, addr string) {
+func StartDeprecated(db ethdb.KV, addr string) {
 	if stopNetInterface != nil {
 		stopNetInterface()
 	}
@@ -517,7 +530,7 @@ func StartDeprecated(db ethdb.HasAbstractKV, addr string) {
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listen(ctx context.Context, ln net.Listener, db ethdb.HasAbstractKV) {
+func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
 	defer func() {
 		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)

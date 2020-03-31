@@ -63,7 +63,7 @@ func TestCmdVersion(t *testing.T) {
 	// ---------- End of boilerplate code
 	assert.Nil(encoder.Encode(remote.CmdVersion), "Could not encode CmdVersion")
 
-	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -99,7 +99,7 @@ func TestCmdBeginEndError(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	var responseCode remote.ResponseCode
@@ -144,7 +144,7 @@ func TestCmdBucket(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -208,7 +208,7 @@ func TestCmdGet(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -282,7 +282,7 @@ func TestCmdSeek(t *testing.T) {
 	assert.Nil(encoder.Encode(&seekKey), "Could not encode seekKey for CmdCursorSeek")
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err := Server(ctx, db, &inBuf, &outBuf, closer)
+	err := Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -373,7 +373,7 @@ func TestCursorOperations(t *testing.T) {
 
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
-	err = Server(ctx, db, &inBuf, &outBuf, closer)
+	err = Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer)
 	require.NoError(err, "Error while calling Server")
 
 	// And then we interpret the results
@@ -525,7 +525,7 @@ func BenchmarkRemoteCursorFirst(b *testing.B) {
 	// By now we constructed all input requests, now we call the
 	// Server to process them all
 	go func() {
-		require.NoError(Server(ctx, db, &inBuf, &outBuf, closer))
+		require.NoError(Server(ctx, db.AbstractKV(), &inBuf, &outBuf, closer))
 	}()
 
 	var responseCode remote.ResponseCode
