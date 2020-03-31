@@ -39,6 +39,7 @@ func TestManagedTx(t *testing.T) {
 	}()
 
 	for _, db := range writeDBs {
+		db := db
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 			for i := uint8(0); i < 10; i++ {
@@ -54,101 +55,111 @@ func TestManagedTx(t *testing.T) {
 	}
 
 	for _, db := range readDBs {
+		db := db
 		msg := fmt.Sprintf("%T", db)
 
 		t.Run("NoValues iterator "+msg, func(t *testing.T) {
-			assert := assert.New(t)
-
-			if err := db.View(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.AccountsBucket)
-				c := b.Cursor().NoValues()
-
-				k, _, err := c.First()
-				assert.NoError(err)
-				assert.Equal([]byte{0}, k)
-				k, _, err = c.Next()
-				assert.NoError(err)
-				assert.Equal([]byte{0, 0, 1}, k)
-				k, _, err = c.Next()
-				assert.NoError(err)
-				assert.Equal([]byte{0, 1}, k)
-				k, _, err = c.Next()
-				assert.NoError(err)
-				assert.Equal([]byte{1}, k)
-
-				return nil
-			}); err != nil {
-				assert.NoError(err)
-			}
+			testNoValuesIterator(t, db)
 		})
-
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
-			assert := assert.New(t)
-			cancelableCtx, cancel := context.WithTimeout(ctx, time.Microsecond)
-			defer cancel()
-
-			if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-				c := tx.Bucket(dbutils.AccountsBucket).Cursor()
-				for {
-					for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
-						if err != nil {
-							return err
-						}
-					}
-				}
-			}); err != nil {
-				assert.True(errors.Is(context.DeadlineExceeded, err))
-			}
+			testCtxCancel(t, db)
 		})
-
 		t.Run("filter "+msg, func(t *testing.T) {
-			assert := assert.New(t)
-
-			if err := db.View(ctx, func(tx ethdb.Tx) error {
-				b := tx.Bucket(dbutils.AccountsBucket)
-				c := b.Cursor().Prefix([]byte{2})
-				counter := 0
-				for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
-					if err != nil {
-						return err
-					}
-					counter++
-				}
-				assert.Equal(1, counter)
-
-				counter = 0
-				if err := c.Walk(func(_, _ []byte) (bool, error) {
-					counter++
-					return true, nil
-				}); err != nil {
-					return err
-				}
-				assert.Equal(1, counter)
-
-				c = b.Cursor()
-				counter = 0
-				for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
-					if err != nil {
-						return err
-					}
-					counter++
-				}
-				assert.Equal(12, counter)
-
-				counter = 0
-				if err := c.Walk(func(_, _ []byte) (bool, error) {
-					counter++
-					return true, nil
-				}); err != nil {
-					return err
-				}
-				assert.Equal(12, counter)
-
-				return nil
-			}); err != nil {
-				assert.NoError(err)
-			}
+			testPrefixFilter(t, db)
 		})
 	}
+}
 
+func testPrefixFilter(t *testing.T, db ethdb.KV) {
+	assert := assert.New(t)
+
+	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.AccountsBucket)
+		c := b.Cursor().Prefix([]byte{2})
+		counter := 0
+		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			counter++
+		}
+		assert.Equal(1, counter)
+
+		counter = 0
+		if err := c.Walk(func(_, _ []byte) (bool, error) {
+			counter++
+			return true, nil
+		}); err != nil {
+			return err
+		}
+		assert.Equal(1, counter)
+
+		c = b.Cursor()
+		counter = 0
+		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+			if err != nil {
+				return err
+			}
+			counter++
+		}
+		assert.Equal(12, counter)
+
+		counter = 0
+		if err := c.Walk(func(_, _ []byte) (bool, error) {
+			counter++
+			return true, nil
+		}); err != nil {
+			return err
+		}
+		assert.Equal(12, counter)
+
+		return nil
+	}); err != nil {
+		assert.NoError(err)
+	}
+
+}
+func testCtxCancel(t *testing.T, db ethdb.KV) {
+	assert := assert.New(t)
+	cancelableCtx, cancel := context.WithTimeout(context.Background(), time.Microsecond)
+	defer cancel()
+
+	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.AccountsBucket).Cursor()
+		for {
+			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}); err != nil {
+		assert.True(errors.Is(context.DeadlineExceeded, err))
+	}
+}
+
+func testNoValuesIterator(t *testing.T, db ethdb.KV) {
+	assert, ctx := assert.New(t), context.Background()
+
+	if err := db.View(ctx, func(tx ethdb.Tx) error {
+		b := tx.Bucket(dbutils.AccountsBucket)
+		c := b.Cursor().NoValues()
+
+		k, _, err := c.First()
+		assert.NoError(err)
+		assert.Equal([]byte{0}, k)
+		k, _, err = c.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 0, 1}, k)
+		k, _, err = c.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 1}, k)
+		k, _, err = c.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{1}, k)
+
+		return nil
+	}); err != nil {
+		assert.NoError(err)
+	}
 }
