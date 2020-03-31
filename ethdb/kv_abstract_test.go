@@ -26,6 +26,10 @@ func TestManagedTx(t *testing.T) {
 
 	serverIn, clientOut := io.Pipe()
 	clientIn, serverOut := io.Pipe()
+	defer serverIn.Close()
+	defer serverOut.Close()
+	defer clientIn.Close()
+	defer clientOut.Close()
 
 	readDBs := []ethdb.KV{
 		writeDBs[0],
