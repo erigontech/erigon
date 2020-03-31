@@ -229,3 +229,6 @@ geth-windows-amd64:
 
 bindings:
 	go generate ./tests/contracts/
+
+simulator-genesis:
+	go run ./cmd/tester genesis > ./cmd/tester/simulator_genesis.json
