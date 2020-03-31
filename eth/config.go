@@ -38,11 +38,13 @@ import (
 var DefaultConfig = Config{
 	SyncMode: downloader.FullSync,
 	Ethash: ethash.Config{
-		CacheDir:       "ethash",
-		CachesInMem:    2,
-		CachesOnDisk:   3,
-		DatasetsInMem:  1,
-		DatasetsOnDisk: 2,
+		CacheDir:         "ethash",
+		CachesInMem:      2,
+		CachesOnDisk:     3,
+		CachesLockMmap:   false,
+		DatasetsInMem:    1,
+		DatasetsOnDisk:   2,
+		DatasetsLockMmap: false,
 	},
 	NetworkID:          1,
 	LightPeers:         100,
