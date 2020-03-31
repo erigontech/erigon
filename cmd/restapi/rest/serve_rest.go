@@ -36,7 +36,8 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error 
 	}
 	defer db.Close()
 	e := &apis.Env{
-		DB: db,
+		DB:              db,
+		RemoteDBAddress: remoteDBAddress,
 	}
 
 	if err = apis.RegisterRemoteDBAPI(root.Group("remote-db"), e); err != nil {

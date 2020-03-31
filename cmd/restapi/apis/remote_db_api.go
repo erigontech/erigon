@@ -18,7 +18,7 @@ func RegisterRemoteDBAPI(router *gin.RouterGroup, e *Env) error {
 func (e *Env) GetDB(c *gin.Context) {
 	var host, port string
 
-	split := strings.Split(e.DB.Options().Remote.DialAddress, ":")
+	split := strings.Split(e.RemoteDBAddress, ":")
 	if len(split) == 2 {
 		host, port = split[0], split[1]
 	}
@@ -32,6 +32,7 @@ func (e *Env) PostDB(c *gin.Context) {
 		c.Error(err) //nolint:errcheck
 		return
 	}
+	e.RemoteDBAddress = newAddr
 
 	e.DB.Close()
 	e.DB = remoteDB

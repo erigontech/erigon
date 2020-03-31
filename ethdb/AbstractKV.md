@@ -13,7 +13,6 @@ Known problems: mutation.Put does copy internally.
 
 ```
 type KV interface {
-	Options() Options
 	View(ctx context.Context, f func(tx Tx) error) (err error)
 	Update(ctx context.Context, f func(tx Tx) error) (err error)
 	Close() error
