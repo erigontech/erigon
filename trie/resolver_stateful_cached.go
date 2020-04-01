@@ -22,7 +22,7 @@ type ResolverStatefulCached struct {
 	*ResolverStateful
 	fromCache bool
 	hashData  GenStructStepHashData
-	trace bool
+	trace     bool
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
@@ -402,34 +402,46 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					minKeyIndex := minInt(len(minKey), fixedbytes-1)
-					//if fromCache && fixedbytes > 32 {
-					//	minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
-					//}
-					startKeyIndex := minInt(len(startkey), fixedbytes-1)
+					startKeyIndex := 0
+					minKeyIndex := 0
+					startKeyIndexIsBigger := false
 
-					if fromCache && fixedbytes > 32 && fixedbytes <= 40 {
-						startKeyIndex = minInt(len(startkey), fixedbytes-1-8)
-						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
+					if fromCache && fixedbytes > 32 && fixedbytes <= 40 { // compare only part before incarnation
+						startKeyIndex = 31
+						minKeyIndex = minInt(len(minKey), 31)
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 						if tr.trace {
 							fmt.Printf("cmp1 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
 						}
-					} else if fromCache && fixedbytes > 40 {
-						startKeyIndex -= 7
-						cmp = bytes.Compare(minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex])
+					} else if fromCache && fixedbytes > 40 { // compare without incarnation
+						startKeyIndex = fixedbytes - 1 // will use it on startkey (which has incarnation) later
+						minKeyIndex := minInt(len(minKey), fixedbytes-1-8)
+						startKeyIndexIsBigger = startKeyIndex-8 > minKeyIndex
+						cmp = bytes.Compare(minKey[:minKeyIndex-8], startKeyNoInc.B[:startKeyIndex-8])
 						if tr.trace {
 							fmt.Printf("cmp2 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex], startKeyNoInc.B, cmp, startKeyIndex, len(startKeyNoInc.B))
 						}
-					} else {
+					} else if fromCache {
+						startKeyIndex = fixedbytes - 1
+						minKeyIndex := minInt(len(minKey), fixedbytes-1)
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 						if tr.trace {
-							fmt.Printf("cmp3 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
+							fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
+						}
+					} else {
+						startKeyIndex = fixedbytes - 1
+						minKeyIndex = fixedbytes - 1
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
+						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+						if tr.trace {
+							fmt.Printf("cmp4 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
 						}
 					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
-						if startKeyIndex > minKeyIndex {
+						if startKeyIndexIsBigger {
 							cmp = -1
 						}
 					} else if cmp == 0 {
@@ -441,6 +453,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							cmp = 1
 						}
 					}
+
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						cacheK, cacheV = cache.SeekTo(startKeyNoInc.B)
