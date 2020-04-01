@@ -325,7 +325,7 @@ func Stateless(
 				fmt.Printf("Before ResolveStateTrie\n")
 			}
 			var resolveWitnesses []*trie.Witness
-			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil, blockNum == 147959); err != nil {
+			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil, false); err != nil {
 				fmt.Printf("Failed to resolve state trie: %v\n", err)
 				return
 			}
