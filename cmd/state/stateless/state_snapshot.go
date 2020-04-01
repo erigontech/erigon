@@ -321,7 +321,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 		fmt.Printf("new resolve request for root block with hash %x\n", rootHash)
 		r.AddRequest(req)
-		if err = r.ResolveWithDb(stateDb, blockNum); err != nil {
+		if err = r.ResolveWithDb(stateDb, blockNum, false); err != nil {
 			fmt.Printf("%v\n", err)
 		}
 		fmt.Printf("Trie computation took %v\n", time.Since(startTime))
@@ -362,7 +362,7 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
 			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
 			sr.AddRequest(streq)
-			err = sr.ResolveWithDb(stateDb, blockNum)
+			err = sr.ResolveWithDb(stateDb, blockNum, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)
 				fmt.Printf("incarnation: %d, account.Root: %x\n", account.Incarnation, account.Root)

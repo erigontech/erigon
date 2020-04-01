@@ -22,6 +22,7 @@ type ResolverStatefulCached struct {
 	*ResolverStateful
 	fromCache bool
 	hashData  GenStructStepHashData
+	trace     bool
 }
 
 func NewResolverStatefulCached(topLevels int, requests []*ResolveRequest, hookFunction hookFunction) *ResolverStatefulCached {
@@ -172,7 +173,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	db ethdb.Database,
 	blockNr uint64,
 	accounts bool,
-	historical bool) error {
+	historical bool,
+	trace bool) error {
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder
@@ -182,6 +184,13 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		}
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
+	if trace {
+		fmt.Printf("RebuildTrie %d\n", len(startkeys))
+		for _, startkey := range startkeys {
+			fmt.Printf("%x\n", startkey)
+		}
+	}
+	tr.trace = trace
 
 	var boltDb *bolt.DB
 	if hasBolt, ok := db.(ethdb.HasKV); ok {
@@ -245,8 +254,9 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 	//if isAccount && fromCache {
 	//	buf := pool.GetBuffer(256)
 	//	CompressNibbles(kAsNibbles, &buf.B)
-	//	fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, buf.B, v, fromCache)
-	//}
+	if tr.trace {
+		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, kAsNibbles, v, fromCache)
+	}
 
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
@@ -352,6 +362,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 	startKeyNoInc.Reset()
 	dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
+	if tr.trace {
+		fmt.Printf("RemoveInc startkey, startKeyNoInc.B = %x, %x\n", startkey, startKeyNoInc.B)
+	}
 
 	err := db.View(func(tx *bolt.Tx) error {
 		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
@@ -373,8 +386,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			//if blockNr > TraceFromBlock {
-			//fmt.Printf("For loop: %x, %x\n", cacheK, k)
-			//}
+			if tr.trace {
+				fmt.Printf("For loop: %x, %x\n", cacheK, k)
+			}
 
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket && len(cacheK) > maxAccountKeyLen {
@@ -388,26 +402,52 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
 				for cmp != 0 {
-					minKeyIndex := minInt(len(minKey), fixedbytes-1)
-					if fromCache && fixedbytes > 32 {
-						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
-					}
-					startKeyIndex := minInt(len(startkey), fixedbytes-1)
+					startKeyIndex := 0
+					minKeyIndex := 0
+					startKeyIndexIsBigger := false
 
-					if fromCache && fixedbytes > 32 && fixedbytes <= 40 {
-						startKeyIndex = minInt(len(startkey), fixedbytes-1-8)
+					if fromCache && fixedbytes > 32 && fixedbytes <= 40 { // compare only part before incarnation
+						startKeyIndex = 31
+						minKeyIndex = minInt(len(minKey), 31)
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
-					} else if fromCache && fixedbytes > 40 {
-						cmp = bytes.Compare(minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex])
+						if tr.trace {
+							fmt.Printf("cmp1 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
+						}
+					} else if fromCache && fixedbytes > 40 { // compare without incarnation
+						startKeyIndex = fixedbytes - 1 // will use it on startKey (which has incarnation) later
+						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
+						startKeyIndexIsBigger = startKeyIndex-8 > minKeyIndex
+						cmp = bytes.Compare(minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8])
+						if tr.trace {
+							fmt.Printf("cmp2 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8], startKeyNoInc.B, cmp, startKeyIndex-8, len(startKeyNoInc.B))
+						}
+					} else if fromCache {
+						startKeyIndex = fixedbytes - 1
+						minKeyIndex = minInt(len(minKey), fixedbytes-1)
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
+						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+						if tr.trace {
+							fmt.Printf("cmp3 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startkey[:startKeyIndex], startkey, cmp, startKeyIndex, len(startkey))
+						}
 					} else {
+						startKeyIndex = fixedbytes - 1
+						minKeyIndex = fixedbytes - 1
+						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
+						if tr.trace {
+							fmt.Printf("cmp4 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
+						}
 					}
 
 					if cmp == 0 && minKeyIndex == len(minKey) { // minKey has no more bytes to compare, then it's less than startKey
-						cmp = -1
-					}
-
-					if cmp == 0 {
+						if startKeyIndexIsBigger {
+							cmp = -1
+						}
+					} else if cmp == 0 {
+						if tr.trace {
+							fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
+						}
 						k1 := minKey[minKeyIndex] & mask
 						k2 := startkey[startKeyIndex] & mask
 						if k1 < k2 {
@@ -416,9 +456,15 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							cmp = 1
 						}
 					}
+
 					if cmp < 0 {
 						k, v = c.SeekTo(startkey)
 						cacheK, cacheV = cache.SeekTo(startKeyNoInc.B)
+						if tr.trace {
+							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
+							fmt.Printf("[fromCache = %t], cache.SeekTo(%x) = %x\n", fromCache, startKeyNoInc.B, cacheK)
+							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
+						}
 						// for Address bucket, skip cache keys longer than 31 bytes
 						if isAccountBucket && len(cacheK) > maxAccountKeyLen {
 							for len(cacheK) > maxAccountKeyLen {
@@ -430,6 +476,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						}
 
 						fromCache, minKey = keyIsBefore(cacheK, k)
+						if tr.trace {
+							//fmt.Printf("fromCache, minKey = %t, %x\n", fromCache, minKey)
+						}
 					} else if cmp > 0 {
 						rangeIdx++
 						if rangeIdx == len(startkeys) {
@@ -439,6 +488,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						startkey = startkeys[rangeIdx]
 						startKeyNoInc.Reset()
 						dbutils.RemoveIncarnationFromKey(startkey, &startKeyNoInc.B)
+						if tr.trace {
+							fmt.Printf("RemoveInc2 startkey, startKeyNoInc.B = %x, %x\n", startkey, startKeyNoInc.B)
+						}
 					}
 				}
 			}

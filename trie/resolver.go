@@ -142,9 +142,9 @@ const (
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
-func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, trace bool) error {
 	if !tr.historical {
-		return tr.ResolveStatefulCached(db, blockNr)
+		return tr.ResolveStatefulCached(db, blockNr, trace)
 	}
 
 	return tr.ResolveStateful(db, blockNr)
@@ -167,7 +167,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
 }
 
-func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64, trace bool) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -178,7 +178,7 @@ func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) err
 	sort.Stable(tr)
 
 	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical); err != nil {
+	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
 		return err
 	}
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
@@ -242,5 +242,5 @@ func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uin
 	req := t.NewResolveRequest(nil, key, pos, expected)
 	r := NewResolver(5, accounts, blockNr)
 	r.AddRequest(req)
-	return r.ResolveWithDb(db, blockNr)
+	return r.ResolveWithDb(db, blockNr, false)
 }

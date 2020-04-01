@@ -58,7 +58,7 @@ func proofs(chaindata string, url string, block int) {
 			t = trie.New(common.Hash{})
 			req := t.NewResolveRequest(nil, []byte{}, 0, nil)
 			r.AddRequest(req)
-			err = r.ResolveWithDb(ethDb, uint64(block))
+			err = r.ResolveWithDb(ethDb, uint64(block), false)
 			if err != nil {
 				panic(err)
 			}
@@ -247,7 +247,7 @@ func fixState(chaindata string, url string) {
 			binary.BigEndian.PutUint64(contractPrefix[common.HashLength:], ^account.Incarnation)
 			streq := st.NewResolveRequest(contractPrefix, key, 0, account.Root[:])
 			sr.AddRequest(streq)
-			err = sr.ResolveWithDb(stateDb, blockNum)
+			err = sr.ResolveWithDb(stateDb, blockNum, false)
 			if err != nil {
 				fmt.Printf("%x: %v\n", addrHash, err)
 				address, _ := stateDb.Get(dbutils.PreimagePrefix, addrHash[:])

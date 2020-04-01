@@ -80,7 +80,7 @@ func TestResolve1(t *testing.T) {
 	}
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0)
+	err := r.ResolveWithDb(db, 0, false)
 	require.NoError(err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -105,7 +105,7 @@ func TestResolve2(t *testing.T) {
 	}
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0)
+	err := r.ResolveWithDb(db, 0, false)
 	require.NoError(err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -130,7 +130,7 @@ func TestResolve2Keep(t *testing.T) {
 	}
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0)
+	err := r.ResolveWithDb(db, 0, false)
 	require.NoError(err)
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -156,7 +156,7 @@ func TestResolve3Keep(t *testing.T) {
 	}
 	r := NewResolver(0, false, 0)
 	r.AddRequest(req)
-	err := r.ResolveWithDb(db, 0)
+	err := r.ResolveWithDb(db, 0, false)
 	require.NoError(err, "resolve error")
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -201,7 +201,7 @@ func TestTrieResolver(t *testing.T) {
 	resolver.AddRequest(req2)
 	resolver.AddRequest(req1)
 
-	err := resolver.ResolveWithDb(db, 0)
+	err := resolver.ResolveWithDb(db, 0, false)
 	require.NoError(err, "resolve error")
 
 	_, ok := tr.Get(common.Hex2Bytes("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
@@ -246,7 +246,7 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver := NewResolver(0, false, 0)
 	resolver.AddRequest(req)
 
-	err = resolver.ResolveWithDb(db, 0)
+	err = resolver.ResolveWithDb(db, 0, false)
 	require.NoError(err, "resolve error")
 
 	assert.Equal(rootHash.String(), tr.Hash().String())
@@ -267,7 +267,7 @@ func TestTwoStorageItems(t *testing.T) {
 	resolver2 := NewResolver(0, false, 0)
 	resolver2.AddRequest(req2)
 
-	err = resolver2.ResolveWithDb(db, 0)
+	err = resolver2.ResolveWithDb(db, 0, false)
 	require.NoError(err, "resolve error")
 
 	assert.Equal(rootHash.String(), tr.Hash().String())
@@ -302,7 +302,7 @@ func TestTwoAccounts(t *testing.T) {
 
 	resolver := NewResolver(0, true, 0)
 	resolver.AddRequest(req)
-	err = resolver.ResolveWithDb(db, 0)
+	err = resolver.ResolveWithDb(db, 0, false)
 	require.NoError(err, "resolve error")
 
 	assert.Equal(expect.String(), tr.Hash().String())
@@ -332,7 +332,7 @@ func TestReturnErrOnWrongRootHash(t *testing.T) {
 	}
 	resolver := NewResolver(0, true, 0)
 	resolver.AddRequest(req)
-	err := resolver.ResolveWithDb(db, 0)
+	err := resolver.ResolveWithDb(db, 0, false)
 	require.NotNil(t, err)
 }
 
@@ -407,7 +407,7 @@ func TestApiDetails(t *testing.T) {
 				//fmt.Printf("%x\n", tries[i].root.(*fullNode).Children[15].(*fullNode).Children[15].hash())
 				assert.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0)
+				err := resolver.ResolveStatefulCached(db, 0, false)
 				//fmt.Printf("%x\n", tries[i].root.(*shortNode).Val.(*fullNode).Children[15].hash())
 				assert.NoError(err)
 			}
@@ -432,7 +432,7 @@ func TestApiDetails(t *testing.T) {
 				//fmt.Printf("%x\n", tries[i].root.(*fullNode).Children[0].(*fullNode).Children[0].hash())
 				assert.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0)
+				err := resolver.ResolveStatefulCached(db, 0, false)
 				//fmt.Printf("%x\n", tries[i].root.(*fullNode).Children[0].(*fullNode).Children[0].hash())
 				assert.NoError(err)
 			}
@@ -484,7 +484,7 @@ func TestApiDetails(t *testing.T) {
 				err := resolver.ResolveStateful(db, 0)
 				require.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0)
+				err := resolver.ResolveStatefulCached(db, 0, false)
 				require.NoError(err)
 			}
 			assert.Equal(expectRootHash.String(), tr.Hash().String())
