@@ -459,6 +459,9 @@ func Stateless(
 				return
 			}
 			tds.PruneTries(false)
+			if blockNum == 2675353 {
+				return
+			}
 		}
 
 		if willSnapshot {
