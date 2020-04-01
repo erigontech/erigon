@@ -415,16 +415,16 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							fmt.Printf("cmp1 %x %x (%d)\n", minKey[:minKeyIndex], startkey[:startKeyIndex], cmp)
 						}
 					} else if fromCache && fixedbytes > 40 { // compare without incarnation
-						startKeyIndex = fixedbytes - 1 // will use it on startkey (which has incarnation) later
-						minKeyIndex := minInt(len(minKey), fixedbytes-1-8)
+						startKeyIndex = fixedbytes - 1 // will use it on startKey (which has incarnation) later
+						minKeyIndex = minInt(len(minKey), fixedbytes-1-8)
 						startKeyIndexIsBigger = startKeyIndex-8 > minKeyIndex
-						cmp = bytes.Compare(minKey[:minKeyIndex-8], startKeyNoInc.B[:startKeyIndex-8])
+						cmp = bytes.Compare(minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8])
 						if tr.trace {
-							fmt.Printf("cmp2 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex], startKeyNoInc.B, cmp, startKeyIndex, len(startKeyNoInc.B))
+							fmt.Printf("cmp2 %x %x [%x] (%d), %d %d\n", minKey[:minKeyIndex], startKeyNoInc.B[:startKeyIndex-8], startKeyNoInc.B, cmp, startKeyIndex-8, len(startKeyNoInc.B))
 						}
 					} else if fromCache {
 						startKeyIndex = fixedbytes - 1
-						minKeyIndex := minInt(len(minKey), fixedbytes-1)
+						minKeyIndex = minInt(len(minKey), fixedbytes-1)
 						startKeyIndexIsBigger = startKeyIndex > minKeyIndex
 						cmp = bytes.Compare(minKey[:minKeyIndex], startkey[:startKeyIndex])
 						if tr.trace {
@@ -445,6 +445,9 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 							cmp = -1
 						}
 					} else if cmp == 0 {
+						if tr.trace {
+							fmt.Printf("cmp5: [%x] %x %x %#b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
+						}
 						k1 := minKey[minKeyIndex] & mask
 						k2 := startkey[startKeyIndex] & mask
 						if k1 < k2 {
@@ -460,6 +463,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						if tr.trace {
 							fmt.Printf("c.SeekTo(%x) = %x\n", startkey, k)
 							fmt.Printf("[fromCache = %t], cache.SeekTo(%x) = %x\n", fromCache, startKeyNoInc.B, cacheK)
+							fmt.Printf("[request = %s]\n", tr.requests[tr.reqIndices[rangeIdx]])
 						}
 						// for Address bucket, skip cache keys longer than 31 bytes
 						if isAccountBucket && len(cacheK) > maxAccountKeyLen {
