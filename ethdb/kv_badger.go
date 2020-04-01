@@ -2,7 +2,6 @@ package ethdb
 
 import (
 	"context"
-	"fmt"
 	"runtime"
 	"time"
 
@@ -87,7 +86,6 @@ func (db *badgerDB) Close() {
 		db.log.Warn("failed to close badger DB", "err", err)
 	} else {
 		db.log.Info("badger database closed")
-		fmt.Printf("badger database closed\n")
 	}
 }
 
