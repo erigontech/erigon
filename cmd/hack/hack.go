@@ -1886,6 +1886,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		}
 	}
 	batch.Commit()
+	batch.Close()
 	log.Info("Process done", "duration", time.Since(startTime))
 	log.Info("Validation Start")
 
@@ -1913,7 +1914,6 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
 			iterations++
 			if iterations%100000 == 0 {
-				batch.Commit()
 				log.Info("Validated", "entries", iterations, "number", blockNum)
 			}
 			if bytes.Compare(val, bn) != 0 {
