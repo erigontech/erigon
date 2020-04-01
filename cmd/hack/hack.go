@@ -1775,7 +1775,6 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	var interrupt bool
 	filename := fmt.Sprintf(".lookups_%d.tmp", len(lookups))
 	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-	startTime := time.Now()
 	for !interrupt {
 		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
 		body := rawdb.ReadBody(db, blockHash, blockNum)
@@ -1887,11 +1886,30 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	}
 	batch.Commit()
 	batch.Close()
-	log.Info("Process done", "duration", time.Since(startTime))
-	log.Info("Validation Start")
+}
 
-	blockNum = startBlock
-	iterations = 0
+func ValidateTxLookups2(chaindata string) {
+	startTime := time.Now()
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	//nolint: errcheck
+	startTime = time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	validateTxLookups2(db, blockNum, interruptCh)
+	log.Info("All done", "duration", time.Since(startTime))
+}
+
+func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+	blockNum := startBlock
+	iterations := 0
+	var interrupt bool
 	// Validation Process
 	blockBytes := big.NewInt(0)
 	for !interrupt {
@@ -1908,7 +1926,7 @@ func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 		default:
 		}
 		blockBytes.SetUint64(blockNum)
-		bn = blockBytes.Bytes()
+		bn := blockBytes.Bytes()
 
 		for _, tx := range body.Transactions {
 			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
@@ -2040,5 +2058,9 @@ func main() {
 
 	if *action == "gen-tx-lookup-2" {
 		GenerateTxLookups2(*chaindata)
+	}
+
+	if *action == "val-tx-lookup-2" {
+		ValidateTxLookups2(*chaindata)
 	}
 }
