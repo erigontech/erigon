@@ -20,7 +20,7 @@ func TestManagedTx(t *testing.T) {
 
 	writeDBs := []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(ctx),
-		//ethdb.NewBadger().InMem().MustOpen(ctx),
+		ethdb.NewBadger().InMem().MustOpen(ctx),
 		ethdb.NewBolt().InMem().MustOpen(ctx), // for remote db
 	}
 
@@ -29,13 +29,13 @@ func TestManagedTx(t *testing.T) {
 
 	readDBs := []ethdb.KV{
 		writeDBs[0],
-		//writeDBs[1],
+		writeDBs[1],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
 	}
 
 	serverCtx, serverCancel := context.WithCancel(ctx)
 	go func() {
-		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
+		_ = remotedbserver.Server(serverCtx, writeDBs[2], serverIn, serverOut, nil)
 	}()
 
 	defer func() {
