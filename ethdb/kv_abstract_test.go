@@ -36,10 +36,11 @@ func TestManagedTx(t *testing.T) {
 		//writeDBs[1],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
 	}
+
+	serverCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	go func() {
-		if err := remotedbserver.Server(ctx, writeDBs[1], serverIn, serverOut, nil); err != nil {
-			require.NoError(t, err)
-		}
+		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
 	}()
 
 	for _, db := range writeDBs {
