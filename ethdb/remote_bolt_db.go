@@ -505,9 +505,5 @@ func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64, df f
 }
 
 func (db *RemoteBoltDatabase) Close() {
-	if err := db.db.Close(); err == nil {
-		db.log.Info("Database closed")
-	} else {
-		db.log.Error("Failed to close database", "err", err)
-	}
+	db.db.Close()
 }

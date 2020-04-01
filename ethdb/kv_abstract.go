@@ -7,7 +7,7 @@ import (
 type KV interface {
 	View(ctx context.Context, f func(tx Tx) error) (err error)
 	Update(ctx context.Context, f func(tx Tx) error) (err error)
-	Close() error
+	Close()
 
 	Begin(ctx context.Context, writable bool) (Tx, error)
 }

@@ -26,10 +26,6 @@ func TestManagedTx(t *testing.T) {
 
 	serverIn, clientOut := io.Pipe()
 	clientIn, serverOut := io.Pipe()
-	defer serverIn.Close()
-	defer serverOut.Close()
-	defer clientIn.Close()
-	defer clientOut.Close()
 
 	readDBs := []ethdb.KV{
 		writeDBs[0],
@@ -37,10 +33,25 @@ func TestManagedTx(t *testing.T) {
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
 	}
 
-	serverCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	serverCtx, serverCancel := context.WithCancel(ctx)
 	go func() {
 		_ = remotedbserver.Server(serverCtx, writeDBs[1], serverIn, serverOut, nil)
+	}()
+
+	defer func() {
+		for _, db := range writeDBs {
+			db.Close()
+		}
+		for _, db := range readDBs {
+			db.Close()
+		}
+
+		serverIn.Close()
+		serverOut.Close()
+		clientIn.Close()
+		clientOut.Close()
+
+		serverCancel()
 	}()
 
 	for _, db := range writeDBs {

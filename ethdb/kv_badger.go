@@ -24,7 +24,7 @@ func (opts badgerOpts) InMem() badgerOpts {
 }
 
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
-	logger := log.New("database", opts.Badger.Dir)
+	logger := log.New("badger_db", opts.Badger.Dir)
 
 	oldMaxProcs := runtime.GOMAXPROCS(0)
 	if oldMaxProcs < minGoMaxProcs {
@@ -50,7 +50,9 @@ func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	}()
 
 	return &badgerDB{
-		opts: opts, badger: db,
+		opts:     opts,
+		badger:   db,
+		log:      logger,
 		gcTicker: ticker, // Garbage Collector
 	}, nil
 }
@@ -67,6 +69,7 @@ type badgerDB struct {
 	opts     badgerOpts
 	badger   *badger.DB
 	gcTicker *time.Ticker
+	log      log.Logger
 }
 
 func NewBadger() badgerOpts {
@@ -75,12 +78,15 @@ func NewBadger() badgerOpts {
 
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
-func (db *badgerDB) Close() error {
+func (db *badgerDB) Close() {
 	if db.gcTicker != nil {
 		db.gcTicker.Stop()
 	}
-
-	return db.badger.Close()
+	if err := db.badger.Close(); err != nil {
+		db.log.Warn("failed to close badger DB", "err", err)
+	} else {
+		db.log.Info("badger database closed")
+	}
 }
 
 func (db *badgerDB) Begin(ctx context.Context, writable bool) (Tx, error) {

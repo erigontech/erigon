@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type boltOpts struct {
@@ -13,66 +14,11 @@ type boltOpts struct {
 	path string
 }
 
-func (opts boltOpts) InMem() boltOpts {
-	opts.Bolt.MemOnly = true
-	return opts
-}
-
-func (opts boltOpts) Path(path string) boltOpts {
-	opts.path = path
-	return opts
-}
-
-func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
-
-	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
-	if err != nil {
-		return nil, err
-	}
-	if err := boltDB.Update(func(tx *bolt.Tx) error {
-		for _, name := range dbutils.Buckets {
-			_, createErr := tx.CreateBucketIfNotExists(name, false)
-			if createErr != nil {
-				return createErr
-			}
-		}
-		return nil
-	}); err != nil {
-		return nil, err
-	}
-	return &BoltKV{opts: opts, bolt: boltDB}, nil
-}
-
-func (opts boltOpts) MustOpen(ctx context.Context) KV {
-	db, err := opts.Open(ctx)
-	if err != nil {
-		panic(err)
-	}
-	return db
-}
-
-func NewBolt() boltOpts {
-	return boltOpts{Bolt: bolt.DefaultOptions}
-}
-
 type BoltKV struct {
 	opts boltOpts
 	bolt *bolt.DB
+	log  log.Logger
 }
-
-// Close closes BoltKV
-// All transactions must be closed before closing the database.
-func (db *BoltKV) Close() error {
-	return db.bolt.Close()
-}
-
-func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
-	var err error
-	t := &boltTx{db: db, ctx: ctx}
-	t.bolt, err = db.bolt.Begin(writable)
-	return t, err
-}
-
 type boltTx struct {
 	ctx context.Context
 	db  *BoltKV
@@ -97,6 +43,72 @@ type boltCursor struct {
 	k   []byte
 	v   []byte
 	err error
+}
+
+type noValuesBoltCursor struct {
+	boltCursor
+}
+
+func (opts boltOpts) InMem() boltOpts {
+	opts.Bolt.MemOnly = true
+	return opts
+}
+
+func (opts boltOpts) Path(path string) boltOpts {
+	opts.path = path
+	return opts
+}
+
+func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
+	if err := boltDB.Update(func(tx *bolt.Tx) error {
+		for _, name := range dbutils.Buckets {
+			_, createErr := tx.CreateBucketIfNotExists(name, false)
+			if createErr != nil {
+				return createErr
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &BoltKV{
+		opts: opts,
+		bolt: boltDB,
+		log:  log.New("bolt_db", opts.path),
+	}, nil
+}
+
+func (opts boltOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func NewBolt() boltOpts {
+	return boltOpts{Bolt: bolt.DefaultOptions}
+}
+
+// Close closes BoltKV
+// All transactions must be closed before closing the database.
+func (db *BoltKV) Close() {
+	if err := db.bolt.Close(); err != nil {
+		db.log.Warn("failed to close bolt DB", "err", err)
+	} else {
+		db.log.Info("bolt database closed")
+	}
+}
+
+func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	var err error
+	t := &boltTx{db: db, ctx: ctx}
+	t.bolt, err = db.bolt.Begin(writable)
+	return t, err
 }
 
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -248,10 +260,6 @@ func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 		}
 	}
 	return nil
-}
-
-type noValuesBoltCursor struct {
-	boltCursor
 }
 
 func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {

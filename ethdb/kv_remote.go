@@ -6,10 +6,46 @@ import (
 	"io"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 type remoteOpts struct {
 	Remote remote.DbOpts
+}
+
+type remoteDB struct {
+	opts   remoteOpts
+	remote *remote.DB
+	log    log.Logger
+}
+
+type remoteTx struct {
+	ctx context.Context
+	db  *remoteDB
+
+	remote *remote.Tx
+}
+
+type remoteBucket struct {
+	tx *remoteTx
+
+	nameLen uint
+	remote  *remote.Bucket
+}
+
+type remoteCursor struct {
+	ctx    context.Context
+	bucket remoteBucket
+
+	remote *remote.Cursor
+
+	k   []byte
+	v   []byte
+	err error
+}
+
+type remoteNoValuesCursor struct {
+	remoteCursor
 }
 
 func (opts remoteOpts) Path(path string) remoteOpts {
@@ -45,7 +81,11 @@ func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
 		return nil, err
 	}
 
-	return &remoteDB{opts: opts, remote: db}, nil
+	return &remoteDB{
+		opts:   opts,
+		remote: db,
+		log:    log.New("remote_db", opts.Remote.DialAddress),
+	}, nil
 }
 
 func (opts remoteOpts) MustOpen(ctx context.Context) KV {
@@ -56,48 +96,22 @@ func (opts remoteOpts) MustOpen(ctx context.Context) KV {
 	return db
 }
 
-type remoteDB struct {
-	opts   remoteOpts
-	remote *remote.DB
-}
-
 func NewRemote() remoteOpts {
 	return remoteOpts{Remote: remote.DefaultOpts}
 }
 
 // Close closes BoltKV
 // All transactions must be closed before closing the database.
-func (db *remoteDB) Close() error {
-	return db.remote.Close()
+func (db *remoteDB) Close() {
+	if err := db.remote.Close(); err != nil {
+		db.log.Warn("failed to close remote DB", "err", err)
+	} else {
+		db.log.Info("remote database closed")
+	}
 }
 
 func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {
 	panic("remote db doesn't support managed transactions")
-}
-
-type remoteTx struct {
-	ctx context.Context
-	db  *remoteDB
-
-	remote *remote.Tx
-}
-
-type remoteBucket struct {
-	tx *remoteTx
-
-	nameLen uint
-	remote  *remote.Bucket
-}
-
-type remoteCursor struct {
-	ctx    context.Context
-	bucket remoteBucket
-
-	remote *remote.Cursor
-
-	k   []byte
-	v   []byte
-	err error
 }
 
 func (db *remoteDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -196,10 +210,6 @@ func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 		}
 	}
 	return nil
-}
-
-type remoteNoValuesCursor struct {
-	remoteCursor
 }
 
 func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
