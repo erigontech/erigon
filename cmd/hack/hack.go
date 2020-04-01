@@ -1048,7 +1048,7 @@ func testDifficulty() {
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	blocksToSearch := 1000
+	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, i)
 		header := rawdb.ReadHeader(ethDb, hash, i)
