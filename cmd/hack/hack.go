@@ -804,7 +804,7 @@ func testStartup() {
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, currentBlockNr)
+	err = r.ResolveWithDb(ethDb, currentBlockNr, false)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
@@ -840,7 +840,7 @@ func testResolveCached() {
 
 		r2 := trie.NewResolver(2, true, currentBlockNr)
 		r2.AddRequest(tries[1].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
-		err = r2.ResolveStatefulCached(ethDb, currentBlockNr)
+		err = r2.ResolveStatefulCached(ethDb, currentBlockNr, false)
 		check(err)
 
 		bufs := [2]*bytes.Buffer{
@@ -971,7 +971,7 @@ func testResolve(chaindata string) {
 	t := trie.New(common.Hash{})
 	req := t.NewResolveRequest(contract, key, 5, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 10000000)
+	err = r.ResolveWithDb(ethDb, 10000000, false)
 	if err != nil {
 		fmt.Printf("Resolve error: %v\n", err)
 	}

@@ -446,7 +446,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						}
 					} else if cmp == 0 {
 						if tr.trace {
-							fmt.Printf("cmp5: [%x] %x %x %#b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
+							fmt.Printf("cmp5: [%x] %x %x %b, %d %d\n", minKey, minKey[minKeyIndex], startkey[startKeyIndex], mask, minKeyIndex, startKeyIndex)
 						}
 						k1 := minKey[minKeyIndex] & mask
 						k2 := startkey[startKeyIndex] & mask
