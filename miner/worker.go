@@ -303,6 +303,20 @@ func (w *worker) close() {
 func (w *worker) newWorkLoop(recommit time.Duration) {
 	minRecommit := recommit // minimal resubmit interval specified by user.
 
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	<-timer.C // discard the initial tick
+
+	// commit aborts in-flight transaction execution with given signal and resubmits a new one.
+	commit := func(noempty bool, s int32) {
+		if interrupt != nil {
+			atomic.StoreInt32(interrupt, s)
+		}
+		interrupt = new(int32)
+		w.newWorkCh <- &newWorkReq{interrupt: interrupt, noempty: noempty, timestamp: timestamp}
+		timer.Reset(recommit)
+		atomic.StoreInt32(&w.newTxs, 0)
+	}
 	// recalcRecommit recalculates the resubmitting interval upon feedback.
 	recalcRecommit := func(target float64, inc bool) {
 		var (
