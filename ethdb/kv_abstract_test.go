@@ -80,7 +80,6 @@ func TestManagedTx(t *testing.T) {
 		t.Run("ctx cancel "+msg, func(t *testing.T) {
 			testCtxCancel(t, db)
 		})
-
 		t.Run("filter "+msg, func(t *testing.T) {
 			testPrefixFilter(t, db)
 		})
