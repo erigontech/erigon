@@ -201,11 +201,19 @@ func (tp *TriePruning) PruneToTimestamp(
 		if !ok {
 			continue
 		}
-		switch parent.(type) {
+		switch nd.(type) {
 		case *duoNode, *fullNode:
+			// will work only with these types of nodes
+		default:
+			continue
+		}
+		switch parent.(type) { // without this condition - doesn't work. Need investigate why.
+		case *duoNode, *fullNode:
+			// will work only with these types of nodes
 			CompressNibbles([]byte(prefix), &key.B)
 			tp.unloadNodeFunc(key.B, nd.reference())
 		default:
+			continue
 		}
 	}
 
