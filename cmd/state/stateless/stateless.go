@@ -452,7 +452,7 @@ func Stateless(
 
 		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0
 
-		if batch.BatchSize() >= 100000 || willSnapshot || blockNum == 2675353 {
+		if batch.BatchSize() >= 100000 || willSnapshot {
 			if _, err := batch.Commit(); err != nil {
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
