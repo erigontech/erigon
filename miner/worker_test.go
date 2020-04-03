@@ -309,10 +309,13 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 	w.skipSealHook = func(task *task) bool {
 		return len(task.receipts) == 0
 	}
-	go listenNewBlock()
 
-	<-subscribe // Ensure the subscription is created
-	w.start()   // Start mining!
+	// Wait for mined blocks.
+	sub := w.mux.Subscribe(core.NewMinedBlockEvent{})
+	defer sub.Unsubscribe()
+
+	// Start mining!
+	w.start()
 
 	for i := 0; i < 5; i++ {
 		if err := b.txPool.AddLocal(b.newRandomTx(testCase, true)); err != nil {
@@ -325,10 +328,12 @@ func testGenerateBlockAndImport(t *testing.T, testCase *testCase, isClique bool)
 		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
 		b.PostChainEvents([]interface{}{core.ChainSideEvent{Block: b.newRandomUncle()}})
 		select {
-		case e := <-loopErr:
-			t.Fatal(e)
-		case <-newBlock:
-		case <-time.NewTimer(3 * time.Second).C: // Worker needs 1s to include new changes.
+		case ev := <-sub.Chan():
+			block := ev.Data.(core.NewMinedBlockEvent).Block
+			if _, err := chain.InsertChain([]*types.Block{block}); err != nil {
+				t.Fatalf("failed to insert new mined block %d: %v", block.NumberU64(), err)
+			}
+		case <-time.After(3 * time.Second): // Worker needs 1s to include new changes.
 			t.Fatalf("timeout")
 		}
 	}
