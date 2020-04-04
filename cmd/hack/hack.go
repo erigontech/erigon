@@ -6,6 +6,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
@@ -1943,6 +1944,60 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	}
 }
 
+func indexSize(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	fStorage,err:=os.Create("index_sizes_storage.csv")
+	check(err)
+	fAcc,err:=os.Create("index_sizes_acc.csv")
+	check(err)
+	csvAcc:=csv.NewWriter(fAcc)
+	err = csvAcc.Write([]string{"key", "ln"})
+	check(err)
+	csvStorage:=csv.NewWriter(fStorage)
+	err = csvStorage.Write([]string{"key", "ln"})
+	i:=0
+	j:=0
+	maxLenAcc:=0
+	maxLenSt:=0
+	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i>10000 {
+			fmt.Println(j)
+			i=0
+		}
+		if len(v)> maxLenAcc {
+			maxLenAcc=len(v)
+		}
+		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
+		if err!=nil {
+			panic(err)
+		}
+
+		return true, nil
+	})
+	i=0
+	j=0
+	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i>10000 {
+			fmt.Println(j)
+			i=0
+		}
+		if len(v)> maxLenSt {
+			maxLenSt=len(v)
+		}
+		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
+		if err!=nil {
+			panic(err)
+		}
+
+		return true, nil
+	})
+
+	fmt.Println("Results:")
+	fmt.Println("maxLenAcc:", maxLenAcc)
+	fmt.Println("maxLenSt:", maxLenSt)
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2062,5 +2117,8 @@ func main() {
 
 	if *action == "val-tx-lookup-2" {
 		ValidateTxLookups2(*chaindata)
+	}
+	if *action == "indexSize" {
+		indexSize(*chaindata)
 	}
 }
