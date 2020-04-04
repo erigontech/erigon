@@ -706,6 +706,10 @@ func (db *BoltDatabase) KV() *bolt.DB {
 	return db.db
 }
 
+func (db *BoltDatabase) AbstractKV() KV {
+	return &BoltKV{bolt: db.db}
+}
+
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,

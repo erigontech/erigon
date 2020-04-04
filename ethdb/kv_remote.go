@@ -1,26 +1,22 @@
 package ethdb
 
 import (
-	"bytes"
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+type remoteOpts struct {
+	Remote remote.DbOpts
+}
+
 type remoteDB struct {
-	opts   Options
+	opts   remoteOpts
 	remote *remote.DB
-}
-
-func (db *remoteDB) Options() Options {
-	return db.opts
-}
-
-// Close closes BoltKV
-// All transactions must be closed before closing the database.
-func (db *remoteDB) Close() error {
-	return db.remote.Close()
+	log    log.Logger
 }
 
 type remoteTx struct {
@@ -40,15 +36,82 @@ type remoteBucket struct {
 type remoteCursor struct {
 	ctx    context.Context
 	bucket remoteBucket
-	prefix []byte
-
-	remoteOpts remote.CursorOpts
 
 	remote *remote.Cursor
 
 	k   []byte
 	v   []byte
 	err error
+}
+
+type remoteNoValuesCursor struct {
+	remoteCursor
+}
+
+func (opts remoteOpts) Path(path string) remoteOpts {
+	opts.Remote = opts.Remote.Addr(path)
+	return opts
+}
+
+//
+//
+// Example text code:
+//  writeDb, errOpen = ethdb.NewBolt().InMem().Open(ctx)
+//	require.NoError(t, errOpen)
+//	serverIn, clientOut := io.Pipe()
+//	clientIn, serverOut := io.Pipe()
+//	readDBs, errOpen = ethdb.NewRemote().InMem(clientIn, clientOut).Open(ctx)
+//	require.NoError(t, errOpen)
+//  go func() {
+// 	    if err := remotedbserver.Server(ctx, writeDb, serverIn, serverOut, nil); err != nil {
+//		    require.NoError(t, err)
+//  	}
+//  }()
+//
+func (opts remoteOpts) InMem(in io.Reader, out io.Writer) remoteOpts {
+	opts.Remote.DialFunc = func(ctx context.Context) (io.Reader, io.Writer, io.Closer, error) {
+		return in, out, nil, nil
+	}
+	return opts
+}
+
+func (opts remoteOpts) Open(ctx context.Context) (KV, error) {
+	db, err := remote.Open(ctx, opts.Remote)
+	if err != nil {
+		return nil, err
+	}
+
+	return &remoteDB{
+		opts:   opts,
+		remote: db,
+		log:    log.New("remote_db", opts.Remote.DialAddress),
+	}, nil
+}
+
+func (opts remoteOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func NewRemote() remoteOpts {
+	return remoteOpts{Remote: remote.DefaultOpts}
+}
+
+// Close closes BoltKV
+// All transactions must be closed before closing the database.
+func (db *remoteDB) Close() {
+	if err := db.remote.Close(); err != nil {
+		db.log.Warn("failed to close remote DB", "err", err)
+	} else {
+		db.log.Info("remote database closed")
+	}
+}
+
+func (db *remoteDB) Begin(ctx context.Context, writable bool) (Tx, error) {
+	panic("remote db doesn't support managed transactions")
 }
 
 func (db *remoteDB) View(ctx context.Context, f func(tx Tx) error) (err error) {
@@ -63,6 +126,14 @@ func (db *remoteDB) Update(ctx context.Context, f func(tx Tx) error) (err error)
 	return fmt.Errorf("remote db provider doesn't support .Update method")
 }
 
+func (tx *remoteTx) Commit(ctx context.Context) error {
+	panic("remote db is read-only")
+}
+
+func (tx *remoteTx) Rollback() error {
+	panic("remote db is read-only")
+}
+
 func (tx *remoteTx) Bucket(name []byte) Bucket {
 	b := remoteBucket{tx: tx, nameLen: uint(len(name))}
 	b.remote = tx.remote.Bucket(name)
@@ -74,7 +145,7 @@ func (tx *remoteTx) cleanup() {
 }
 
 func (c *remoteCursor) Prefix(v []byte) Cursor {
-	c.prefix = v
+	c.remote = c.remote.Prefix(v)
 	return c
 }
 
@@ -83,22 +154,16 @@ func (c *remoteCursor) MatchBits(n uint) Cursor {
 }
 
 func (c *remoteCursor) Prefetch(v uint) Cursor {
-	c.remoteOpts.PrefetchSize(uint64(v))
+	c.remote = c.remote.Prefetch(v)
 	return c
 }
 
 func (c *remoteCursor) NoValues() NoValuesCursor {
-	c.remoteOpts.PrefetchValues(false)
+	c.remote = c.remote.NoValues()
 	return &remoteNoValuesCursor{remoteCursor: *c}
 }
 
 func (b remoteBucket) Get(key []byte) (val []byte, err error) {
-	select {
-	case <-b.tx.ctx.Done():
-		return nil, b.tx.ctx.Err()
-	default:
-	}
-
 	val, err = b.remote.Get(key)
 	return val, err
 }
@@ -112,57 +177,22 @@ func (b remoteBucket) Delete(key []byte) error {
 }
 
 func (b remoteBucket) Cursor() Cursor {
-	c := &remoteCursor{bucket: b, ctx: b.tx.ctx}
-	c.remoteOpts = remote.DefaultCursorOpts
+	c := &remoteCursor{bucket: b, ctx: b.tx.ctx, remote: b.remote.Cursor()}
 	return c
 }
 
-func (c *remoteCursor) initCursor() {
-	if c.remote != nil {
-		return
-	}
-	c.remote = c.bucket.remote.Cursor(c.remoteOpts)
-}
-
 func (c *remoteCursor) First() ([]byte, []byte, error) {
-	c.initCursor()
-
-	if c.prefix != nil {
-		c.k, c.v, c.err = c.remote.Seek(c.prefix)
-	} else {
-		c.k, c.v, c.err = c.remote.First()
-	}
+	c.k, c.v, c.err = c.remote.First()
 	return c.k, c.v, c.err
 }
 
 func (c *remoteCursor) Seek(seek []byte) ([]byte, []byte, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	default:
-	}
-
-	c.initCursor()
-
 	c.k, c.v, c.err = c.remote.Seek(seek)
 	return c.k, c.v, c.err
 }
 
 func (c *remoteCursor) Next() ([]byte, []byte, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, nil, c.ctx.Err()
-	default:
-	}
-
 	c.k, c.v, c.err = c.remote.Next()
-	if c.err != nil {
-		return nil, nil, c.err
-	}
-
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, nil, nil
-	}
 	return c.k, c.v, c.err
 }
 
@@ -182,11 +212,7 @@ func (c *remoteCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-type remoteNoValuesCursor struct {
-	remoteCursor
-}
-
-func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint64) (bool, error)) error {
+func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
 	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
@@ -202,58 +228,20 @@ func (c *remoteNoValuesCursor) Walk(walker func(k []byte, vSize uint64) (bool, e
 	return nil
 }
 
-func (c *remoteNoValuesCursor) First() ([]byte, uint64, error) {
-	c.initCursor()
-
-	var vSize uint64
-	var vIsEmpty bool
-	if c.prefix != nil {
-		c.k, vIsEmpty, c.err = c.remote.SeekKey(c.prefix)
-	} else {
-		c.k, vIsEmpty, c.err = c.remote.FirstKey()
-	}
-	if !vIsEmpty {
-		vSize = 1
-	}
+func (c *remoteNoValuesCursor) First() ([]byte, uint32, error) {
+	var vSize uint32
+	c.k, vSize, c.err = c.remote.FirstKey()
 	return c.k, vSize, c.err
 }
 
-func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint64, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
-	default:
-	}
-
-	c.initCursor()
-
-	var vSize uint64
-	var vIsEmpty bool
-	c.k, vIsEmpty, c.err = c.remote.SeekKey(seek)
-	if !vIsEmpty {
-		vSize = 1
-	}
+func (c *remoteNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
+	var vSize uint32
+	c.k, vSize, c.err = c.remote.SeekKey(seek)
 	return c.k, vSize, c.err
 }
 
-func (c *remoteNoValuesCursor) Next() ([]byte, uint64, error) {
-	select {
-	case <-c.ctx.Done():
-		return nil, 0, c.ctx.Err()
-	default:
-	}
-
-	var vSize uint64
-	var vIsEmpty bool
-	c.k, vIsEmpty, c.err = c.remote.NextKey()
-	if !vIsEmpty {
-		vSize = 1
-	}
-	if c.err != nil {
-		return nil, 0, c.err
-	}
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
-		return nil, 0, nil
-	}
+func (c *remoteNoValuesCursor) Next() ([]byte, uint32, error) {
+	var vSize uint32
+	c.k, vSize, c.err = c.remote.NextKey()
 	return c.k, vSize, c.err
 }

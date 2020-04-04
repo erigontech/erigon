@@ -32,7 +32,7 @@ var (
 	gitCommit = ""
 	gitDate   = ""
 	// The app that holds all commands and flags.
-	app = utils.NewApp(gitCommit, "", "Ethereum Tester")
+	app = utils.NewApp(gitCommit, gitDate, "Ethereum Tester")
 	// flags that configure the node
 	VerbosityFlag = cli.IntFlag{
 		Name:  "verbosity",
@@ -55,6 +55,7 @@ func init() {
 	app.Flags = append(app.Flags, flags...)
 
 	app.Before = func(ctx *cli.Context) error {
+		setupLogger(ctx)
 		runtime.GOMAXPROCS(runtime.NumCPU())
 		if err := debug.Setup(ctx); err != nil {
 			return err
@@ -126,8 +127,6 @@ func setupLogger(cliCtx *cli.Context) {
 }
 
 func tester(cliCtx *cli.Context) error {
-	setupLogger(cliCtx)
-
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {
@@ -165,7 +164,6 @@ func tester(cliCtx *cli.Context) error {
 }
 
 func genesisCmd(cliCtx *cli.Context) error {
-	setupLogger(cliCtx)
 	res, err := json.Marshal(genesis())
 	if err != nil {
 		return err
@@ -178,7 +176,6 @@ func genesisCmd(cliCtx *cli.Context) error {
 }
 
 func mgrCmd(cliCtx *cli.Context) error {
-	setupLogger(cliCtx)
 	ctx := rootContext()
 	nodeToConnect, err := getTargetAddr(cliCtx)
 	if err != nil {

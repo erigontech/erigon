@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math/big"
-	"os"
-	"os/signal"
 	"strings"
 
 	lru "github.com/hashicorp/golang-lru"
@@ -18,12 +16,12 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/eth"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
+	"github.com/spf13/cobra"
 )
 
 // splitAndTrim splits input separated by a comma
@@ -44,7 +42,7 @@ type EthAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type APIImpl struct {
-	db           *remote.DB
+	db           ethdb.KV
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
 }
@@ -56,13 +54,13 @@ type PrivateDebugAPI interface {
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access
 type PrivateDebugAPIImpl struct {
-	db           *remote.DB
+	db           ethdb.KV
 	dbReader     ethdb.Getter
 	chainContext core.ChainContext
 }
 
 // NewAPI returns APIImpl instance
-func NewAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
+func NewAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *APIImpl {
 	return &APIImpl{
 		db:           db,
 		dbReader:     dbReader,
@@ -71,7 +69,7 @@ func NewAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.ChainContext
 }
 
 // NewPrivateDebugAPI returns PrivateDebugAPIImpl instance
-func NewPrivateDebugAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
+func NewPrivateDebugAPI(db ethdb.KV, dbReader ethdb.Getter, chainContext core.ChainContext) *PrivateDebugAPIImpl {
 	return &PrivateDebugAPIImpl{
 		db:           db,
 		dbReader:     dbReader,
@@ -82,7 +80,7 @@ func NewPrivateDebugAPI(db *remote.DB, dbReader ethdb.Getter, chainContext core.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
 	var blockNumber uint64
 
-	if err := api.db.View(ctx, func(tx *remote.Tx) error {
+	if err := api.db.View(ctx, func(tx ethdb.Tx) error {
 		var err error
 		blockNumber, err = remotechain.ReadLastBlockNumber(tx)
 		if err != nil {
@@ -196,7 +194,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	var block *types.Block
 	additionalFields := make(map[string]interface{})
 
-	err = api.db.View(ctx, func(tx *remote.Tx) error {
+	err = api.db.View(ctx, func(tx ethdb.Tx) error {
 		block, err = remotechain.GetBlockByNumber(tx, uint64(number.Int64()))
 		if err != nil {
 			return err
@@ -261,18 +259,19 @@ func (api *APIImpl) rpcMarshalBlock(b *types.Block, inclTx bool, fullTx bool, ad
 	return fields, err
 }
 
-func daemon(cfg Config) {
+func daemon(cmd *cobra.Command, cfg Config) {
 	vhosts := splitAndTrim(cfg.rpcVirtualHost)
 	cors := splitAndTrim(cfg.rpcCORSDomain)
 	enabledApis := splitAndTrim(cfg.rpcAPI)
 
-	db, err := remote.Open(context.Background(), remote.DefaultOpts.Addr(cfg.remoteDbAddress))
+	db, err := ethdb.NewRemote().Path(cfg.remoteDbAddress).Open(cmd.Context())
 	if err != nil {
 		log.Error("Could not connect to remoteDb", "error", err)
 		return
 	}
 
 	var rpcAPI = []rpc.API{}
+
 	dbReader := ethdb.NewRemoteBoltDatabase(db)
 	chainContext := NewChainContext(dbReader)
 	apiImpl := NewAPI(db, dbReader, chainContext)
@@ -313,9 +312,6 @@ func daemon(cfg Config) {
 		log.Info("HTTP endpoint closed", "url", httpEndpoint)
 	}()
 
-	abortChan := make(chan os.Signal, 1)
-	signal.Notify(abortChan, os.Interrupt)
-
-	sig := <-abortChan
+	sig := <-cmd.Context().Done()
 	log.Info("Exiting...", "signal", sig)
 }

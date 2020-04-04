@@ -247,7 +247,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 				return err
 			}
 		case msg.Code == eth.NewBlockHashesMsg:
-			if signaledHead, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
+			if _, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
 				return err
 			}
 		default:

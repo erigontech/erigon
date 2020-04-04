@@ -17,7 +17,7 @@ require (
 	github.com/cloudflare/cloudflare-go v0.10.6
 	github.com/davecgh/go-spew v1.1.1
 	github.com/deckarep/golang-set v0.0.0-20180603214616-504e848d77ea
-	github.com/dgraph-io/badger/v2 v2.0.1
+	github.com/dgraph-io/badger/v2 v2.0.3
 	github.com/dlclark/regexp2 v1.2.0 // indirect
 	github.com/docker/docker v1.4.2-0.20180625184442-8e610b2b55bf
 	github.com/dop251/goja v0.0.0-20200219165308-d1232e640a87
@@ -26,11 +26,11 @@ require (
 	github.com/fatih/color v1.7.0
 	github.com/fjl/memsize v0.0.0-20180418122429-ca190fb6ffbc
 	github.com/gballet/go-libpcsclite v0.0.0-20190607065134-2772fd86a8ff
-	github.com/gin-gonic/gin v1.5.0
+	github.com/gin-gonic/gin v1.6.2
 	github.com/go-ole/go-ole v1.2.4 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.2+incompatible // indirect
 	github.com/go-stack/stack v1.8.0
-	github.com/golang/protobuf v1.3.2
+	github.com/golang/protobuf v1.3.3
 	github.com/golang/snappy v0.0.1
 	github.com/google/go-cmp v0.3.1 // indirect
 	github.com/gorilla/websocket v1.4.1
@@ -45,7 +45,7 @@ require (
 	github.com/ledgerwatch/bolt v1.4.3
 	github.com/llgcode/draw2d v0.0.0-20180825133448-f52c8a71aff0
 	github.com/mattn/go-colorable v0.1.2
-	github.com/mattn/go-isatty v0.0.9
+	github.com/mattn/go-isatty v0.0.12
 	github.com/naoina/go-stringutil v0.1.0 // indirect
 	github.com/naoina/toml v0.1.2-0.20170918210437-9fafd6967416
 	github.com/olekukonko/tablewriter v0.0.2-0.20190409134802-7e037d187b0c
@@ -56,11 +56,11 @@ require (
 	github.com/prometheus/tsdb v0.10.0
 	github.com/rs/cors v0.0.0-20160617231935-a62a804a8a00
 	github.com/rs/xhandler v0.0.0-20170707052532-1eb70cf1520d // indirect
-	github.com/spf13/cobra v0.0.5
+	github.com/spf13/cobra v0.0.7
 	github.com/status-im/keycard-go v0.0.0-20190424133014-d95853db0f48
 	github.com/steakknife/bloomfilter v0.0.0-20180922174646-6819c0d2a570
 	github.com/steakknife/hamming v0.0.0-20180906055917-c99c65617cd3 // indirect
-	github.com/stretchr/testify v1.4.0
+	github.com/stretchr/testify v1.5.1
 	github.com/tyler-smith/go-bip39 v1.0.2
 	github.com/ugorji/go/codec v1.1.7
 	github.com/urfave/cli v1.22.1
@@ -75,6 +75,5 @@ require (
 	gopkg.in/check.v1 v1.0.0-20190902080502-41f04d3bba15
 	gopkg.in/natefinch/npipe.v2 v2.0.0-20160621034901-c1b8fa8bdcce
 	gopkg.in/olebedev/go-duktape.v3 v3.0.0-20190213234257-ec84240a7772
-	gopkg.in/yaml.v2 v2.2.4 // indirect
 	gotest.tools v2.2.0+incompatible // indirect
 )

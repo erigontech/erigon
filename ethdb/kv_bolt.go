@@ -5,23 +5,20 @@ import (
 	"context"
 
 	"github.com/ledgerwatch/bolt"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/log"
 )
 
+type boltOpts struct {
+	Bolt *bolt.Options
+	path string
+}
+
 type BoltKV struct {
-	opts Options
+	opts boltOpts
 	bolt *bolt.DB
+	log  log.Logger
 }
-
-// Close closes BoltKV
-// All transactions must be closed before closing the database.
-func (db *BoltKV) Close() error {
-	return db.bolt.Close()
-}
-
-func (db *BoltKV) Options() Options {
-	return db.opts
-}
-
 type boltTx struct {
 	ctx context.Context
 	db  *BoltKV
@@ -48,10 +45,75 @@ type boltCursor struct {
 	err error
 }
 
+type noValuesBoltCursor struct {
+	boltCursor
+}
+
+func (opts boltOpts) InMem() boltOpts {
+	opts.Bolt.MemOnly = true
+	return opts
+}
+
+func (opts boltOpts) Path(path string) boltOpts {
+	opts.path = path
+	return opts
+}
+
+func (opts boltOpts) Open(ctx context.Context) (db KV, err error) {
+	boltDB, err := bolt.Open(opts.path, 0600, opts.Bolt)
+	if err != nil {
+		return nil, err
+	}
+	if err := boltDB.Update(func(tx *bolt.Tx) error {
+		for _, name := range dbutils.Buckets {
+			_, createErr := tx.CreateBucketIfNotExists(name, false)
+			if createErr != nil {
+				return createErr
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+	return &BoltKV{
+		opts: opts,
+		bolt: boltDB,
+		log:  log.New("bolt_db", opts.path),
+	}, nil
+}
+
+func (opts boltOpts) MustOpen(ctx context.Context) KV {
+	db, err := opts.Open(ctx)
+	if err != nil {
+		panic(err)
+	}
+	return db
+}
+
+func NewBolt() boltOpts {
+	return boltOpts{Bolt: bolt.DefaultOptions}
+}
+
+// Close closes BoltKV
+// All transactions must be closed before closing the database.
+func (db *BoltKV) Close() {
+	if err := db.bolt.Close(); err != nil {
+		db.log.Warn("failed to close bolt DB", "err", err)
+	} else {
+		db.log.Info("bolt database closed")
+	}
+}
+
+func (db *BoltKV) Begin(ctx context.Context, writable bool) (Tx, error) {
+	var err error
+	t := &boltTx{db: db, ctx: ctx}
+	t.bolt, err = db.bolt.Begin(writable)
+	return t, err
+}
+
 func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.View(func(tx *bolt.Tx) error {
-		defer t.cleanup()
 		t.bolt = tx
 		return f(t)
 	})
@@ -60,20 +122,27 @@ func (db *BoltKV) View(ctx context.Context, f func(tx Tx) error) (err error) {
 func (db *BoltKV) Update(ctx context.Context, f func(tx Tx) error) (err error) {
 	t := &boltTx{db: db, ctx: ctx}
 	return db.bolt.Update(func(tx *bolt.Tx) error {
-		defer t.cleanup()
 		t.bolt = tx
 		return f(t)
 	})
+}
+
+func (tx *boltTx) Commit(ctx context.Context) error {
+	return tx.bolt.Commit()
+}
+
+func (tx *boltTx) Rollback() error {
+	return tx.bolt.Rollback()
+}
+
+func (tx *boltTx) Yield() {
+	tx.bolt.Yield()
 }
 
 func (tx *boltTx) Bucket(name []byte) Bucket {
 	b := boltBucket{tx: tx, nameLen: uint(len(name))}
 	b.bolt = tx.bolt.Bucket(name)
 	return b
-}
-
-func (tx *boltTx) cleanup() {
-	// nothing to cleanup
 }
 
 func (c *boltCursor) Prefix(v []byte) Cursor {
@@ -126,9 +195,7 @@ func (b boltBucket) Delete(key []byte) error {
 }
 
 func (b boltBucket) Cursor() Cursor {
-	c := &boltCursor{bucket: b, ctx: b.tx.ctx}
-	// nothing to do
-	return c
+	return &boltCursor{bucket: b, ctx: b.tx.ctx, bolt: b.bolt.Cursor()}
 }
 
 func (c *boltCursor) initCursor() {
@@ -139,14 +206,16 @@ func (c *boltCursor) initCursor() {
 }
 
 func (c *boltCursor) First() ([]byte, []byte, error) {
-	c.initCursor()
-
-	if c.prefix != nil {
-		c.k, c.v = c.bolt.Seek(c.prefix)
-	} else {
+	if len(c.prefix) == 0 {
 		c.k, c.v = c.bolt.First()
+		return c.k, c.v, nil
 	}
-	return c.k, c.v, c.err
+
+	c.k, c.v = c.bolt.Seek(c.prefix)
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+	return c.k, c.v, nil
 }
 
 func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
@@ -156,10 +225,11 @@ func (c *boltCursor) Seek(seek []byte) ([]byte, []byte, error) {
 	default:
 	}
 
-	c.initCursor()
-
 	c.k, c.v = c.bolt.Seek(seek)
-	return c.k, c.v, c.err
+	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+	return c.k, c.v, nil
 }
 
 func (c *boltCursor) Next() ([]byte, []byte, error) {
@@ -170,10 +240,10 @@ func (c *boltCursor) Next() ([]byte, []byte, error) {
 	}
 
 	c.k, c.v = c.bolt.Next()
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
+	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
 		return nil, nil, nil
 	}
-	return c.k, c.v, c.err
+	return c.k, c.v, nil
 }
 
 func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
@@ -192,11 +262,7 @@ func (c *boltCursor) Walk(walker func(k, v []byte) (bool, error)) error {
 	return nil
 }
 
-type noValuesBoltCursor struct {
-	boltCursor
-}
-
-func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint64) (bool, error)) error {
+func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint32) (bool, error)) error {
 	for k, vSize, err := c.First(); k != nil || err != nil; k, vSize, err = c.Next() {
 		if err != nil {
 			return err
@@ -212,49 +278,43 @@ func (c *noValuesBoltCursor) Walk(walker func(k []byte, vSize uint64) (bool, err
 	return nil
 }
 
-func (c *noValuesBoltCursor) First() ([]byte, uint64, error) {
-	c.initCursor()
-
-	var vSize uint64
-	var v []byte
-	if c.prefix != nil {
-		c.k, v = c.bolt.Seek(c.prefix)
-	} else {
-		c.k, v = c.bolt.First()
+func (c *noValuesBoltCursor) First() ([]byte, uint32, error) {
+	if len(c.prefix) == 0 {
+		c.k, c.v = c.bolt.First()
+		return c.k, uint32(len(c.v)), nil
 	}
-	vSize = uint64(len(v))
-	return c.k, vSize, c.err
+
+	c.k, c.v = c.bolt.Seek(c.prefix)
+	if !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+	return c.k, uint32(len(c.v)), nil
 }
 
-func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint64, error) {
+func (c *noValuesBoltCursor) Seek(seek []byte) ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
 	default:
 	}
 
-	c.initCursor()
-
-	var vSize uint64
-	var v []byte
-	c.k, v = c.bolt.Seek(seek)
-	vSize = uint64(len(v))
-	return c.k, vSize, c.err
+	c.k, c.v = c.bolt.Seek(seek)
+	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
+		c.k, c.v = nil, nil
+	}
+	return c.k, uint32(len(c.v)), nil
 }
 
-func (c *noValuesBoltCursor) Next() ([]byte, uint64, error) {
+func (c *noValuesBoltCursor) Next() ([]byte, uint32, error) {
 	select {
 	case <-c.ctx.Done():
 		return nil, 0, c.ctx.Err()
 	default:
 	}
 
-	var vSize uint64
-	var v []byte
-	c.k, v = c.bolt.Next()
-	vSize = uint64(len(v))
-	if c.prefix != nil && !bytes.HasPrefix(c.k, c.prefix) {
+	c.k, c.v = c.bolt.Next()
+	if len(c.prefix) != 0 && !bytes.HasPrefix(c.k, c.prefix) {
 		return nil, 0, nil
 	}
-	return c.k, vSize, c.err
+	return c.k, uint32(len(c.v)), nil
 }
