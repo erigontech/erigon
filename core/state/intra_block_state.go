@@ -905,9 +905,6 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
-		if common.IsCanceled(ctx) {
-			return ctx.Err()
-		}
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if err := updateAccount(ctx, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err

@@ -321,16 +321,10 @@ func Stateless(
 				return
 			}
 		} else {
-			if blockNum == 147959 {
-				fmt.Printf("Before ResolveStateTrie\n")
-			}
 			var resolveWitnesses []*trie.Witness
 			if resolveWitnesses, err = tds.ResolveStateTrie(witnessDBWriter != nil, false); err != nil {
 				fmt.Printf("Failed to resolve state trie: %v\n", err)
 				return
-			}
-			if blockNum == 147959 {
-				fmt.Printf("After ResolveStateTrie\n")
 			}
 			if len(resolveWitnesses) > 0 {
 				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
@@ -450,8 +444,7 @@ func Stateless(
 		}
 		tds.SetBlockNr(blockNum)
 
-		commitBlockCtx := context.Background() // because .CommitBlock must not be interrupted
-		err = statedb.CommitBlock(commitBlockCtx, tds.DbStateWriter())
+		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
 		if err != nil {
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
