@@ -1965,6 +1965,8 @@ func indexSize(chaindata string) {
 			fmt.Println(j)
 			i=0
 		}
+		i++
+		j++
 		if len(v)> maxLenAcc {
 			maxLenAcc=len(v)
 		}
@@ -1982,6 +1984,8 @@ func indexSize(chaindata string) {
 			fmt.Println(j)
 			i=0
 		}
+		i++
+		j++
 		if len(v)> maxLenSt {
 			maxLenSt=len(v)
 		}
