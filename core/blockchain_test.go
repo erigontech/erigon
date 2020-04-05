@@ -173,7 +173,6 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		parent := blockchain.GetBlockByHash(block.ParentHash())
 		tds := state.NewTrieDbState(parent.Root(), blockchain.db, parent.NumberU64())
-		tds.Rebuild()
 		statedb := state.New(tds)
 		if err = blockchain.db.DeleteTimestamp(block.NumberU64()); err != nil {
 			return err

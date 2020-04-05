@@ -215,9 +215,6 @@ func Stateless(
 		}
 	}()
 	tds := state.NewTrieDbState(preRoot, batch, blockNum-1)
-	if blockNum > 1 {
-		tds.Rebuild()
-	}
 	tds.SetResolveReads(false)
 	tds.SetNoHistory(!writeHistory)
 	interrupt := false
