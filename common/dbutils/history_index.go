@@ -2,6 +2,7 @@ package dbutils
 
 import (
 	"encoding/binary"
+	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
@@ -67,8 +68,8 @@ func (hi *HistoryIndexBytes) Append(v uint64) *HistoryIndexBytes {
 	return hi
 }
 
-func (hi *HistoryIndexBytes) Len() uint32 {
-	return binary.LittleEndian.Uint32((*hi)[0:LenBytes])
+func (hi HistoryIndexBytes) Len() uint32 {
+	return binary.LittleEndian.Uint32(hi[:LenBytes])
 }
 
 //most common operation is remove one from the tail
@@ -110,7 +111,32 @@ Loop:
 	return hi
 }
 
-func (hi *HistoryIndexBytes) Search(v uint64) (uint64, bool) {
+func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
+	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
+	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
+
+	idx := sort.Search(numOfElements, func (i int) bool {
+		if i > numOfUint32Elements {
+			elemStart := LenBytes*2 + numOfUint32Elements*4 + (i-numOfUint32Elements)*8
+			num := binary.LittleEndian.Uint64(hi[elemStart:])
+			return num >= v
+		}
+		elemStart := LenBytes*2 + i*4
+		num := uint64(binary.LittleEndian.Uint32(hi[elemStart:]))
+		return num >= v
+	})
+	if idx == numOfElements {
+		return 0, false
+	}
+	if idx > numOfUint32Elements {
+		elemStart := LenBytes*2 + numOfUint32Elements*4 + (idx-numOfUint32Elements)*8
+		return binary.LittleEndian.Uint64(hi[elemStart:]), true
+	}
+	elemStart := LenBytes*2 + idx*4
+	return uint64(binary.LittleEndian.Uint32(hi[elemStart:])), true
+}
+
+func (hi *HistoryIndexBytes) Search1(v uint64) (uint64, bool) {
 	if len(*hi) < 4 {
 		return 0, false
 	}
