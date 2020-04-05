@@ -112,6 +112,9 @@ Loop:
 }
 
 func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
+	if len(hi) == 0 {
+		return 0, false
+	}
 	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
 	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
 	elements := hi[LenBytes*2:]
