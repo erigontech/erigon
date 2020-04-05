@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"bytes"
 	"fmt"
 	"math/big"
 	"testing"
@@ -12,55 +11,9 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/rlp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-func TestRebuild(t *testing.T) {
-	t.Skip("should be restored. skipped for turbo-geth")
-
-	db := ethdb.NewMemDatabase()
-	defer db.Close()
-	bucket := dbutils.AccountsBucket
-	tr := New(common.Hash{})
-
-	keys := []string{
-		"FIRSTFIRSTFIRSTFIRSTFIRSTFIRSTFI",
-		"SECONDSECONDSECONDSECONDSECONDSE",
-		"FISECONDSECONDSECONDSECONDSECOND",
-		"FISECONDSECONDSECONDSECONDSECONB",
-		"THIRDTHIRDTHIRDTHIRDTHIRDTHIRDTH",
-	}
-	values := []string{
-		"FIRST",
-		"SECOND",
-		"THIRD",
-		"FORTH",
-		"FIRTH",
-	}
-
-	for i := 0; i < len(keys); i++ {
-		key := []byte(keys[i])
-		value := []byte(values[i])
-		v1, err := rlp.EncodeToBytes(bytes.TrimLeft(value, "\x00"))
-		if err != nil {
-			t.Errorf("Could not encode value: %v", err)
-		}
-		tr.Update(key, v1)
-		tr.PrintTrie()
-		root1 := tr.Root()
-		//fmt.Printf("Root1: %x\n", tr.Root())
-		v1, err = EncodeAsValue(v1)
-		if err != nil {
-			t.Errorf("Could not encode value: %v", err)
-		}
-		err = db.Put(bucket, key, v1)
-		require.NoError(t, err)
-		t1 := New(common.BytesToHash(root1))
-		_ = t1.Rebuild(db, 0)
-	}
-}
 
 // Put 1 embedded entry into the database and try to resolve it
 func TestResolve1(t *testing.T) {

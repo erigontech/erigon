@@ -836,20 +836,6 @@ func (tds *TrieDbState) clearUpdates() {
 	tds.aggregateBuffer = nil
 }
 
-func (tds *TrieDbState) Rebuild() error {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-	err := tds.t.Rebuild(tds.db, tds.blockNr)
-	if err != nil {
-		return err
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-	return nil
-}
-
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.setBlockNr(blockNr)
 	tds.tp.SetBlockNr(blockNr)

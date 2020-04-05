@@ -7,27 +7,11 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var emptyHash [32]byte
 
 type ResolveFunc func(*Resolver) error
-
-func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
-	if t.root == nil {
-		return nil
-	}
-	n, ok := t.root.(hashNode)
-	if !ok {
-		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
-	}
-	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
-		return err
-	}
-	log.Info("Rebuilt top of account trie and verified", "root hash", n)
-	return nil
-}
 
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
@@ -236,11 +220,4 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 	tr.witnesses = append(tr.witnesses, witness)
 
 	return hookSubtrie(currentReq, hbRoot, hbHash)
-}
-
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
-	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(5, accounts, blockNr)
-	r.AddRequest(req)
-	return r.ResolveWithDb(db, blockNr, false)
 }
