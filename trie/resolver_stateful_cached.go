@@ -385,9 +385,21 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
-			//if blockNr > TraceFromBlock {
 			if tr.trace {
 				fmt.Printf("For loop: %x, %x\n", cacheK, k)
+			}
+
+			// Special case: self-destructed accounts.
+			// self-destructed accounts may be marked in IH bucket by empty value
+			// in this case: skip all IH keys of given prefix
+			if cacheV != nil && len(cacheV) == 0 {
+				next, ok := nextSubtree(cacheK)
+				if !ok { // no siblings left
+					cacheK, cacheV = nil, nil
+					continue
+				}
+				cacheK, cacheV = cache.Seek(next)
+				continue
 			}
 
 			// for Address bucket, skip cache keys longer than 31 bytes
@@ -510,39 +522,24 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			// cache part
 			canUseCache := false
 
-			// Special case: self-destructed accounts.
-			// self-destructed accounts may be marked in cache bucket by empty value
-			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
-			isSelfDestructedMarker := len(cacheV) == 0
-			if isSelfDestructedMarker {
-				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
-					keyAsNibbles.Reset()
-					DecompressNibbles(minKey, &keyAsNibbles.B)
-					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
-						return err
-					}
-				}
-				// skip subtree
-			} else {
-				currentReq := tr.requests[tr.reqIndices[rangeIdx]]
-				currentRs := tr.rss[rangeIdx]
-				keyAsNibbles.Reset()
-				DecompressNibbles(minKey, &keyAsNibbles.B)
+			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
+			currentRs := tr.rss[rangeIdx]
+			keyAsNibbles.Reset()
+			DecompressNibbles(minKey, &keyAsNibbles.B)
 
-				if len(keyAsNibbles.B) < currentReq.extResolvePos {
-					cacheK, cacheV = cache.Next() // go to children, not to sibling
-					continue
-				}
+			if len(keyAsNibbles.B) < currentReq.extResolvePos {
+				cacheK, cacheV = cache.Next() // go to children, not to sibling
+				continue
+			}
 
-				canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-				if !canUseCache { // can't use cache as is, need go to children
-					cacheK, cacheV = cache.Next() // go to children, not to sibling
-					continue
-				}
+			canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			if !canUseCache { // can't use cache as is, need go to children
+				cacheK, cacheV = cache.Next() // go to children, not to sibling
+				continue
+			}
 
-				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
-					return fmt.Errorf("waker err: %w", err)
-				}
+			if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
+				return fmt.Errorf("waker err: %w", err)
 			}
 
 			// skip subtree

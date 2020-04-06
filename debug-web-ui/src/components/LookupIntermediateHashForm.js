@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 
 import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
-import { Spinner, Table } from 'react-bootstrap';
+import { Form, Spinner, Table } from 'react-bootstrap';
 
 import SearchField from './SearchField.js';
 
-const search = (prefix, api, setState) => {
+const search = (prefix, tombstones, api, setState) => {
   setState({ hashes: undefined, loading: true });
 
   const lookupSuccess = (response) => setState({ hashes: response.data, loading: false });
@@ -18,18 +18,22 @@ const search = (prefix, api, setState) => {
     });
   };
 
-  return api.lookupStorageTombstones(prefix).then(lookupSuccess).catch(lookupFail);
+  return api.lookupStorageTombstones(prefix, tombstones).then(lookupSuccess).catch(lookupFail);
 };
 
-const LookupStorageTombstonesForm = ({ api }) => {
+const LookupIntermediateHashForm = ({ api }) => {
   const [state, setState] = useState({ hashes: undefined, loading: false });
 
   return (
     <div>
+      <SearchField
+        placeholder="lookup by prefix"
+        disabled={state.loading}
+        onSubmit={(data) => search(data.search, data.tombstones, api, setState)}
+      >
+        <Form.Check name="tombstones" type="checkbox" label="Show tombstones" />
+      </SearchField>
       {state.loading && <Spinner animation="border" />}
-      {!state.loading && (
-        <SearchField placeholder="lookup by prefix" onClick={(prefix) => search(prefix, api, setState)} />
-      )}
       {state.hashes && <Details hashes={state.hashes} />}
     </div>
   );
@@ -42,10 +46,10 @@ const Details = ({ hashes }) => (
         <thead>
           <tr>
             <th>
-              <strong>Prefix</strong>
+              <strong>Key</strong>
             </th>
             <th>
-              <strong>Hide storage</strong>
+              <strong>Value</strong>
             </th>
           </tr>
         </thead>
@@ -60,14 +64,14 @@ const Details = ({ hashes }) => (
 );
 
 const TableRow = ({ item }) => {
-  const { prefix, hideStorage } = item;
+  const { prefix, value } = item;
 
   return (
     <tr>
       <td className="text-monospace">{prefix}</td>
-      <td className={hideStorage ? '' : 'bg-danger'}>{hideStorage ? 'yes' : 'no'}</td>
+      <td className="text-monospace">{value}</td>
     </tr>
   );
 };
 
-export default LookupStorageTombstonesForm;
+export default LookupIntermediateHashForm;

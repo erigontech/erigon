@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -789,7 +788,6 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	debug.IntermediateTrieHashAssertDbIntegrity = true
 	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()

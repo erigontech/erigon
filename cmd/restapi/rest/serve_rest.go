@@ -49,7 +49,7 @@ func ServeREST(ctx context.Context, localAddress, remoteDBAddress string) error 
 	if err = apis.RegisterStorageAPI(root.Group("storage"), e); err != nil {
 		return err
 	}
-	if err = apis.RegisterStorageTombstonesAPI(root.Group("storage-tombstones"), e); err != nil {
+	if err = apis.RegisterIntermediateHashAPI(root.Group("intermediate-hash"), e); err != nil {
 		return err
 	}
 
