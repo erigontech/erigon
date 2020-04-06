@@ -288,7 +288,7 @@ func (api *PrivateDebugAPI) traceChain(ctx context.Context, start, end *types.Bl
 			// Finalize the state so any modifications are written to the trie
 			ctx := api.eth.blockchain.Config().WithEIPsFlags(context.Background(), big.NewInt(int64(number)))
 			tds.SetBlockNr(number)
-			err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+			err = statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */))
 			if err != nil {
 				failed = err
 				break

@@ -150,7 +150,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if !ok {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	block, _, _, _ := t.genesis(config).ToBlock(nil)
+	block, _, _, _ := t.genesis(config).ToBlock(nil, false /* history */)
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))
@@ -182,7 +182,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 		return nil, nil, common.Hash{}, err
 	}
 	// And _now_ get the state root
-	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
 	//fmt.Printf("\n before\n%s\n", tds.Dump())
@@ -196,7 +196,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if err = statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
-	if err = statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err = statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		return nil, nil, common.Hash{}, err
 	}
 	//fmt.Printf("\nbefore%s\n", tds.Dump())
@@ -244,7 +244,7 @@ func MakePreState(ctx context.Context, db ethdb.Database, accounts core.GenesisA
 	}
 
 	tds.SetBlockNr(blockNr + 1)
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		return nil, nil, err
 	}
 	statedb = state.New(tds)

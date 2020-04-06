@@ -199,7 +199,7 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 
 // Assumes that bucket, key, and value won't be modified
 func (m *mutation) PutS(hBucket, key, value []byte, timestamp uint64, noHistory bool) error {
-	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d\n", bucket, key, value, timestamp)
+	//fmt.Printf("PutS bucket %x key %x value %x timestamp %d, noHistory %t\n", hBucket, key, value, timestamp, noHistory)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

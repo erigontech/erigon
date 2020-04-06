@@ -191,9 +191,9 @@ func Stateless(
 	}
 	var preRoot common.Hash
 	if blockNum == 1 {
-		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
+		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory)
 		check(err)
-		genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
+		genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
 		check(err)
 		preRoot = genesisBlock.Header().Root
 	} else {
@@ -441,7 +441,7 @@ func Stateless(
 		}
 		tds.SetBlockNr(blockNum)
 
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+		err = statedb.CommitBlock(ctx, tds.DbStateWriter(writeHistory))
 		if err != nil {
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return

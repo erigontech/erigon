@@ -13,6 +13,7 @@ import (
 
 type DbStateWriter struct {
 	tds *TrieDbState
+	csw *ChangeSetWriter
 }
 
 func originalAccountData(original *accounts.Account, omitHashes bool) []byte {

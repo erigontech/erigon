@@ -138,7 +138,7 @@ func TestIntermediateLeaks(t *testing.T) {
 
 	transTds.SetBlockNr(1)
 
-	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter())
+	err = transState.CommitBlock(context.Background(), transTds.DbStateWriter(false /* history */))
 	if err != nil {
 		t.Fatal("failed to commit transition state", err)
 	}
@@ -154,7 +154,7 @@ func TestIntermediateLeaks(t *testing.T) {
 	}
 
 	finalTds.SetBlockNr(1)
-	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter()); err != nil {
+	if err := finalState.CommitBlock(context.Background(), finalTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatalf("failed to commit final state: %v", err)
 	}
 	finalKeys, err := finalDb.Keys()
@@ -458,7 +458,7 @@ func (s *StateSuite) TestTouchDelete(c *check.C) {
 
 	s.tds.SetBlockNr(1)
 
-	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter())
+	err = s.state.CommitBlock(context.Background(), s.tds.DbStateWriter(false /* history */))
 	if err != nil {
 		c.Fatal("error while commit", err)
 	}

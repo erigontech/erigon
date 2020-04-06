@@ -1287,7 +1287,7 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		if err != nil {
 			return err
 		}
-		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
+		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis, true /* history */)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)
 		}

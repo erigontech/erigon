@@ -1232,7 +1232,13 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 
-func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
+// DbStateWriter creates a writer that is designed to write changes into the database batch
+// `history` flag allows to collect the history, which will need to be written by the
+// `WriteHistory` function
+func (tds *TrieDbState) DbStateWriter(history bool) *DbStateWriter {
+	if history {
+		return &DbStateWriter{tds: tds, csw: NewChangeSetWriter()}
+	}
 	return &DbStateWriter{tds: tds}
 }
 

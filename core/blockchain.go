@@ -1275,7 +1275,7 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 
 	ctx = bc.WithContext(ctx, block.Number())
 	if stateDb != nil {
-		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter(!bc.NoHistory())); err != nil {
 			return NonStatTy, err
 		}
 	}

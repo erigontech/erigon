@@ -631,7 +631,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil)
+	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil, false /* history */)
 	check(err)
 	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
@@ -1015,7 +1015,7 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
+	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
 	check(err)
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisBlock.Header())
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
@@ -1951,6 +1951,7 @@ func indexSize(chaindata string) {
 	j:=0
 	maxLenAcc:=0
 	maxLenSt:=0
+	accountsOver4096 := 0
 	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if i>10000 {
 			fmt.Println(j)
@@ -1961,6 +1962,9 @@ func indexSize(chaindata string) {
 		if len(v)> maxLenAcc {
 			maxLenAcc=len(v)
 		}
+		if len(v) > 4096 {
+			accountsOver4096++
+		}
 		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
 		if err!=nil {
 			panic(err)
@@ -1970,6 +1974,7 @@ func indexSize(chaindata string) {
 	})
 	i=0
 	j=0
+	storageOver4096 := 0
 	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if i>10000 {
 			fmt.Println(j)
@@ -1979,6 +1984,9 @@ func indexSize(chaindata string) {
 		j++
 		if len(v)> maxLenSt {
 			maxLenSt=len(v)
+		}
+		if len(v) > 4096 {
+			storageOver4096++
 		}
 		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
 		if err!=nil {
@@ -1991,6 +1999,8 @@ func indexSize(chaindata string) {
 	fmt.Println("Results:")
 	fmt.Println("maxLenAcc:", maxLenAcc)
 	fmt.Println("maxLenSt:", maxLenSt)
+	fmt.Println("account over 4096 index:", accountsOver4096)
+	fmt.Println("storage over 4096 index:", storageOver4096)
 }
 
 func main() {

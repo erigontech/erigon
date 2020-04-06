@@ -87,7 +87,7 @@ func TestAccountRange(t *testing.T) {
 			m[addr] = true
 		}
 	}
-	state.CommitBlock(context.Background(), tds.DbStateWriter())
+	state.CommitBlock(context.Background(), tds.DbStateWriter(false /* history */))
 
 	t.Logf("test getting number of results less than max")
 	accountRangeTest(t, statedb, &common.Hash{0x0}, AccountRangeMaxResults/2, AccountRangeMaxResults/2)
@@ -216,7 +216,7 @@ func TestStorageRangeAt(t *testing.T) {
 
 	tds.SetBlockNr(1)
 
-	err = statedb.CommitBlock(context.Background(), tds.DbStateWriter())
+	err = statedb.CommitBlock(context.Background(), tds.DbStateWriter(false /* history */))
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}

@@ -65,7 +65,7 @@ func (s *StateSuite) TestDump(c *checker.C) {
 
 	s.tds.SetBlockNr(1)
 
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter(false /* history */))
 	c.Check(err, checker.IsNil)
 
 	// check that dump contains the state objects that are in trie
@@ -120,7 +120,7 @@ func (s *StateSuite) TestNull(c *checker.C) {
 
 	s.tds.SetBlockNr(1)
 
-	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter())
+	err = s.state.CommitBlock(ctx, s.tds.DbStateWriter(false /* history */))
 	c.Check(err, checker.IsNil)
 
 	if value := s.state.GetCommittedState(address, common.Hash{}); value != (common.Hash{}) {
@@ -198,7 +198,7 @@ func TestSnapshot2(t *testing.T) {
 
 	tds.SetBlockNr(1)
 
-	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	err = state.CommitBlock(ctx, tds.DbStateWriter(false /* history */))
 	if err != nil {
 		t.Fatal("error while committing state", err)
 	}
@@ -321,7 +321,7 @@ func TestDump(t *testing.T) {
 
 	tds.SetBlockNr(1)
 
-	err = state.CommitBlock(ctx, tds.DbStateWriter())
+	err = state.CommitBlock(ctx, tds.DbStateWriter(false /* history */))
 	if err != nil {
 		t.Fatal(err)
 	}

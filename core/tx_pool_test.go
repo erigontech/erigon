@@ -218,7 +218,7 @@ func TestStateChangeDuringTransactionPoolReset(t *testing.T) {
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	blockchain := &testChain{&testBlockChain{statedb, tds, 1000000000, new(event.Feed)}, address, &trigger}
@@ -308,7 +308,7 @@ func TestTransactionQueue(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -352,7 +352,7 @@ func TestTransactionQueue2(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	pool.reset(nil, nil)
@@ -404,7 +404,7 @@ func TestTransactionChainFork(t *testing.T) {
 		if _, err := tds.ComputeTrieRoots(); err != nil {
 			t.Fatal(err)
 		}
-		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -446,7 +446,7 @@ func TestTransactionDoubleNonce(t *testing.T) {
 		if _, err := tds.ComputeTrieRoots(); err != nil {
 			t.Fatal(err)
 		}
-		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -531,7 +531,7 @@ func TestTransactionNonceRecovery(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -550,7 +550,7 @@ func TestTransactionNonceRecovery(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -578,7 +578,7 @@ func TestTransactionDropping(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -627,7 +627,7 @@ func TestTransactionDropping(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -707,7 +707,7 @@ func TestTransactionPostponing(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	// Add a batch consecutive pending transactions for validation
@@ -760,7 +760,7 @@ func TestTransactionPostponing(t *testing.T) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -1857,7 +1857,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	if _, err := pool.currentTds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter()); err != nil {
+	if err := pool.currentState.CommitBlock(ctx, pool.currentTds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1895,7 +1895,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	blockchain = &testBlockChain{statedb, tds, 1000000, new(event.Feed)}
@@ -1928,7 +1928,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	<-pool.requestReset(nil, nil)
@@ -1944,7 +1944,7 @@ func testTransactionJournaling(t *testing.T, nolocals bool) {
 	if _, err := tds.ComputeTrieRoots(); err != nil {
 		t.Fatal(err)
 	}
-	if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+	if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 		t.Fatal(err)
 	}
 	blockchain = &testBlockChain{statedb, tds, 1000000, new(event.Feed)}

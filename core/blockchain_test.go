@@ -190,7 +190,7 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		blockchain.chainmu.Lock()
 		tds.SetBlockNr(block.NumberU64())
-		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
 			return err
 		}
 		if _, err := blockchain.db.Commit(); err != nil {
@@ -1532,7 +1532,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
-		genesis = gspec.MustCommit(db)
+		genesis, _, _ = gspec.Commit(db, history)
 	)
 
 	cacheConfig := &CacheConfig{

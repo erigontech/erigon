@@ -147,7 +147,13 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideIstanbul, config.OverrideMuirGlacier)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(
+		chainDb,
+		config.Genesis,
+		config.OverrideIstanbul,
+		config.OverrideMuirGlacier,
+		config.StorageMode.History,
+	)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}
@@ -658,11 +664,6 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 		return err
 	}
 
-	err = setModeOnEmpty(db, dbutils.StorageModeThinHistory, sm.ThinHistory)
-	if err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -713,12 +714,6 @@ func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 		return StorageMode{}, err
 	}
 	sm.TxIndex = len(v) > 0
-
-	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
-	if err != nil && err != ethdb.ErrKeyNotFound {
-		return StorageMode{}, err
-	}
-	sm.ThinHistory = len(v) > 0
 
 	return sm, nil
 }
