@@ -54,6 +54,10 @@ func (bg *BlockGenerator) GetHeaderByHash(hash common.Hash) *types.Header {
 	return bg.headersByHash[hash]
 }
 
+func (bg *BlockGenerator) Genesis() *types.Block {
+	return bg.genesisBlock
+}
+
 func (bg *BlockGenerator) GetHeaderByNumber(number uint64) *types.Header {
 	return bg.headersByNumber[number]
 }
@@ -466,7 +470,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	if err := bg.blocksToFile(outputFile, blocks); err != nil {
 		return nil, err
 	}
-	base.forkId.Next = forkBase
+
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	bg.forkId = forkid.NewID(blockchain)
+
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
 		return nil, err
