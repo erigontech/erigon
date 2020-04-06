@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -683,6 +684,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
+			_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -706,6 +708,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
+						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -802,11 +805,23 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
+			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
 
 	return roots, nil
+}
+
+func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
+	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
+	if err != nil {
+		if errors.Is(err, ethdb.ErrKeyNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return v != nil && len(v) == 0, nil
 }
 
 func (tds *TrieDbState) clearUpdates() {

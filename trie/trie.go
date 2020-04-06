@@ -616,7 +616,8 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		newNode = n
 		return
 	default:
-		panic(fmt.Sprintf("%T: invalid node: %v. Searched by: key=%x, pos=%d", n, n, key, pos))
+		fmt.Printf("Key: %x, Pos: %d\n", key, pos)
+		panic(fmt.Sprintf("%T: invalid node: %v", n, n))
 	}
 }
 

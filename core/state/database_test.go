@@ -17,12 +17,14 @@
 package state_test
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -39,6 +41,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // Create revival problem
@@ -1151,6 +1154,206 @@ func TestWrongIncarnation2(t *testing.T) {
 		t.Fatal("wrong incarnation", acc.Incarnation)
 	}
 
+}
+
+func TestClearTombstonesForReCreatedAccount(t *testing.T) {
+	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
+
+	accKey := fmt.Sprintf("11%062x", 0)
+	k1 := fmt.Sprintf("11%062x", 0)
+	k2 := fmt.Sprintf("2211%062x", 0)
+	k3 := fmt.Sprintf("2233%062x", 0)
+	k4 := fmt.Sprintf("44%062x", 0)
+
+	storageKey := func(incarnation uint64, storageKey string) []byte {
+		return append(dbutils.GenerateStoragePrefix(common.HexToHash(accKey), incarnation), common.FromHex(storageKey)...)
+	}
+
+	putStorage := func(incarnation uint64, k string, v string) {
+		err := db.Put(dbutils.StorageBucket, storageKey(incarnation, k), common.FromHex(v))
+		require.NoError(err)
+	}
+
+	checkProps := func() {
+		if err := db.KV().View(func(tx *bolt.Tx) error {
+			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
+
+			for k, v := inter.First(); k != nil; k, v = inter.Next() {
+				if len(v) > 0 {
+					continue
+				}
+
+				// each tomb must cover storage
+				addrHash := common.CopyBytes(k[:common.HashLength])
+				storageK, _ := storage.Seek(addrHash)
+				if !bytes.HasPrefix(storageK, addrHash) {
+					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+				} else {
+					incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
+					hideStorage := false
+					for ; incarnation > 0; incarnation-- {
+						kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
+						kWithInc = append(kWithInc, k[common.HashLength:]...)
+						storageK, _ = storage.Seek(kWithInc)
+						if bytes.HasPrefix(storageK, kWithInc) {
+							hideStorage = true
+						}
+					}
+					if !hideStorage {
+						panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
+					}
+				}
+			}
+			return nil
+		}); err != nil {
+			panic(err)
+		}
+	}
+
+	//printBucket := func() {
+	//	fmt.Printf("IH bucket print\n")
+	//	_ = db.HasKV().View(func(tx *bolt.Tx) error {
+	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
+	//			if len(v) == 0 {
+	//				fmt.Printf("IH: %x\n", k)
+	//			}
+	//			return nil
+	//		})
+	//		return nil
+	//	})
+	//	fmt.Printf("IH bucket print END\n")
+	//}
+
+	acc := accounts.NewAccount()
+	acc.Incarnation = 1
+	encodedAcc := make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(encodedAcc)
+	err := db.Put(dbutils.AccountsBucket, common.FromHex(accKey), encodedAcc)
+	require.NoError(err)
+
+	putStorage(2, k1, "hi")
+	putStorage(2, k2, "hi")
+	putStorage(2, k3, "hi")
+	putStorage(2, k4, "hi")
+
+	// step 1: delete account
+	batch := db.NewBatch()
+	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	untouchedAcc := fmt.Sprintf("99%062x", 0)
+	checks := map[string]bool{
+		accKey:       true,
+		untouchedAcc: false,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 2: re-create account
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForReCreatedAccount(batch, common.HexToHash(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey:        false,
+		accKey + "11": true,
+		accKey + "22": true,
+		accKey + "aa": false,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 3: re-create storage
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k2))
+	require.NoError(err)
+	_, err = batch.Commit()
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey + "11":     true,
+		accKey + k2:       false,
+		accKey + "22":     false,
+		accKey + "2200":   false,
+		accKey + "2211":   false,
+		accKey + "2233":   true,
+		accKey + "223300": false,
+		accKey + "22ab":   false,
+		accKey + "44":     true,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 4: create one new storage
+	batch = db.NewBatch()
+	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k4))
+	require.NoError(err)
+	_, err = batch.Commit()
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey + k2:         false, // results of step2 preserved
+		accKey + "22":       false, // results of step2 preserved
+		accKey + "2211":     false, // results of step2 preserved
+		accKey + "22110000": false, // results of step2 preserved
+		accKey + "2233":     true,  // results of step2 preserved
+		accKey + "44":       false, // results of step2 preserved
+	}
+
+	for k, expect := range checks {
+		ok, err := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err, k)
+		assert.Equal(expect, ok, k)
+	}
+
+	// step 5: delete account again - it must remove all tombstones and keep only 1 which will cover account itself
+	batch = db.NewBatch()
+	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
+	require.NoError(err)
+	_, err = batch.Commit()
+	require.NoError(err)
+	//printBucket()
+	checkProps()
+
+	checks = map[string]bool{
+		accKey:       true,
+		untouchedAcc: false,
+
+		// accKey + "2233" was true on previous step, don't delete this tombstone even one with shorter prefix exists.
+		// Because account creation must do predictable amount of operations.
+		accKey + "2233": true,
+	}
+
+	for k, expect := range checks {
+		ok, err1 := state.HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
+		assert.Equal(expect, ok, k)
+	}
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {

@@ -16,6 +16,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
+const TraceFromBlock uint64 = 258199
+
 type ResolverStatefulCached struct {
 	*ResolverStateful
 	fromCache bool
@@ -249,6 +251,9 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
+	//if isAccount && fromCache {
+	//	buf := pool.GetBuffer(256)
+	//	CompressNibbles(kAsNibbles, &buf.B)
 	if tr.trace {
 		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, kAsNibbles, v, fromCache)
 	}
@@ -380,6 +385,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var minKey []byte
 		var fromCache bool
 		for k != nil || cacheK != nil {
+			//if blockNr > TraceFromBlock {
 			if tr.trace {
 				fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			}
@@ -502,29 +508,41 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			}
 
 			// cache part
-			if len(cacheV) == 0 { // skip empty values
-				cacheK, cacheV = cache.Next()
-				continue
-			}
+			canUseCache := false
 
-			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
-			currentRs := tr.rss[rangeIdx]
-			keyAsNibbles.Reset()
-			DecompressNibbles(minKey, &keyAsNibbles.B)
+			// Special case: self-destructed accounts.
+			// self-destructed accounts may be marked in cache bucket by empty value
+			// in this case: account - add to Trie, storage - skip with subtree (it will be deleted by a background pruner)
+			isSelfDestructedMarker := len(cacheV) == 0
+			if isSelfDestructedMarker {
+				if isAccountBucket && len(v) > 0 && bytes.Equal(k, cacheK) {
+					keyAsNibbles.Reset()
+					DecompressNibbles(minKey, &keyAsNibbles.B)
+					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
+						return err
+					}
+				}
+				// skip subtree
+			} else {
+				currentReq := tr.requests[tr.reqIndices[rangeIdx]]
+				currentRs := tr.rss[rangeIdx]
+				keyAsNibbles.Reset()
+				DecompressNibbles(minKey, &keyAsNibbles.B)
 
-			if len(keyAsNibbles.B) < currentReq.extResolvePos {
-				cacheK, cacheV = cache.Next() // go to children, not to sibling
-				continue
-			}
+				if len(keyAsNibbles.B) < currentReq.extResolvePos {
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
 
-			canUseCache := currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
-			if !canUseCache { // can't use cache as is, need go to children
-				cacheK, cacheV = cache.Next() // go to children, not to sibling
-				continue
-			}
+				canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+				if !canUseCache { // can't use cache as is, need go to children
+					cacheK, cacheV = cache.Next() // go to children, not to sibling
+					continue
+				}
 
-			if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
-				return fmt.Errorf("waker err: %w", err)
+				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
+					return fmt.Errorf("waker err: %w", err)
+				}
 			}
 
 			// skip subtree
