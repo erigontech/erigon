@@ -95,7 +95,7 @@ test: semantics/z3/build/libz3.a all
 
 lint: lintci
 
-lintci:
+lintci: semantics/z3/build/libz3.a all
 	@echo "--> Running linter for code diff versus commit $(LATEST_COMMIT)"
 	@./build/bin/golangci-lint run \
 	    --new-from-rev=$(LATEST_COMMIT) \
