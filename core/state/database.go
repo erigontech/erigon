@@ -947,12 +947,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				continue
 			}
 			alreadyCreated[addrHash] = struct{}{}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
-			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
+
 			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
 
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
