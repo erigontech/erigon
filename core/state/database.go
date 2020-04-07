@@ -298,12 +298,33 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 	}
 
 	var toPut [][]byte
-	//var toDelete [][]byte
+	toDelete := map[string]struct{}{}
 
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		for k, v := c.Seek(storageKeyNoInc[:common.HashLength]); k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, storageKeyNoInc[:common.HashLength]) {
+
+		i := common.HashLength
+		var k, v []byte
+		for ; i < len(storageKeyNoInc); i++ {
+			k, v = c.Seek(storageKeyNoInc[:i])
+			if k == nil {
+				return nil
+			}
+
+			isTombstone := v != nil && len(v) == 0
+			if !isTombstone {
+				continue
+			}
+
+			if !bytes.HasPrefix(storageKeyNoInc, k) {
+				continue
+			}
+
+			break
+		}
+
+		for ; k != nil; k, v = c.Next() {
+			if !bytes.HasPrefix(k, storageKeyNoInc[:i]) {
 				k = nil
 			}
 			if k == nil {
@@ -312,31 +333,32 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 
 			isTombstone := v != nil && len(v) == 0
 			if isTombstone {
+				if !bytes.HasPrefix(storageKeyNoInc, k) {
+					continue
+				}
+				toDelete[string(k)] = struct{}{}
 				continue
 			}
 
-			for i := common.HashLength; i < len(k); i++ {
-				if storageKeyNoInc[i] == k[i] {
-					continue
+			for j := i; j < len(k); j++ {
+				if storageKeyNoInc[j] != k[j] {
+					toPut = append(toPut, common.CopyBytes(k[:j+1]))
+					break
 				}
-
-				toPut = append(toPut, common.CopyBytes(k[:i+1]))
-				break
 			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-
 	for _, k := range toPut {
 		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
 			return err
 		}
 	}
 
-	for i := common.HashLength; i <= len(storageKeyNoInc); i++ {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
+	for k := range toDelete {
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, []byte(k)); err != nil {
 			return err
 		}
 	}
