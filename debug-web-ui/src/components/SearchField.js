@@ -16,7 +16,7 @@ const SearchField = (props) => {
   };
 
   return (
-    <Form onSubmit={handleSubmit} disabled>
+    <Form onSubmit={handleSubmit} disabled={props.disabled}>
       <Form.Row>
         <Col>
           <Form.Control size="sm" name="search" placeholder={props.placeholder} />
