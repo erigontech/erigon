@@ -259,9 +259,6 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 	}
 
 	tds := state.NewTrieDbState(parent.Root(), db, parent.Number().Uint64())
-	//if err := tds.Rebuild(); err != nil {
-	//	panic(err)
-	//}
 	for i := 0; i < n; i++ {
 		select {
 		case <-ctx.Done():

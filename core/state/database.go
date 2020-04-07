@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -28,11 +27,9 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -251,257 +248,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
 
 	return &cpy
-}
-
-func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
-	addrHashBytes := addrHash[:]
-	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
-		return err
-	} else if !ok {
-		return nil
-	}
-
-	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasBolt.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	var toPut [][]byte
-	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("ClearTombstonesForReCreatedAccount(%x): %w\n", addrHash, err))
-				}
-			}()
-		}
-
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-		k, _ := storage.Seek(addrHashBytes)
-		if !bytes.HasPrefix(k, addrHashBytes) {
-			return nil
-		}
-
-		buf := pool.GetBuffer(256)
-		defer pool.PutBuffer(buf)
-
-		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
-		for ; incarnation > 0; incarnation-- {
-			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
-			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
-				if !bytes.HasPrefix(k, accWithInc) {
-					k = nil
-				}
-
-				if k == nil {
-					break
-				}
-
-				buf.Reset()
-				dbutils.RemoveIncarnationFromKey(k, &buf.B)
-				toPut = append(toPut, common.CopyBytes(buf.B[:common.HashLength+1]))
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, k := range toPut {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-			return err
-		}
-	}
-
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
-		return err
-	}
-	return nil
-}
-
-// PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
-	if len(addrHash) != common.HashLength {
-		return nil
-	}
-
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	buf := pool.GetBuffer(64)
-	defer pool.PutBuffer(buf)
-
-	hasStorage := false
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("PutTombstoneForDeletedAccount(%x): %w\n", addrHash, err))
-				}
-			}()
-		}
-
-		// place 1 tombstone to account if it has storage
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-		k, _ := storage.Seek(addrHash)
-		if !bytes.HasPrefix(k, addrHash) {
-			return nil
-		}
-
-		if k != nil {
-			hasStorage = true
-		}
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if !hasStorage {
-		return nil
-	}
-
-	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
-}
-
-func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
-
-	var toPut [][]byte
-	var toDelete [][]byte
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("ClearTombstonesForNewStorage(%x): %w\n", storageKeyNoInc, err))
-				}
-			}()
-		}
-
-		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-		storageK, _ := storage.Seek(addrHashBytes)
-		if !bytes.HasPrefix(storageK, addrHashBytes) {
-			storageK = nil
-		}
-		if storageK == nil {
-			return nil
-		}
-
-		kWithInc := pool.GetBuffer(256)
-		defer pool.PutBuffer(kWithInc)
-		kWithInc.B = kWithInc.B[:0]
-		kWithInc.B = append(kWithInc.B, storageK[:common.HashLength+8]...)
-		kWithInc.B = append(kWithInc.B, storageKeyNoInc[common.HashLength:]...)
-
-		buf := pool.GetBuffer(256)
-		defer pool.PutBuffer(buf)
-
-		for i := common.HashLength + 1; i < len(storageKeyNoInc)-1; i++ { // +1 because first step happened during account re-creation
-			tombStone, _ := interBucket.Get(storageKeyNoInc[:i])
-			foundTombstone := tombStone != nil && len(tombStone) == 0
-			if !foundTombstone {
-				continue
-			}
-
-			for storageK, _ = storage.Seek(kWithInc.B[:i+8]); storageK != nil; storageK, _ = storage.Next() {
-				if !bytes.HasPrefix(storageK, kWithInc.B[:i+8]) {
-					storageK = nil
-				}
-				if storageK == nil {
-					break
-				}
-
-				if storageK[i+8] == storageKeyNoInc[i] { // clear path for given storage
-					continue
-				}
-
-				buf.Reset()
-				dbutils.RemoveIncarnationFromKey(storageK[:i+1+8], &buf.B)
-				toPut = append(toPut, common.CopyBytes(buf.B))
-			}
-			toDelete = append(toDelete, common.CopyBytes(storageKeyNoInc[:i]))
-			break
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	for _, k := range toPut {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-			return err
-		}
-	}
-
-	for _, k := range toDelete {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func StorageTombstonesIntegrityDBCheck(tx *bolt.Tx) error {
-	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-	storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-	for k, v := inter.First(); k != nil; k, v = inter.Next() {
-		if len(v) > 0 {
-			continue
-		}
-
-		// 1 prefix must be covered only by 1 tombstone
-		from := append(k, []byte{0, 0}...)
-		for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
-			if !bytes.HasPrefix(overlapK, from) {
-				overlapK = nil
-			}
-			if len(overlapV) > 0 {
-				continue
-			}
-
-			if bytes.HasPrefix(overlapK, k) {
-				return fmt.Errorf("%x is prefix of %x\n", overlapK, k)
-			}
-		}
-
-		addrHash := common.CopyBytes(k[:common.HashLength])
-		storageK, _ := storage.Seek(addrHash)
-		if !bytes.HasPrefix(storageK, addrHash) {
-			return fmt.Errorf("tombstone %x has no storage to hide\n", k)
-		} else {
-			incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
-			hideStorage := false
-			for ; incarnation > 0; incarnation-- {
-				kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
-				kWithInc = append(kWithInc, k[common.HashLength:]...)
-				storageK, _ = storage.Seek(kWithInc)
-				if bytes.HasPrefix(storageK, kWithInc) {
-					hideStorage = true
-				}
-			}
-			if !hideStorage {
-				return fmt.Errorf("tombstone %x has no storage to hide\n", k)
-			}
-		}
-	}
-	return nil
 }
 
 func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
@@ -953,7 +699,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
-			_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -977,7 +722,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -1074,7 +818,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
-			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -1082,35 +825,10 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	return roots, nil
 }
 
-func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
-	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
-	if err != nil {
-		if errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return v != nil && len(v) == 0, nil
-}
-
 func (tds *TrieDbState) clearUpdates() {
 	tds.buffers = nil
 	tds.currentBuffer = nil
 	tds.aggregateBuffer = nil
-}
-
-func (tds *TrieDbState) Rebuild() error {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-	err := tds.t.Rebuild(tds.db, tds.blockNr)
-	if err != nil {
-		return err
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-	return nil
 }
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {

@@ -19,13 +19,13 @@ package ethdb
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"io/ioutil"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )

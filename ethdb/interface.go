@@ -127,6 +127,10 @@ type HasKV interface {
 	KV() *bolt.DB
 }
 
+type HasAbstractKV interface {
+	AbstractKV() KV
+}
+
 type HasNetInterface interface {
 	DB() Database
 }

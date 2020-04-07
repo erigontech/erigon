@@ -6,6 +6,7 @@ import (
 	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
@@ -691,9 +692,6 @@ func extractTrie(block int) {
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	startTime := time.Now()
-	tds.Rebuild()
-	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	filename := fmt.Sprintf("right_%d.txt", baseBlock.NumberU64())
@@ -724,12 +722,9 @@ func testRewind(chaindata string, block, rewind int) {
 	defer db.Rollback()
 	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	startTime := time.Now()
-	tds.Rebuild()
-	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	startTime = time.Now()
+	startTime := time.Now()
 	rewindLen := uint64(rewind)
 
 	err = tds.UnwindTo(baseBlockNr - rewindLen)
@@ -761,9 +756,6 @@ func testRewind(chaindata string, block, rewind int) {
 			tds, err = state.NewTrieDbState(rewoundBlock.Root(), db, rewoundBlock.NumberU64())
 			tds.SetHistorical(true)
 			check(err)
-			startTime := time.Now()
-			tds.Rebuild()
-			fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 			rebuiltRoot, err := tds.TrieRoot()
 			fmt.Printf("Rebuilt root: %x\n", rebuiltRoot)
 			check(err)
@@ -1943,6 +1935,64 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 	}
 }
 
+func indexSize(chaindata string) {
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	fStorage,err:=os.Create("index_sizes_storage.csv")
+	check(err)
+	fAcc,err:=os.Create("index_sizes_acc.csv")
+	check(err)
+	csvAcc:=csv.NewWriter(fAcc)
+	err = csvAcc.Write([]string{"key", "ln"})
+	check(err)
+	csvStorage:=csv.NewWriter(fStorage)
+	err = csvStorage.Write([]string{"key", "ln"})
+	i:=0
+	j:=0
+	maxLenAcc:=0
+	maxLenSt:=0
+	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i>10000 {
+			fmt.Println(j)
+			i=0
+		}
+		i++
+		j++
+		if len(v)> maxLenAcc {
+			maxLenAcc=len(v)
+		}
+		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
+		if err!=nil {
+			panic(err)
+		}
+
+		return true, nil
+	})
+	i=0
+	j=0
+	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i>10000 {
+			fmt.Println(j)
+			i=0
+		}
+		i++
+		j++
+		if len(v)> maxLenSt {
+			maxLenSt=len(v)
+		}
+		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
+		if err!=nil {
+			panic(err)
+		}
+
+		return true, nil
+	})
+
+	fmt.Println("Results:")
+	fmt.Println("maxLenAcc:", maxLenAcc)
+	fmt.Println("maxLenSt:", maxLenSt)
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -2062,5 +2112,8 @@ func main() {
 
 	if *action == "val-tx-lookup-2" {
 		ValidateTxLookups2(*chaindata)
+	}
+	if *action == "indexSize" {
+		indexSize(*chaindata)
 	}
 }

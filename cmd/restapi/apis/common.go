@@ -9,5 +9,6 @@ import (
 var ErrEntityNotFound = errors.New("entity not found")
 
 type Env struct {
-	DB ethdb.KV
+	DB              ethdb.KV
+	RemoteDBAddress string
 }

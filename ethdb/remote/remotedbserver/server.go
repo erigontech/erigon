@@ -10,7 +10,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
@@ -26,10 +25,12 @@ const Version uint64 = 2
 // It runs while the connection is active and keep the entire connection's context
 // in the local variables
 // For tests, bytes.Buffer can be used for both `in` and `out`
-func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, closer io.Closer) error {
+func Server(ctx context.Context, db ethdb.KV, in io.Reader, out io.Writer, closer io.Closer) error {
 	defer func() {
-		if err1 := closer.Close(); err1 != nil {
-			logger.Error("Could not close connection", "err", err1)
+		if closer != nil {
+			if err1 := closer.Close(); err1 != nil {
+				logger.Error("Could not close connection", "err", err1)
+			}
 		}
 	}()
 
@@ -41,7 +42,7 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 	// Server is passive - it runs a loop what reads remote.Commands (and their arguments) and attempts to respond
 	var lastHandle uint64
 	// Read-only transactions opened by the client
-	var tx *bolt.Tx
+	var tx ethdb.Tx
 
 	// We do Rollback and never Commit, because the remote transactions are always read-only, and must never change
 	// anything
@@ -55,17 +56,18 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 	}()
 
 	// Buckets opened by the client
-	buckets := make(map[uint64]*bolt.Bucket, 2)
+	buckets := make(map[uint64]ethdb.Bucket, 2)
 	// List of buckets opened in each transaction
 	//bucketsByTx := make(map[uint64][]uint64, 10)
 	// Cursors opened by the client
-	cursors := make(map[uint64]*bolt.Cursor, 2)
+	cursors := make(map[uint64]ethdb.Cursor, 2)
 	// List of cursors opened in each bucket
 	cursorsByBucket := make(map[uint64][]uint64, 2)
 
 	var c remote.Command
 	var bucketHandle uint64
 	var cursorHandle uint64
+	var cursorPrefix []byte
 
 	var name []byte
 	var seekKey []byte
@@ -73,7 +75,12 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 	for {
 		// Make sure we are not blocking the resizing of the memory map
 		if tx != nil {
-			tx.Yield()
+			type Yieldable interface {
+				Yield()
+			}
+			if casted, ok := tx.(Yieldable); ok {
+				casted.Yield()
+			}
 		}
 
 		if err := decoder.Decode(&c); err != nil {
@@ -93,7 +100,7 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 			}
 		case remote.CmdBeginTx:
 			var err error
-			tx, err = db.KV().Begin(false)
+			tx, err = db.Begin(ctx, false)
 			if err != nil {
 				err2 := fmt.Errorf("could not start transaction for remote.CmdBeginTx: %w", err)
 				encodeErr(encoder, err2)
@@ -183,13 +190,16 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 			if err := decoder.Decode(&bucketHandle); err != nil {
 				return fmt.Errorf("could not decode bucketHandle for remote.CmdCursor: %w", err)
 			}
+			if err := decoder.Decode(&cursorPrefix); err != nil {
+				return fmt.Errorf("could not decode prefix for remote.CmdCursor: %w", err)
+			}
 			bucket, ok := buckets[bucketHandle]
 			if !ok {
 				encodeErr(encoder, fmt.Errorf("bucket not found for remote.CmdCursor: %d", bucketHandle))
 				continue
 			}
 
-			cursor := bucket.Cursor()
+			cursor := bucket.Cursor().Prefix(cursorPrefix)
 			lastHandle++
 			cursorHandle = lastHandle
 			cursors[cursorHandle] = cursor
@@ -219,7 +229,10 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
 				continue
 			}
-			k, v := cursor.Seek(seekKey)
+			k, v, err := cursor.Seek(seekKey)
+			if err != nil {
+				return fmt.Errorf("in CmdCursorSeek: %w", err)
+			}
 			if err := encoder.Encode(remote.ResponseOk); err != nil {
 				return fmt.Errorf("could not encode (key,value) for remote.CmdCursorSeek: %w", err)
 			}
@@ -239,12 +252,14 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				continue
 			}
 
-			k, v := cursor.SeekTo(seekKey)
+			k, v, err := cursor.Seek(seekKey)
+			if err != nil {
+				return fmt.Errorf("in CmdCursorSeekTo: %w", err)
+			}
 
 			if err := encoder.Encode(remote.ResponseOk); err != nil {
 				return fmt.Errorf("could not encode response to remote.CmdCursorSeek: %w", err)
 			}
-
 			if err := encodeKeyValue(encoder, k, v); err != nil {
 				return fmt.Errorf("could not encode (key,value) in response to remote.CmdCursorSeekTo: %w", err)
 			}
@@ -272,7 +287,11 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				return fmt.Errorf("could not encode response to remote.CmdCursorNext: %w", err)
 			}
 
-			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
+			for k, v, err := cursor.Next(); ; k, v, err = cursor.Next() {
+				if err != nil {
+					return fmt.Errorf("in CmdCursorNext: %w", err)
+				}
+
 				select {
 				default:
 				case <-ctx.Done():
@@ -284,6 +303,9 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -307,18 +329,18 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				return fmt.Errorf("could not encode response code for remote.CmdCursorFirst: %w", err)
 			}
 
-			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
+			for k, v, err := cursor.First(); ; k, v, err = cursor.Next() {
+				if err != nil {
+					return fmt.Errorf("in CmdCursorFirst: %w", err)
 				}
-
 				if err := encodeKeyValue(encoder, k, v); err != nil {
 					return fmt.Errorf("could not encode (key,value) for remote.CmdCursorFirst: %w", err)
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -347,18 +369,19 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				return fmt.Errorf("could not encode response to remote.CmdCursorNextKey: %w", err)
 			}
 
-			for k, v := cursor.Next(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
+			for k, v, err := cursor.Next(); ; k, v, err = cursor.Next() {
+				if err != nil {
+					return fmt.Errorf("in CmdCursorNextKey: %w", err)
 				}
 
-				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
-					return fmt.Errorf("could not encode (key,valueIsEmpty) in response to remote.CmdCursorNextKey: %w", err)
+				if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
+					return fmt.Errorf("could not encode (key,vSize) in response to remote.CmdCursorNextKey: %w", err)
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
@@ -381,52 +404,44 @@ func Server(ctx context.Context, db ethdb.HasKV, in io.Reader, out io.Writer, cl
 				return fmt.Errorf("could not encode response code for remote.CmdCursorFirstKey: %w", err)
 			}
 
-			for k, v := cursor.First(); numberOfKeys > 0; k, v = cursor.Next() {
-				select {
-				default:
-				case <-ctx.Done():
-					return ctx.Err()
+			for k, v, err := cursor.First(); ; k, v, err = cursor.Next() {
+				if err != nil {
+					return fmt.Errorf("in CmdCursorFirstKey: %w", err)
 				}
 
-				if err := encodeKey(encoder, k, len(v) == 0); err != nil {
-					return fmt.Errorf("could not encode (key,valueIsEmpty) for remote.CmdCursorFirstKey: %w", err)
+				if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
+					return fmt.Errorf("could not encode (key,vSize) for remote.CmdCursorFirstKey: %w", err)
 				}
 
 				numberOfKeys--
+				if numberOfKeys == 0 {
+					break
+				}
 				if k == nil {
 					break
 				}
 			}
-		case remote.CmdGetAsOf:
-			var bucket, hBucket, key, v []byte
-			var timestamp uint64
-			if err := decoder.Decode(&bucket); err != nil {
-				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
+		case remote.CmdCursorSeekKey:
+			if err := decoder.Decode(&cursorHandle); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
-			if err := decoder.Decode(&hBucket); err != nil {
-				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
+			if err := decoder.Decode(&seekKey); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
-			if err := decoder.Decode(&key); err != nil {
-				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
+			cursor, ok := cursors[cursorHandle]
+			if !ok {
+				encodeErr(encoder, fmt.Errorf("cursor not found: %d", cursorHandle))
+				continue
 			}
-			if err := decoder.Decode(&timestamp); err != nil {
-				return fmt.Errorf("could not decode seekKey for remote.CmdGetAsOf: %w", err)
-			}
-
-			d := ethdb.NewWrapperBoltDatabase(db.KV())
-
-			var err error
-			v, err = d.GetAsOf(bucket, hBucket, key, timestamp)
+			k, v, err := cursor.Seek(seekKey)
 			if err != nil {
-				encodeErr(encoder, err)
+				return fmt.Errorf("in CmdCursorSeek: %w", err)
 			}
-
 			if err := encoder.Encode(remote.ResponseOk); err != nil {
-				return fmt.Errorf("could not encode response to remote.CmdGetAsOf: %w", err)
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
-
-			if err := encoder.Encode(&v); err != nil {
-				return fmt.Errorf("could not encode response to remote.CmdGetAsOf: %w", err)
+			if err := encodeKey(encoder, k, uint32(len(v))); err != nil {
+				return fmt.Errorf("could not encode (key,vSize) for CmdCursorSeekKey: %w", err)
 			}
 		default:
 			logger.Error("unknown", "remote.Command", c)
@@ -451,11 +466,11 @@ func encodeKeyValue(encoder *codec.Encoder, key []byte, value []byte) error {
 	return nil
 }
 
-func encodeKey(encoder *codec.Encoder, key []byte, valueIsEmpty bool) error {
+func encodeKey(encoder *codec.Encoder, key []byte, valueSize uint32) error {
 	if err := encoder.Encode(&key); err != nil {
 		return err
 	}
-	if err := encoder.Encode(valueIsEmpty); err != nil {
+	if err := encoder.Encode(&valueSize); err != nil {
 		return err
 	}
 	return nil
@@ -475,7 +490,7 @@ func encodeErr(encoder *codec.Encoder, mainError error) {
 var netAddr string
 var stopNetInterface context.CancelFunc
 
-func StartDeprecated(db ethdb.HasKV, addr string) {
+func StartDeprecated(db ethdb.KV, addr string) {
 	if stopNetInterface != nil {
 		stopNetInterface()
 	}
@@ -515,7 +530,7 @@ func StartDeprecated(db ethdb.HasKV, addr string) {
 
 // Listener starts listener that for each incoming connection
 // spawn a go-routine invoking Server
-func Listen(ctx context.Context, ln net.Listener, db ethdb.HasKV) {
+func Listen(ctx context.Context, ln net.Listener, db ethdb.KV) {
 	defer func() {
 		if err := ln.Close(); err != nil {
 			logger.Error("Could not close listener", "err", err)

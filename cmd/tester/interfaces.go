@@ -18,4 +18,5 @@ type BlockFeeder interface {
 	TotalDifficulty() *big.Int
 	LastBlock() *types.Block
 	ForkID() forkid.ID
+	Genesis() *types.Block
 }

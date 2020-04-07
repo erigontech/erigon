@@ -23,19 +23,18 @@ import (
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 // RemoteBoltDatabase is a wrapper over BoltDb,
 // compatible with the Database interface.
 type RemoteBoltDatabase struct {
-	db  *remote.DB // BoltDB instance
+	db  KV         // BoltDB instance
 	log log.Logger // Contextual logger tracking the database path
 }
 
 // NewRemoteBoltDatabase returns a BoltDB wrapper.
-func NewRemoteBoltDatabase(db *remote.DB) *RemoteBoltDatabase {
+func NewRemoteBoltDatabase(db KV) *RemoteBoltDatabase {
 	logger := log.New()
 
 	return &RemoteBoltDatabase{
@@ -49,7 +48,7 @@ func NewRemoteBoltDatabase(db *remote.DB) *RemoteBoltDatabase {
 // Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
 func (db *RemoteBoltDatabase) Has(bucket, key []byte) (bool, error) {
 	var has bool
-	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			has = false
@@ -72,7 +71,7 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 	// Retrieve the key and increment the miss counter if not found
 	var dat []byte
-	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return fmt.Errorf("bucket not found, %s", bucket)
@@ -95,18 +94,57 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
+//func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
+//	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
+//}
+
+// GetAsOf returns the value valid as of a given timestamp.
 func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)
+	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
+	var dat []byte
+	err := db.db.View(context.Background(), func(tx Tx) error {
+		{
+			hB := tx.Bucket(hBucket)
+			hC := hB.Cursor()
+			hK, hV, err := hC.Seek(composite)
+			if err != nil {
+				return err
+			}
+
+			if hK != nil && bytes.HasPrefix(hK, key) {
+				dat = make([]byte, len(hV))
+				copy(dat, hV)
+				return nil
+			}
+		}
+		{
+			b := tx.Bucket(bucket)
+			c := b.Cursor()
+			k, v, err := c.Seek(key)
+			if err != nil {
+				return err
+			}
+
+			if k != nil && bytes.Equal(k, key) {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		}
+
+		return ErrKeyNotFound
+	})
+	return dat, err
 }
 
 func (db *RemoteBoltDatabase) Walk(bucket, startkey []byte, fixedbits uint, walker func(k, v []byte) (bool, error)) error {
 	fixedbytes, mask := Bytesmask(fixedbits)
-	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor(remote.DefaultCursorOpts)
+		c := b.Cursor()
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -137,12 +175,12 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
-	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
 		}
-		c := b.Cursor(remote.DefaultCursorOpts)
+		c := b.Cursor()
 
 		k, v, err := c.Seek(startkey)
 		if err != nil {
@@ -165,7 +203,8 @@ func (db *RemoteBoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixed
 						}
 					}
 					if cmp < 0 {
-						k, v, err = c.SeekTo(startkey)
+						//k, v, err = c.SeekTo(startkey)
+						k, v, err = c.Seek(startkey)
 						if err != nil {
 							return err
 						}
@@ -203,7 +242,7 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 	l := len(startkey)
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(EndSuffix))
-	err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	err := db.db.View(context.Background(), func(tx Tx) error {
 		var err error
 
 		b := tx.Bucket(bucket)
@@ -214,8 +253,8 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor(remote.DefaultCursorOpts)
-		hC := hB.Cursor(remote.DefaultCursorOpts)
+		c := b.Cursor()
+		hC := hB.Cursor()
 		k, v, err := c.Seek(startkey)
 		if err != nil {
 			return err
@@ -246,7 +285,8 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
 				// update historical key/value to the desired block
-				hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				//hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				hK, hV, err = hC.Seek(keyBuffer[:sl])
 				if err != nil {
 					return err
 				}
@@ -281,7 +321,8 @@ func (db *RemoteBoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbi
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], EndSuffix)
-					hK, hV, err = hC.SeekTo(keyBuffer)
+					//hK, hV, err = hC.SeekTo(keyBuffer)
+					hK, hV, err = hC.Seek(keyBuffer)
 					if err != nil {
 						return err
 					}
@@ -305,7 +346,7 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 	l := len(startkey)
 	sl := l + len(encodedTS)
 	keyBuffer := make([]byte, l+len(EndSuffix))
-	if err := db.db.View(context.Background(), func(tx *remote.Tx) error {
+	if err := db.db.View(context.Background(), func(tx Tx) error {
 		b := tx.Bucket(bucket)
 		if b == nil {
 			return nil
@@ -314,9 +355,9 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 		if hB == nil {
 			return nil
 		}
-		c := b.Cursor(remote.DefaultCursorOpts)
-		hC := hB.Cursor(remote.DefaultCursorOpts)
-		hC1 := hB.Cursor(remote.DefaultCursorOpts)
+		c := b.Cursor()
+		hC := hB.Cursor()
+		hC1 := hB.Cursor()
 
 		k, v, err := c.Seek(startkey)
 		if err != nil {
@@ -348,7 +389,8 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 							}
 						}
 						if cmp < 0 {
-							k, v, err = c.SeekTo(startkey)
+							//k, v, err = c.SeekTo(startkey)
+							k, v, err = c.Seek(startkey)
 							if err != nil {
 								return err
 							}
@@ -370,7 +412,8 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 							}
 						}
 						if hCmp < 0 {
-							hK, hV, err = hC.SeekTo(startkey)
+							//hK, hV, err = hC.SeekTo(startkey)
+							hK, hV, err = hC.Seek(startkey)
 							if err != nil {
 								return err
 							}
@@ -395,7 +438,8 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 			if hKFit && bytes.Compare(hK[l:], encodedTS) < 0 {
 				copy(keyBuffer, hK[:l])
 				copy(keyBuffer[l:], encodedTS)
-				hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				//hK, hV, err = hC.SeekTo(keyBuffer[:sl])
+				hK, hV, err = hC.Seek(keyBuffer[:sl])
 				if err != nil {
 					return err
 				}
@@ -438,7 +482,8 @@ func (db *RemoteBoltDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys []
 				if cmp >= 0 {
 					copy(keyBuffer, hK[:l])
 					copy(keyBuffer[l:], EndSuffix)
-					hK, hV, err = hC.SeekTo(keyBuffer)
+					//hK, hV, err = hC.SeekTo(keyBuffer)
+					hK, hV, err = hC.Seek(keyBuffer)
 					if err != nil {
 						return err
 					}
@@ -460,9 +505,5 @@ func (db *RemoteBoltDatabase) RewindData(timestampSrc, timestampDst uint64, df f
 }
 
 func (db *RemoteBoltDatabase) Close() {
-	if err := db.db.Close(); err == nil {
-		db.log.Info("Database closed")
-	} else {
-		db.log.Error("Failed to close database", "err", err)
-	}
+	db.db.Close()
 }
