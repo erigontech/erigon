@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -348,8 +347,6 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return m
 }

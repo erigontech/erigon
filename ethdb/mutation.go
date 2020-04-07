@@ -1,7 +1,6 @@
 package ethdb
 
 import (
-	"bytes"
 	"fmt"
 	"sort"
 	"sync"
@@ -9,9 +8,6 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 )
 
 type puts map[string]putsBucket //map[bucket]putsBucket
@@ -34,6 +30,7 @@ func (p puts) Delete(bucket, key []byte) {
 	p.Set(bucket, key, nil)
 }
 
+/*
 func (p puts) SetStr(bucket string, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
@@ -43,10 +40,13 @@ func (p puts) SetStr(bucket string, key, value []byte) {
 	}
 	bucketPuts[string(key)] = value
 }
+*/
 
+/*
 func (p puts) DeleteStr(bucket string, key []byte) {
 	p.SetStr(bucket, key, nil)
 }
+*/
 
 func (p puts) Size() int {
 	var size int
@@ -86,9 +86,6 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 
 type mutation struct {
 	puts puts // Map buckets to map[key]value
-	//map[blockNumber]listOfChangedKeys
-	accountChangeSetByBlock map[uint64]*changeset.ChangeSet
-	storageChangeSetByBlock map[uint64]*changeset.ChangeSet
 	mu                      sync.RWMutex
 	db                      Database
 }
@@ -123,31 +120,6 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 		return m.db.Get(bucket, key)
 	}
 	return nil, ErrKeyNotFound
-}
-
-func (m *mutation) getChangeSetByBlockNoLock(bucket []byte, timestamp uint64) *changeset.ChangeSet {
-	switch {
-	case bytes.Equal(bucket, dbutils.AccountsHistoryBucket):
-		if _, ok := m.accountChangeSetByBlock[timestamp]; !ok {
-			if debug.IsThinHistory() {
-				m.accountChangeSetByBlock[timestamp] = changeset.NewAccountChangeSet()
-			} else {
-				m.accountChangeSetByBlock[timestamp] = changeset.NewChangeSet()
-			}
-		}
-		return m.accountChangeSetByBlock[timestamp]
-	case bytes.Equal(bucket, dbutils.StorageHistoryBucket):
-		if _, ok := m.storageChangeSetByBlock[timestamp]; !ok {
-			if debug.IsThinHistory() {
-				m.storageChangeSetByBlock[timestamp] = changeset.NewStorageChangeSet()
-			} else {
-				m.storageChangeSetByBlock[timestamp] = changeset.NewChangeSet()
-			}
-		}
-		return m.storageChangeSetByBlock[timestamp]
-	default:
-		panic("incorrect bucket")
-	}
 }
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
@@ -286,8 +258,6 @@ func (m *mutation) Commit() (uint64, error) {
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.accountChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
-	m.storageChangeSetByBlock = make(map[uint64]*changeset.ChangeSet)
 	m.puts = make(puts)
 }
 
@@ -420,8 +390,6 @@ func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
 		db:                      d,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return mm
 }
