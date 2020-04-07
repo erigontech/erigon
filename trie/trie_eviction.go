@@ -85,13 +85,12 @@ func (gs *generations) touch(blockNum uint64, key []byte) {
 		return
 	}
 
-	var currentGeneration *generation
-	if blockNum > gs.latestBlockNum || len(gs.blockNumToGeneration) == 0 {
+	currentGeneration, ok := gs.blockNumToGeneration[blockNum]
+	if !ok {
 		currentGeneration = newGeneration()
 		gs.blockNumToGeneration[blockNum] = currentGeneration
-	} else {
-		currentGeneration = gs.blockNumToGeneration[blockNum]
 	}
+
 	gs.latestBlockNum = blockNum
 	currentGeneration.grabFrom(key, oldGeneration)
 
