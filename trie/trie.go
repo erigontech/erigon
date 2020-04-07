@@ -469,9 +469,10 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if updated {
 				if !bytes.Equal(origAccN.CodeHash[:], vAccN.CodeHash[:]) {
 					origAccN.code = nil
+				} else if vAccN.code != nil {
+					origAccN.code = vAccN.code
 				}
 				origAccN.Account.Copy(&vAccN.Account)
-				origAccN.code = vAccN.code
 				origAccN.rootCorrect = false
 			}
 			newNode = origAccN

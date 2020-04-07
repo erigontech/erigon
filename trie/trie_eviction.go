@@ -58,7 +58,7 @@ func (gs *generations) add(blockNum uint64, key []byte, size uint) {
 	}
 	generation.add(key, size)
 	gs.keyToBlockNum[string(key)] = blockNum
-	if gs.oldestBlockNum == 0 {
+	if gs.oldestBlockNum > blockNum {
 		gs.oldestBlockNum = blockNum
 	}
 	gs.totalSize += int64(size)
@@ -88,6 +88,10 @@ func (gs *generations) touch(blockNum uint64, key []byte) {
 	currentGeneration.grabFrom(key, oldGeneration)
 
 	gs.keyToBlockNum[string(key)] = blockNum
+
+	if gs.oldestBlockNum > blockNum {
+		gs.oldestBlockNum = blockNum
+	}
 
 	if oldGeneration.empty() {
 		delete(gs.blockNumToGeneration, oldBlockNum)

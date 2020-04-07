@@ -82,7 +82,7 @@ func TestEvictionPartialSingleGen(t *testing.T) {
 
 	assert.Equal(t, 100, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 1, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, int(eviction.generations.blockNumToGeneration[1].totalSize), "should register size of gen")
 
 	mock := newMockAccountEvicter()
@@ -91,7 +91,7 @@ func TestEvictionPartialSingleGen(t *testing.T) {
 
 	assert.Equal(t, 0, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 0, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 2, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, len(mock.keys), "should evict all 100 accounts")
 }
 
@@ -107,7 +107,7 @@ func TestEvictionFullSingleGen(t *testing.T) {
 
 	assert.Equal(t, 100, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 1, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, int(eviction.generations.blockNumToGeneration[1].totalSize), "should register size of gen")
 
 	mock := newMockAccountEvicter()
@@ -116,7 +116,7 @@ func TestEvictionFullSingleGen(t *testing.T) {
 
 	assert.Equal(t, 0, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 0, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 2, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, len(mock.keys), "should evict all 100 accounts")
 }
 
@@ -132,7 +132,7 @@ func TestEvictionNoNeedSingleGen(t *testing.T) {
 
 	assert.Equal(t, 100, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 1, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, int(eviction.generations.blockNumToGeneration[1].totalSize), "should register size of gen")
 
 	mock := newMockAccountEvicter()
@@ -141,7 +141,7 @@ func TestEvictionNoNeedSingleGen(t *testing.T) {
 
 	assert.Equal(t, 100, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 1, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	assert.Equal(t, 100, int(eviction.generations.blockNumToGeneration[1].totalSize), "should register size of gen")
 
 	assert.Equal(t, 0, len(mock.keys), "should evict all 100 accounts")
@@ -193,7 +193,7 @@ func TestEvictionNoNeedMultipleGen(t *testing.T) {
 
 	assert.Equal(t, 50*1024, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 5, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	for _, i := range []uint64{1, 2, 4, 5, 7} {
 		assert.Equal(t, 10*1024, int(eviction.generations.blockNumToGeneration[i].totalSize), "should register size of gen")
 	}
@@ -204,7 +204,7 @@ func TestEvictionNoNeedMultipleGen(t *testing.T) {
 
 	assert.Equal(t, 50*1024, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 5, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 
 	assert.Equal(t, 0, len(mock.keys), "should not evict anything")
 }
@@ -255,7 +255,7 @@ func TestEvictionPartialMultipleGen(t *testing.T) {
 
 	assert.Equal(t, 50*1024, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 5, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	for _, i := range []uint64{1, 2, 4, 5, 7} {
 		assert.Equal(t, 10*1024, int(eviction.generations.blockNumToGeneration[i].totalSize), "should register size of gen")
 	}
@@ -319,7 +319,7 @@ func TestEvictionFullMultipleGen(t *testing.T) {
 
 	assert.Equal(t, 50*1024, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 5, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 1, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 0, int(eviction.generations.oldestBlockNum), "should register block num")
 	for _, i := range []uint64{1, 2, 4, 5, 7} {
 		assert.Equal(t, 10*1024, int(eviction.generations.blockNumToGeneration[i].totalSize), "should register size of gen")
 	}
@@ -330,7 +330,7 @@ func TestEvictionFullMultipleGen(t *testing.T) {
 
 	assert.Equal(t, 0, int(eviction.TotalSize()), "should register all accounts")
 	assert.Equal(t, 0, len(eviction.generations.blockNumToGeneration), "should register generation")
-	assert.Equal(t, 7, int(eviction.generations.oldestBlockNum), "should register block num")
+	assert.Equal(t, 8, int(eviction.generations.oldestBlockNum), "should register block num")
 
 	assert.Equal(t, 50, len(mock.keys), "should evict only 3 generations")
 
