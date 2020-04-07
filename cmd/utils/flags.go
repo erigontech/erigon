@@ -1588,8 +1588,9 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 	}
 
 	// TODO(fjl): move trie cache generations into config
+	// FIXME: rename
 	if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-		state.MaxTrieCacheGen = uint32(gen)
+		state.MaxTrieCacheSize = uint64(gen)
 	}
 }
 

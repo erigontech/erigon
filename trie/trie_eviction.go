@@ -22,239 +22,329 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 )
 
-type TrieEviction struct {
-	accountTimestamps map[string]uint64
-
-	// Maps timestamp (uint64) to set of prefixes of nodes (string)
-	accounts map[uint64]map[string]struct{}
-
-	// For each timestamp, keeps number of branch nodes belonging to it
-	generationCounts map[uint64]int
-
-	// Keeps total number of branch nodes
-	nodeCount int
-
-	// The oldest timestamp of all branch nodes
-	oldestGeneration uint64
-
-	// Current timestamp
-	blockNr uint64
-
-	onNodeCreated func(prefixAsNibbles []byte)
-	onNodeEvicted func(prefix []byte, nodeHash []byte) // called when fullNode or dualNode unloaded
+type AccountEvicter interface {
+	EvictNode([]byte)
+	// FIXME: add separate EvictCode?
 }
 
-func NewTrieEviction(oldestGeneration uint64) *TrieEviction {
-	return &TrieEviction{
-		oldestGeneration:  oldestGeneration,
-		blockNr:           oldestGeneration,
-		accountTimestamps: make(map[string]uint64),
-		accounts:          make(map[uint64]map[string]struct{}),
-		generationCounts:  make(map[uint64]int),
-		onNodeCreated:     func([]byte) {},
+type generations struct {
+	blockNumToGeneration map[uint64]*generation
+	keyToBlockNum        map[string]uint64
+	latestBlockNum       uint64
+	oldestBlockNum       uint64
+	totalSize            int64
+}
+
+func newGenerations() *generations {
+	return &generations{
+		make(map[uint64]*generation),
+		make(map[string]uint64),
+		0,
+		0,
+		0,
 	}
 }
 
-func (tp *TrieEviction) SetBlockNr(blockNr uint64) {
-	tp.blockNr = blockNr
-}
-
-func (tp *TrieEviction) BlockNr() uint64 {
-	return tp.blockNr
-}
-
-func (tp *TrieEviction) SetOnNodeCreated(f func(prefixAsNibbles []byte)) {
-	tp.onNodeCreated = f
-}
-
-func (tp *TrieEviction) SetOnNodeEvicted(f func(prefix []byte, nodeHash []byte)) {
-	tp.onNodeEvicted = f
-}
-
-// Updates a node to the current timestamp
-// contract is effectively address of the smart contract
-// hex is the prefix of the key
-// parent is the node that needs to be modified to unload the touched node
-// exists is true when the node existed before, and false if it is a new one
-// prevTimestamp is the timestamp the node current has
-func (tp *TrieEviction) touch(hexS string, exists bool, prevTimestamp uint64, del bool, newTimestamp uint64) {
-	//fmt.Printf("TouchFrom %x, exists: %t, prevTimestamp %d, del %t, newTimestamp %d\n", hexS, exists, prevTimestamp, del, newTimestamp)
-	if exists && !del && prevTimestamp == newTimestamp {
+func (gs *generations) add(blockNum uint64, key []byte, size uint) {
+	//fmt.Printf("gen.add %v %v k=%x\n", blockNum, size, key)
+	if _, ok := gs.keyToBlockNum[string(key)]; ok {
+		gs.updateSize(blockNum, key, size)
 		return
 	}
-	if !del {
-		var newMap map[string]struct{}
-		if m, ok := tp.accounts[newTimestamp]; ok {
-			newMap = m
-		} else {
-			newMap = make(map[string]struct{})
-			tp.accounts[newTimestamp] = newMap
-		}
 
-		newMap[hexS] = struct{}{}
+	var generation *generation
+	if blockNum > gs.latestBlockNum || len(gs.blockNumToGeneration) == 0 {
+		generation = newGeneration()
+		gs.blockNumToGeneration[blockNum] = generation
+	} else {
+		generation, _ = gs.blockNumToGeneration[blockNum]
 	}
-	if exists {
-		if m, ok := tp.accounts[prevTimestamp]; ok {
-			delete(m, hexS)
-			if len(m) == 0 {
-				delete(tp.accounts, prevTimestamp)
-			}
-		}
+	generation.add(key, size)
+	gs.keyToBlockNum[string(key)] = blockNum
+	gs.latestBlockNum = blockNum
+	if gs.oldestBlockNum == 0 {
+		gs.oldestBlockNum = blockNum
 	}
-	// Update generation count
-	if !del {
-		tp.generationCounts[newTimestamp]++
-		tp.nodeCount++
+	gs.totalSize += int64(size)
+}
+
+func (gs *generations) touch(blockNum uint64, key []byte) {
+	if len(gs.blockNumToGeneration) == 0 {
+		return
 	}
-	if exists {
-		tp.generationCounts[prevTimestamp]--
-		if tp.generationCounts[prevTimestamp] == 0 {
-			delete(tp.generationCounts, prevTimestamp)
-		}
-		tp.nodeCount--
+
+	oldBlockNum, ok := gs.keyToBlockNum[string(key)]
+	if !ok {
+		return
+	}
+
+	oldGeneration, ok := gs.blockNumToGeneration[oldBlockNum]
+	if !ok {
+		return
+	}
+
+	var currentGeneration *generation
+	if blockNum > gs.latestBlockNum || len(gs.blockNumToGeneration) == 0 {
+		currentGeneration = newGeneration()
+		gs.blockNumToGeneration[blockNum] = currentGeneration
+	} else {
+		currentGeneration, _ = gs.blockNumToGeneration[blockNum]
+	}
+	gs.latestBlockNum = blockNum
+	currentGeneration.grabFrom(key, oldGeneration)
+
+	gs.keyToBlockNum[string(key)] = blockNum
+
+	if oldGeneration.empty() {
+		delete(gs.blockNumToGeneration, oldBlockNum)
 	}
 }
 
-func (tp *TrieEviction) Timestamp(hex []byte) uint64 {
-	ts := tp.accountTimestamps[string(hex)]
-	return ts
+func (gs *generations) remove(key []byte) {
+	oldBlockNum, ok := gs.keyToBlockNum[string(key)]
+	if !ok {
+		return
+	}
+	generation, ok := gs.blockNumToGeneration[oldBlockNum]
+	if !ok {
+		return
+	}
+	sizeDiff := generation.remove(key)
+	gs.totalSize += sizeDiff
+	delete(gs.keyToBlockNum, string(key))
 }
 
-// Updates a node to the current timestamp
-// contract is effectively address of the smart contract
-// hex is the prefix of the key
-// parent is the node that needs to be modified to unload the touched node
-func (tp *TrieEviction) Touch(hex []byte, del bool) {
-	var exists = false
-	var prevTimestamp uint64
-	hexS := string(common.CopyBytes(hex))
+func (gs *generations) updateSize(blockNum uint64, key []byte, newSize uint) {
+	oldBlockNum, ok := gs.keyToBlockNum[string(key)]
+	if !ok {
+		gs.add(blockNum, key, newSize)
+		return
+	}
+	generation, ok := gs.blockNumToGeneration[oldBlockNum]
+	if !ok {
+		gs.add(blockNum, key, newSize)
+		return
+	}
 
-	if m, ok := tp.accountTimestamps[hexS]; ok {
-		prevTimestamp = m
-		exists = true
-		if del {
-			delete(tp.accountTimestamps, hexS)
+	sizeDiff := generation.updateAccountSize(key, newSize)
+	gs.totalSize += sizeDiff
+	gs.touch(blockNum, key)
+}
+
+// popKeysToEvict returns the keys to evict from the trie,
+// also removing them from generations
+func (gs *generations) popKeysToEvict(threshold uint64) []string {
+	keys := make([]string, 0)
+	for uint64(gs.totalSize) > threshold && len(gs.blockNumToGeneration) > 0 {
+		generation, ok := gs.blockNumToGeneration[gs.oldestBlockNum]
+		if !ok {
+			gs.oldestBlockNum++
+			continue
 		}
-	}
-	if !del {
-		tp.accountTimestamps[hexS] = tp.blockNr
-	}
-	if !exists {
-		tp.onNodeCreated([]byte(hexS))
-	}
 
-	tp.touch(hexS, exists, prevTimestamp, del, tp.blockNr)
+		gs.totalSize -= generation.totalSize
+		if gs.totalSize < 0 {
+			gs.totalSize = 0
+		}
+		keysToEvict := generation.keys()
+		keys = append(keys, keysToEvict...)
+		for _, k := range keysToEvict {
+			delete(gs.keyToBlockNum, k)
+		}
+		delete(gs.blockNumToGeneration, gs.oldestBlockNum)
+		gs.oldestBlockNum++
+	}
+	if gs.oldestBlockNum > gs.latestBlockNum {
+		gs.oldestBlockNum = gs.latestBlockNum
+	}
+	return keys
 }
 
-func evictMap(t *Trie, m map[string]struct{}) bool {
-	hexes := make([]string, len(m))
+type generation struct {
+	sizesByKey map[string]uint
+	totalSize  int64
+}
+
+func newGeneration() *generation {
+	return &generation{
+		make(map[string]uint, 0),
+		0,
+	}
+}
+
+func (g *generation) empty() bool {
+	return len(g.sizesByKey) == 0
+}
+
+func (g *generation) grabFrom(key []byte, other *generation) {
+	if g == other {
+		return
+	}
+
+	keyStr := string(key)
+	size, ok := other.sizesByKey[keyStr]
+	if !ok {
+		return
+	}
+
+	g.sizesByKey[keyStr] = size
+	g.totalSize += int64(size)
+	other.totalSize -= int64(size)
+
+	if other.totalSize < 0 {
+		other.totalSize = 0
+	}
+
+	delete(other.sizesByKey, keyStr)
+}
+
+func (g *generation) add(key []byte, size uint) {
+	g.sizesByKey[string(key)] = size
+	g.totalSize += int64(size)
+}
+
+func (g *generation) updateAccountSize(key []byte, size uint) int64 {
+	oldSize := g.sizesByKey[string(key)]
+	g.sizesByKey[string(key)] = size
+	diff := int64(size) - int64(oldSize)
+	g.totalSize += diff
+	return diff
+}
+
+func (g *generation) remove(key []byte) int64 {
+	oldSize := g.sizesByKey[string(key)]
+	delete(g.sizesByKey, string(key))
+	g.totalSize -= int64(oldSize)
+	if g.totalSize < 0 {
+		g.totalSize = 0
+	}
+
+	return -1 * int64(oldSize)
+}
+
+func (g *generation) keys() []string {
+	keys := make([]string, len(g.sizesByKey))
 	i := 0
-	for hexS := range m {
-		hexes[i] = hexS
+	for k, _ := range g.sizesByKey {
+		keys[i] = k
 		i++
 	}
+	return keys
+}
+
+type TrieEviction struct {
+	NoopTrieObserver // make sure that we don't need to implement unnecessary observer methods
+
+	blockNumber uint64
+
+	generations *generations
+}
+
+func NewTrieEviction() *TrieEviction {
+	return &TrieEviction{
+		generations: newGenerations(),
+	}
+}
+
+func (tp *TrieEviction) SetBlockNumber(blockNumber uint64) {
+	tp.blockNumber = blockNumber
+}
+
+func (tp *TrieEviction) BlockNumber() uint64 {
+	return tp.blockNumber
+}
+
+func (tp *TrieEviction) BranchNodeCreated(hex []byte) {
+	key := hex
+	tp.generations.add(tp.blockNumber, key, 1)
+}
+
+func (tp *TrieEviction) BranchNodeDeleted(hex []byte) {
+	key := hex
+	tp.generations.remove(key)
+}
+
+func (tp *TrieEviction) BranchNodeTouched(hex []byte) {
+	key := hex
+	tp.generations.touch(tp.blockNumber, key)
+}
+
+func (tp *TrieEviction) CodeNodeCreated(hex []byte, size uint) {
+	key := hex
+	tp.generations.add(tp.blockNumber, CodeKeyFromAddrHash(key), size)
+}
+
+func (tp *TrieEviction) CodeNodeDeleted(hex []byte) {
+	key := hex
+	tp.generations.remove(CodeKeyFromAddrHash(key))
+}
+
+func (tp *TrieEviction) CodeNodeTouched(hex []byte) {
+	key := hex
+	tp.generations.touch(tp.blockNumber, CodeKeyFromAddrHash(key))
+}
+
+func (tp *TrieEviction) CodeNodeSizeChanged(hex []byte, newSize uint) {
+	key := hex
+	tp.generations.updateSize(tp.blockNumber, CodeKeyFromAddrHash(key), newSize)
+}
+
+func evictList(evicter AccountEvicter, hexes []string) bool {
 	var empty = false
 	sort.Strings(hexes)
 
-	for i, hex := range hexes {
-		if i == 0 || len(hex) == 0 || !strings.HasPrefix(hex, hexes[i-1]) { // If the parent nodes pruned, there is no need to prune descendants
-			t.unload([]byte(hex))
-			if len(hex) == 0 {
-				empty = true
-			}
-		}
+	// from long to short -- a naive way to first clean up nodes and then accounts
+	// FIXME: optimize to avoid the same paths
+	for i := len(hexes) - 1; i >= 0; i-- {
+		//fmt.Printf("evicting %x\n", []byte(hexes[i]))
+		evicter.EvictNode([]byte(hexes[i]))
+		//fmt.Printf("    num=%v\n", evicter.(*Trie).NumberOfAccounts())
 	}
 	return empty
 }
 
-// EvictToTimestamp evicts all nodes that are older than given timestamp
-func (tp *TrieEviction) EvictToTimestamp(
-	accountsTrie *Trie,
-	targetTimestamp uint64,
-) {
-	// Remove (unload) nodes from storage tries and account trie
-	aggregateAccounts := make(map[string]struct{})
-	for gen := tp.oldestGeneration; gen < targetTimestamp; gen++ {
-		tp.nodeCount -= tp.generationCounts[gen]
-		if m, ok := tp.accounts[gen]; ok {
-			for hexS := range m {
-				aggregateAccounts[hexS] = struct{}{}
-			}
-		}
-		delete(tp.accounts, gen)
-	}
-
-	// intermediate hashes
-	key := pool.GetBuffer(64)
-	defer pool.PutBuffer(key)
-	for prefix := range aggregateAccounts {
-		if len(prefix) == 0 || len(prefix)%2 == 1 {
-			continue
-		}
-
-			nd, parent, ok := accountsTrie.getNode([]byte(prefix), false)
-			if !ok {
-				continue
-			}
-			switch parent.(type) {
-			case *duoNode, *fullNode:
-				CompressNibbles([]byte(prefix), &key.B)
-				tp.onNodeEvicted(key.B, nd.reference())
-			default:
-			}
-		}
-	}
-
-	evictMap(accountsTrie, aggregateAccounts)
-
-	// Remove fom the timestamp structure
-	for hexS := range aggregateAccounts {
-		delete(tp.accountTimestamps, hexS)
-	}
-	tp.oldestGeneration = targetTimestamp
-}
-
-// EvictTo evicts mininum number of generations necessary so that the total
-// number of prunable nodes is at most `targetNodeCount`
-func (tp *TrieEviction) EvictTo(
-	accountsTrie *Trie,
-	targetNodeCount int,
+// EvictToFitSize evicts mininum number of generations necessary so that the total
+// size of accounts left is fits into the provided threshold
+func (tp *TrieEviction) EvictToFitSize(
+	evicter AccountEvicter,
+	threshold uint64,
 ) bool {
-	if tp.nodeCount <= targetNodeCount {
+
+	if uint64(tp.generations.totalSize) <= threshold {
 		return false
 	}
-	excess := tp.nodeCount - targetNodeCount
-	prunable := 0
-	pruneGeneration := tp.oldestGeneration
-	for prunable < excess && pruneGeneration < tp.blockNr {
-		prunable += tp.generationCounts[pruneGeneration]
-		pruneGeneration++
+
+	keys := tp.generations.popKeysToEvict(threshold)
+
+	return evictList(evicter, keys)
+}
+
+func (tp *TrieEviction) TotalSize() uint64 {
+	return uint64(tp.generations.totalSize)
+}
+
+func (tp *TrieEviction) NumberOf() uint64 {
+	total := uint64(0)
+	for _, gen := range tp.generations.blockNumToGeneration {
+		if gen == nil {
+			continue
+		}
+		total += uint64(len(gen.sizesByKey))
 	}
-	//fmt.Printf("Will prune to generation %d, nodes to prune: %d, excess %d\n", pruneGeneration, prunable, excess)
-	tp.EvictToTimestamp(accountsTrie, pruneGeneration)
-	return true
+	return total
 }
 
-func (tp *TrieEviction) NodeCount() int {
-	return tp.nodeCount
-}
-
-func (tp *TrieEviction) GenCounts() map[uint64]int {
-	return tp.generationCounts
-}
-
-// DebugDump is used in the tests to ensure that there are no prunable entries (in such case, this function returns empty string)
-func (tp *TrieEviction) DebugDump() string {
+func (dp *TrieEviction) DebugDump() string {
 	var sb strings.Builder
-	for timestamp, m := range tp.accounts {
-		for account := range m {
-			sb.WriteString(fmt.Sprintf("%d %x\n", timestamp, account))
+
+	for block, gen := range dp.generations.blockNumToGeneration {
+		sb.WriteString(fmt.Sprintf("Block: %v\n", block))
+		for key, size := range gen.sizesByKey {
+			sb.WriteString(fmt.Sprintf("    %x->%v\n", key, size))
 		}
 	}
+
 	return sb.String()
 }

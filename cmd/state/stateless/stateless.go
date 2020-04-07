@@ -150,7 +150,7 @@ func Stateless(
 	witnessDatabasePath string,
 	writeHistory bool,
 ) {
-	state.MaxTrieCacheGen = triesize
+	state.MaxTrieCacheSize = triesize
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)
@@ -324,7 +324,7 @@ func Stateless(
 				return
 			}
 			if len(resolveWitnesses) > 0 {
-				witnessDBWriter.MustUpsert(blockNum, state.MaxTrieCacheGen, resolveWitnesses)
+				witnessDBWriter.MustUpsert(blockNum, uint32(state.MaxTrieCacheSize), resolveWitnesses)
 			}
 		}
 		execTime2 := time.Since(execStart)
