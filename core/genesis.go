@@ -320,8 +320,19 @@ func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.
 		return nil, nil, err
 	}
 	tds.SetBlockNr(0)
-	if err := statedb.CommitBlock(context.Background(), tds.DbStateWriter(history)); err != nil {
+	blockWriter := tds.DbStateWriter()
+	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+	}
+	// Always write changesets
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+	}
+	// Optionally write history
+	if history {
+		if err := blockWriter.WriteHistory(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err

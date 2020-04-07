@@ -89,7 +89,7 @@ func TestEIP2200(t *testing.T) {
 		s.SetCode(address, hexutil.MustDecode(tt.input))
 		s.SetState(address, common.Hash{}, common.BytesToHash([]byte{tt.original}))
 
-		s.CommitBlock(context.Background(), tds.DbStateWriter(false /* history */))
+		s.CommitBlock(context.Background(), tds.DbStateWriter())
 
 		// re-initialize the state
 		state := state.New(state.NewDbState(db, 0))

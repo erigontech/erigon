@@ -18,85 +18,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMutation_DeleteTimestamp(t *testing.T) {
-	db := NewMemDatabase()
-	mutDB := db.NewBatch()
-
-	acc := make([]*accounts.Account, 10)
-	addrHashes := make([]common.Hash, 10)
-	for i := range acc {
-		acc[i], addrHashes[i] = randomAccount(t)
-		b := make([]byte, acc[i].EncodingLengthForStorage())
-		acc[i].EncodeForStorage(b)
-		err := mutDB.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	_, err := mutDB.Commit()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if changeset.Len(csData) != 10 {
-		t.FailNow()
-	}
-	if debug.IsThinHistory() {
-		csData, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
-		if err != nil {
-			t.Fatal(err)
-		}
-		index := dbutils.WrapHistoryIndex(csData)
-		parsed, innerErr := index.Decode()
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-		if parsed[0] != 1 {
-			t.Fatal("incorrect block num")
-		}
-
-	} else {
-		compositeKey, _ := dbutils.CompositeKeySuffix(addrHashes[0].Bytes(), 1)
-		_, innerErr := db.Get(dbutils.AccountsHistoryBucket, compositeKey)
-		if innerErr != nil {
-			t.Fatal(innerErr)
-		}
-	}
-
-	err = mutDB.DeleteTimestamp(1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = mutDB.Commit()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != ErrKeyNotFound {
-		t.Fatal("changeset must be deleted")
-	}
-
-	if debug.IsThinHistory() {
-		_, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
-		if err != ErrKeyNotFound {
-			t.Fatal("account must be deleted")
-		}
-	} else {
-		compositeKey, _ := dbutils.CompositeKeySuffix(addrHashes[0].Bytes(), 1)
-		_, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
-		if err != ErrKeyNotFound {
-			t.Fatal("account must be deleted")
-		}
-	}
-}
-
 func TestMutationCommit(t *testing.T) {
 	if debug.IsThinHistory() {
 		t.Skip()
@@ -385,10 +306,6 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db Putter, numOfAccount
 		b = make([]byte, accHistory[i].EncodingLengthForStorage())
 		accHistory[i].EncodeForStorage(b)
 
-		err := db.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		accState[i] = accHistory[i].SelfCopy()
 		accState[i].Nonce++

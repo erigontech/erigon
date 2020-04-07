@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
@@ -32,7 +31,11 @@ func NewChangeSetWriter() *ChangeSetWriter {
 func (w *ChangeSetWriter) GetAccountChanges() *changeset.ChangeSet {
 	cs := changeset.NewAccountChangeSet()
 	for key, val := range w.accountChanges {
-		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
+		addrHash, err := common.HashData(key[:])
+		if err != nil {
+			panic(err)
+		}
+		if err := cs.Add(addrHash[:], val); err != nil {
 			panic(err)
 		}
 	}

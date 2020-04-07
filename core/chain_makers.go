@@ -250,7 +250,7 @@ func GenerateChain(ctx context.Context, config *params.ChainConfig, parent *type
 			block := types.NewBlock(b.header, b.txs, b.uncles, b.receipts)
 			tds.SetBlockNr(block.NumberU64())
 			// Write state changes to db
-			if err := statedb.CommitBlock(ctx, tds.DbStateWriter(false /* history */)); err != nil {
+			if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
 				panic(fmt.Sprintf("state write error: %v", err))
 			}
 			return block, b.receipts
