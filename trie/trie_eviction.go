@@ -32,7 +32,6 @@ type AccountEvicter interface {
 type generations struct {
 	blockNumToGeneration map[uint64]*generation
 	keyToBlockNum        map[string]uint64
-	latestBlockNum       uint64
 	oldestBlockNum       uint64
 	totalSize            int64
 }
@@ -43,27 +42,22 @@ func newGenerations() *generations {
 		make(map[string]uint64),
 		0,
 		0,
-		0,
 	}
 }
 
 func (gs *generations) add(blockNum uint64, key []byte, size uint) {
-	//fmt.Printf("gen.add %v %v k=%x\n", blockNum, size, key)
 	if _, ok := gs.keyToBlockNum[string(key)]; ok {
 		gs.updateSize(blockNum, key, size)
 		return
 	}
 
-	var generation *generation
-	if blockNum > gs.latestBlockNum || len(gs.blockNumToGeneration) == 0 {
+	generation, ok := gs.blockNumToGeneration[blockNum]
+	if !ok {
 		generation = newGeneration()
 		gs.blockNumToGeneration[blockNum] = generation
-	} else {
-		generation = gs.blockNumToGeneration[blockNum]
 	}
 	generation.add(key, size)
 	gs.keyToBlockNum[string(key)] = blockNum
-	gs.latestBlockNum = blockNum
 	if gs.oldestBlockNum == 0 {
 		gs.oldestBlockNum = blockNum
 	}
@@ -91,7 +85,6 @@ func (gs *generations) touch(blockNum uint64, key []byte) {
 		gs.blockNumToGeneration[blockNum] = currentGeneration
 	}
 
-	gs.latestBlockNum = blockNum
 	currentGeneration.grabFrom(key, oldGeneration)
 
 	gs.keyToBlockNum[string(key)] = blockNum
@@ -154,9 +147,6 @@ func (gs *generations) popKeysToEvict(threshold uint64) []string {
 		}
 		delete(gs.blockNumToGeneration, gs.oldestBlockNum)
 		gs.oldestBlockNum++
-	}
-	if gs.oldestBlockNum > gs.latestBlockNum {
-		gs.oldestBlockNum = gs.latestBlockNum
 	}
 	return keys
 }
@@ -337,6 +327,9 @@ func (tp *Eviction) DebugDump() string {
 	var sb strings.Builder
 
 	for block, gen := range tp.generations.blockNumToGeneration {
+		if gen.empty() {
+			continue
+		}
 		sb.WriteString(fmt.Sprintf("Block: %v\n", block))
 		for key, size := range gen.sizesByKey {
 			sb.WriteString(fmt.Sprintf("    %x->%v\n", key, size))
