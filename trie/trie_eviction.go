@@ -26,7 +26,6 @@ import (
 
 type AccountEvicter interface {
 	EvictNode([]byte)
-	// FIXME: add separate EvictCode?
 }
 
 type generations struct {
