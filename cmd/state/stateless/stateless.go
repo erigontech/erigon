@@ -454,7 +454,7 @@ func Stateless(
 				fmt.Printf("Failed to commit batch: %v\n", err)
 				return
 			}
-			tds.PruneTries(false)
+			tds.EvictTries(false)
 		}
 
 		if willSnapshot {

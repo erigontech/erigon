@@ -1182,7 +1182,7 @@ type TrieStateWriter struct {
 	tds *TrieDbState
 }
 
-func (tds *TrieDbState) PruneTries(print bool) {
+func (tds *TrieDbState) EvictTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
 	strict := print
