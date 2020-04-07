@@ -320,6 +320,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
 		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Hash]uint64),
 	}
 	tds.tMu.Unlock()
 

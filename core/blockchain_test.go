@@ -177,13 +177,22 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		if err = blockchain.db.DeleteTimestamp(block.NumberU64()); err != nil {
 			return err
 		}
-		receipts, _, usedGas, err := blockchain.Processor().Process(block, statedb, tds, vm.Config{})
+		receipts, _, usedGas, root, err := blockchain.Processor().PreProcess(block, statedb, tds, vm.Config{})
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
 			return err
 		}
-		//statedb.FinalizeTx(false, tds.TrieStateWriter())
-		err = blockchain.validator.ValidateState(block, parent, statedb, tds, receipts, usedGas)
+		err = blockchain.validator.ValidateGasAndRoot(block, root, usedGas, tds)
+		if err != nil {
+			blockchain.reportBlock(block, receipts, err)
+			return err
+		}
+		err = blockchain.Processor().PostProcess(block, tds, receipts)
+		if err != nil {
+			blockchain.reportBlock(block, receipts, err)
+			return err
+		}
+		err = blockchain.validator.ValidateReceipts(block, receipts)
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
 			return err

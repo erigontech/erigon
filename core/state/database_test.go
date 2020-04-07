@@ -734,7 +734,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
-	// We expect number 0x42 in the position [2], because it is the block number 2
+
 	check0 := st.GetState(contractAddress, common.BigToHash(big.NewInt(0)))
 	if check0 != common.HexToHash("0x0") {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0)

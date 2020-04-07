@@ -25,6 +25,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -117,16 +118,11 @@ func (v *BlockValidator) ValidateBody(ctx context.Context, block *types.Block) e
 	return nil
 }
 
-// ValidateState validates the various changes that happen after a state
-// transition, such as amount of used gas, the receipt roots and the state root
-// itself. ValidateState returns a database batch if the validation was a success
-// otherwise nil and an error is returned.
-func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, receipts types.Receipts, usedGas uint64) error {
+// ValidateReceipts validates block receipts.
+func (v *BlockValidator) ValidateReceipts(block *types.Block, receipts types.Receipts) error {
 	header := block.Header()
 	var errorBuf strings.Builder
-	if block.GasUsed() != usedGas {
-		fmt.Fprintf(&errorBuf, "invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
-	}
+
 	// Validate the received block's bloom with the one derived from the generated receipts.
 	// For valid blocks this should always validate to true.
 	rbloom := types.CreateBloom(receipts)
@@ -151,11 +147,25 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 		}
 		fmt.Fprintf(&errorBuf, "invalid receipt root hash (remote: %x local: %x)", header.ReceiptHash, receiptSha)
 	}
+
+	if errorBuf.Len() > 0 {
+		return errors.New(errorBuf.String())
+	}
+	return nil
+}
+
+// ValidateGasAndRoot validates the amount of used gas and the state root.
+func (v *BlockValidator) ValidateGasAndRoot(block *types.Block, root common.Hash, usedGas uint64, tds *state.TrieDbState) error {
+	var errorBuf strings.Builder
+	if block.GasUsed() != usedGas {
+		fmt.Fprintf(&errorBuf, "invalid gas used (remote: %d local: %d)", block.GasUsed(), usedGas)
+	}
+
 	// Validate the state root against the received state root and throw
 	// an error if they don't match.
-	if root := tds.LastRoot(); header.Root != root {
+	if block.Header().Root != root {
 		filename := fmt.Sprintf("root_%d.txt", block.NumberU64())
-		log.Warn("Generating deep snapshot of the wront tries...", "file", filename)
+		log.Warn("Generating deep snapshot of the wrong tries...", "file", filename)
 		f, err := os.Create(filename)
 		if err == nil {
 			defer f.Close()
@@ -164,7 +174,7 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 		if errorBuf.Len() > 0 {
 			errorBuf.WriteString("; ")
 		}
-		fmt.Fprintf(&errorBuf, "invalid merkle root (remote: %x local: %x)", header.Root, root)
+		fmt.Fprintf(&errorBuf, "invalid merkle root (remote: %x local: %x)", block.Header().Root, root)
 	} else if has, ok := v.dblks[block.NumberU64()]; ok && has {
 		filename := fmt.Sprintf("right_%d.txt", block.NumberU64())
 		log.Warn("Generating deep snapshot of right tries...", "file", filename)
@@ -174,6 +184,7 @@ func (v *BlockValidator) ValidateState(block, parent *types.Block, statedb *stat
 			tds.PrintTrie(f)
 		}
 	}
+
 	if errorBuf.Len() > 0 {
 		return errors.New(errorBuf.String())
 	}
