@@ -16,7 +16,7 @@ func newPuts() puts {
 	return make(puts)
 }
 
-func (p puts) Set(bucket, key, value []byte) {
+func (p puts) set(bucket, key, value []byte) {
 	var bucketPuts putsBucket
 	var ok bool
 	if bucketPuts, ok = p[string(bucket)]; !ok {
@@ -27,26 +27,8 @@ func (p puts) Set(bucket, key, value []byte) {
 }
 
 func (p puts) Delete(bucket, key []byte) {
-	p.Set(bucket, key, nil)
+	p.set(bucket, key, nil)
 }
-
-/*
-func (p puts) SetStr(bucket string, key, value []byte) {
-	var bucketPuts putsBucket
-	var ok bool
-	if bucketPuts, ok = p[bucket]; !ok {
-		bucketPuts = make(putsBucket)
-		p[bucket] = bucketPuts
-	}
-	bucketPuts[string(key)] = value
-}
-*/
-
-/*
-func (p puts) DeleteStr(bucket string, key []byte) {
-	p.SetStr(bucket, key, nil)
-}
-*/
 
 func (p puts) Size() int {
 	var size int
@@ -165,7 +147,7 @@ func (m *mutation) Put(bucket, key []byte, value []byte) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.puts.Set(bucket, key, value)
+	m.puts.set(bucket, key, value)
 	return nil
 }
 
@@ -174,7 +156,7 @@ func (m *mutation) MultiPut(tuples ...[]byte) (uint64, error) {
 	defer m.mu.Unlock()
 	l := len(tuples)
 	for i := 0; i < l; i += 3 {
-		m.puts.Set(tuples[i], tuples[i+1], tuples[i+2])
+		m.puts.set(tuples[i], tuples[i+1], tuples[i+2])
 	}
 	return 0, nil
 }
