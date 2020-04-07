@@ -12,9 +12,9 @@ import (
 const keyBufferSize = 64
 
 type IntermediateHashes struct {
-	trie.NoopTrieObserver // make sure that we don't need to subscribe to unnecessary methods
-	putter                ethdb.Putter
-	deleter               ethdb.Deleter
+	trie.NoopObserver // make sure that we don't need to subscribe to unnecessary methods
+	putter            ethdb.Putter
+	deleter           ethdb.Deleter
 }
 
 func NewIntermediateHashes(putter ethdb.Putter, deleter ethdb.Deleter) *IntermediateHashes {

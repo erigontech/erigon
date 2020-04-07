@@ -127,9 +127,11 @@ const (
 
 // ResolveWithDb resolves and hooks subtries using a state database.
 func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, trace bool) error {
-	if !tr.historical {
-		return tr.ResolveStatefulCached(db, blockNr, trace)
-	}
+	/*
+		if !tr.historical {
+			return tr.ResolveStatefulCached(db, blockNr, trace)
+		}
+	*/
 
 	return tr.ResolveStateful(db, blockNr)
 }
@@ -152,6 +154,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 }
 
 func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64, trace bool) error {
+	fmt.Printf("stateful cached\n")
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -197,9 +200,9 @@ func hookSubtrie(currentReq *ResolveRequest, hbRoot node, hbHash common.Hash) er
 		hookKey = append(contractHex, currentReq.resolveHex[:currentReq.resolvePos]...)
 	}
 
-	//fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
 	currentReq.t.hook(hookKey, hbRoot)
 	if len(currentReq.resolveHash) > 0 && !bytes.Equal(currentReq.resolveHash, hbHash[:]) {
+		fmt.Printf("hookKey: %x, %s\n", hookKey, hbRoot.fstring(""))
 		return fmt.Errorf("mismatching hash: %s %x for prefix %x, resolveHex %x, resolvePos %d",
 			currentReq.resolveHash, hbHash, currentReq.contract, currentReq.resolveHex, currentReq.resolvePos)
 	}

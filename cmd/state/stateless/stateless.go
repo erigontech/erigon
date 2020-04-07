@@ -150,7 +150,7 @@ func Stateless(
 	witnessDatabasePath string,
 	writeHistory bool,
 ) {
-	state.MaxTrieCacheSize = triesize
+	state.MaxTrieCacheSize = uint64(triesize)
 	startTime := time.Now()
 	sigs := make(chan os.Signal, 1)
 	interruptCh := make(chan bool, 1)

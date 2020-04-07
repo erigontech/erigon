@@ -56,7 +56,7 @@ type Trie struct {
 
 	hashMap map[common.Hash]node
 
-	observers *TrieObserversMux
+	observers *ObserverMux
 }
 
 // New creates a trie with an existing root node from db.
@@ -97,7 +97,7 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 	return trie
 }
 
-func (t *Trie) AddObserver(observer TrieObserver) {
+func (t *Trie) AddObserver(observer Observer) {
 	t.observers.AddChild(observer)
 }
 

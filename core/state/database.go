@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:scopelint
 package state
 
 import (
@@ -36,7 +37,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-// Trie cache size limit after which to evict trie nodes from memory.
+// MaxTrieCacheSize is the trie cache size limit after which to evict trie nodes from memory.
 var MaxTrieCacheSize = uint64(1024 * 1024)
 
 const (
@@ -180,7 +181,7 @@ type TrieDbState struct {
 	resolveReads      bool
 	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TrieEviction
+	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
@@ -189,7 +190,7 @@ type TrieDbState struct {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewTrieEviction()
+	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -233,7 +234,7 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewTrieEviction()
+	tp := trie.NewEviction()
 	tp.SetBlockNumber(n)
 
 	cpy := TrieDbState{

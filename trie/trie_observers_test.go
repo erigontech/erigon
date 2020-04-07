@@ -20,7 +20,7 @@ func genAccount() *accounts.Account {
 
 func genNKeys(n int) [][]byte {
 	result := make([][]byte, n)
-	for i, _ := range result {
+	for i := range result {
 		result[i] = crypto.Keccak256([]byte{0x0, 0x0, 0x0, byte(i % 256), byte(i / 256)})
 	}
 	return result
@@ -35,7 +35,7 @@ func genByteArrayOfLen(n int) []byte {
 }
 
 type partialObserver struct {
-	NoopTrieObserver
+	NoopObserver
 	callbackCalled bool
 }
 
@@ -81,14 +81,14 @@ func (m *mockObserver) CodeNodeDeleted(hex []byte) {
 }
 
 func (m *mockObserver) BranchNodeTouched(hex []byte) {
-	value, _ := m.touchedNodes[common.Bytes2Hex(hex)]
-	value += 1
+	value := m.touchedNodes[common.Bytes2Hex(hex)]
+	value++
 	m.touchedNodes[common.Bytes2Hex(hex)] = value
 }
 
 func (m *mockObserver) CodeNodeTouched(hex []byte) {
-	value, _ := m.touchedNodes[common.Bytes2Hex(hex)]
-	value += 1
+	value := m.touchedNodes[common.Bytes2Hex(hex)]
+	value++
 	m.touchedNodes[common.Bytes2Hex(hex)] = value
 }
 
@@ -98,16 +98,16 @@ func (m *mockObserver) CodeNodeSizeChanged(hex []byte, newSize uint) {
 
 func (m *mockObserver) WillUnloadBranchNode(hex []byte, hash common.Hash) {
 	dictKey := common.Bytes2Hex(hex)
-	value, _ := m.unloadedNodes[dictKey]
-	value += 1
+	value := m.unloadedNodes[dictKey]
+	value++
 	m.unloadedNodes[dictKey] = value
 	m.unloadedNodeHashes[dictKey] = common.CopyBytes(hash[:])
 }
 
 func (m *mockObserver) BranchNodeLoaded(hex []byte) {
 	dictKey := common.Bytes2Hex(hex)
-	value, _ := m.reloadedNodes[dictKey]
-	value += 1
+	value := m.reloadedNodes[dictKey]
+	value++
 	m.reloadedNodes[dictKey] = value
 }
 
@@ -126,7 +126,7 @@ func TestObserversBranchNodesCreateDelete(t *testing.T) {
 		codeHash := crypto.Keccak256(code)
 		acc.CodeHash = common.BytesToHash(codeHash)
 		trie.UpdateAccount(key, acc)
-		trie.UpdateAccountCode(key, codeNode(code))
+		trie.UpdateAccountCode(key, codeNode(code)) //nolint:errcheck
 	}
 
 	expectedNodes := calcSubtreeNodes(trie.root)
@@ -158,7 +158,7 @@ func TestObserverCodeSizeChanged(t *testing.T) {
 		codeHash := crypto.Keccak256(code)
 		acc.CodeHash = common.BytesToHash(codeHash)
 		trie.UpdateAccount(key, acc)
-		trie.UpdateAccountCode(key, codeNode(code))
+		trie.UpdateAccountCode(key, codeNode(code)) //nolint:errcheck
 
 		hex := keybytesToHex(key)
 		hex = hex[:len(hex)-1]
@@ -170,7 +170,7 @@ func TestObserverCodeSizeChanged(t *testing.T) {
 		codeHash2 := crypto.Keccak256(code2)
 		acc.CodeHash = common.BytesToHash(codeHash2)
 		trie.UpdateAccount(key, acc)
-		trie.UpdateAccountCode(key, codeNode(code2))
+		trie.UpdateAccountCode(key, codeNode(code2)) //nolint:errcheck
 
 		newSize2, ok := observer.createdNodes[common.Bytes2Hex(hex)]
 		assert.True(t, ok, "account should be registed as created")
@@ -258,13 +258,13 @@ func TestObserverLoadNodes(t *testing.T) {
 	// random account keys with the follwing paths
 
 	prefixes := [][]byte{
-		[]byte{0x00, 0x00}, //acc1
-		[]byte{0x00, 0x02}, //acc2
-		[]byte{0x00, 0x05}, //acc3
-		[]byte{0x02, 0x02}, //acc4
-		[]byte{0x02, 0x05}, //acc5
-		[]byte{0x0A, 0x00}, //acc6
-		[]byte{0x0A, 0x03}, //acc7
+		{0x00, 0x00}, //acc1
+		{0x00, 0x02}, //acc2
+		{0x00, 0x05}, //acc3
+		{0x02, 0x02}, //acc4
+		{0x02, 0x05}, //acc5
+		{0x0A, 0x00}, //acc6
+		{0x0A, 0x03}, //acc7
 	}
 
 	keys := genNKeys(7)
@@ -346,7 +346,7 @@ func TestObserverTouches(t *testing.T) {
 	assert.Equal(t, 2, observer.touchedNodes[branchNodeHex])
 
 	// updating code touches the account
-	trie.UpdateAccountCode(key, codeNode(code))
+	trie.UpdateAccountCode(key, codeNode(code)) //nolint:errcheck
 	// 2 touches -- retrieve + updae
 	assert.Equal(t, 4, observer.touchedNodes[branchNodeHex])
 
@@ -400,7 +400,7 @@ func TestObserverMux(t *testing.T) {
 		codeHash := crypto.Keccak256(code)
 		acc.CodeHash = common.BytesToHash(codeHash)
 		trie.UpdateAccount(key, acc)
-		trie.UpdateAccountCode(key, codeNode(code))
+		trie.UpdateAccountCode(key, codeNode(code)) //nolint:errcheck
 
 		_, ok := trie.GetAccount(key)
 		assert.True(t, ok, "acount should be found")
@@ -443,7 +443,7 @@ func TestObserverPartial(t *testing.T) {
 		codeHash := crypto.Keccak256(code)
 		acc.CodeHash = common.BytesToHash(codeHash)
 		trie.UpdateAccount(key, acc)
-		trie.UpdateAccountCode(key, codeNode(code))
+		trie.UpdateAccountCode(key, codeNode(code)) //nolint:errcheck
 
 	}
 	for _, key := range keys {

@@ -59,7 +59,7 @@ func (gs *generations) add(blockNum uint64, key []byte, size uint) {
 		generation = newGeneration()
 		gs.blockNumToGeneration[blockNum] = generation
 	} else {
-		generation, _ = gs.blockNumToGeneration[blockNum]
+		generation = gs.blockNumToGeneration[blockNum]
 	}
 	generation.add(key, size)
 	gs.keyToBlockNum[string(key)] = blockNum
@@ -90,7 +90,7 @@ func (gs *generations) touch(blockNum uint64, key []byte) {
 		currentGeneration = newGeneration()
 		gs.blockNumToGeneration[blockNum] = currentGeneration
 	} else {
-		currentGeneration, _ = gs.blockNumToGeneration[blockNum]
+		currentGeneration = gs.blockNumToGeneration[blockNum]
 	}
 	gs.latestBlockNum = blockNum
 	currentGeneration.grabFrom(key, oldGeneration)
@@ -169,7 +169,7 @@ type generation struct {
 
 func newGeneration() *generation {
 	return &generation{
-		make(map[string]uint, 0),
+		make(map[string]uint),
 		0,
 	}
 }
@@ -227,66 +227,66 @@ func (g *generation) remove(key []byte) int64 {
 func (g *generation) keys() []string {
 	keys := make([]string, len(g.sizesByKey))
 	i := 0
-	for k, _ := range g.sizesByKey {
+	for k := range g.sizesByKey {
 		keys[i] = k
 		i++
 	}
 	return keys
 }
 
-type TrieEviction struct {
-	NoopTrieObserver // make sure that we don't need to implement unnecessary observer methods
+type Eviction struct {
+	NoopObserver // make sure that we don't need to implement unnecessary observer methods
 
 	blockNumber uint64
 
 	generations *generations
 }
 
-func NewTrieEviction() *TrieEviction {
-	return &TrieEviction{
+func NewEviction() *Eviction {
+	return &Eviction{
 		generations: newGenerations(),
 	}
 }
 
-func (tp *TrieEviction) SetBlockNumber(blockNumber uint64) {
+func (tp *Eviction) SetBlockNumber(blockNumber uint64) {
 	tp.blockNumber = blockNumber
 }
 
-func (tp *TrieEviction) BlockNumber() uint64 {
+func (tp *Eviction) BlockNumber() uint64 {
 	return tp.blockNumber
 }
 
-func (tp *TrieEviction) BranchNodeCreated(hex []byte) {
+func (tp *Eviction) BranchNodeCreated(hex []byte) {
 	key := hex
 	tp.generations.add(tp.blockNumber, key, 1)
 }
 
-func (tp *TrieEviction) BranchNodeDeleted(hex []byte) {
+func (tp *Eviction) BranchNodeDeleted(hex []byte) {
 	key := hex
 	tp.generations.remove(key)
 }
 
-func (tp *TrieEviction) BranchNodeTouched(hex []byte) {
+func (tp *Eviction) BranchNodeTouched(hex []byte) {
 	key := hex
 	tp.generations.touch(tp.blockNumber, key)
 }
 
-func (tp *TrieEviction) CodeNodeCreated(hex []byte, size uint) {
+func (tp *Eviction) CodeNodeCreated(hex []byte, size uint) {
 	key := hex
 	tp.generations.add(tp.blockNumber, CodeKeyFromAddrHash(key), size)
 }
 
-func (tp *TrieEviction) CodeNodeDeleted(hex []byte) {
+func (tp *Eviction) CodeNodeDeleted(hex []byte) {
 	key := hex
 	tp.generations.remove(CodeKeyFromAddrHash(key))
 }
 
-func (tp *TrieEviction) CodeNodeTouched(hex []byte) {
+func (tp *Eviction) CodeNodeTouched(hex []byte) {
 	key := hex
 	tp.generations.touch(tp.blockNumber, CodeKeyFromAddrHash(key))
 }
 
-func (tp *TrieEviction) CodeNodeSizeChanged(hex []byte, newSize uint) {
+func (tp *Eviction) CodeNodeSizeChanged(hex []byte, newSize uint) {
 	key := hex
 	tp.generations.updateSize(tp.blockNumber, CodeKeyFromAddrHash(key), newSize)
 }
@@ -298,16 +298,14 @@ func evictList(evicter AccountEvicter, hexes []string) bool {
 	// from long to short -- a naive way to first clean up nodes and then accounts
 	// FIXME: optimize to avoid the same paths
 	for i := len(hexes) - 1; i >= 0; i-- {
-		//fmt.Printf("evicting %x\n", []byte(hexes[i]))
 		evicter.EvictNode([]byte(hexes[i]))
-		//fmt.Printf("    num=%v\n", evicter.(*Trie).NumberOfAccounts())
 	}
 	return empty
 }
 
 // EvictToFitSize evicts mininum number of generations necessary so that the total
 // size of accounts left is fits into the provided threshold
-func (tp *TrieEviction) EvictToFitSize(
+func (tp *Eviction) EvictToFitSize(
 	evicter AccountEvicter,
 	threshold uint64,
 ) bool {
@@ -321,11 +319,11 @@ func (tp *TrieEviction) EvictToFitSize(
 	return evictList(evicter, keys)
 }
 
-func (tp *TrieEviction) TotalSize() uint64 {
+func (tp *Eviction) TotalSize() uint64 {
 	return uint64(tp.generations.totalSize)
 }
 
-func (tp *TrieEviction) NumberOf() uint64 {
+func (tp *Eviction) NumberOf() uint64 {
 	total := uint64(0)
 	for _, gen := range tp.generations.blockNumToGeneration {
 		if gen == nil {
@@ -336,10 +334,10 @@ func (tp *TrieEviction) NumberOf() uint64 {
 	return total
 }
 
-func (dp *TrieEviction) DebugDump() string {
+func (tp *Eviction) DebugDump() string {
 	var sb strings.Builder
 
-	for block, gen := range dp.generations.blockNumToGeneration {
+	for block, gen := range tp.generations.blockNumToGeneration {
 		sb.WriteString(fmt.Sprintf("Block: %v\n", block))
 		for key, size := range gen.sizesByKey {
 			sb.WriteString(fmt.Sprintf("    %x->%v\n", key, size))

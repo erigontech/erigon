@@ -2,7 +2,7 @@ package trie
 
 import "github.com/ledgerwatch/turbo-geth/common"
 
-type TrieObserver interface {
+type Observer interface {
 	BranchNodeCreated(hex []byte)
 	BranchNodeDeleted(hex []byte)
 	BranchNodeTouched(hex []byte)
@@ -16,32 +16,32 @@ type TrieObserver interface {
 	BranchNodeLoaded(prefixAsNibbles []byte)
 }
 
-var _ TrieObserver = (*NoopTrieObserver)(nil) // make sure that NoopTrieObserver is compliant
+var _ Observer = (*NoopObserver)(nil) // make sure that NoopTrieObserver is compliant
 
 // NoopTrieObserver might be used to emulate optional methods in observers
-type NoopTrieObserver struct{}
+type NoopObserver struct{}
 
-func (*NoopTrieObserver) BranchNodeCreated(_ []byte)                   {}
-func (*NoopTrieObserver) BranchNodeDeleted(_ []byte)                   {}
-func (*NoopTrieObserver) BranchNodeTouched(_ []byte)                   {}
-func (*NoopTrieObserver) CodeNodeCreated(_ []byte, _ uint)             {}
-func (*NoopTrieObserver) CodeNodeDeleted(_ []byte)                     {}
-func (*NoopTrieObserver) CodeNodeTouched(_ []byte)                     {}
-func (*NoopTrieObserver) CodeNodeSizeChanged(_ []byte, _ uint)         {}
-func (*NoopTrieObserver) WillUnloadBranchNode(_ []byte, _ common.Hash) {}
-func (*NoopTrieObserver) BranchNodeLoaded(_ []byte)                    {}
+func (*NoopObserver) BranchNodeCreated(_ []byte)                   {}
+func (*NoopObserver) BranchNodeDeleted(_ []byte)                   {}
+func (*NoopObserver) BranchNodeTouched(_ []byte)                   {}
+func (*NoopObserver) CodeNodeCreated(_ []byte, _ uint)             {}
+func (*NoopObserver) CodeNodeDeleted(_ []byte)                     {}
+func (*NoopObserver) CodeNodeTouched(_ []byte)                     {}
+func (*NoopObserver) CodeNodeSizeChanged(_ []byte, _ uint)         {}
+func (*NoopObserver) WillUnloadBranchNode(_ []byte, _ common.Hash) {}
+func (*NoopObserver) BranchNodeLoaded(_ []byte)                    {}
 
 // TrieObserverMux multiplies the callback methods and sends them to
 // all it's children.
-type TrieObserversMux struct {
-	children []TrieObserver
+type ObserverMux struct {
+	children []Observer
 }
 
-func NewTrieObserverMux() *TrieObserversMux {
-	return &TrieObserversMux{make([]TrieObserver, 0)}
+func NewTrieObserverMux() *ObserverMux {
+	return &ObserverMux{make([]Observer, 0)}
 }
 
-func (mux *TrieObserversMux) AddChild(child TrieObserver) {
+func (mux *ObserverMux) AddChild(child Observer) {
 	if child == nil {
 		return
 	}
@@ -49,55 +49,55 @@ func (mux *TrieObserversMux) AddChild(child TrieObserver) {
 	mux.children = append(mux.children, child)
 }
 
-func (mux *TrieObserversMux) BranchNodeCreated(hex []byte) {
+func (mux *ObserverMux) BranchNodeCreated(hex []byte) {
 	for _, child := range mux.children {
 		child.BranchNodeCreated(hex)
 	}
 }
 
-func (mux *TrieObserversMux) BranchNodeDeleted(hex []byte) {
+func (mux *ObserverMux) BranchNodeDeleted(hex []byte) {
 	for _, child := range mux.children {
 		child.BranchNodeDeleted(hex)
 	}
 }
 
-func (mux *TrieObserversMux) BranchNodeTouched(hex []byte) {
+func (mux *ObserverMux) BranchNodeTouched(hex []byte) {
 	for _, child := range mux.children {
 		child.BranchNodeTouched(hex)
 	}
 }
 
-func (mux *TrieObserversMux) CodeNodeCreated(hex []byte, size uint) {
+func (mux *ObserverMux) CodeNodeCreated(hex []byte, size uint) {
 	for _, child := range mux.children {
 		child.CodeNodeCreated(hex, size)
 	}
 }
 
-func (mux *TrieObserversMux) CodeNodeDeleted(hex []byte) {
+func (mux *ObserverMux) CodeNodeDeleted(hex []byte) {
 	for _, child := range mux.children {
 		child.CodeNodeDeleted(hex)
 	}
 }
 
-func (mux *TrieObserversMux) CodeNodeTouched(hex []byte) {
+func (mux *ObserverMux) CodeNodeTouched(hex []byte) {
 	for _, child := range mux.children {
 		child.CodeNodeTouched(hex)
 	}
 }
 
-func (mux *TrieObserversMux) CodeNodeSizeChanged(hex []byte, newSize uint) {
+func (mux *ObserverMux) CodeNodeSizeChanged(hex []byte, newSize uint) {
 	for _, child := range mux.children {
 		child.CodeNodeSizeChanged(hex, newSize)
 	}
 }
 
-func (mux *TrieObserversMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash) {
+func (mux *ObserverMux) WillUnloadBranchNode(key []byte, nodeHash common.Hash) {
 	for _, child := range mux.children {
 		child.WillUnloadBranchNode(key, nodeHash)
 	}
 }
 
-func (mux *TrieObserversMux) BranchNodeLoaded(prefixAsNibbles []byte) {
+func (mux *ObserverMux) BranchNodeLoaded(prefixAsNibbles []byte) {
 	for _, child := range mux.children {
 		child.BranchNodeLoaded(prefixAsNibbles)
 	}

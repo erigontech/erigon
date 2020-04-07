@@ -37,7 +37,7 @@ func (m *mockAccountEvicter) EvictNode(key []byte) {
 }
 
 func TestEvictionBasicOperations(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	key := []byte{0x01, 0x01, 0x01, 0x01}
@@ -75,7 +75,7 @@ func TestEvictionBasicOperations(t *testing.T) {
 }
 
 func TestEvictionPartialSingleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 100kb or accounts
@@ -102,7 +102,7 @@ func TestEvictionPartialSingleGen(t *testing.T) {
 }
 
 func TestEvictionFullSingleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 100kb or accounts
@@ -129,7 +129,7 @@ func TestEvictionFullSingleGen(t *testing.T) {
 }
 
 func TestEvictionNoNeedSingleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 100kb or accounts
@@ -158,7 +158,7 @@ func TestEvictionNoNeedSingleGen(t *testing.T) {
 }
 
 func TestEvictionNoNeedMultipleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 10kb or accounts
@@ -222,7 +222,7 @@ func TestEvictionNoNeedMultipleGen(t *testing.T) {
 }
 
 func TestEvictionPartialMultipleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 10kb or accounts
@@ -288,7 +288,7 @@ func TestEvictionPartialMultipleGen(t *testing.T) {
 }
 
 func TestEvictionFullMultipleGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 	eviction.SetBlockNumber(1)
 
 	// create 10kb or accounts
@@ -353,7 +353,7 @@ func TestEvictionFullMultipleGen(t *testing.T) {
 }
 
 func TestEvictionMoveBetweenGen(t *testing.T) {
-	eviction := NewTrieEviction()
+	eviction := NewEviction()
 
 	eviction.SetBlockNumber(2)
 
