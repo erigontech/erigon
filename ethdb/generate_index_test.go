@@ -1,13 +1,16 @@
 package ethdb
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"log"
+	"os"
 	"sort"
 	"testing"
 	"time"
@@ -180,6 +183,266 @@ func TestCheckIndexes(t *testing.T) {
 		t.Fatal("storageChangeSetBytes Walk err", err)
 	}
 
+}
+func TestCheckContracts(t *testing.T) {
+
+}
+
+func TestMore1000Calc(t *testing.T) {
+	db, err := NewBoltDatabase(statePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ts := time.Now()
+	defer func() {
+		fmt.Println("end:", time.Now().Sub(ts))
+	}()
+
+	aib := []byte("hAT31")
+	//sib := []byte("hST31")
+
+	more1index := 0
+	more10index := make(map[string]uint64)
+	more100index := make(map[string]uint64)
+
+	prevKey := []byte{}
+	count := uint64(1)
+	added := false
+	i := uint64(0)
+
+	err = db.Walk(aib, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i%100000 == 0 {
+			fmt.Println(i, common.Bytes2Hex(k), len(v), " --- ", more1index, len(more10index), len(more100index))
+		}
+
+		i++
+		if bytes.Equal(k[:common.HashLength], prevKey) {
+			count++
+			if count > 1 && !added {
+				more1index++
+				added = true
+			}
+			if count > 10 {
+				more10index[string(common.CopyBytes(k[:common.HashLength]))] = count
+			}
+			if count > 100 {
+				more100index[string(common.CopyBytes(k[:common.HashLength]))] = count
+			}
+		} else {
+			added = false
+			count = 1
+			prevKey = common.CopyBytes(k[:common.HashLength])
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal("AccountChangeSetBytes Walk err", err)
+	}
+	fmt.Println("more100", len(more100index))
+	fmt.Println("more1", more1index)
+	fmt.Println("more10", len(more10index))
+
+	save100 := make([]struct {
+		Address      string
+		Hash         string
+		NumOfIndexes uint64
+	}, 0, len(more100index))
+	for hash, v := range more100index {
+		p, err := db.Get(dbutils.PreimagePrefix, []byte(hash))
+		if err != nil {
+			t.Error(err)
+		}
+		if len(p) == 0 {
+			t.Error("empty")
+		}
+
+		save100 = append(save100, struct {
+			Address      string
+			Hash         string
+			NumOfIndexes uint64
+		}{
+			Address:      common.BytesToAddress(p).String(),
+			NumOfIndexes: v,
+			Hash:         common.Bytes2Hex([]byte(hash)),
+		})
+
+	}
+	sort.Slice(save100, func(i, j int) bool {
+		return save100[i].NumOfIndexes > save100[j].NumOfIndexes
+	})
+	f, err := os.Create("/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/more100.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.NewEncoder(f).Encode(save100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	save10 := make([]struct {
+		Address      string
+		Hash         string
+		NumOfIndexes uint64
+	}, 0, len(more10index))
+	for hash, v := range more10index {
+		p, err := db.Get(dbutils.PreimagePrefix, []byte(hash))
+		if err != nil {
+			t.Error(err)
+		}
+		if len(p) == 0 {
+			t.Error("empty")
+		}
+		save10 = append(save10, struct {
+			Address      string
+			Hash         string
+			NumOfIndexes uint64
+		}{
+			Address:      common.BytesToAddress(p).String(),
+			NumOfIndexes: v,
+			Hash:         common.Bytes2Hex([]byte(hash)),
+		})
+
+	}
+	sort.Slice(save10, func(i, j int) bool {
+		return save10[i].NumOfIndexes > save10[j].NumOfIndexes
+	})
+
+	f2, err := os.Create("/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/more10.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.NewEncoder(f2).Encode(save10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+func TestMore1000CalcStr(t *testing.T) {
+	db, err := NewBoltDatabase(statePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	ts := time.Now()
+	defer func() {
+		fmt.Println("end:", time.Now().Sub(ts))
+	}()
+
+	sib := []byte("hST31")
+
+	more1index := 0
+	more10index := make(map[string]uint64)
+	more100index := make(map[string]uint64)
+
+	prevKey := []byte{}
+	count := uint64(1)
+	added := false
+	i := uint64(0)
+
+	keyLen := common.HashLength*2 + common.IncarnationLength
+	err = db.Walk(sib, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i%100000 == 0 {
+			fmt.Println(i, common.Bytes2Hex(k), len(v), " --- ", more1index, len(more10index), len(more100index))
+		}
+
+		i++
+		if bytes.Equal(k[:keyLen], prevKey) {
+			count++
+			if count > 1 && !added {
+				more1index++
+				added = true
+			}
+			if count > 10 {
+				more10index[string(common.CopyBytes(k[:keyLen]))] = count
+			}
+			if count > 100 {
+				more100index[string(common.CopyBytes(k[:keyLen]))] = count
+			}
+		} else {
+			added = false
+			count = 1
+			prevKey = common.CopyBytes(k[:keyLen])
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal("AccountChangeSetBytes Walk err", err)
+	}
+	fmt.Println("more100", len(more100index))
+	fmt.Println("more1", more1index)
+	fmt.Println("more10", len(more10index))
+
+	save100 := make([]struct {
+		Hash         string
+		NumOfIndexes uint64
+	}, 0, len(more100index))
+	for hash, v := range more100index {
+		save100 = append(save100, struct {
+			Hash         string
+			NumOfIndexes uint64
+		}{
+			NumOfIndexes: v,
+			Hash:         common.Bytes2Hex([]byte(hash)),
+		})
+
+	}
+	sort.Slice(save100, func(i, j int) bool {
+		return save100[i].NumOfIndexes > save100[j].NumOfIndexes
+	})
+	f, err := os.Create("/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/more100str.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.NewEncoder(f).Encode(save100)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	save10 := make([]struct {
+		Hash         string
+		NumOfIndexes uint64
+	}, 0, len(more10index))
+	for hash, v := range more10index {
+		save10 = append(save10, struct {
+			Hash         string
+			NumOfIndexes uint64
+		}{
+			NumOfIndexes: v,
+			Hash:         common.Bytes2Hex([]byte(hash)),
+		})
+
+	}
+	sort.Slice(save10, func(i, j int) bool {
+		return save10[i].NumOfIndexes > save10[j].NumOfIndexes
+	})
+
+	f2, err := os.Create("/home/b00ris/go/src/github.com/ledgerwatch/turbo-geth/debug/more10str.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = json.NewEncoder(f2).Encode(save10)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+}
+
+func TestCheckAcc(t *testing.T) {
+	db, err := NewBoltDatabase(statePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	bucket := []byte("hAT31")
+	key := common.Hex2Bytes("002afdbfc7f15d5b2f6df268e8b4b26ce02e297e53503d0f056c065e980ebda1")
+	fmt.Println(len(key))
+	i := 0
+	err = db.Walk(bucket, key, 32, func(k, v []byte) (b bool, e error) {
+		fmt.Println(i, len(v), common.Bytes2Hex(k[:common.HashLength]), ^binary.BigEndian.Uint64(k[common.HashLength:]))
+		i++
+		return true, nil
+	})
+	t.Log(err)
 }
 
 func TestName2(t *testing.T) {
