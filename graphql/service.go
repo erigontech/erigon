@@ -21,12 +21,13 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
-	"github.com/ledgerwatch/turbo-geth/log"
-	"github.com/ledgerwatch/turbo-geth/p2p"
-	"github.com/ledgerwatch/turbo-geth/rpc"
 	"github.com/graph-gophers/graphql-go"
 	"github.com/graph-gophers/graphql-go/relay"
+	"github.com/ledgerwatch/turbo-geth/internal/ethapi"
+	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/node"
+	"github.com/ledgerwatch/turbo-geth/p2p"
+	"github.com/ledgerwatch/turbo-geth/rpc"
 )
 
 // Service encapsulates a GraphQL service.
@@ -68,7 +69,18 @@ func (s *Service) Start(server *p2p.Server) error {
 	if s.listener, err = net.Listen("tcp", s.endpoint); err != nil {
 		return err
 	}
-	go rpc.NewHTTPServer(s.cors, s.vhosts, s.timeouts, s.handler).Serve(s.listener)
+	// create handler stack and wrap the graphql handler
+	handler := node.NewHTTPHandlerStack(s.handler, s.cors, s.vhosts)
+	// make sure timeout values are meaningful
+	node.CheckTimeouts(&s.timeouts)
+	// create http server
+	httpSrv := &http.Server{
+		Handler:      handler,
+		ReadTimeout:  s.timeouts.ReadTimeout,
+		WriteTimeout: s.timeouts.WriteTimeout,
+		IdleTimeout:  s.timeouts.IdleTimeout,
+	}
+	go httpSrv.Serve(s.listener)
 	log.Info("GraphQL endpoint opened", "url", fmt.Sprintf("http://%s", s.endpoint))
 	return nil
 }
