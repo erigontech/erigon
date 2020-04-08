@@ -118,9 +118,9 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
 	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
 	elements := hi[LenBytes*2:]
-	idx := sort.Search(numOfElements, func (i int) bool {
+	idx := sort.Search(numOfElements, func(i int) bool {
 		if i > numOfUint32Elements {
-			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (i-numOfUint32Elements)*8:]) >= v
+			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(i-numOfUint32Elements)*8:]) >= v
 		}
 		return uint64(binary.LittleEndian.Uint32(elements[i*4:])) >= v
 	})
@@ -128,8 +128,23 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 		return 0, false
 	}
 	if idx > numOfUint32Elements {
-		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (idx-numOfUint32Elements)*8:]), true
+		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4+(idx-numOfUint32Elements)*8:]), true
 	}
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
+func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
+	if len(hi) < LenBytes*2+4 {
+		return 0, false
+	}
+	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
+	if numOfElements == 0 {
+		return 0, false
+	}
+
+	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
+	if numOfUint32Elements > 0 {
+		return uint64(binary.LittleEndian.Uint32(hi[2*LenBytes : 2*LenBytes+4])), true
+	}
+	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
+}
