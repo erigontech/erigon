@@ -119,8 +119,8 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	for k, expect := range checks {
-		ok, err := HasTombstone(db, common.FromHex(k))
-		require.NoError(err, k)
+		ok, err1 := HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
 

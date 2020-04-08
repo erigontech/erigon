@@ -16,8 +16,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
 )
 
-const TraceFromBlock uint64 = 258199
-
 type ResolverStatefulCached struct {
 	*ResolverStateful
 	fromCache bool
@@ -251,9 +249,6 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	//if isAccount && fromCache {
-	//	buf := pool.GetBuffer(256)
-	//	CompressNibbles(kAsNibbles, &buf.B)
 	if tr.trace {
 		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, kAsNibbles, v, fromCache)
 	}

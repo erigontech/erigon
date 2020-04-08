@@ -1934,57 +1934,62 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 }
 
 func indexSize(chaindata string) {
+	//db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
+	defer db.Close()
 	fStorage, err := os.Create("index_sizes_storage.csv")
 	check(err)
+	defer fStorage.Close()
 	fAcc, err := os.Create("index_sizes_acc.csv")
 	check(err)
+	defer fAcc.Close()
 	csvAcc := csv.NewWriter(fAcc)
+	defer csvAcc.Flush()
 	err = csvAcc.Write([]string{"key", "ln"})
 	check(err)
 	csvStorage := csv.NewWriter(fStorage)
+	defer csvStorage.Flush()
 	err = csvStorage.Write([]string{"key", "ln"})
+
 	i := 0
-	j := 0
 	maxLenAcc := 0
-	maxLenSt := 0
-	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i > 10000 {
-			fmt.Println(j)
-			i = 0
-		}
+	if err := db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenAcc)
+		}
 		if len(v) > maxLenAcc {
 			maxLenAcc = len(v)
 		}
-		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err != nil {
+		if err := csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		check(err)
+	}
+
 	i = 0
-	j = 0
-	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i > 10000 {
-			fmt.Println(j)
-			i = 0
-		}
+	maxLenSt := 0
+	if err := db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenSt)
+		}
+
 		if len(v) > maxLenSt {
 			maxLenSt = len(v)
 		}
-		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err != nil {
+		if err := csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		check(err)
+	}
 
 	fmt.Println("Results:")
 	fmt.Println("maxLenAcc:", maxLenAcc)
