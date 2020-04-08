@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"syscall"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/console"
@@ -21,7 +22,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/p2p"
 	"github.com/ledgerwatch/turbo-geth/p2p/enode"
-	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
 	"github.com/urfave/cli"
@@ -133,8 +133,17 @@ func tester(cliCtx *cli.Context) error {
 		return err
 	}
 
-	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	tp := NewTesterProtocol()
+	server := makeP2PServer(ctx, tp, []string{eth.DebugName})
+	// Add protocol
+	if err := server.Start(); err != nil {
+		panic(fmt.Errorf("could not start server: %w", err))
+	}
+	server.AddPeer(nodeToConnect)
+	time.Sleep(time.Second)
+	server.Stop()
+
+	//fmt.Printf("%s %s\n", ctx.Args()[0], ctx.Args()[1])
 	//tp.blockFeeder, err = NewBlockAccessor(ctx.Args()[0]/*, ctx.Args()[1]*/)
 	blockGen, err := NewBlockGenerator(ctx, "blocks", 50000)
 	if err != nil {
@@ -151,8 +160,9 @@ func tester(cliCtx *cli.Context) error {
 	defer tp.forkFeeder.Close()
 	tp.protocolVersion = uint32(eth.ProtocolVersions[0])
 	tp.networkId = 1 // Mainnet
-	tp.genesisBlockHash = params.MainnetGenesisHash
-	server := makeP2PServer(ctx, tp, []string{eth.ProtocolName, eth.DebugName})
+	tp.genesisBlockHash = tp.forkFeeder.Genesis().Hash()
+
+	server = makeP2PServer(ctx, tp, []string{eth.ProtocolName})
 	// Add protocol
 	if err := server.Start(); err != nil {
 		panic(fmt.Errorf("could not start server: %w", err))

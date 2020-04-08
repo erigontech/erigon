@@ -1786,7 +1786,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
 			if bc.trieDbState != nil {
-				bc.trieDbState.PruneTries(false)
+				bc.trieDbState.EvictTries(false)
 			}
 			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
 		}
