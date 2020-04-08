@@ -73,7 +73,7 @@ func TestPrintLoad(t *testing.T) {
 		tr.Print(&b)
 		if trace {
 			fmt.Printf("Trie: %s\n", tr.root.fstring(""))
-			fmt.Printf("Buffer: %s\n", b.Bytes())
+			fmt.Printf("Buffer: 0x%x\n", b.Bytes())
 		}
 		trLoaded, err := Load(&b)
 		if err != nil {
