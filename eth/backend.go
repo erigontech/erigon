@@ -664,6 +664,11 @@ func setStorageModeIfNotExist(db ethdb.Database, sm StorageMode) error {
 		return err
 	}
 
+	err = setModeOnEmpty(db, dbutils.StorageModeThinHistory, sm.ThinHistory)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -714,6 +719,12 @@ func getStorageModeFromDB(db ethdb.Database) (StorageMode, error) {
 		return StorageMode{}, err
 	}
 	sm.TxIndex = len(v) > 0
+
+	v, err = db.Get(dbutils.DatabaseInfoBucket, dbutils.StorageModeThinHistory)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return StorageMode{}, err
+	}
+	sm.ThinHistory = len(v) > 0
 
 	return sm, nil
 }

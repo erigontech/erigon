@@ -40,7 +40,7 @@ func TestSetStorageModeIfNotExist(t *testing.T) {
 		true,
 		true,
 		true,
-		false,
+		true,
 	}) {
 		spew.Dump(sm)
 		t.Fatal("not equal")
