@@ -165,7 +165,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 				return err
 			}
 		}
- 	} else {
+	} else {
 		for _, change := range accountChanges.Changes {
 			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
 			if err := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err != nil {
