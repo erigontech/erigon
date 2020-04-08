@@ -29,7 +29,8 @@ const LookupAccountForm = ({ api }) => {
     <div>
       <SearchField
         placeholder="lookup by id or hash"
-        onClick={(id) => loadAccount(id, api).then(lookupSuccess).catch(lookupFail)}
+        disabled={state.loading}
+        onSubmit={(data) => loadAccount(data.search, api).then(lookupSuccess).catch(lookupFail)}
       />
       <hr />
       {state.account && <DetailsForm account={state.account} />}

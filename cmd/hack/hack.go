@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -789,7 +788,6 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	debug.IntermediateTrieHashAssertDbIntegrity = true
 	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()
@@ -1936,66 +1934,70 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 }
 
 func indexSize(chaindata string) {
+	//db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
+	defer db.Close()
 	fStorage, err := os.Create("index_sizes_storage.csv")
 	check(err)
+	defer fStorage.Close()
 	fAcc, err := os.Create("index_sizes_acc.csv")
 	check(err)
+	defer fAcc.Close()
 	csvAcc := csv.NewWriter(fAcc)
+	defer csvAcc.Flush()
 	err = csvAcc.Write([]string{"key", "ln"})
 	check(err)
 	csvStorage := csv.NewWriter(fStorage)
+	defer csvStorage.Flush()
 	err = csvStorage.Write([]string{"key", "ln"})
+
 	i := 0
-	j := 0
 	maxLenAcc := 0
-	maxLenSt := 0
 	accountsOver4096 := 0
-	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i > 10000 {
-			fmt.Println(j)
-			i = 0
-		}
+	if err := db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenAcc)
+		}
 		if len(v) > maxLenAcc {
 			maxLenAcc = len(v)
 		}
 		if len(v) > 4096 {
 			accountsOver4096++
 		}
-		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err != nil {
+		if err := csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		check(err)
+	}
 
 	i = 0
-	j = 0
+	maxLenSt := 0
 	storageOver4096 := 0
-	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i > 10000 {
-			fmt.Println(j)
-			i = 0
-		}
+	if err := db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenSt)
+		}
+
 		if len(v) > maxLenSt {
 			maxLenSt = len(v)
 		}
 		if len(v) > 4096 {
 			storageOver4096++
 		}
-		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err != nil {
+		if err := csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		check(err)
+	}
 
 	fmt.Println("Results:")
 	fmt.Println("maxLenAcc:", maxLenAcc)
