@@ -23,7 +23,7 @@ func transformSubTrie(nd node, hex []byte, newTrie *Trie, transformFunc keyTrans
 			code = make([]byte, len(n.code))
 			copy(code, n.code)
 		}
-		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), 0, &accountNode{accountCopy, nil, true, codeNode(code)})
+		_, newTrie.root = newTrie.insert(newTrie.root, transformFunc(hex), 0, &accountNode{accountCopy, nil, true, codeNode(code), n.codeSize})
 		aHex := hex
 		if aHex[len(aHex)-1] == 16 {
 			aHex = aHex[:len(aHex)-1]

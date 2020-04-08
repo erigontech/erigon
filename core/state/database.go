@@ -93,6 +93,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads      map[common.Hash]common.Hash
+	codeSizeReads  map[common.Hash]common.Hash
 	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
@@ -105,6 +106,7 @@ type Buffer struct {
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
 	b.codeReads = make(map[common.Hash]common.Hash)
+	b.codeSizeReads = make(map[common.Hash]common.Hash)
 	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
@@ -131,6 +133,10 @@ func (b *Buffer) merge(other *Buffer) {
 
 	for addrHash, code := range other.codeUpdates {
 		b.codeUpdates[addrHash] = code
+	}
+
+	for address, codeHash := range other.codeSizeReads {
+		b.codeSizeReads[address] = codeHash
 	}
 
 	for addrHash, om := range other.storageUpdates {
@@ -422,8 +428,12 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
-func (tds *TrieDbState) buildCodeTouches(withReads bool) map[common.Hash]common.Hash {
+func (tds *TrieDbState) buildCodeTouches() map[common.Hash]common.Hash {
 	return tds.aggregateBuffer.codeReads
+}
+
+func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
+	return tds.aggregateBuffer.codeSizeReads
 }
 
 // Builds a sorted list of all address hashes that were touched within the
@@ -470,10 +480,28 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 	return accountTouches, aValues
 }
 
-func (tds *TrieDbState) resolveCodeTouches(codeTouches map[common.Hash]common.Hash, resolveFunc trie.ResolveFunc) error {
+func (tds *TrieDbState) resolveCodeTouches(
+	codeTouches map[common.Hash]common.Hash,
+	codeSizeTouches map[common.Hash]common.Hash,
+	resolveFunc trie.ResolveFunc,
+) error {
 	firstRequest := true
 	for address, codeHash := range codeTouches {
-		if need, req := tds.t.NeedResolutonForCode(address, codeHash); need {
+		delete(codeSizeTouches, codeHash)
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
+			}
+			firstRequest = false
+			tds.resolver.AddCodeRequest(req)
+		}
+	}
+
+	for address, codeHash := range codeSizeTouches {
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
 				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
@@ -550,7 +578,10 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
 
 	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
-	codeTouches := tds.buildCodeTouches(tds.resolveReads)
+	codeTouches := tds.buildCodeTouches()
+
+	// Prepare (resolve) contract code size reads so that actual modifications can proceed without database access
+	codeSizeTouches := tds.buildCodeSizeTouches()
 
 	var err error
 
@@ -558,7 +589,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 		return err
 	}
 
-	if err = tds.resolveCodeTouches(codeTouches, resolveFunc); err != nil {
+	if err = tds.resolveCodeTouches(codeTouches, codeSizeTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -1076,6 +1107,12 @@ func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) 
 	return tds.t.GetAccountCode(addrHash)
 }
 
+func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	return tds.t.GetAccountCodeSize(addrHash)
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -1114,10 +1151,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		return 0, err
 	}
 
-	if code, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
-		codeSize, err = len(code), nil
+	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
+		codeSize, err = cached, nil
 	} else {
-		code, err = tds.ReadAccountCode(address, codeHash)
+		var code []byte
+		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
 		if err != nil {
 			return 0, err
 		}
@@ -1134,7 +1172,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		tds.currentBuffer.codeReads[addrHash] = codeHash
+		tds.currentBuffer.codeSizeReads[addrHash] = codeHash
+		// FIXME: support codeSize in witnesses if makes sense
 		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return codeSize, nil

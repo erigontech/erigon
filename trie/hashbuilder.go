@@ -230,7 +230,12 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	var accCopy accounts.Account
 	accCopy.Copy(&hb.acc)
 
-	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true, accountCode}}
+	accountCodeSize := codeSizeUncached
+	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
+		accountCodeSize = len(accountCode)
+	}
+
+	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true, accountCode, accountCodeSize}}
 	// this invocation will take care of the popping given number of items from both hash stack and node stack,
 	// pushing resulting hash to the hash stack, and nil to the node stack
 	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
