@@ -93,6 +93,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads      map[common.Hash]common.Hash
+	codeSizeReads  map[common.Hash]struct{}
 	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}

@@ -135,7 +135,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 
 func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 	if t.root == nil {
-		return nil, true
+		return nil, false
 	}
 
 	hex := keybytesToHex(key)
@@ -277,9 +277,9 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 
 	var newnode *accountNode
 	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
-		newnode = &accountNode{*value, nil, true, nil}
+		newnode = &accountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
-		newnode = &accountNode{*value, hashNode(value.Root[:]), true, nil}
+		newnode = &accountNode{*value, hashNode(value.Root[:]), true, nil, codeSizeUncached}
 	}
 
 	if t.root == nil {
@@ -311,6 +311,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 	}
 
 	accNode.code = code
+	accNode.codeSize = len(code)
 
 	// t.insert will call the observer methods itself
 	_, t.root = t.insert(t.root, hex, 0, accNode)
@@ -471,6 +472,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 					origAccN.code = nil
 				} else if vAccN.code != nil {
 					origAccN.code = vAccN.code
+					origAccN.codeSize = vAccN.codeSize
 				}
 				origAccN.Account.Copy(&vAccN.Account)
 				origAccN.rootCorrect = false

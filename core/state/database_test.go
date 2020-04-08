@@ -1197,3 +1197,65 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
 }
+
+func TestCacheCodeSize(t *testing.T) {
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+
+	db := ethdb.NewMemDatabase()
+	tds := state.NewTrieDbState(root, db, 0)
+	tds.SetResolveReads(true)
+	tsw := tds.DbStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+
+	code := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, code)
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	tds.ResolveStateTrie(false, false)
+
+	tds.StartNewBuffer()
+
+	tds.ReadAccountData(contract)
+
+	tds.ResolveStateTrie(false, true)
+
+	tds.StartNewBuffer()
+
+	tds.Trie().PrintTrie()
+
+	tds.ComputeTrieRoots()
+
+	oldSize := tds.Trie().TrieSize()
+
+	tds.StartNewBuffer()
+
+	codeHash := common.BytesToHash(crypto.Keccak256(code))
+	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, len(code), codeSize, "new code should be received")
+
+	tds.ResolveStateTrie(false, true)
+
+	newSize := tds.Trie().TrieSize()
+	assert.Equal(t, oldSize, newSize, "should not load codeNode, so the size shouldn't change")
+
+	tds.StartNewBuffer()
+
+	code2, err := tds.ReadAccountCode(contract, codeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, code, code2, "new code should be received")
+
+	tds.ResolveStateTrie(false, true)
+
+	newSize2 := tds.Trie().TrieSize()
+	assert.Equal(t, oldSize, newSize2-len(code), "should load codeNode when requesting new data ")
+}
