@@ -384,6 +384,19 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			}
 
+			// Special case: self-destructed accounts.
+			// self-destructed accounts may be marked in IH bucket by empty value
+			// in this case: skip all IH keys of given prefix
+			if cacheV != nil && len(cacheV) == 0 {
+				next, ok := nextSubtree(cacheK)
+				if !ok { // no siblings left
+					cacheK, cacheV = nil, nil
+					continue
+				}
+				cacheK, cacheV = cache.Seek(next)
+				continue
+			}
+
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket {
 				for len(cacheK) > maxAccountKeyLen {
@@ -502,10 +515,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			}
 
 			// cache part
-			if len(cacheV) == 0 { // skip empty values
-				cacheK, cacheV = cache.Next()
-				continue
-			}
+			canUseCache := false
 
 			currentReq := tr.requests[tr.reqIndices[rangeIdx]]
 			currentRs := tr.rss[rangeIdx]
@@ -517,7 +527,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			canUseCache := currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
+			canUseCache = currentRs.HashOnly(keyAsNibbles.B[currentReq.extResolvePos:])
 			if !canUseCache { // can't use cache as is, need go to children
 				cacheK, cacheV = cache.Next() // go to children, not to sibling
 				continue

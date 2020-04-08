@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 
+import './App.css';
 import { Col, Container, Nav, Row } from 'react-bootstrap';
 import API from './utils/API.js';
 import ErrorCatcher from './components/ErrorCatcher.js';
 import { BrowserRouter as Router, Link, NavLink, Redirect, Route, Switch } from 'react-router-dom';
 import AccountsPage from './page/Accounts';
+import IntermediateHashPage from './page/IntermediateHashPage';
 import { ReactComponent as Logo } from './logo.svg';
-import './App.css';
 import StoragePage from './page/Storage';
 import RemoteSidebar from './components/RemoteSidebar';
 
@@ -18,6 +19,10 @@ const sidebar = [
   {
     url: '/storage',
     label: 'Storage',
+  },
+  {
+    url: '/intermediate-hash',
+    label: 'Inter Hash',
   },
 ];
 
@@ -62,6 +67,9 @@ function App() {
                 </Route>
                 <Route path="/storage">
                   <StoragePage api={api} />
+                </Route>
+                <Route path="/intermediate-hash">
+                  <IntermediateHashPage api={api} />
                 </Route>
               </Switch>
             </Col>
