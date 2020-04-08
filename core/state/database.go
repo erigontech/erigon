@@ -21,7 +21,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -29,7 +28,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -253,120 +251,6 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	cpy.t.AddObserver(NewIntermediateHashes(cpy.db, cpy.db))
 
 	return &cpy
-}
-
-// PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
-	if len(addrHash) != common.HashLength {
-		return nil
-	}
-
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	hasIH := false
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		k, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Seek(addrHash)
-		if !bytes.HasPrefix(k, addrHash) {
-			k = nil
-		}
-		if k != nil {
-			hasIH = true
-		}
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if !hasIH {
-		return nil
-	}
-
-	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
-}
-
-func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	var toPut [][]byte
-	//var toDelete [][]byte
-
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		for k, v := c.Seek(storageKeyNoInc[:common.HashLength]); k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, storageKeyNoInc[:common.HashLength]) {
-				k = nil
-			}
-			if k == nil {
-				break
-			}
-
-			isTombstone := v != nil && len(v) == 0
-			if isTombstone {
-				continue
-			}
-
-			for i := common.HashLength; i < len(k); i++ {
-				if storageKeyNoInc[i] == k[i] {
-					continue
-				}
-
-				toPut = append(toPut, common.CopyBytes(k[:i+1]))
-				break
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	for _, k := range toPut {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-			return err
-		}
-	}
-
-	for i := common.HashLength; i <= len(storageKeyNoInc); i++ {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key), common.CopyBytes(nodeHash)); err != nil {
-		log.Warn("could not put intermediate trie hash", "err", err)
-	}
-}
-
-func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
-	if len(prefixAsNibbles) == 0 {
-		return
-	}
-
-	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of nibbles
-		return
-	}
-
-	key := make([]byte, len(prefixAsNibbles)/2)
-	trie.CompressNibbles(prefixAsNibbles, &key)
-
-	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {
-		log.Warn("could not delete intermediate trie hash", "err", err)
-		return
-	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
@@ -925,17 +809,6 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 	}
 
 	return roots, nil
-}
-
-func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
-	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
-	if err != nil {
-		if errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return v != nil && len(v) == 0, nil
 }
 
 func (tds *TrieDbState) clearUpdates() {
