@@ -160,7 +160,7 @@ func (b *WitnessBuilder) processAccountCode(n *accountNode, hashOnly HashOnly) e
 		return nil
 	}
 
-	if n.code == nil || !hashOnly.IsCodeTouched(n.CodeHash) {
+	if n.code == nil || (hashOnly != nil && !hashOnly.IsCodeTouched(n.CodeHash)) {
 		return b.addHashOp(hashNode(n.CodeHash[:]))
 	}
 
@@ -184,7 +184,11 @@ func (b *WitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
 	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
-		if err := b.processAccountCode(n, limiter.HashOnly); err != nil {
+		var hashOnly HashOnly
+		if limiter != nil {
+			hashOnly = limiter.HashOnly
+		}
+		if err := b.processAccountCode(n, hashOnly); err != nil {
 			return err
 		}
 		if err := b.processAccountStorage(n, storageKey, limiter); err != nil {
