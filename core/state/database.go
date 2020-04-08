@@ -29,6 +29,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
@@ -298,50 +299,45 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 	}
 
 	var toPut [][]byte
-	toDelete := map[string]struct{}{}
+	//var toDelete [][]byte
 
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-
-		i := common.HashLength
-		var k, v []byte
-		for ; i < len(storageKeyNoInc); i++ {
-			k, v = c.Seek(storageKeyNoInc[:i])
-			if k == nil {
-				return nil
+		for k, v := c.Seek(storageKeyNoInc[:common.HashLength]); k != nil; k, v = c.Next() {
+			if !bytes.HasPrefix(k, storageKeyNoInc[:common.HashLength]) {
+				k = nil
 			}
-
-			isTombstone := v != nil && len(v) == 0
-			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
+			if k == nil {
 				break
 			}
-		}
 
-		for ; bytes.HasPrefix(k, storageKeyNoInc[:i]); k, v = c.Next() {
 			isTombstone := v != nil && len(v) == 0
-			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
-				toDelete[string(k)] = struct{}{}
-			} else {
-				for j := i; j < len(k); j++ {
-					if storageKeyNoInc[j] != k[j] {
-						toPut = append(toPut, common.CopyBytes(k[:j+1]))
-						break
-					}
+			if isTombstone {
+				continue
+			}
+
+			for i := common.HashLength; i < len(k); i++ {
+				if storageKeyNoInc[i] == k[i] {
+					continue
 				}
+
+				toPut = append(toPut, common.CopyBytes(k[:i+1]))
+				break
 			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
+
 	for _, k := range toPut {
 		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
 			return err
 		}
 	}
 
-	for k := range toDelete {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, []byte(k)); err != nil {
+	for i := common.HashLength; i <= len(storageKeyNoInc); i++ {
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
 			return err
 		}
 	}
