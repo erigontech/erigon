@@ -34,6 +34,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
+	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/core/vm/runtime"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -130,7 +131,7 @@ func runCmd(ctx *cli.Context) error {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
 		db := ethdb.NewMemDatabase()
-		var genesis *core.Genesis
+		var genesis *types.Block
 		genesis, _, tds, _ = gen.ToBlock(db, false /* history */)
 		tds = state.NewTrieDbState(genesis.Root(), db, 0)
 		statedb = state.New(tds)
