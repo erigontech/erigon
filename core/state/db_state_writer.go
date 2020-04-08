@@ -134,7 +134,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		return err
 	}
 	storageChanges := dsw.csw.GetStorageChanges()
-	storageSerialized := make([]byte, 0)
+	var storageSerialized []byte
 	if storageChanges.Len() > 0 {
 		if debug.IsThinHistory() {
 			storageSerialized, err = changeset.EncodeStorage(storageChanges)
