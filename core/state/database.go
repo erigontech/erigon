@@ -312,38 +312,21 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 			}
 
 			isTombstone := v != nil && len(v) == 0
-			if !isTombstone {
-				continue
-			}
-
-			if !bytes.HasPrefix(storageKeyNoInc, k) {
-				continue
-			}
-
-			break
-		}
-
-		for ; k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, storageKeyNoInc[:i]) {
-				k = nil
-			}
-			if k == nil {
+			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
 				break
 			}
+		}
 
+		for ; bytes.HasPrefix(k, storageKeyNoInc[:i]); k, v = c.Next() {
 			isTombstone := v != nil && len(v) == 0
-			if isTombstone {
-				if !bytes.HasPrefix(storageKeyNoInc, k) {
-					continue
-				}
+			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
 				toDelete[string(k)] = struct{}{}
-				continue
-			}
-
-			for j := i; j < len(k); j++ {
-				if storageKeyNoInc[j] != k[j] {
-					toPut = append(toPut, common.CopyBytes(k[:j+1]))
-					break
+			} else {
+				for j := i; j < len(k); j++ {
+					if storageKeyNoInc[j] != k[j] {
+						toPut = append(toPut, common.CopyBytes(k[:j+1]))
+						break
+					}
 				}
 			}
 		}
