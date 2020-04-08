@@ -160,6 +160,31 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 	return nil, gotValue
 }
 
+func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
+	if t.root == nil {
+		return 0, false
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode != nil {
+		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+			return 0, gotValue
+		}
+
+		if accNode.codeSize == codeSizeUncached {
+			return 0, false
+		}
+
+		return accNode.codeSize, gotValue
+	}
+	return 0, gotValue
+}
+
 func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNode, gotValue bool) {
 	switch n := (origNode).(type) {
 	case nil:
@@ -318,16 +343,40 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 	return nil
 }
 
+// UpdateAccountCodeSize attaches the code size to the account
+func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
+	if t.root == nil {
+		return nil
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode == nil || !gotValue {
+		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
+	}
+
+	accNode.codeSize = codeSize
+
+	// t.insert will call the observer methods itself
+	_, t.root = t.insert(t.root, hex, 0, accNode)
+	return nil
+}
+
 // ResolveRequestFor Code expresses the need to fetch code from the DB (by its hash) and attach
 // to a specific account leaf in the trie.
 type ResolveRequestForCode struct {
 	t        *Trie
 	addrHash common.Hash // contract address hash
 	codeHash common.Hash
+	bytecode bool // include the bytecode too
 }
 
 func (rr *ResolveRequestForCode) String() string {
-	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x}", rr.addrHash, rr.codeHash)
+	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", rr.addrHash, rr.codeHash, rr.bytecode)
 }
 
 // ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
@@ -364,18 +413,23 @@ func (rr *ResolveRequest) String() string {
 	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
 }
 
-func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash) *ResolveRequestForCode {
-	return &ResolveRequestForCode{t, addrHash, codeHash}
+func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *ResolveRequestForCode {
+	return &ResolveRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash) (bool, *ResolveRequestForCode) {
+func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *ResolveRequestForCode) {
 	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
 		return false, nil
 	}
 
-	_, ok := t.GetAccountCode(addrHash[:])
+	ok := false
+	if bytecode {
+		_, ok = t.GetAccountCode(addrHash[:])
+	} else {
+		_, ok = t.GetAccountCodeSize(addrHash[:])
+	}
 	if !ok {
-		return true, t.NewResolveRequestForCode(addrHash, codeHash)
+		return true, t.NewResolveRequestForCode(addrHash, codeHash, bytecode)
 	}
 
 	return false, nil
@@ -472,9 +526,9 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 					origAccN.code = nil
 				} else if vAccN.code != nil {
 					origAccN.code = vAccN.code
-					origAccN.codeSize = vAccN.codeSize
 				}
 				origAccN.Account.Copy(&vAccN.Account)
+				origAccN.codeSize = vAccN.codeSize
 				origAccN.rootCorrect = false
 			}
 			newNode = origAccN

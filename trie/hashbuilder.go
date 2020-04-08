@@ -231,7 +231,7 @@ func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64
 	accCopy.Copy(&hb.acc)
 
 	accountCodeSize := codeSizeUncached
-	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) {
+	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
 		accountCodeSize = len(accountCode)
 	}
 
