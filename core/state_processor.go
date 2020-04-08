@@ -191,7 +191,7 @@ func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockSta
 		return
 	}
 	root, err = tds.CalcTrieRoots(false)
-	return
+	return receipts, allLogs, usedGas, root, err
 }
 
 // PostProcess calculates receipt roots (required pre-Byzantium) and updates the TrieDbState.
