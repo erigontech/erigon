@@ -1221,7 +1221,9 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	tds.ResolveStateTrie(false, false)
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
 
 	oldSize := tds.Trie().TrieSize()
 
@@ -1232,7 +1234,9 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, len(code), codeSize, "new code should be received")
 
-	tds.ResolveStateTrie(false, false)
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
 
 	newSize := tds.Trie().TrieSize()
 	assert.Equal(t, oldSize, newSize, "should not load codeNode, so the size shouldn't change")
@@ -1243,7 +1247,9 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, code, code2, "new code should be received")
 
-	tds.ResolveStateTrie(false, false)
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
 
 	newSize2 := tds.Trie().TrieSize()
 	assert.Equal(t, oldSize, newSize2-len(code), "should load codeNode when requesting new data ")
@@ -1272,7 +1278,9 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
 
-	tds.ResolveStateTrie(false, false)
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
 
 	tds.StartNewBuffer()
 
@@ -1281,9 +1289,11 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	assert.NoError(t, err, "you can receive the code size ")
 	assert.Equal(t, len(code), codeSize, "you can receive the code size")
 
-	tds.ResolveStateTrie(false, false)
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
 
-	db.Delete(dbutils.CodeBucket, codeHash[:])
+	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:]))
 
 	codeSize2, err := tds.ReadAccountCodeSize(contract, codeHash)
 	assert.NoError(t, err, "you can still receive code size even with empty DB")

@@ -485,7 +485,6 @@ func (tds *TrieDbState) resolveCodeTouches(
 	codeSizeTouches map[common.Hash]common.Hash,
 	resolveFunc trie.ResolveFunc,
 ) error {
-	fmt.Printf("codeTouches: %v\ncodeSizeTouches: %v\n", codeTouches, codeSizeTouches)
 	firstRequest := true
 	for address, codeHash := range codeTouches {
 		delete(codeSizeTouches, codeHash)
@@ -1153,7 +1152,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
 		codeSize, err = cached, nil
 	} else {
-		code, err := tds.db.Get(dbutils.CodeBucket, codeHash[:])
+		var code []byte
+		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
 		if err != nil {
 			return 0, err
 		}
