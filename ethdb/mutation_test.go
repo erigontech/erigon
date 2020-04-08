@@ -51,21 +51,10 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		compositeKey, _ := dbutils.CompositeKeySuffix(addrHash.Bytes(), 1)
-		b, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
-		if err != nil {
-			t.Fatal("error on get account", i, err)
-		}
-
 		acc = accounts.NewAccount()
 		err = acc.DecodeForStorage(b)
 		if err != nil {
 			t.Fatal("error on get account", i, err)
-		}
-		if !accHistory[i].Equals(&acc) {
-			spew.Dump("got", acc)
-			spew.Dump("expected", accState[i])
-			t.Fatal("Accounts not equals")
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
@@ -91,46 +80,19 @@ func TestMutationCommit(t *testing.T) {
 		if err != nil {
 			t.Fatal("error on get account storage", i, err)
 		}
-
-		if !reflect.DeepEqual(resAccStorage, accHistoryStateStorage[i]) {
-			spew.Dump("res", resAccStorage)
-			spew.Dump("expected", accHistoryStateStorage[i])
-			t.Fatal("incorrect history storage", i)
-		}
-	}
-
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	expectedChangeSet := changeset.NewAccountChangeSet()
 	for i := range addrHashes {
 		b := make([]byte, accHistory[i].EncodingLengthForStorage())
 		accHistory[i].EncodeForStorage(b)
-		err = expectedChangeSet.Add(addrHashes[i].Bytes(), b)
+		err := expectedChangeSet.Add(addrHashes[i].Bytes(), b)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	sort.Sort(expectedChangeSet)
-	expectedData, err := changeset.EncodeChangeSet(expectedChangeSet)
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
-		t.Fatal("incorrect account changeset")
-	}
-
-	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if changeset.Len(csData) != numOfAccounts*numOfStateKeys {
-		t.FailNow()
-	}
 
 	expectedChangeSet = changeset.NewStorageChangeSet()
 	for i, addrHash := range addrHashes {
@@ -145,17 +107,6 @@ func TestMutationCommit(t *testing.T) {
 	}
 
 	sort.Sort(expectedChangeSet)
-
-	expectedData, err = changeset.EncodeChangeSet(expectedChangeSet)
-	if debug.IsThinHistory() {
-		expectedData, err = changeset.EncodeStorage(expectedChangeSet)
-	}
-	assert.NoError(t, err)
-	if !bytes.Equal(csData, expectedData) {
-		spew.Dump("res", csData)
-		spew.Dump("expected", expectedData)
-		t.Fatal("incorrect storage changeset")
-	}
 }
 
 func TestMutationCommitThinHistory(t *testing.T) {
@@ -313,7 +264,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db Putter, numOfAccount
 		b = make([]byte, accState[i].EncodingLengthForStorage())
 		accState[i].EncodeForStorage(b)
 
-		err = db.Put(dbutils.AccountsBucket, addrHashes[i].Bytes(), b)
+		err := db.Put(dbutils.AccountsBucket, addrHashes[i].Bytes(), b)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -331,138 +282,9 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db Putter, numOfAccount
 
 			newValue := common.Hash{uint8(10 + j)}
 			accHistoryStateStorage[i][key] = newValue
-			err = db.PutS(
-				dbutils.StorageHistoryBucket,
-				dbutils.GenerateCompositeStorageKey(addrHashes[i], accHistory[i].Incarnation, key),
-				newValue.Bytes(),
-				1,
-				false,
-			)
-			if err != nil {
-				t.Fatal(err)
-			}
 		}
 	}
 	return addrHashes, accState, accStateStorage, accHistory, accHistoryStateStorage
-}
-
-func TestMutation_GetAsOf(t *testing.T) {
-	db := NewMemDatabase()
-	mutDB := db.NewBatch()
-
-	acc, addrHash := randomAccount(t)
-	acc2 := acc.SelfCopy()
-	acc2.Nonce = 1
-	acc4 := acc.SelfCopy()
-	acc4.Nonce = 3
-
-	b := make([]byte, acc.EncodingLengthForStorage())
-	acc.EncodeForStorage(b)
-	err := db.Put(dbutils.AccountsBucket, addrHash.Bytes(), b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b = make([]byte, acc2.EncodingLengthForStorage())
-	acc2.EncodeForStorage(b)
-	err = db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 2, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b = make([]byte, acc4.EncodingLengthForStorage())
-	acc4.EncodeForStorage(b)
-	err = db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 4, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, err = mutDB.Commit()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	b, err = db.Get(dbutils.AccountsBucket, addrHash.Bytes())
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc := new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc.Equals(resAcc) {
-		t.Fatal("Account from Get is incorrect")
-	}
-
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 1)
-	if err != nil {
-		t.Fatal("incorrect value on block 1", err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !acc2.Equals(resAcc) {
-		spew.Dump(resAcc)
-		t.Fatal("Account from GetAsOf(1) is incorrect")
-	}
-
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc2.Equals(resAcc) {
-		spew.Dump(resAcc)
-		t.Fatal("Account from GetAsOf(2) is incorrect")
-	}
-
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc4.Equals(resAcc) {
-		spew.Dump(resAcc)
-		t.Fatal("Account from GetAsOf(2) is incorrect")
-	}
-
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc.Equals(resAcc) {
-		t.Fatal("Account from GetAsOf(4) is incorrect")
-	}
-
-	b, err = db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resAcc = new(accounts.Account)
-	err = resAcc.DecodeForStorage(b)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !acc.Equals(resAcc) {
-		t.Fatal("Account from GetAsOf(7) is incorrect")
-	}
 }
 
 func randomAccount(t *testing.T) (*accounts.Account, common.Hash) {
