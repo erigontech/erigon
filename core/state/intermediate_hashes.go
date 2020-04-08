@@ -57,29 +57,15 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte) {
 }
 
 // PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
+func PutTombstoneForDeletedAccount(db ethdb.Database, addrHash []byte) error {
 	if len(addrHash) != common.HashLength {
 		return nil
 	}
 
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
 	hasIH := false
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		k, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor().Seek(addrHash)
-		if !bytes.HasPrefix(k, addrHash) {
-			k = nil
-		}
-		if k != nil {
-			hasIH = true
-		}
-
-		return nil
+	if err := db.Walk(dbutils.IntermediateTrieHashBucket, addrHash, 32*8, func(_ []byte, _ []byte) (bool, error) {
+		hasIH = true
+		return false, nil
 	}); err != nil {
 		return err
 	}
@@ -100,45 +86,50 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 	}
 
 	var toPut [][]byte
-	//var toDelete [][]byte
+	toDelete := map[string]struct{}{}
 
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-		for k, v := c.Seek(storageKeyNoInc[:common.HashLength]); k != nil; k, v = c.Next() {
-			if !bytes.HasPrefix(k, storageKeyNoInc[:common.HashLength]) {
-				k = nil
-			}
+
+		i := common.HashLength
+		var k, v []byte
+		for ; i < len(storageKeyNoInc); i++ {
+			k, v = c.Seek(storageKeyNoInc[:i])
 			if k == nil {
-				break
+				return nil
 			}
 
 			isTombstone := v != nil && len(v) == 0
-			if isTombstone {
-				continue
-			}
-
-			for i := common.HashLength; i < len(k); i++ {
-				if storageKeyNoInc[i] == k[i] {
-					continue
-				}
-
-				toPut = append(toPut, common.CopyBytes(k[:i+1]))
+			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
 				break
+			}
+		}
+
+		for ; bytes.HasPrefix(k, storageKeyNoInc[:i]); k, v = c.Next() {
+			isTombstone := v != nil && len(v) == 0
+			if isTombstone && bytes.HasPrefix(storageKeyNoInc, k) {
+				toDelete[string(k)] = struct{}{}
+			} else {
+				for j := i; j < len(k); j++ {
+					if storageKeyNoInc[j] != k[j] {
+						toPut = append(toPut, common.CopyBytes(k[:j+1]))
+						break
+					}
+				}
 			}
 		}
 		return nil
 	}); err != nil {
 		return err
 	}
-
 	for _, k := range toPut {
 		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
 			return err
 		}
 	}
 
-	for i := common.HashLength; i <= len(storageKeyNoInc); i++ {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, common.CopyBytes(storageKeyNoInc[:i])); err != nil {
+	for k := range toDelete {
+		if err := db.Delete(dbutils.IntermediateTrieHashBucket, []byte(k)); err != nil {
 			return err
 		}
 	}

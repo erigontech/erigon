@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/blend/go-sdk/assert"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -142,8 +142,8 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 	}
 
 	for k, expect := range checks {
-		ok, err := HasTombstone(db, common.FromHex(k))
-		require.NoError(err, k)
+		ok, err1 := HasTombstone(db, common.FromHex(k))
+		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
 }
