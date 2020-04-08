@@ -146,6 +146,7 @@ func TestClearTombstonesForReCreatedAccount(t *testing.T) {
 		require.NoError(err1, k)
 		assert.Equal(expect, ok, k)
 	}
+
 }
 
 func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
