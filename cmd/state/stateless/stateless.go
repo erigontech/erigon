@@ -193,8 +193,8 @@ func Stateless(
 	if blockNum == 1 {
 		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory)
 		check(err)
-		genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
-		check(err)
+		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
+		check(err1)
 		preRoot = genesisBlock.Header().Root
 	} else {
 		block := bcb.GetBlockByNumber(blockNum - 1)

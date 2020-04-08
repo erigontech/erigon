@@ -130,7 +130,8 @@ func runCmd(ctx *cli.Context) error {
 		gen := readGenesis(ctx.GlobalString(GenesisFlag.Name))
 		genesisConfig = gen
 		db := ethdb.NewMemDatabase()
-		genesis, _, tds, _ := gen.ToBlock(db, false /* history */)
+		var genesis *core.Genesis
+		genesis, _, tds, _ = gen.ToBlock(db, false /* history */)
 		tds = state.NewTrieDbState(genesis.Root(), db, 0)
 		statedb = state.New(tds)
 		chainConfig = gen.Config

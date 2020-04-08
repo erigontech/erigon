@@ -1017,7 +1017,6 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
 				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
 				return tds.db.Delete(dbutils.StorageHistoryBucket, composite)
-				return nil
 			})
 
 			if innerErr != nil {

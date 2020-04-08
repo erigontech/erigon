@@ -175,22 +175,22 @@ func SetupGenesisBlockWithOverride(db ethdb.Database,
 		} else {
 			log.Info("Writing custom genesis block")
 		}
-		block, stateDB, err := genesis.Commit(db, history)
+		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
 			return nil, common.Hash{}, nil, err
 		}
-		return genesis.Config, block.Hash(), stateDB, err
+		return genesis.Config, block.Hash(), stateDB1, err
 	}
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, stateDB, _, err := genesis.ToBlock(nil, history)
+		block, stateDB1, _, err := genesis.ToBlock(nil, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
 		}
 		hash := block.Hash()
 		if hash != stored {
-			return genesis.Config, block.Hash(), stateDB, &GenesisMismatchError{stored, hash}
+			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
 		}
 	}
 
