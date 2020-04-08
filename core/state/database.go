@@ -954,7 +954,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 				if getErr != nil {
 					if getErr == ethdb.ErrKeyNotFound {
 						return nil
-					} 
+					}
 					return getErr
 				}
 
@@ -989,9 +989,8 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 
 				if index.Len() == 0 {
 					return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
-				} else {
-					return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
 				}
+				return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
 			})
 			if innerErr != nil {
 				return innerErr
