@@ -143,8 +143,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	return byt, nil
 }
 
-// Only to be used for testing
-func decodeStorage(b []byte) (*ChangeSet, error) {
+func DecodeStorage(b []byte) (*ChangeSet, error) {
 	h := NewStorageChangeSet()
 	if len(b) == 0 {
 		h.Changes = make([]Change, 0)
