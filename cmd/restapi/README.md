@@ -1,0 +1,75 @@
+# Turbo-Geth Rest API
+
+## Build
+
+``make restapi``
+
+## Running
+
+* Running node with `--remote-db-listen-addr` (e.g `./build/bin/geth --remote-db-listen-addr localhost:9999`).
+* Running Restapi: `./build/bin/restapi` (Default Port: 8080)
+
+## API
+
+* `/api/v1/remote-db/`: gives remote-db url
+* `/api/v1/accounts/:accountID`: gives account data
+    * accountID is account address
+    * Reponse: 
+    
+```json
+{
+
+    "balance":"BALANCE",
+    "code_hash":"HASH",
+    "implementation":
+        {
+            "incarnation":NUMBER
+        },
+        "nonce":NUMBER,
+        "root_hash":"HASH"      
+}
+```
+* `/api/v1/storage/`
+    * gives the storage
+    * Response:
+```json
+[
+    {"prefix": "Storage Prefix","value": "Value"},
+    ...
+]
+```
+* `/api/v1/retrace/`
+    * extract changeSets and readSets for each block
+    * Response:
+```json
+[
+    {
+        "storage": {
+            "reads": [READ, ...],
+            "writes": [WRITE, ...]
+        },
+        "accounts": {
+            "reads": [READ, ...],
+            "writes": [WRITE, ...]
+        }
+    }
+]
+```
+* `/api/v1/intermediate-hash/`
+    * extract changeSets and readSets for each block
+    * Response:
+```json
+[
+    {
+        "storage": {
+            "reads": [READ, ...],
+            "writes": [WRITE, ...]
+        },
+        "accounts": {
+            "reads": [READ, ...],
+            "writes": [WRITE, ...]
+        }
+    }
+]
+```
+

@@ -41,7 +41,7 @@ type WritesReads struct {
 }
 type RetraceResponse struct {
 	Storage WritesReads `json:"storage"`
-	Account WritesReads `json:"account"`
+	Account WritesReads `json:"accounts"`
 }
 
 func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, error) {
