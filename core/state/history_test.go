@@ -375,8 +375,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 				t.Fatal(err1)
 			}
 			value := common.Hash{uint8(10 + j)}
-			err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes())
-			if err != nil {
+			if err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes()); err != nil {
 				t.Fatal(err)
 			}
 		}
