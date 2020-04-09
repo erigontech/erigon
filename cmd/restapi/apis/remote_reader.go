@@ -105,11 +105,45 @@ func (r *RemoteReader) GetStorageReads() [][]byte {
 func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	r.accountReads[address] = true
 	addrHash, err := common.HashData(address[:])
+	key := addrHash[:]
 	if err != nil {
 		return nil, err
 	}
 	r.accountReads[address] = true
-	dat, err := GetAsOf(r.db, dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], r.blockNr)
+	composite, _ := dbutils.CompositeKeySuffix(key, r.blockNr)
+	var dat []byte
+	err = r.db.View(context.Background(), func(tx ethdb.Tx) error {
+		{
+			hB := tx.Bucket(dbutils.AccountsHistoryBucket)
+			hC := hB.Cursor()
+			hK, hV, err := hC.Seek(composite)
+			if err != nil {
+				return err
+			}
+
+			if hK != nil && bytes.HasPrefix(hK, key) {
+				dat = make([]byte, len(hV))
+				copy(dat, hV)
+				return nil
+			}
+		}
+		{
+			b := tx.Bucket(dbutils.AccountsBucket)
+			c := b.Cursor()
+			k, v, err := c.Seek(key)
+			if err != nil {
+				return err
+			}
+
+			if k != nil && bytes.Equal(k, key) {
+				dat = make([]byte, len(v))
+				copy(dat, v)
+				return nil
+			}
+		}
+
+		return ethdb.ErrKeyNotFound
+	})
 	if err != nil || dat == nil || len(dat) == 0 {
 		return nil, nil
 	}
@@ -199,43 +233,4 @@ func (e *RemoteContext) GetHeader(hash common.Hash, number uint64) *types.Header
 		return nil
 	})
 	return header
-}
-
-// GetAsOf returns the value valid as of a given timestamp.
-func GetAsOf(db ethdb.KV, bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
-	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)
-	var dat []byte
-	err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		{
-			hB := tx.Bucket(hBucket)
-			hC := hB.Cursor()
-			hK, hV, err := hC.Seek(composite)
-			if err != nil {
-				return err
-			}
-
-			if hK != nil && bytes.HasPrefix(hK, key) {
-				dat = make([]byte, len(hV))
-				copy(dat, hV)
-				return nil
-			}
-		}
-		{
-			b := tx.Bucket(bucket)
-			c := b.Cursor()
-			k, v, err := c.Seek(key)
-			if err != nil {
-				return err
-			}
-
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
-			}
-		}
-
-		return ethdb.ErrKeyNotFound
-	})
-	return dat, err
 }
