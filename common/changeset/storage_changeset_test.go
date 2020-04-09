@@ -39,7 +39,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		ch2, err := DecodeStorage(b)
+		ch2, err := decodeStorage(b)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -95,7 +95,7 @@ func TestEncodingStorageWithtRandomIncarnation(t *testing.T) {
 			t.Error(err)
 		}
 
-		ch2, err := DecodeStorage(b)
+		ch2, err := decodeStorage(b)
 		if err != nil {
 			t.Error(err)
 		}
