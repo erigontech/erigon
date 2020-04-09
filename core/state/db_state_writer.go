@@ -163,9 +163,9 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	}
 	if debug.IsThinHistory() {
 		for _, change := range accountChanges.Changes {
-			value, err := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
-			if err != nil && err != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err)
+			value, err1 := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
+			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+				return fmt.Errorf("db.Get failed: %w", err1)
 			}
 			index := dbutils.WrapHistoryIndex(value)
 			index.Append(dsw.tds.blockNr)
@@ -187,9 +187,9 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	}
 	if debug.IsThinHistory() {
 		for _, change := range storageChanges.Changes {
-			value, err := dsw.tds.db.Get(dbutils.StorageHistoryBucket, change.Key)
-			if err != nil && err != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err)
+			value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, change.Key)
+			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+				return fmt.Errorf("db.Get failed: %w", err1)
 			}
 			index := dbutils.WrapHistoryIndex(value)
 			index.Append(dsw.tds.blockNr)
