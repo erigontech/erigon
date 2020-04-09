@@ -35,9 +35,13 @@ func (e *Env) GetWritesReads(c *gin.Context) {
 	c.JSON(http.StatusOK, results)
 }
 
-type RetraceResponse struct {
+type WritesReads struct {
 	Reads  []string `json:"reads"`
 	Writes []string `json:"writes"`
+}
+type RetraceResponse struct {
+	Storage WritesReads `json:"storage"`
+	Account WritesReads `json:"account"`
 }
 
 func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, error) {
@@ -63,10 +67,18 @@ func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, err
 	var output RetraceResponse
 	accountChanges := writer.GetAccountChanges()
 	for _, ch := range accountChanges.Changes {
-		output.Writes = append(output.Writes, common.Bytes2Hex(ch.Key))
+		output.Account.Writes = append(output.Account.Writes, common.Bytes2Hex(ch.Key))
 	}
 	for _, ch := range reader.GetAccountReads() {
-		output.Reads = append(output.Reads, common.Bytes2Hex(ch))
+		output.Account.Reads = append(output.Account.Reads, common.Bytes2Hex(ch))
+	}
+
+	accountChanges = writer.GetStorageChanges()
+	for _, ch := range accountChanges.Changes {
+		output.Storage.Writes = append(output.Storage.Writes, common.Bytes2Hex(ch.Key))
+	}
+	for _, ch := range reader.GetStorageReads() {
+		output.Storage.Reads = append(output.Storage.Reads, common.Bytes2Hex(ch))
 	}
 	return output, nil
 }
