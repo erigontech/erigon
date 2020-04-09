@@ -627,7 +627,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := block2Expected.Add(key, []byte("block 3 " + strconv.Itoa(int(i)))); err != nil {
+		if err := block2Expected.Add(key, []byte("block 3 "+strconv.Itoa(int(i)))); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -656,7 +656,7 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if err := block4Expected.Add(key, []byte("block 5 " + strconv.Itoa(int(i)))); err != nil {
+		if err := block4Expected.Add(key, []byte("block 5 "+strconv.Itoa(int(i)))); err != nil {
 			t.Fatal(err)
 		}
 	}
