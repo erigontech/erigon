@@ -147,7 +147,13 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		}
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideIstanbul, config.OverrideMuirGlacier)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(
+		chainDb,
+		config.Genesis,
+		config.OverrideIstanbul,
+		config.OverrideMuirGlacier,
+		config.StorageMode.History,
+	)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}

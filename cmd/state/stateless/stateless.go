@@ -191,10 +191,10 @@ func Stateless(
 	}
 	var preRoot common.Hash
 	if blockNum == 1 {
-		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
+		_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock(), writeHistory)
 		check(err)
-		genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
-		check(err)
+		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
+		check(err1)
 		preRoot = genesisBlock.Header().Root
 	} else {
 		block := bcb.GetBlockByNumber(blockNum - 1)
@@ -441,10 +441,21 @@ func Stateless(
 		}
 		tds.SetBlockNr(blockNum)
 
-		err = statedb.CommitBlock(ctx, tds.DbStateWriter())
+		blockWriter := tds.DbStateWriter()
+		err = statedb.CommitBlock(ctx, blockWriter)
 		if err != nil {
 			fmt.Printf("Commiting block %d failed: %v", blockNum, err)
 			return
+		}
+		if writeHistory {
+			if err = blockWriter.WriteChangeSets(); err != nil {
+				fmt.Printf("Writing changesets for block %d failed: %v", blockNum, err)
+				return
+			}
+			if err = blockWriter.WriteHistory(); err != nil {
+				fmt.Printf("Writing history for block %d failed: %v", blockNum, err)
+				return
+			}
 		}
 
 		willSnapshot := interval > 0 && blockNum > 0 && blockNum >= ignoreOlderThan && blockNum%interval == 0

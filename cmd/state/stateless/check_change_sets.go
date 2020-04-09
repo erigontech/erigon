@@ -82,7 +82,10 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 		}
 
 		if !nocheck {
-			accountChanges := csw.GetAccountChanges()
+			accountChanges, err := csw.GetAccountChanges()
+			if err != nil {
+				return err
+			}
 			var expectedAccountChanges []byte
 			if debug.IsThinHistory() {
 				expectedAccountChanges, err = changeset.EncodeAccounts(accountChanges)
@@ -104,7 +107,10 @@ func CheckChangeSets(genesis *core.Genesis, blockNum uint64, chaindata string, h
 				return nil
 			}
 
-			expectedStorageChanges := csw.GetStorageChanges()
+			expectedStorageChanges, err := csw.GetStorageChanges()
+			if err != nil {
+				return err
+			}
 			expectedtorageSerialized := make([]byte, 0)
 			if expectedStorageChanges.Len() > 0 {
 				if debug.IsThinHistory() {

@@ -103,49 +103,6 @@ func (db *BoltDatabase) Put(bucket, key []byte, value []byte) error {
 	return err
 }
 
-// PutS adds a new entry to the historical buckets:
-// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
-func (db *BoltDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
-	changeSetKey := encodedTS
-
-	err := db.db.Update(func(tx *bolt.Tx) error {
-		if !changeSetBucketOnly {
-			hb, err := tx.CreateBucketIfNotExists(hBucket, false)
-			if err != nil {
-				return err
-			}
-			if debug.IsThinHistory() {
-				b, _ := hb.Get(key)
-				index := dbutils.WrapHistoryIndex(b)
-				index.Append(timestamp)
-				if err = hb.Put(key, *index); err != nil {
-					return err
-				}
-			} else {
-				if err = hb.Put(composite, value); err != nil {
-					return err
-				}
-			}
-		}
-
-		sb, err := tx.CreateBucketIfNotExists(dbutils.ChangeSetByIndexBucket(hBucket), true)
-		if err != nil {
-			return err
-		}
-
-		dat, _ := sb.Get(changeSetKey)
-		dat, err = addToChangeSet(hBucket, dat, key, value)
-		if err != nil {
-			log.Error("PutS DecodeChangeSet changeSet err", "err", err)
-			return err
-		}
-		// s.Sort(dat) not sorting it here. seems that this Puts is only for testing.
-		return sb.Put(changeSetKey, dat)
-	})
-	return err
-}
-
 func (db *BoltDatabase) MultiPut(tuples ...[]byte) (uint64, error) {
 	var savedTx *bolt.Tx
 	err := db.db.Update(func(tx *bolt.Tx) error {
@@ -378,9 +335,13 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
+func (db *BoltDatabase) walkAsOfThin(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	panic("")
+}
+
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	if debug.IsThinHistory() {
-		panic("WalkAsOf")
+		return db.walkAsOfThin(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 	}
 
 	fixedbytes, mask := Bytesmask(fixedbits)
@@ -613,57 +574,6 @@ func (db *BoltDatabase) Delete(bucket, key []byte) error {
 	return err
 }
 
-// DeleteTimestamp removes data for a given timestamp (block number)
-// from all historical buckets (incl. AccountChangeSet, StorageChangeSet).
-func (db *BoltDatabase) DeleteTimestamp(timestamp uint64) error {
-	encodedTS := dbutils.EncodeTimestamp(timestamp)
-	return db.db.Update(func(tx *bolt.Tx) error {
-		removeChangeSetAndHistory := func(changeSetBucket []byte, historyBucket []byte) error {
-			sb := tx.Bucket(changeSetBucket)
-			if sb == nil {
-				return nil
-			}
-
-			v, _ := sb.Get(encodedTS)
-			if len(v) == 0 {
-				return ErrKeyNotFound
-			}
-			hb := tx.Bucket(historyBucket)
-			if hb == nil {
-				return nil
-			}
-			var err error
-			if debug.IsThinHistory() {
-				if bytes.Equal(changeSetBucket, dbutils.AccountChangeSetBucket) {
-					err = changeset.AccountChangeSetBytes(v).Walk(func(kk, _ []byte) error {
-						kk = append(kk, encodedTS...)
-						return hb.Delete(kk)
-					})
-				} else {
-					err = changeset.StorageChangeSetBytes(v).Walk(func(kk, _ []byte) error {
-						kk = append(kk, encodedTS...)
-						return hb.Delete(kk)
-					})
-				}
-			} else {
-				err = changeset.Walk(v, func(kk, _ []byte) error {
-					kk = append(kk, encodedTS...)
-					return hb.Delete(kk)
-				})
-			}
-			if err != nil {
-				return err
-			}
-			return sb.Delete(encodedTS)
-		}
-		innerErr := removeChangeSetAndHistory(dbutils.AccountChangeSetBucket, dbutils.AccountsHistoryBucket)
-		if innerErr != nil {
-			return innerErr
-		}
-		return removeChangeSetAndHistory(dbutils.StorageChangeSetBucket, dbutils.StorageHistoryBucket)
-	})
-}
-
 func (db *BoltDatabase) DeleteBucket(bucket []byte) error {
 	err := db.db.Update(func(tx *bolt.Tx) error {
 		if err := tx.DeleteBucket(bucket); err != nil {
@@ -714,8 +624,6 @@ func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return m
 }

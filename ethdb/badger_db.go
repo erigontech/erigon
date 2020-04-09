@@ -18,14 +18,12 @@ package ethdb
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"runtime"
 	"time"
 
 	"github.com/dgraph-io/badger/v2"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/log"
 )
@@ -165,76 +163,6 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 	return val, err
-}
-
-// PutS adds a new entry to the historical buckets:
-// hBucket (unless changeSetBucketOnly) and AccountChangeSet.
-func (db *BadgerDatabase) PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error {
-	composite, encodedTS := dbutils.CompositeKeySuffix(key, timestamp)
-	hKey := bucketKey(hBucket, composite)
-	changeSetKey := bucketKey(dbutils.ChangeSetByIndexBucket(hBucket), encodedTS)
-
-	return db.db.Update(func(tx *badger.Txn) error {
-		if !changeSetBucketOnly {
-			if err := tx.Set(hKey, value); err != nil {
-				return err
-			}
-		}
-
-		var sh changeset.ChangeSet
-
-		err := sh.Add(key, value)
-		if err != nil {
-			return err
-		}
-		dat, err := changeset.EncodeChangeSet(&sh)
-		if err != nil {
-			fmt.Println(err)
-			log.Error("PutS Decode suffix err", "err", err)
-			return err
-		}
-		// sort.Sort(changeSetKey)
-		return tx.Set(changeSetKey, dat)
-	})
-}
-
-// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. AccountChangeSet).
-func (db *BadgerDatabase) DeleteTimestamp(timestamp uint64) error {
-	encodedTS := dbutils.EncodeTimestamp(timestamp)
-	accountChangeSetKey := bucketKey(dbutils.AccountChangeSetBucket, encodedTS)
-	storageChangeSetKey := bucketKey(dbutils.StorageChangeSetBucket, encodedTS)
-	return db.db.Update(func(tx *badger.Txn) error {
-		f := func(changeSetKey []byte, hBucket []byte) error {
-			item, err := tx.Get(changeSetKey)
-			if err != nil {
-				return err
-			}
-			var changes []byte
-			err = item.Value(func(v []byte) error {
-				changes = v
-				return nil
-			})
-			if err != nil {
-				return err
-			}
-
-			err = changeset.Walk(changes, func(kk, _ []byte) error {
-				kk = append(kk, encodedTS...)
-				return tx.Delete(bucketKey(hBucket, kk))
-			})
-			if err != nil {
-				return err
-			}
-
-			return tx.Delete(item.Key())
-		}
-		err := f(accountChangeSetKey, dbutils.AccountsHistoryBucket)
-		if err != nil {
-			return err
-		}
-
-		return f(storageChangeSetKey, dbutils.StorageHistoryBucket)
-	})
 }
 
 // GetAsOf returns the value valid as of a given timestamp.
@@ -419,8 +347,6 @@ func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
 		db:                      db,
 		puts:                    newPuts(),
-		accountChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
-		storageChangeSetByBlock: make(map[uint64]*changeset.ChangeSet),
 	}
 	return m
 }
