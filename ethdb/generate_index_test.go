@@ -31,7 +31,7 @@ func TestName1(t *testing.T) {
 		csBucket:      dbutils.AccountChangeSetBucket,
 		bucketToWrite: []byte("hAT29"),
 		fixedBits:     32,
-		csWalker: func(cs []byte) Walker {
+		csWalker: func(cs []byte) ChangesetWalker {
 			fmt.Println("cs count", binary.BigEndian.Uint32(cs[0:4]))
 			return changeset.AccountChangeSetBytes(cs)
 		},
@@ -58,7 +58,7 @@ func TestName11(t *testing.T) {
 		csBucket:      dbutils.StorageChangeSetBucket,
 		bucketToWrite: []byte("hST29"),
 		fixedBits:     72,
-		csWalker: func(cs []byte) Walker {
+		csWalker: func(cs []byte) ChangesetWalker {
 			fmt.Println("cs count", binary.BigEndian.Uint32(cs[0:4]))
 			return changeset.StorageChangeSetBytes(cs)
 		},
@@ -85,7 +85,7 @@ func TestRegenerateIndexes(t *testing.T) {
 		csBucket:      dbutils.AccountChangeSetBucket,
 		bucketToWrite: []byte("hAT31"),
 		fixedBits:     32,
-		csWalker: func(cs []byte) Walker {
+		csWalker: func(cs []byte) ChangesetWalker {
 			fmt.Println("cs count", binary.BigEndian.Uint32(cs[0:4]))
 			return changeset.AccountChangeSetBytes(cs)
 		},
@@ -101,7 +101,7 @@ func TestRegenerateIndexes(t *testing.T) {
 		csBucket:      dbutils.StorageChangeSetBucket,
 		bucketToWrite: []byte("hST31"),
 		fixedBits:     72,
-		csWalker: func(cs []byte) Walker {
+		csWalker: func(cs []byte) ChangesetWalker {
 			fmt.Println("cs count", binary.BigEndian.Uint32(cs[0:4]))
 			return changeset.StorageChangeSetBytes(cs)
 		},
@@ -443,6 +443,60 @@ func TestCheckAcc(t *testing.T) {
 		return true, nil
 	})
 	t.Log(err)
+}
+
+func TestSecondTypeIndex(t *testing.T) {
+	db, err := NewBoltDatabase(statePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	db2, err := NewBoltDatabase("/media/b00ris/nvme/bucket_index_exp")
+	if err != nil {
+		log.Fatal(err)
+	}
+	bucket := []byte("hAT31")
+	numOfMultiput := 0
+	i := 0
+	tuples := common.NewTuples(db2.IdealBatchSize(), 3, 1)
+	sort.Sort(tuples)
+	err = db.Walk(bucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		if i%10000 == 0 {
+			fmt.Println(i)
+		}
+		i++
+		ui, err := dbutils.WrapHistoryIndex(v).Decode()
+		if err != nil {
+			return false, err
+		}
+		for _, val := range ui {
+			numOfMultiput++
+			key := make([]byte, common.HashLength+8)
+			copy(key[0:common.HashLength], k[0:common.HashLength])
+			binary.BigEndian.PutUint64(key[common.HashLength:], val)
+			if err := tuples.Append(bucket, key, []byte{}); err != nil {
+				t.Fatal("tuple append", err)
+			}
+		}
+		if numOfMultiput > db2.IdealBatchSize() {
+			fmt.Println("Multiput", len(tuples.Values)/3, db2.IdealBatchSize())
+			sort.Sort(tuples)
+			if _, err := db2.MultiPut(tuples.Values...); err != nil {
+				t.Fatal(err)
+			}
+			numOfMultiput = 0
+			tuples = common.NewTuples(db2.IdealBatchSize(), 3, 1)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tuples.Values) > 0 {
+		if _, err := db2.MultiPut(tuples.Values...); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func TestName2(t *testing.T) {

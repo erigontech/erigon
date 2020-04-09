@@ -2,6 +2,7 @@ package dbutils
 
 import (
 	"encoding/binary"
+	"errors"
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common/math"
@@ -133,7 +134,21 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
-func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
+func IndexChunkKey(blockNumber uint64, key []byte) ([]byte) {
+	blockNumBytes := make([]byte, len(key)+ 8)
+	binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
+	copy(blockNumBytes[:len(key)], key)
+	return blockNumBytes
+}
+func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
+	blockNum, ok := hi.firstElement()
+	if !ok {
+		return nil, errors.New("empty index")
+	}
+	return IndexChunkKey(blockNum, key), nil
+}
+
+func (hi HistoryIndexBytes) firstElement() (uint64, bool) {
 	if len(hi) < LenBytes*2+4 {
 		return 0, false
 	}
