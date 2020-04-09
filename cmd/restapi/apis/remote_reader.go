@@ -87,7 +87,7 @@ func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 }
 
 func (r *RemoteReader) GetAccountReads() [][]byte {
-	var output [][]byte
+	output := make([][]byte, 0)
 	for key := range r.accountReads {
 		output = append(output, key.Bytes())
 	}
@@ -95,7 +95,7 @@ func (r *RemoteReader) GetAccountReads() [][]byte {
 }
 
 func (r *RemoteReader) GetStorageReads() [][]byte {
-	var output [][]byte
+	output := make([][]byte, 0)
 	for key := range r.storageReads {
 		output = append(output, key.Bytes())
 	}
@@ -104,15 +104,12 @@ func (r *RemoteReader) GetStorageReads() [][]byte {
 
 func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Account, error) {
 	r.accountReads[address] = true
-	addrHash, err := common.HashData(address[:])
+	addrHash, _ := common.HashData(address[:])
 	key := addrHash[:]
-	if err != nil {
-		return nil, err
-	}
 	r.accountReads[address] = true
 	composite, _ := dbutils.CompositeKeySuffix(key, r.blockNr)
 	var dat []byte
-	err = r.db.View(context.Background(), func(tx ethdb.Tx) error {
+	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
 		{
 			hB := tx.Bucket(dbutils.AccountsHistoryBucket)
 			hC := hB.Cursor()
@@ -156,19 +153,12 @@ func (r *RemoteReader) ReadAccountData(address common.Address) (*accounts.Accoun
 }
 
 func (r *RemoteReader) ReadAccountStorage(address common.Address, incarnation uint64, key *common.Hash) ([]byte, error) {
-	keyHash, err := common.HashData(key[:])
-	if err != nil {
-		return nil, err
-	}
-
-	addrHash, err := common.HashData(address[:])
-	if err != nil {
-		return nil, err
-	}
+	keyHash, _ := common.HashData(key[:])
+	addrHash, _ := common.HashData(address[:])
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
 	var val []byte
-	err = r.db.View(context.Background(), func(tx ethdb.Tx) error {
+	err := r.db.View(context.Background(), func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		v, err := b.Get(compositeKey)
 		val = v
