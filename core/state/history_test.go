@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 	"math/rand"
@@ -459,6 +458,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	blockWriter = tds.DbStateWriter()
 	tds.SetBlockNr(2)
 	if err := blockWriter.UpdateAccountData(ctx, addr, acc2, acc4); err != nil {
 		t.Fatal(err)
@@ -470,6 +470,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	blockWriter = tds.DbStateWriter()
 	tds.SetBlockNr(4)
 	if err := blockWriter.UpdateAccountData(ctx, addr, acc4, acc); err != nil {
 		t.Fatal(err)
@@ -590,6 +591,10 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		t.Skip()
 	}
 	db := ethdb.NewMemDatabase()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	blockWriter := tds.DbStateWriter()
+	ctx := context.Background()
+	emptyVal := common.Hash{}
 
 	block2Expected := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
@@ -604,14 +609,77 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 
 	//create state and history
-	for i := uint8(1); i < 5; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, uint64(1), common.Hash{i})
-		val := []byte("state   " + strconv.Itoa(int(i)))
-		err := db.Put(dbutils.StorageBucket, key, val)
-		if err != nil {
+	for i := uint8(1); i <= 7; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
+		val3 := common.BytesToHash([]byte("block 3 " + strconv.Itoa(int(i))))
+		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		if i <= 2 {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val5); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := block2Expected.Add(key, []byte("block 3 " + strconv.Itoa(int(i)))); err != nil {
 			t.Fatal(err)
 		}
-		err = block6Expected.Add(key, val)
+	}
+	tds.SetBlockNr(3)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
+	blockWriter = tds.DbStateWriter()
+	for i := uint8(3); i <= 7; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
+		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		if i > 4 {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &emptyVal); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &val); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := block4Expected.Add(key, []byte("block 5 " + strconv.Itoa(int(i)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tds.SetBlockNr(5)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
+	blockWriter = tds.DbStateWriter()
+	for i := uint8(1); i < 5; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, uint64(1), keyHash)
+		val := []byte("state   " + strconv.Itoa(int(i)))
+		//err := db.Put(dbutils.StorageBucket, key, val)
+		//if err != nil {
+		//	t.Fatal(err)
+		//}
+		err := block6Expected.Add(key, val)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -621,48 +689,15 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
 		}
 	}
-	for i := uint8(1); i <= 7; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, 1, common.Hash{i})
-		val := []byte("block 3 " + strconv.Itoa(int(i)))
-		err := db.PutS(
-			dbutils.StorageHistoryBucket,
-			key,
-			val,
-			3,
-			false,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		err = block2Expected.Add(key, val)
-		if err != nil {
-			t.Fatal(err)
-		}
+	tds.SetBlockNr(6)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
 	}
-	for i := uint8(3); i <= 7; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, 1, common.Hash{i})
-		val := []byte("block 5 " + strconv.Itoa(int(i)))
-		err := db.PutS(
-			dbutils.StorageHistoryBucket,
-			key,
-			val,
-			5,
-			false,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = block4Expected.Add(key, val)
-		if err != nil {
-			t.Fatal(err)
-		}
-
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
-
 	block2 := &changeset.ChangeSet{
 		Changes: make([]changeset.Change, 0),
 	}
@@ -716,195 +751,22 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
+	sort.Sort(block2Expected)
 	if !reflect.DeepEqual(block2, block2Expected) {
 		spew.Dump("expected", block2Expected)
 		spew.Dump("current", block2)
 		t.Fatal("block 2 result is incorrect")
 	}
+	sort.Sort(block4Expected)
 	if !reflect.DeepEqual(block4, block4Expected) {
-		spew.Dump(block6)
+		spew.Dump("expected", block4Expected)
+		spew.Dump("current", block4)
 		t.Fatal("block 4 result is incorrect")
 	}
+	sort.Sort(block6Expected)
 	if !reflect.DeepEqual(block6, block6Expected) {
-		spew.Dump(block6)
+		spew.Dump("expected", block6Expected)
+		spew.Dump("current", block6)
 		t.Fatal("block 6 result is incorrect")
-	}
-}
-
-func TestBoltDB_MultiWalkAsOf(t *testing.T) {
-	if debug.IsThinHistory() {
-		t.Skip()
-	}
-
-	db := ethdb.NewMemDatabase()
-
-	block2Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-				Value: []byte("block 3 " + strconv.Itoa(1)),
-			},
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-				Value: []byte("block 3 " + strconv.Itoa(3)),
-			},
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
-				Value: []byte("block 3 " + strconv.Itoa(7)),
-			},
-		},
-	}
-
-	block4Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-				Value: []byte("state   " + strconv.Itoa(1)),
-			},
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-				Value: []byte("block 5 " + strconv.Itoa(3)),
-			},
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
-				Value: []byte("block 5 " + strconv.Itoa(7)),
-			},
-		},
-	}
-
-	block6Expected := &changeset.ChangeSet{
-		Changes: []changeset.Change{
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-				Value: []byte("state   " + strconv.Itoa(1)),
-			},
-			{
-				Key:   dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-				Value: []byte("state   " + strconv.Itoa(3)),
-			},
-		},
-	}
-
-	//create state and history
-	for i := uint8(1); i < 5; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, uint64(1), common.Hash{i})
-		val := []byte("state   " + strconv.Itoa(int(i)))
-		err := db.Put(dbutils.StorageBucket, key, val)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	for i := uint8(1); i <= 7; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, 1, common.Hash{i})
-		val := []byte("block 3 " + strconv.Itoa(int(i)))
-		err := db.PutS(
-			dbutils.StorageHistoryBucket,
-			key,
-			val,
-			3,
-			false,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	for i := uint8(3); i <= 7; i++ {
-		key := dbutils.GenerateCompositeStorageKey(common.Hash{i}, 1, common.Hash{i})
-		val := []byte("block 5 " + strconv.Itoa(int(i)))
-		err := db.PutS(
-			dbutils.StorageHistoryBucket,
-			key,
-			val,
-			5,
-			false,
-		)
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	//walk and collect walkAsOf result
-	var err error
-	startKeys := [][]byte{
-		dbutils.GenerateCompositeStorageKey(common.Hash{1}, 1, common.Hash{1}),
-		dbutils.GenerateCompositeStorageKey(common.Hash{3}, 1, common.Hash{3}),
-		dbutils.GenerateCompositeStorageKey(common.Hash{7}, 1, common.Hash{7}),
-	}
-	fixedBits := []uint{
-		60,
-		60,
-		60,
-	}
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	block2 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block4 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	block6 := &changeset.ChangeSet{
-		Changes: make([]changeset.Change, 0),
-	}
-
-	err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 2, func(idx int, k []byte, v []byte) error {
-		fmt.Printf("%v - %s - %s\n", idx, string(k), string(v))
-		err = block2.Add(k, v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 4, func(idx int, k []byte, v []byte) error {
-		fmt.Printf("%v - %s - %s\n", idx, string(k), string(v))
-		err = block4.Add(k, v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKeys, fixedBits, 6, func(idx int, k []byte, v []byte) error {
-		fmt.Printf("%v - %s - %s\n", idx, string(k), string(v))
-		err = block6.Add(k, v)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if !reflect.DeepEqual(block2Expected, block2) {
-		spew.Dump(block2)
-		t.Fatal("block2")
-	}
-	if !reflect.DeepEqual(block4Expected, block4) {
-		spew.Dump(block4)
-		t.Fatal("block4")
-	}
-	if !reflect.DeepEqual(block6Expected, block6) {
-		spew.Dump(block6)
-		t.Fatal("block6")
 	}
 }
