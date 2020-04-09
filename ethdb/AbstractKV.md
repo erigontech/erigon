@@ -3,7 +3,7 @@
 To build 1 key-value abstraction on top of Bolt, Badger and RemoteDB (our own read-only TCP protocol for key-value databases).
 
 ## Design principles:
-- No internal copies/allocations - all must be delegated to user. 
+- No internal copies/allocations - all must be delegated to user. It means app must copy keys/values before put to database.  
 Make it part of contract - written clearly in docs, because it's unsafe (unsafe to put slice to DB and then change it). 
 Known problems: mutation.Put does copy internally. 
 - Low-level API: as close to original Bolt/Badger as possible.
@@ -61,7 +61,7 @@ type NoValuesCursor interface {
 - For Badger - auto-remove bucket from key prefix
 
 #### InMemory and ReadOnly modes: 
-- `db.InMemDb()` or `db.Opts().InMem(true)` 
+- `NewBadger().InMem().ReadOnly().Open(ctx)` 
 
 #### Context:
 - For transactions - yes
@@ -70,7 +70,7 @@ type NoValuesCursor interface {
 #### Cursor/Iterator: 
 - Cursor is an interface, can’t be nil, can't return error
 - `cursor.Prefix(prefix)` filtering keys by given prefix. Badger using i.Prefix. RemoteDb - to support server side filtering.
-- `cursor.PrefetchSize(prefix)` - useful for Badger and Remote
+- `cursor.Prefetch(1000)` - useful for Badger and Remote
 - Badger iterator require i.Close() call - abstraction automated it.
 - Badger iterator has AllVersions=true by default - why?
 
@@ -94,15 +94,13 @@ type NoValuesCursor interface {
 #### Yeld: abstraction leak from RemoteDb, but need investigate how Badger Streams working here
 #### i.SeekTo vs i.Rewind: TBD
 #### in-memory LRU cache: TBD
-#### Copy of data: 
-- Bolt does copy keys inside .Put(), but doesn't copy values. How behave Badger here? 
+- Reverse Iterator
 
 ## Not covered by Abstractions:
 - DB stats, bucket.Stats(), item.EstimatedSize()
 - buckets stats, buckets list
-- Merge operator of Badger 
+- Merge operator of Badger - no
 - TTL of keys
-- Reverse Iterator
 - Fetch AllVersions of Badger
 - Monotonic int DB.GetSequence 
 - Nested Buckets
