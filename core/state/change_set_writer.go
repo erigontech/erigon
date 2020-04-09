@@ -28,28 +28,28 @@ func NewChangeSetWriter() *ChangeSetWriter {
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() *changeset.ChangeSet {
+func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
 	cs := changeset.NewAccountChangeSet()
 	for key, val := range w.accountChanges {
 		addrHash, err := common.HashData(key[:])
 		if err != nil {
-			panic(err)
+			return nil, err
 		}
 		if err := cs.Add(addrHash[:], val); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return cs
+	return cs, nil
 }
 
-func (w *ChangeSetWriter) GetStorageChanges() *changeset.ChangeSet {
+func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 	cs := changeset.NewStorageChangeSet()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return cs
+	return cs, nil
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {

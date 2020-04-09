@@ -118,9 +118,11 @@ func (dsw *DbStateWriter) CreateContract(address common.Address) error {
 // WriteChangeSets causes accumulated change sets to be written into
 // the database (or batch) associated with the `dsw`
 func (dsw *DbStateWriter) WriteChangeSets() error {
-	accountChanges := dsw.csw.GetAccountChanges()
+	accountChanges, err := dsw.csw.GetAccountChanges()
+	if err != nil {
+		return err
+	}
 	var accountSerialised []byte
-	var err error
 	if debug.IsThinHistory() {
 		accountSerialised, err = changeset.EncodeAccounts(accountChanges)
 	} else {
@@ -133,7 +135,10 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	if err = dsw.tds.db.Put(dbutils.AccountChangeSetBucket, key, accountSerialised); err != nil {
 		return err
 	}
-	storageChanges := dsw.csw.GetStorageChanges()
+	storageChanges, err := dsw.csw.GetStorageChanges()
+	if err != nil {
+		return err
+	}
 	var storageSerialized []byte
 	if storageChanges.Len() > 0 {
 		if debug.IsThinHistory() {
@@ -152,7 +157,10 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 }
 
 func (dsw *DbStateWriter) WriteHistory() error {
-	accountChanges := dsw.csw.GetAccountChanges()
+	accountChanges, err := dsw.csw.GetAccountChanges()
+	if err != nil {
+		return err
+	}
 	if debug.IsThinHistory() {
 		for _, change := range accountChanges.Changes {
 			value, err := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
@@ -173,7 +181,10 @@ func (dsw *DbStateWriter) WriteHistory() error {
 			}
 		}
 	}
-	storageChanges := dsw.csw.GetStorageChanges()
+	storageChanges, err := dsw.csw.GetStorageChanges()
+	if err != nil {
+		return err
+	}
 	if debug.IsThinHistory() {
 		for _, change := range storageChanges.Changes {
 			value, err := dsw.tds.db.Get(dbutils.StorageHistoryBucket, change.Key)

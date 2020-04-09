@@ -225,9 +225,9 @@ func TestMutationCommit(t *testing.T) {
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
-			keyHash, err := common.HashData(key.Bytes())
-			if err != nil {
-				t.Fatal(err)
+			keyHash, err1 := common.HashData(key.Bytes())
+			if err1 != nil {
+				t.Fatal(err1)
 			}
 			value := common.Hash{uint8(10 + j)}
 			if err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes()); err != nil {
