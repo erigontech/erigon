@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -1315,9 +1314,6 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		downloader.MaxBlockFetch = 128 * 10
 		downloader.MaxHeaderFetch = 192 * 10
 		downloader.MaxReceiptFetch = 256 * 10
-
-		// hacks to enable asserts
-		debug.IntermediateTrieHashAssertDbIntegrity = true
 
 		log.Warn("Succeed to set new Genesis")
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {

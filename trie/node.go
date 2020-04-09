@@ -26,6 +26,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+const codeSizeUncached = -1
+
 var indices = []string{"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "a", "b", "c", "d", "e", "f", "[17]"}
 
 type node interface {
@@ -63,6 +65,7 @@ type (
 		storage     node
 		rootCorrect bool
 		code        codeNode
+		codeSize    int
 	}
 
 	codeNode []byte
@@ -228,3 +231,77 @@ func (n hashNode) String() string     { return n.fstring("") }
 func (n valueNode) String() string    { return n.fstring("") }
 func (n codeNode) String() string     { return n.fstring("") }
 func (an accountNode) String() string { return an.fstring("") }
+
+func CodeKeyFromAddrHash(addrHash []byte) []byte {
+	return append(addrHash, 0xC0, 0xDE)
+}
+
+func CodeHexFromHex(hex []byte) []byte {
+	return append(hex, 0x0C, 0x00, 0x0D, 0x0E)
+}
+
+func IsPointingToCode(key []byte) bool {
+	// checking for 0xC0DE
+	l := len(key)
+	if l < 2 {
+		return false
+	}
+
+	return key[l-2] == 0xC0 && key[l-1] == 0xDE
+}
+
+func AddrHashFromCodeKey(codeKey []byte) []byte {
+	// cut off 0xC0DE
+	return codeKey[:len(codeKey)-2]
+}
+
+func calcSubtreeSize(node node) int {
+	switch n := node.(type) {
+	case nil:
+		return 0
+	case valueNode:
+		return 0
+	case *shortNode:
+		return calcSubtreeSize(n.Val)
+	case *duoNode:
+		return 1 + calcSubtreeSize(n.child1) + calcSubtreeSize(n.child2)
+	case *fullNode:
+		size := 1
+		for _, child := range n.Children {
+			size += calcSubtreeSize(child)
+		}
+		return size
+	case *accountNode:
+		return len(n.code) + calcSubtreeSize(n.storage)
+	case hashNode:
+		return 0
+	}
+	return 0
+}
+
+func calcSubtreeNodes(node node) int {
+	switch n := node.(type) {
+	case nil:
+		return 0
+	case valueNode:
+		return 0
+	case *shortNode:
+		return calcSubtreeNodes(n.Val)
+	case *duoNode:
+		return 1 + calcSubtreeNodes(n.child1) + calcSubtreeNodes(n.child2)
+	case *fullNode:
+		size := 1
+		for _, child := range n.Children {
+			size += calcSubtreeNodes(child)
+		}
+		return size
+	case *accountNode:
+		if n.code != nil {
+			return 1 + calcSubtreeNodes(n.storage)
+		}
+		return calcSubtreeNodes(n.storage)
+	case hashNode:
+		return 0
+	}
+	return 0
+}

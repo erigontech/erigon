@@ -14,6 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:scopelint
 package state
 
 import (
@@ -36,8 +37,8 @@ import (
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-// Trie cache generation limit after which to evict trie nodes from memory.
-var MaxTrieCacheGen = uint32(1024 * 1024)
+// MaxTrieCacheSize is the trie cache size limit after which to evict trie nodes from memory.
+var MaxTrieCacheSize = uint64(1024 * 1024)
 
 const (
 	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
@@ -92,6 +93,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads      map[common.Hash]common.Hash
+	codeSizeReads  map[common.Hash]common.Hash
 	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
@@ -104,6 +106,7 @@ type Buffer struct {
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
 	b.codeReads = make(map[common.Hash]common.Hash)
+	b.codeSizeReads = make(map[common.Hash]common.Hash)
 	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
@@ -130,6 +133,10 @@ func (b *Buffer) merge(other *Buffer) {
 
 	for addrHash, code := range other.codeUpdates {
 		b.codeUpdates[addrHash] = code
+	}
+
+	for address, codeHash := range other.codeSizeReads {
+		b.codeSizeReads[address] = codeHash
 	}
 
 	for addrHash, om := range other.storageUpdates {
@@ -180,7 +187,7 @@ type TrieDbState struct {
 	resolveReads      bool
 	savePreimages     bool
 	resolveSetBuilder *trie.ResolveSetBuilder
-	tp                *trie.TriePruning
+	tp                *trie.Eviction
 	newStream         trie.Stream
 	hashBuilder       *trie.HashBuilder
 	resolver          *trie.Resolver
@@ -189,7 +196,7 @@ type TrieDbState struct {
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewTriePruning(blockNr)
+	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -202,10 +209,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
-	t.SetTouchFunc(tp.Touch)
 
-	tp.SetUnloadNodeFunc(tds.putIntermediateHash)
-	tp.SetCreateNodeFunc(tds.delIntermediateHash)
+	tp.SetBlockNumber(blockNr)
+
+	t.AddObserver(tp)
+	t.AddObserver(NewIntermediateHashes(tds.db, tds.db))
 
 	return tds
 }
@@ -232,7 +240,8 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewTriePruning(n)
+	tp := trie.NewEviction()
+	tp.SetBlockNumber(n)
 
 	cpy := TrieDbState{
 		t:              &tcopy,
@@ -244,34 +253,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
-	cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
+	cpy.t.AddObserver(tp)
+	cpy.t.AddObserver(NewIntermediateHashes(cpy.db, cpy.db))
 
 	return &cpy
-}
-
-func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key), common.CopyBytes(nodeHash)); err != nil {
-		log.Warn("could not put intermediate trie hash", "err", err)
-	}
-}
-
-func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
-	if len(prefixAsNibbles) == 0 {
-		return
-	}
-
-	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of nibbles
-		return
-	}
-
-	key := make([]byte, len(prefixAsNibbles)/2)
-	trie.CompressNibbles(prefixAsNibbles, &key)
-
-	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {
-		log.Warn("could not delete intermediate trie hash", "err", err)
-		return
-	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
@@ -443,8 +428,12 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
-func (tds *TrieDbState) buildCodeTouches(withReads bool) map[common.Hash]common.Hash {
+func (tds *TrieDbState) buildCodeTouches() map[common.Hash]common.Hash {
 	return tds.aggregateBuffer.codeReads
+}
+
+func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
+	return tds.aggregateBuffer.codeSizeReads
 }
 
 // Builds a sorted list of all address hashes that were touched within the
@@ -491,10 +480,28 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 	return accountTouches, aValues
 }
 
-func (tds *TrieDbState) resolveCodeTouches(codeTouches map[common.Hash]common.Hash, resolveFunc trie.ResolveFunc) error {
+func (tds *TrieDbState) resolveCodeTouches(
+	codeTouches map[common.Hash]common.Hash,
+	codeSizeTouches map[common.Hash]common.Hash,
+	resolveFunc trie.ResolveFunc,
+) error {
 	firstRequest := true
 	for address, codeHash := range codeTouches {
-		if need, req := tds.t.NeedResolutonForCode(address, codeHash); need {
+		delete(codeSizeTouches, codeHash)
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
+			}
+			firstRequest = false
+			tds.resolver.AddCodeRequest(req)
+		}
+	}
+
+	for address, codeHash := range codeSizeTouches {
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
 				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
@@ -571,7 +578,10 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
 
 	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
-	codeTouches := tds.buildCodeTouches(tds.resolveReads)
+	codeTouches := tds.buildCodeTouches()
+
+	// Prepare (resolve) contract code size reads so that actual modifications can proceed without database access
+	codeSizeTouches := tds.buildCodeSizeTouches()
 
 	var err error
 
@@ -579,7 +589,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 		return err
 	}
 
-	if err = tds.resolveCodeTouches(codeTouches, resolveFunc); err != nil {
+	if err = tds.resolveCodeTouches(codeTouches, codeSizeTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -645,7 +655,7 @@ func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) 
 			return nil
 		}
 
-		pos, err := resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen, startPos)
+		pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos)
 		if err != nil {
 			return err
 		}
@@ -727,6 +737,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
+						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -823,6 +834,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
+			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
@@ -838,7 +850,7 @@ func (tds *TrieDbState) clearUpdates() {
 
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.setBlockNr(blockNr)
-	tds.tp.SetBlockNr(blockNr)
+	tds.tp.SetBlockNumber(blockNr)
 }
 
 func (tds *TrieDbState) GetBlockNr() uint64 {
@@ -1095,6 +1107,12 @@ func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) 
 	return tds.t.GetAccountCode(addrHash)
 }
 
+func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	return tds.t.GetAccountCodeSize(addrHash)
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -1133,10 +1151,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		return 0, err
 	}
 
-	if code, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
-		codeSize, err = len(code), nil
+	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
+		codeSize, err = cached, nil
 	} else {
-		code, err = tds.ReadAccountCode(address, codeHash)
+		var code []byte
+		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
 		if err != nil {
 			return 0, err
 		}
@@ -1153,7 +1172,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		tds.currentBuffer.codeReads[addrHash] = codeHash
+		tds.currentBuffer.codeSizeReads[addrHash] = codeHash
+		// FIXME: support codeSize in witnesses if makes sense
 		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return codeSize, nil
@@ -1203,28 +1223,69 @@ type TrieStateWriter struct {
 	tds *TrieDbState
 }
 
-func (tds *TrieDbState) PruneTries(print bool) {
+func (tds *TrieDbState) EvictTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
+	strict := print
 	tds.incarnationMap = make(map[common.Hash]uint64)
 	if print {
-		prunableNodes := tds.t.CountPrunableNodes()
-		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
+		trieSize := tds.t.TrieSize()
+		fmt.Println("") // newline for better formatting
+		fmt.Printf("[Before] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
 	}
 
-	tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
+	if strict {
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
+		accountedAccounts := tds.tp.NumberOf()
+		if actualAccounts != accountedAccounts {
+			panic(fmt.Errorf("account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
+		}
+		fmt.Printf("checking number --> ok\n")
+
+		actualSize := uint64(tds.t.TrieSize())
+		accountedSize := tds.tp.TotalSize()
+
+		if actualSize != accountedSize {
+			panic(fmt.Errorf("account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
+		}
+		fmt.Printf("checking size --> ok\n")
+	}
+
+	tds.tp.EvictToFitSize(tds.t, MaxTrieCacheSize)
+
+	if strict {
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
+		accountedAccounts := tds.tp.NumberOf()
+		if actualAccounts != accountedAccounts {
+			panic(fmt.Errorf("after eviction account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
+		}
+		fmt.Printf("checking number --> ok\n")
+
+		actualSize := uint64(tds.t.TrieSize())
+		accountedSize := tds.tp.TotalSize()
+
+		if actualSize != accountedSize {
+			panic(fmt.Errorf("after eviction account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
+		}
+		fmt.Printf("checking size --> ok\n")
+	}
 
 	if print {
-		prunableNodes := tds.t.CountPrunableNodes()
-		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
+		trieSize := tds.t.TrieSize()
+		fmt.Printf("[After] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
+
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
 	}
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Memory", "nodes", tds.tp.NodeCount(), "hashes", tds.t.HashMapSize(),
+	log.Info("Memory", "nodes size", tds.tp.TotalSize(), "hashes", tds.t.HashMapSize(),
 		"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	if print {
-		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
+		fmt.Printf("Eviction done. Nodes size: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.TotalSize(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
 }
 

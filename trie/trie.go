@@ -48,8 +48,6 @@ var (
 type Trie struct {
 	root node
 
-	touchFunc func(hex []byte, del bool)
-
 	newHasherFunc func() *hasher
 
 	Version uint8
@@ -57,6 +55,8 @@ type Trie struct {
 	binary bool
 
 	hashMap map[common.Hash]node
+
+	observers *ObserverMux
 }
 
 // New creates a trie with an existing root node from db.
@@ -67,9 +67,9 @@ type Trie struct {
 // not exist in the database. Accessing the trie loads nodes from db on demand.
 func New(root common.Hash) *Trie {
 	trie := &Trie{
-		touchFunc:     func([]byte, bool) {},
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ false) },
 		hashMap:       make(map[common.Hash]node),
+		observers:     NewTrieObserverMux(),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -87,9 +87,9 @@ func NewBinary(root common.Hash) *Trie {
 // it is usually used for testing purposes.
 func NewTestRLPTrie(root common.Hash) *Trie {
 	trie := &Trie{
-		touchFunc:     func([]byte, bool) {},
 		newHasherFunc: func() *hasher { return newHasher( /*valueNodesRlpEncoded = */ true) },
 		hashMap:       make(map[common.Hash]node),
+		observers:     NewTrieObserverMux(),
 	}
 	if (root != common.Hash{}) && root != EmptyRoot {
 		trie.root = hashNode(root[:])
@@ -97,8 +97,8 @@ func NewTestRLPTrie(root common.Hash) *Trie {
 	return trie
 }
 
-func (t *Trie) SetTouchFunc(touchFunc func(hex []byte, del bool)) {
-	t.touchFunc = touchFunc
+func (t *Trie) AddObserver(observer Observer) {
+	t.observers.AddChild(observer)
 }
 
 // Get returns the value for key stored in the trie.
@@ -135,7 +135,7 @@ func (t *Trie) GetAccount(key []byte) (value *accounts.Account, gotValue bool) {
 
 func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 	if t.root == nil {
-		return nil, true
+		return nil, false
 	}
 
 	hex := keybytesToHex(key)
@@ -149,6 +149,8 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 			return nil, gotValue
 		}
 
+		t.observers.CodeNodeTouched(hex)
+
 		if accNode.code == nil {
 			return nil, false
 		}
@@ -156,6 +158,31 @@ func (t *Trie) GetAccountCode(key []byte) (value []byte, gotValue bool) {
 		return accNode.code, gotValue
 	}
 	return nil, gotValue
+}
+
+func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
+	if t.root == nil {
+		return 0, false
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode != nil {
+		if bytes.Equal(accNode.Account.CodeHash[:], EmptyCodeHash[:]) {
+			return 0, gotValue
+		}
+
+		if accNode.codeSize == codeSizeUncached {
+			return 0, false
+		}
+
+		return accNode.codeSize, gotValue
+	}
+	return 0, gotValue
 }
 
 func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNode, gotValue bool) {
@@ -174,7 +201,7 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 			return nil, true
 		}
 	case *duoNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
@@ -185,7 +212,7 @@ func (t *Trie) getAccount(origNode node, key []byte, pos int) (value *accountNod
 			return nil, true
 		}
 	case *fullNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		child := n.Children[key[pos]]
 		return t.getAccount(child, key, pos+1)
 	case hashNode:
@@ -215,7 +242,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return
 	case *duoNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
@@ -227,7 +254,7 @@ func (t *Trie) get(origNode node, key []byte, pos int) (value []byte, gotValue b
 		}
 		return
 	case *fullNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		child := n.Children[key[pos]]
 		if child == nil {
 			return nil, true
@@ -254,9 +281,10 @@ func (t *Trie) Update(key, value []byte) {
 		hex = keyHexToBin(hex)
 	}
 
+	newnode := valueNode(value)
+
 	if t.root == nil {
-		newnode := &shortNode{Key: hex, Val: valueNode(value)}
-		t.root = newnode
+		t.root = &shortNode{Key: hex, Val: newnode}
 	} else {
 		_, t.root = t.insert(t.root, hex, 0, valueNode(value))
 	}
@@ -271,20 +299,18 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if t.binary {
 		hex = keyHexToBin(hex)
 	}
-	if t.root == nil {
-		var newnode node
-		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
-			newnode = &shortNode{Key: hex, Val: &accountNode{*value, nil, true, nil}}
-		} else {
-			newnode = &shortNode{Key: hex, Val: &accountNode{*value, hashNode(value.Root[:]), true, nil}}
-		}
-		t.root = newnode
+
+	var newnode *accountNode
+	if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
+		newnode = &accountNode{*value, nil, true, nil, codeSizeUncached}
 	} else {
-		if value.Root == EmptyRoot || value.Root == (common.Hash{}) {
-			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, nil, true, nil})
-		} else {
-			_, t.root = t.insert(t.root, hex, 0, &accountNode{*value, hashNode(value.Root[:]), true, nil})
-		}
+		newnode = &accountNode{*value, hashNode(value.Root[:]), true, nil, codeSizeUncached}
+	}
+
+	if t.root == nil {
+		t.root = &shortNode{Key: hex, Val: newnode}
+	} else {
+		_, t.root = t.insert(t.root, hex, 0, newnode)
 	}
 }
 
@@ -310,7 +336,32 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 	}
 
 	accNode.code = code
+	accNode.codeSize = len(code)
 
+	// t.insert will call the observer methods itself
+	_, t.root = t.insert(t.root, hex, 0, accNode)
+	return nil
+}
+
+// UpdateAccountCodeSize attaches the code size to the account
+func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
+	if t.root == nil {
+		return nil
+	}
+
+	hex := keybytesToHex(key)
+	if t.binary {
+		hex = keyHexToBin(hex)
+	}
+
+	accNode, gotValue := t.getAccount(t.root, hex, 0)
+	if accNode == nil || !gotValue {
+		return errors.Wrapf(ethdb.ErrKeyNotFound, "account not found with key: %x", key)
+	}
+
+	accNode.codeSize = codeSize
+
+	// t.insert will call the observer methods itself
 	_, t.root = t.insert(t.root, hex, 0, accNode)
 	return nil
 }
@@ -321,10 +372,11 @@ type ResolveRequestForCode struct {
 	t        *Trie
 	addrHash common.Hash // contract address hash
 	codeHash common.Hash
+	bytecode bool // include the bytecode too
 }
 
 func (rr *ResolveRequestForCode) String() string {
-	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x}", rr.addrHash, rr.codeHash)
+	return fmt.Sprintf("rr_code{addrHash:%x,codeHash:%x,bytecode:%v}", rr.addrHash, rr.codeHash, rr.bytecode)
 }
 
 // ResolveRequest expresses the need to fetch a subtrie from the database. The location of this
@@ -361,18 +413,23 @@ func (rr *ResolveRequest) String() string {
 	return fmt.Sprintf("rr{t:%x,resolveHex:%x,resolvePos:%d,resolveHash:%s}", rr.contract, rr.resolveHex, rr.resolvePos, rr.resolveHash)
 }
 
-func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash) *ResolveRequestForCode {
-	return &ResolveRequestForCode{t, addrHash, codeHash}
+func (t *Trie) NewResolveRequestForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) *ResolveRequestForCode {
+	return &ResolveRequestForCode{t, addrHash, codeHash, bytecode}
 }
 
-func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash) (bool, *ResolveRequestForCode) {
+func (t *Trie) NeedResolutonForCode(addrHash common.Hash, codeHash common.Hash, bytecode bool) (bool, *ResolveRequestForCode) {
 	if bytes.Equal(codeHash[:], EmptyCodeHash[:]) {
 		return false, nil
 	}
 
-	_, ok := t.GetAccountCode(addrHash[:])
+	ok := false
+	if bytecode {
+		_, ok = t.GetAccountCode(addrHash[:])
+	} else {
+		_, ok = t.GetAccountCodeSize(addrHash[:])
+	}
 	if !ok {
-		return true, t.NewResolveRequestForCode(addrHash, codeHash)
+		return true, t.NewResolveRequestForCode(addrHash, codeHash, bytecode)
 	}
 
 	return false, nil
@@ -467,11 +524,20 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			if updated {
 				if !bytes.Equal(origAccN.CodeHash[:], vAccN.CodeHash[:]) {
 					origAccN.code = nil
+				} else if vAccN.code != nil {
+					origAccN.code = vAccN.code
 				}
 				origAccN.Account.Copy(&vAccN.Account)
+				origAccN.codeSize = vAccN.codeSize
 				origAccN.rootCorrect = false
 			}
 			newNode = origAccN
+
+			if len(origAccN.code) > 0 {
+				t.observers.CodeNodeSizeChanged(key[:pos-1], uint(len(origAccN.code)))
+			} else {
+				t.observers.CodeNodeDeleted(key[:pos-1])
+			}
 			return
 		}
 
@@ -532,22 +598,21 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
-				t.touchFunc(key[:pos], false)
 				newNode = branch // current node leaves the generation, but new node branch joins it
 			} else {
 				// Otherwise, replace it with a short node leading up to the branch.
-				t.touchFunc(key[:pos+matchlen], false)
 				n.Key = common.CopyBytes(key[pos : pos+matchlen])
 				n.Val = branch
 				n.ref.len = 0
 				newNode = n
 			}
+			t.observers.BranchNodeCreated(key[:pos+matchlen])
 			updated = true
 		}
 		return
 
 	case *duoNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
@@ -585,7 +650,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		return
 
 	case *fullNode:
-		t.touchFunc(key[:pos], false)
+		t.observers.BranchNodeTouched(key[:pos])
 		child := n.Children[key[pos]]
 		if child == nil {
 			t.evictNodeFromHashMap(n)
@@ -635,9 +700,8 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool) {
 			}
 		case *duoNode:
 			if doTouch {
-				t.touchFunc(hex[:pos], false)
+				t.observers.BranchNodeTouched(hex[:pos])
 			}
-
 			i1, i2 := n.childrenIdx()
 			switch hex[pos] {
 			case i1:
@@ -653,7 +717,7 @@ func (t *Trie) getNode(hex []byte, doTouch bool) (node, node, bool) {
 			}
 		case *fullNode:
 			if doTouch {
-				t.touchFunc(hex[:pos], false)
+				t.observers.BranchNodeTouched(hex[:pos])
 			}
 			child := n.Children[hex[pos]]
 			if child == nil {
@@ -733,7 +797,12 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 			t.touchAll(n.Val, hexVal, del)
 		}
 	case *duoNode:
-		t.touchFunc(hex, del)
+		if del {
+			t.observers.BranchNodeDeleted(hex)
+		} else {
+			t.observers.BranchNodeCreated(hex)
+			t.observers.BranchNodeLoaded(hex)
+		}
 		i1, i2 := n.childrenIdx()
 		hex1 := make([]byte, len(hex)+1)
 		copy(hex1, hex)
@@ -744,13 +813,23 @@ func (t *Trie) touchAll(n node, hex []byte, del bool) {
 		t.touchAll(n.child1, hex1, del)
 		t.touchAll(n.child2, hex2, del)
 	case *fullNode:
-		t.touchFunc(hex, del)
+		if del {
+			t.observers.BranchNodeDeleted(hex)
+		} else {
+			t.observers.BranchNodeCreated(hex)
+			t.observers.BranchNodeLoaded(hex)
+		}
 		for i, child := range n.Children {
 			if child != nil {
 				t.touchAll(child, concat(hex, byte(i)), del)
 			}
 		}
 	case *accountNode:
+		if del {
+			t.observers.CodeNodeDeleted(hex)
+		} else {
+			t.observers.CodeNodeTouched(hex)
+		}
 		if n.storage != nil {
 			t.touchAll(n.storage, hex, del)
 		}
@@ -853,15 +932,15 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		case i1:
 			updated, nn = t.delete(n.child1, key, keyStart+1, preserveAccountNode)
 			if !updated {
-				t.touchFunc(key[:keyStart], false)
 				newNode = n
+				t.observers.BranchNodeTouched(key[:keyStart])
 			} else {
 				t.evictNodeFromHashMap(n)
 				if nn == nil {
-					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child2, uint(i2))
+					t.observers.BranchNodeDeleted(key[:keyStart])
 				} else {
-					t.touchFunc(key[:keyStart], false)
+					t.observers.BranchNodeTouched(key[:keyStart])
 					n.child1 = nn
 					n.ref.len = 0
 					newNode = n
@@ -870,22 +949,21 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		case i2:
 			updated, nn = t.delete(n.child2, key, keyStart+1, preserveAccountNode)
 			if !updated {
-				t.touchFunc(key[:keyStart], false)
 				newNode = n
+				t.observers.BranchNodeTouched(key[:keyStart])
 			} else {
 				t.evictNodeFromHashMap(n)
 				if nn == nil {
-					t.touchFunc(key[:keyStart], true)
 					newNode = t.convertToShortNode(n.child1, uint(i1))
+					t.observers.BranchNodeDeleted(key[:keyStart])
 				} else {
-					t.touchFunc(key[:keyStart], false)
+					t.observers.BranchNodeTouched(key[:keyStart])
 					n.child2 = nn
 					n.ref.len = 0
 					newNode = n
 				}
 			}
 		default:
-			t.touchFunc(key[:keyStart], false)
 			updated = false
 			newNode = n
 		}
@@ -895,8 +973,8 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		child := n.Children[key[keyStart]]
 		updated, nn = t.delete(child, key, keyStart+1, preserveAccountNode)
 		if !updated {
-			t.touchFunc(key[:keyStart], false)
 			newNode = n
+			t.observers.BranchNodeTouched(key[:keyStart])
 		} else {
 			t.evictNodeFromHashMap(n)
 			n.Children[key[keyStart]] = nn
@@ -926,10 +1004,10 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				}
 			}
 			if count == 1 {
-				t.touchFunc(key[:keyStart], true)
 				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
+				t.observers.BranchNodeDeleted(key[:keyStart])
 			} else if count == 2 {
-				t.touchFunc(key[:keyStart], false)
+				t.observers.BranchNodeTouched(key[:keyStart])
 				duo := &duoNode{}
 				if pos1 == int(key[keyStart]) {
 					duo.child1 = nn
@@ -944,7 +1022,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
 			} else if count > 2 {
-				t.touchFunc(key[:keyStart], false)
+				t.observers.BranchNodeTouched(key[:keyStart])
 				// n still contains at least three values and cannot be reduced.
 				n.ref.len = 0
 				newNode = n
@@ -960,20 +1038,23 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 	case *accountNode:
 		if keyStart >= len(key) || key[keyStart] == 16 {
 			// Key terminates here
+			h := key[:keyStart]
+			if h[len(h)-1] == 16 {
+				h = h[:len(h)-1]
+			}
 			if n.storage != nil {
-				h := key[:keyStart]
-				if h[len(h)-1] == 16 {
-					h = h[:len(h)-1]
-				}
 				// Mark all the storage nodes as deleted
 				t.touchAll(n.storage, h, true)
 			}
 			if preserveAccountNode {
 				n.storage = nil
+				n.code = nil
 				n.Root = EmptyRoot
 				n.rootCorrect = true
+				t.observers.CodeNodeDeleted(h)
 				return true, n
 			}
+
 			return true, nil
 		}
 		updated, nn = t.delete(n.storage, key, keyStart, preserveAccountNode)
@@ -1067,11 +1148,22 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	return true, accNode.Root
 }
 
-func (t *Trie) unload(hex []byte) {
+func (t *Trie) EvictNode(hex []byte) {
+	isCode := IsPointingToCode(hex)
+	if isCode {
+		hex = AddrHashFromCodeKey(hex)
+	}
+
 	nd, parent, ok := t.getNode(hex, false)
 	if !ok {
 		return
 	}
+	if accNode, ok := parent.(*accountNode); isCode && ok {
+		// add special treatment to code nodes
+		accNode.code = nil
+		return
+	}
+
 	switch nd.(type) {
 	case valueNode, hashNode:
 		return
@@ -1084,9 +1176,12 @@ func (t *Trie) unload(hex []byte) {
 	var hn common.Hash
 	if nd == nil {
 		fmt.Printf("nd == nil, hex %x, parent node: %T\n", hex, parent)
+		return
 	}
 	copy(hn[:], nd.reference())
 	hnode := hashNode(hn[:])
+	t.observers.WillUnloadBranchNode(hex, hn)
+
 	switch p := parent.(type) {
 	case nil:
 		t.root = hnode
@@ -1108,57 +1203,12 @@ func (t *Trie) unload(hex []byte) {
 	}
 }
 
-func (t *Trie) CountPrunableNodes() int {
-	return t.countPrunableNodes(t.root, []byte{}, false)
+func (t *Trie) TrieSize() int {
+	return calcSubtreeSize(t.root)
 }
 
-func (t *Trie) countPrunableNodes(nd node, hex []byte, print bool) int {
-	switch n := nd.(type) {
-	case nil:
-		return 0
-	case valueNode:
-		return 0
-	case *accountNode:
-		return t.countPrunableNodes(n.storage, hex, print)
-	case hashNode:
-		return 0
-	case *shortNode:
-		var hexVal []byte
-		if _, ok := n.Val.(valueNode); !ok { // Don't need to compute prefix for a leaf
-			h := n.Key
-			if h[len(h)-1] == 16 {
-				h = h[:len(h)-1]
-			}
-			hexVal = concat(hex, h...)
-		}
-		//@todo accountNode?
-		return t.countPrunableNodes(n.Val, hexVal, print)
-	case *duoNode:
-		i1, i2 := n.childrenIdx()
-		hex1 := make([]byte, len(hex)+1)
-		copy(hex1, hex)
-		hex1[len(hex)] = byte(i1)
-		hex2 := make([]byte, len(hex)+1)
-		copy(hex2, hex)
-		hex2[len(hex)] = byte(i2)
-		if print {
-			fmt.Printf("%T node: %x\n", n, hex)
-		}
-		return 1 + t.countPrunableNodes(n.child1, hex1, print) + t.countPrunableNodes(n.child2, hex2, print)
-	case *fullNode:
-		if print {
-			fmt.Printf("%T node: %x\n", n, hex)
-		}
-		count := 0
-		for i, child := range n.Children {
-			if child != nil {
-				count += t.countPrunableNodes(child, concat(hex, byte(i)), print)
-			}
-		}
-		return 1 + count
-	default:
-		panic("")
-	}
+func (t *Trie) NumberOfAccounts() int {
+	return calcSubtreeNodes(t.root)
 }
 
 func (t *Trie) hashRoot() (node, error) {

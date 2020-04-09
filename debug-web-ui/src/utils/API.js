@@ -44,20 +44,14 @@ export default class API {
     });
   }
 
-  lookupStorageTombstones(prefix) {
+  lookupStorageTombstones(prefix, tombstones) {
     return axios({
-      url: this.endpoint('/api/v1/storage-tombstones/'),
+      url: this.endpoint('/api/v1/intermediate-hash/'),
       method: 'get',
       params: {
         prefix: prefix,
+        tombstones: tombstones,
       },
-    });
-  }
-
-  storageTombstonesIntegrityChecks() {
-    return axios({
-      url: this.endpoint('/api/v1/storage-tombstones/integrity/'),
-      method: 'get',
     });
   }
 }
