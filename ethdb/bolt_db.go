@@ -335,9 +335,13 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
+func (db *BoltDatabase) walkAsOfThin(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	panic("")
+}
+
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	if debug.IsThinHistory() {
-		panic("WalkAsOf")
+		return db.walkAsOfThin(bucket, hBucket, startkey, fixedbits, timestamp, walker)
 	}
 
 	fixedbytes, mask := Bytesmask(fixedbits)

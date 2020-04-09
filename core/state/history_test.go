@@ -18,6 +18,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -140,7 +141,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		compositeKey, _ := dbutils.CompositeKeySuffix(addrHash.Bytes(), 1)
+		compositeKey, _ := dbutils.CompositeKeySuffix(addrHash.Bytes(), 2)
 		b, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
 		if err != nil {
 			t.Fatal("error on get account", i, err)
@@ -158,7 +159,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -169,11 +170,11 @@ func TestMutationCommit(t *testing.T) {
 		if !reflect.DeepEqual(resAccStorage, accStateStorage[i]) {
 			spew.Dump("res", resAccStorage)
 			spew.Dump("expected", accHistoryStateStorage[i])
-			t.Log("incorrect storage", i)
+			t.Fatal("incorrect storage", i)
 		}
 
 		resAccStorage = make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:common.HashLength+8+common.HashLength])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -188,7 +189,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +213,7 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal("incorrect account changeset")
 	}
 
-	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +302,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -328,29 +329,35 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	expectedChangeSet := changeset.NewAccountChangeSet()
 	for i := range addrHashes {
-		b := make([]byte, accHistory[i].EncodingLengthForStorage())
-		accHistory[i].EncodeForStorage(b)
+		// Make ajustments for THIN_HISTORY
+		c := accHistory[i].SelfCopy()
+		copy(c.CodeHash[:], emptyCodeHash)
+		c.Root = trie.EmptyRoot
+		bLen := c.EncodingLengthForStorage()
+		b := make([]byte, bLen)
+		c.EncodeForStorage(b)
 		innerErr := expectedChangeSet.Add(addrHashes[i].Bytes(), b)
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
-
 	}
-
-	expectedData, err := changeset.EncodeChangeSet(expectedChangeSet)
+	sort.Sort(expectedChangeSet)
+	expectedData, err := changeset.EncodeAccounts(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect changeset")
 	}
 
-	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -363,14 +370,18 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
+			keyHash, err1 := common.HashData(key.Bytes())
+			if err1 != nil {
+				t.Fatal(err1)
+			}
 			value := common.Hash{uint8(10 + j)}
-			err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, key), value.Bytes())
+			err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
-
+	sort.Sort(expectedChangeSet)
 	expectedData, err = changeset.EncodeStorage(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
@@ -412,7 +423,10 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 				t.Fatal(err)
 			}
 			newValue := common.Hash{uint8(j)}
-			accStateStorage[i][keyHash] = newValue
+			if newValue != (common.Hash{}) {
+				// Empty value is not considered to be present
+				accStateStorage[i][keyHash] = newValue
+			}
 
 			value := common.Hash{uint8(10 + j)}
 			accHistoryStateStorage[i][keyHash] = value
@@ -424,6 +438,7 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 			t.Fatal(err)
 		}
 	}
+	tds.SetBlockNr(2)
 	if err := blockWriter.WriteChangeSets(); err != nil {
 		t.Fatal(err)
 	}
@@ -675,10 +690,6 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 		keyHash, _ := common.HashData(k[:])
 		key := dbutils.GenerateCompositeStorageKey(addrHash, uint64(1), keyHash)
 		val := []byte("state   " + strconv.Itoa(int(i)))
-		//err := db.Put(dbutils.StorageBucket, key, val)
-		//if err != nil {
-		//	t.Fatal(err)
-		//}
 		err := block6Expected.Add(key, val)
 		if err != nil {
 			t.Fatal(err)
