@@ -169,15 +169,15 @@ func (dsw *DbStateWriter) WriteHistory() error {
 			}
 			index := dbutils.WrapHistoryIndex(value)
 			index.Append(dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err != nil {
-				return err
+			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err2 != nil {
+				return err2
 			}
 		}
 	} else {
 		for _, change := range accountChanges.Changes {
 			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err != nil {
-				return err
+			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err2 != nil {
+				return err2
 			}
 		}
 	}
