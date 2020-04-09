@@ -88,7 +88,7 @@ func NewRemoteReader(db ethdb.KV, blockNr uint64) *RemoteReader {
 
 func (r *RemoteReader) GetAccountReads() [][]byte {
 	var output [][]byte
-	for key, _ := range r.accountReads {
+	for key := range r.accountReads {
 		output = append(output, key.Bytes())
 	}
 	return output
@@ -96,7 +96,7 @@ func (r *RemoteReader) GetAccountReads() [][]byte {
 
 func (r *RemoteReader) GetStorageReads() [][]byte {
 	var output [][]byte
-	for key, _ := range r.storageReads {
+	for key := range r.storageReads {
 		output = append(output, key.Bytes())
 	}
 	return output
@@ -227,7 +227,7 @@ func (e *RemoteContext) Engine() consensus.Engine {
 
 func (e *RemoteContext) GetHeader(hash common.Hash, number uint64) *types.Header {
 	var header *types.Header
-	e.db.View(context.Background(), func(tx ethdb.Tx) error {
+	_ = e.db.View(context.Background(), func(tx ethdb.Tx) error {
 		h, _ := remotechain.ReadHeader(tx, hash, number)
 		header = h
 		return nil

@@ -1,9 +1,9 @@
 package main
 
 import (
-    "fmt"
+	"fmt"
 )
 
 func main() {
-    fmt.Printf("Hello, semantics!\n")
+	fmt.Printf("Hello, semantics!\n")
 }
