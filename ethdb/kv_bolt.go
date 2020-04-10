@@ -54,6 +54,11 @@ func (opts boltOpts) InMem() boltOpts {
 	return opts
 }
 
+func (opts boltOpts) ReadOnly() boltOpts {
+	opts.Bolt.ReadOnly = true
+	return opts
+}
+
 func (opts boltOpts) Path(path string) boltOpts {
 	opts.path = path
 	return opts

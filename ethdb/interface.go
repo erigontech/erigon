@@ -31,11 +31,6 @@ var ErrKeyNotFound = errors.New("db: key not found")
 type Putter interface {
 	// Put inserts or updates a single entry.
 	Put(bucket, key, value []byte) error
-
-	// PutS adds a new entry to the historical buckets:
-	// hBucket (unless changeSetBucketOnly) and ChangeSet.
-	// timestamp == block number
-	PutS(hBucket, key, value []byte, timestamp uint64, changeSetBucketOnly bool) error
 }
 
 // Getter wraps the database read operations.
@@ -68,10 +63,6 @@ type Getter interface {
 type Deleter interface {
 	// Delete removes a single entry.
 	Delete(bucket, key []byte) error
-
-	// DeleteTimestamp removes data for a given timestamp from all historical buckets (incl. ChangeSet).
-	// timestamp == block number
-	DeleteTimestamp(timestamp uint64) error
 }
 
 // Database wraps all database operations. All methods are safe for concurrent use.

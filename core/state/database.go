@@ -29,6 +29,7 @@ import (
 	"sync/atomic"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -923,13 +924,107 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		return err
 	}
 	for i := tds.blockNr; i > blockNr; i-- {
-		if err := tds.db.DeleteTimestamp(i); err != nil {
+		if err := tds.deleteTimestamp(i); err != nil {
 			return err
 		}
 	}
 
 	tds.clearUpdates()
 	tds.setBlockNr(blockNr)
+	return nil
+}
+
+func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
+	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	changedAccounts, err := tds.db.Get(dbutils.AccountChangeSetBucket, changeSetKey)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return err
+	}
+	changedStorage, err := tds.db.Get(dbutils.StorageChangeSetBucket, changeSetKey)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return err
+	}
+
+	if debug.IsThinHistory() {
+		if len(changedAccounts) > 0 {
+			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
+				indexBytes, getErr := tds.db.Get(dbutils.AccountsHistoryBucket, kk)
+				if getErr != nil {
+					if getErr == ethdb.ErrKeyNotFound {
+						return nil
+					}
+					return getErr
+				}
+
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
+					return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
+				}
+				return tds.db.Put(dbutils.AccountsHistoryBucket, kk, *index)
+			})
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+
+		if len(changedStorage) > 0 {
+			innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
+				indexBytes, getErr := tds.db.Get(dbutils.StorageHistoryBucket, kk)
+				if getErr != nil {
+					if getErr == ethdb.ErrKeyNotFound {
+						return nil
+					}
+					return getErr
+				}
+
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
+					return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
+				}
+				return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
+			})
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+	} else {
+		if len(changedAccounts) > 0 {
+			innerErr := changeset.Walk(changedAccounts, func(kk, _ []byte) error {
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				return tds.db.Delete(dbutils.AccountsHistoryBucket, composite)
+			})
+
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+		if len(changedStorage) > 0 {
+			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				return tds.db.Delete(dbutils.StorageHistoryBucket, composite)
+			})
+
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -1291,8 +1386,9 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 
+// DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{tds: tds}
+	return &DbStateWriter{tds: tds, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {
