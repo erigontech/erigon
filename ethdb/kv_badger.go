@@ -23,6 +23,11 @@ func (opts badgerOpts) InMem() badgerOpts {
 	return opts
 }
 
+func (opts badgerOpts) ReadOnly() badgerOpts {
+	opts.Badger = opts.Badger.WithReadOnly(true)
+	return opts
+}
+
 func (opts badgerOpts) Open(ctx context.Context) (KV, error) {
 	logger := log.New("badger_db", opts.Badger.Dir)
 
@@ -151,10 +156,12 @@ func (tx *badgerTx) Bucket(name []byte) Bucket {
 }
 
 func (tx *badgerTx) Commit(ctx context.Context) error {
+	tx.cleanup()
 	return tx.badger.Commit()
 }
 
 func (tx *badgerTx) Rollback() error {
+	tx.cleanup()
 	tx.badger.Discard()
 	return nil
 }
@@ -272,8 +279,7 @@ func (c *badgerCursor) Seek(seek []byte) ([]byte, []byte, error) {
 
 	c.initCursor()
 
-	//seek = append(c.bucket.prefix[:c.bucket.nameLen], seek...)
-	c.badger.Seek(seek)
+	c.badger.Seek(append(c.bucket.prefix[:c.bucket.nameLen], seek...))
 	if !c.badger.Valid() {
 		c.k = nil
 		return c.k, c.v, c.err
@@ -364,8 +370,7 @@ func (c *badgerNoValuesCursor) Seek(seek []byte) ([]byte, uint32, error) {
 
 	c.initCursor()
 
-	//c.bucket.prefix = append(c.bucket.prefix[:c.bucket.nameLen], seek...)
-	c.badger.Seek(seek)
+	c.badger.Seek(append(c.bucket.prefix[:c.bucket.nameLen], seek...))
 	if !c.badger.Valid() {
 		c.k = nil
 		return c.k, 0, c.err

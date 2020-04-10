@@ -67,7 +67,6 @@ func NewBoltDatabase(file string) (*BoltDatabase, error) {
 	}
 	// Open the db and recover any potential corruptions
 	db, errOpen := bolt.Open(file, 0600, &bolt.Options{})
-
 	// (Re)check for errors and abort if opening of the db failed
 	if errOpen != nil {
 		return nil, errOpen
@@ -622,8 +621,8 @@ func (db *BoltDatabase) AbstractKV() KV {
 
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:                      db,
-		puts:                    newPuts(),
+		db:   db,
+		puts: newPuts(),
 	}
 	return m
 }

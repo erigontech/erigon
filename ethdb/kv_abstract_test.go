@@ -20,8 +20,8 @@ func TestManagedTx(t *testing.T) {
 
 	writeDBs := []ethdb.KV{
 		ethdb.NewBolt().InMem().MustOpen(ctx),
-		//ethdb.NewBadger().InMem().MustOpen(ctx),
 		ethdb.NewBolt().InMem().MustOpen(ctx), // for remote db
+		//ethdb.NewBadger().InMem().MustOpen(ctx),
 	}
 
 	serverIn, clientOut := io.Pipe()
@@ -29,8 +29,8 @@ func TestManagedTx(t *testing.T) {
 
 	readDBs := []ethdb.KV{
 		writeDBs[0],
-		//writeDBs[1],
 		ethdb.NewRemote().InMem(clientIn, clientOut).MustOpen(ctx),
+		//writeDBs[2],
 	}
 
 	serverCtx, serverCancel := context.WithCancel(ctx)
@@ -63,7 +63,6 @@ func TestManagedTx(t *testing.T) {
 			}
 			require.NoError(t, b.Put([]byte{0, 1}, []byte{1}))
 			require.NoError(t, b.Put([]byte{0, 0, 1}, []byte{1}))
-			require.NoError(t, b.Put([]byte{2}, []byte{1}))
 			return nil
 		}); err != nil {
 			require.NoError(t, err)
@@ -111,6 +110,10 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}
 		assert.Equal(1, counter)
 
+		k, _, err := c.Seek([]byte{2})
+		assert.NoError(err)
+		assert.Equal([]byte{2}, k)
+
 		c = b.Cursor()
 		counter = 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
@@ -130,6 +133,9 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 		}
 		assert.Equal(12, counter)
 
+		k, _, err = c.Seek([]byte{2})
+		assert.NoError(err)
+		assert.Equal([]byte{2}, k)
 		return nil
 	}); err != nil {
 		assert.NoError(err)
@@ -160,7 +166,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
-		c := b.Cursor().NoValues()
+		c := b.Cursor()
 
 		k, _, err := c.First()
 		assert.NoError(err)
@@ -174,6 +180,42 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 		k, _, err = c.Next()
 		assert.NoError(err)
 		assert.Equal([]byte{1}, k)
+		k, _, err = c.Seek([]byte{0, 1})
+		assert.NoError(err)
+		assert.Equal([]byte{0, 1}, k)
+		k, _, err = c.Seek([]byte{2})
+		assert.NoError(err)
+		assert.Equal([]byte{2}, k)
+		k, _, err = c.Seek([]byte{99})
+		assert.NoError(err)
+		assert.Nil(k)
+
+		c2 := b.Cursor().NoValues()
+
+		k, _, err = c2.First()
+		assert.NoError(err)
+		assert.Equal([]byte{0}, k)
+		k, _, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 0, 1}, k)
+		k, _, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{0, 1}, k)
+		k, _, err = c2.Next()
+		assert.NoError(err)
+		assert.Equal([]byte{1}, k)
+		k, _, err = c2.Seek([]byte{0, 1})
+		assert.NoError(err)
+		assert.Equal([]byte{0, 1}, k)
+		k, _, err = c2.Seek([]byte{0})
+		assert.NoError(err)
+		assert.Equal([]byte{0}, k)
+		k, _, err = c.Seek([]byte{2})
+		assert.NoError(err)
+		assert.Equal([]byte{2}, k)
+		k, _, err = c.Seek([]byte{99})
+		assert.NoError(err)
+		assert.Nil(k)
 
 		return nil
 	}); err != nil {
