@@ -40,7 +40,9 @@ make restapi
     ...
 ]
 ```
-* `/api/v1/retrace/`
+* `/api/v1/retrace/:chain/:number`
+    * chain is the name of the chain(mainnet, testnet, goerli and rinkeby)
+    * number is block number (e.g 98345)
     * extract changeSets and readSets for each block
     * Response:
 ```json
