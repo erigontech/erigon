@@ -26,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -617,7 +616,7 @@ func trieChart() {
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
-	state.MaxTrieCacheGen = 32
+	state.MaxTrieCacheSize = 32
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -631,7 +630,7 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil)
+	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil, false /* history */)
 	check(err)
 	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
@@ -789,7 +788,6 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	debug.IntermediateTrieHashAssertDbIntegrity = true
 	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()
@@ -1015,7 +1013,7 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
+	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
 	check(err)
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisBlock.Header())
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
@@ -1936,61 +1934,76 @@ func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh c
 }
 
 func indexSize(chaindata string) {
+	//db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	fStorage,err:=os.Create("index_sizes_storage.csv")
+	defer db.Close()
+	fStorage, err := os.Create("index_sizes_storage.csv")
 	check(err)
-	fAcc,err:=os.Create("index_sizes_acc.csv")
+	defer fStorage.Close()
+	fAcc, err := os.Create("index_sizes_acc.csv")
 	check(err)
-	csvAcc:=csv.NewWriter(fAcc)
+	defer fAcc.Close()
+	csvAcc := csv.NewWriter(fAcc)
+	defer csvAcc.Flush()
 	err = csvAcc.Write([]string{"key", "ln"})
 	check(err)
-	csvStorage:=csv.NewWriter(fStorage)
+	csvStorage := csv.NewWriter(fStorage)
+	defer csvStorage.Flush()
 	err = csvStorage.Write([]string{"key", "ln"})
-	i:=0
-	j:=0
-	maxLenAcc:=0
-	maxLenSt:=0
-	db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i>10000 {
-			fmt.Println(j)
-			i=0
-		}
+
+	i := 0
+	maxLenAcc := 0
+	accountsOver4096 := 0
+	if err := db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
-		if len(v)> maxLenAcc {
-			maxLenAcc=len(v)
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenAcc)
 		}
-		err = csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err!=nil {
+		if len(v) > maxLenAcc {
+			maxLenAcc = len(v)
+		}
+		if len(v) > 4096 {
+			accountsOver4096++
+		}
+		if err := csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
-	i=0
-	j=0
-	db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
-		if i>10000 {
-			fmt.Println(j)
-			i=0
-		}
+	}); err != nil {
+		check(err)
+	}
+
+	i = 0
+	maxLenSt := 0
+	storageOver4096 := 0
+	if err := db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		i++
-		j++
-		if len(v)> maxLenSt {
-			maxLenSt=len(v)
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenSt)
 		}
-		err = csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))})
-		if err!=nil {
+
+		if len(v) > maxLenSt {
+			maxLenSt = len(v)
+		}
+		if len(v) > 4096 {
+			storageOver4096++
+		}
+		if err := csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
 			panic(err)
 		}
 
 		return true, nil
-	})
+	}); err != nil {
+		check(err)
+	}
 
 	fmt.Println("Results:")
 	fmt.Println("maxLenAcc:", maxLenAcc)
 	fmt.Println("maxLenSt:", maxLenSt)
+	fmt.Println("account over 4096 index:", accountsOver4096)
+	fmt.Println("storage over 4096 index:", storageOver4096)
 }
 
 func main() {

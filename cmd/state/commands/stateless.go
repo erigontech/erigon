@@ -28,7 +28,7 @@ func init() {
 	withBlock(statelessCmd)
 
 	statelessCmd.Flags().StringVar(&statefile, "statefile", "state", "path to the file where the state will be periodically written during the analysis")
-	statelessCmd.Flags().Uint32Var(&triesize, "triesize", 1024*1024, "maximum number of nodes in the state trie")
+	statelessCmd.Flags().Uint32Var(&triesize, "triesize", 4*1024*1024, "maximum size of a trie in bytes")
 	statelessCmd.Flags().BoolVar(&preroot, "preroot", false, "Attempt to compute hash of the trie without modifying it")
 	statelessCmd.Flags().Uint64Var(&snapshotInterval, "snapshotInterval", 0, "how often to take snapshots (0 - never, 1 - every block, 1000 - every 1000th block, etc)")
 	statelessCmd.Flags().Uint64Var(&snapshotFrom, "snapshotFrom", 0, "from which block to start snapshots")

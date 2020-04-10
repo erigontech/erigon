@@ -128,6 +128,11 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 func (sdb *IntraBlockState) setError(err error) {
 	sdb.Lock()
 	defer sdb.Unlock()
+	sdb.setErrorUnsafe(err)
+}
+
+// setErrorUnsafe sets error but should be called in medhods that already have locks
+func (sdb *IntraBlockState) setErrorUnsafe(err error) {
 	if sdb.dbErr == nil {
 		sdb.dbErr = err
 	}
@@ -343,7 +348,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 	}
 	len, err := sdb.stateReader.ReadAccountCodeSize(addr, common.BytesToHash(stateObject.CodeHash()))
 	if err != nil {
-		sdb.setError(err)
+		sdb.setErrorUnsafe(err)
 	}
 	return len
 }

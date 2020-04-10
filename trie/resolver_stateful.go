@@ -193,8 +193,14 @@ func (tr *ResolverStateful) AttachRequestedCode(db ethdb.Getter, requests []*Res
 		if err != nil {
 			return err
 		}
-		if err := req.t.UpdateAccountCode(req.addrHash[:], codeNode(code)); err != nil {
-			return err
+		if req.bytecode {
+			if err := req.t.UpdateAccountCode(req.addrHash[:], codeNode(code)); err != nil {
+				return err
+			}
+		} else {
+			if err := req.t.UpdateAccountCodeSize(req.addrHash[:], len(code)); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

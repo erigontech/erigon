@@ -887,6 +887,6 @@ func TestCodeNodeUpdateAccountNoChangeCodeHash(t *testing.T) {
 
 	trie.UpdateAccount(crypto.Keccak256(address[:]), &acc)
 	value, gotValue := trie.GetAccountCode(crypto.Keccak256(address[:]))
-	assert.Equal(t, value, codeValue1, "the value should NOT reset after account's non codehash had changed")
+	assert.Equal(t, codeValue1, value, "the value should NOT reset after account's non codehash had changed")
 	assert.True(t, gotValue, "should indicate that the code is still in the cache")
 }

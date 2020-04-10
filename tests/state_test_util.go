@@ -150,7 +150,7 @@ func (t *StateTest) Run(ctx context.Context, subtest StateSubtest, vmconfig vm.C
 	if !ok {
 		return nil, nil, common.Hash{}, UnsupportedForkError{subtest.Fork}
 	}
-	block, _, _, _ := t.genesis(config).ToBlock(nil)
+	block, _, _, _ := t.genesis(config).ToBlock(nil, false /* history */)
 	readBlockNr := block.Number().Uint64()
 	writeBlockNr := readBlockNr + 1
 	ctx = config.WithEIPsFlags(ctx, big.NewInt(int64(writeBlockNr)))

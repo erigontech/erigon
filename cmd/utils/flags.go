@@ -1589,7 +1589,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 
 	// TODO(fjl): move trie cache generations into config
 	if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-		state.MaxTrieCacheGen = uint32(gen)
+		state.MaxTrieCacheSize = uint64(gen)
 	}
 }
 
@@ -1713,7 +1713,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chainDb ethdb.Database) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx))
+	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */)
 	if err != nil {
 		Fatalf("%v", err)
 	}

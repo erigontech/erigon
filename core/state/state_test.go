@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"math/big"
-	"os"
 	"testing"
 
 	"context"
@@ -325,11 +324,6 @@ func TestDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	f, _ := os.Create("/Users/boris/go/src/github.com/ledgerwatch/turbo-geth/debug/trie_wrong.txt")
-	tds.tMu.Lock()
-	tds.t.Print(f)
-	tds.tMu.Unlock()
 
 	// check that dump contains the state objects that are in trie
 	got := string(tds.DefaultDump())

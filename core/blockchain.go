@@ -1275,8 +1275,19 @@ func (bc *BlockChain) writeBlockWithState(ctx context.Context, block *types.Bloc
 
 	ctx = bc.WithContext(ctx, block.Number())
 	if stateDb != nil {
-		if err := stateDb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		blockWriter := tds.DbStateWriter()
+		if err := stateDb.CommitBlock(ctx, blockWriter); err != nil {
 			return NonStatTy, err
+		}
+		// Always write changesets
+		if err := blockWriter.WriteChangeSets(); err != nil {
+			return NonStatTy, err
+		}
+		// Optionally write history
+		if !bc.NoHistory() {
+			if err := blockWriter.WriteHistory(); err != nil {
+				return NonStatTy, err
+			}
 		}
 	}
 	if bc.enableReceipts && !bc.cacheConfig.DownloadOnly {
@@ -1775,7 +1786,7 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			}
 			bc.committedBlock.Store(bc.currentBlock.Load())
 			if bc.trieDbState != nil {
-				bc.trieDbState.PruneTries(false)
+				bc.trieDbState.EvictTries(false)
 			}
 			log.Info("Database", "size", bc.db.DiskSize(), "written", written)
 		}
