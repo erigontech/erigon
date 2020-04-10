@@ -60,12 +60,15 @@ func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, err
 	reader := NewRemoteReader(remoteDB, uint64(bn))
 	intraBlockState := state.New(reader)
 
-	if err := runBlock(intraBlockState, noOpWriter, writer, chainConfig, chainCtx, block); err != nil {
+	if err = runBlock(intraBlockState, noOpWriter, writer, chainConfig, chainCtx, block); err != nil {
 		return RetraceResponse{}, err
 	}
 
 	var output RetraceResponse
-	accountChanges := writer.GetAccountChanges()
+	accountChanges, _ := writer.GetAccountChanges()
+	if err != nil {
+		return RetraceResponse{}, err
+	}
 	for _, ch := range accountChanges.Changes {
 		output.Account.Writes = append(output.Account.Writes, common.Bytes2Hex(ch.Key))
 	}
@@ -73,8 +76,8 @@ func Retrace(blockNumber, chain string, remoteDB ethdb.KV) (RetraceResponse, err
 		output.Account.Reads = append(output.Account.Reads, common.Bytes2Hex(ch))
 	}
 
-	accountChanges = writer.GetStorageChanges()
-	for _, ch := range accountChanges.Changes {
+	storageChanges, _ := writer.GetStorageChanges()
+	for _, ch := range storageChanges.Changes {
 		output.Storage.Writes = append(output.Storage.Writes, common.Bytes2Hex(ch.Key))
 	}
 	for _, ch := range reader.GetStorageReads() {
