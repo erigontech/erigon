@@ -1,0 +1,20 @@
+global:
+  scrape_interval: 5s
+  scrape_timeout: 5s
+  evaluation_interval: 5s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+      scheme: http
+      timeout: 5s
+
+scrape_configs:
+  - job_name: turbo-geth # example, how to connect prometheus to geth runned by docker-compose
+    metrics_path: /debug/metrics/prometheus
+    scheme: http
+    static_configs:
+      - targets:
+        - turbo-geth:6060
+        - host.docker.internal:6060

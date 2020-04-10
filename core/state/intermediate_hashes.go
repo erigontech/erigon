@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"fmt"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -10,7 +11,16 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie"
+)
+
+var (
+	InsertCounter          = metrics.NewRegisteredCounter("db/ih/insert", nil)
+	DeleteCounter          = metrics.NewRegisteredCounter("db/ih/delete", nil)
+	InsertTombstoneCounter = metrics.NewRegisteredCounter("db/ih/tombstone_insert", nil)
+	DeleteTombstoneCounter = metrics.NewRegisteredCounter("db/ih/tombstone_delete", nil)
+	ClearTombstoneTimer    = metrics.NewRegisteredTimer("db/ih/tombstone_clear", nil)
 )
 
 const keyBufferSize = 64
@@ -30,6 +40,7 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	if len(prefixAsNibbles) == 0 || len(prefixAsNibbles)%2 == 1 {
 		return
 	}
+	InsertCounter.Inc(1)
 
 	key := pool.GetBuffer(keyBufferSize)
 	defer pool.PutBuffer(key)
@@ -45,6 +56,7 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte) {
 	if len(prefixAsNibbles) == 0 || len(prefixAsNibbles)%2 == 1 {
 		return
 	}
+	DeleteCounter.Inc(1)
 
 	key := pool.GetBuffer(keyBufferSize)
 	defer pool.PutBuffer(key)
@@ -74,6 +86,7 @@ func PutTombstoneForDeletedAccount(db ethdb.Database, addrHash []byte) error {
 		return nil
 	}
 
+	InsertTombstoneCounter.Inc(1)
 	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
 }
 
@@ -87,6 +100,9 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 
 	var toPut [][]byte
 	toDelete := map[string]struct{}{}
+
+	start := time.Now()
+	defer ClearTombstoneTimer.UpdateSince(start)
 
 	if err := boltDb.View(func(tx *bolt.Tx) error {
 		c := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
@@ -122,12 +138,14 @@ func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) 
 	}); err != nil {
 		return err
 	}
+	InsertTombstoneCounter.Inc(int64(len(toPut)))
 	for _, k := range toPut {
 		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
 			return err
 		}
 	}
 
+	DeleteTombstoneCounter.Inc(int64(len(toDelete)))
 	for k := range toDelete {
 		if err := db.Delete(dbutils.IntermediateTrieHashBucket, []byte(k)); err != nil {
 			return err
