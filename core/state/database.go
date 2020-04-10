@@ -357,9 +357,7 @@ func (tds *TrieDbState) buildStorageTouches(withReads bool, withValues bool) (co
 	var values [][]byte
 	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
 		if withValues {
-			_, created := tds.aggregateBuffer.created[addrHash]
-			_, deleted := tds.aggregateBuffer.deleted[addrHash]
-			if deleted && !created {
+			if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
 				continue
 			}
 		}
