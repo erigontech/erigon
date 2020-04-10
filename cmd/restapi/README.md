@@ -2,7 +2,9 @@
 
 ## Build
 
-``make restapi``
+```
+make restapi
+```
 
 ## Running
 
@@ -56,20 +58,12 @@
 ]
 ```
 * `/api/v1/intermediate-hash/`
-    * extract changeSets and readSets for each block
+    * extract intermediate hashes
     * Response:
 ```json
 [
-    {
-        "storage": {
-            "reads": [READ, ...],
-            "writes": [WRITE, ...]
-        },
-        "accounts": {
-            "reads": [READ, ...],
-            "writes": [WRITE, ...]
-        }
-    }
+    {"prefix": "Prefix","value": "Value"},
+    ...
 ]
 ```
 
