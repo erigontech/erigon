@@ -10,7 +10,23 @@ import (
 )
 
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
-	r, h, _, err := buildTrie(witness.Operators, 0, trace)
+	trace = true
+	fmt.Printf("witness = len(%v)\n", len(witness.Operators))
+	for i, o := range witness.Operators {
+		fmt.Printf("%d: %T\n", i, o)
+	}
+	fmt.Println("")
+
+	r, _, err := buildTrie(witness.Operators, 0, trace)
+	if err != nil {
+		return nil, err
+	}
+
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+
+	var h common.Hash
+	_, err = hasher.hash(r, true, h[:])
 	if err != nil {
 		return nil, err
 	}
@@ -25,10 +41,9 @@ func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, e
 	return tr, nil
 }
 
-// TODO: hashes
-func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Hash, int, error) {
+func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error) {
 	if trace {
-		fmt.Printf("idx=%d", i)
+		fmt.Printf("idx=%d:", i)
 	}
 	operator := operators[i]
 	switch op := operator.(type) {
@@ -38,17 +53,17 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Has
 		}
 		keyHex := op.Key
 		val := op.Value
-		return &shortNode{Key: keyHex, Val: valueNode(val)}, common.Hash{}, i + 1, nil
+		return &shortNode{Key: keyHex, Val: valueNode(val)}, i + 1, nil
 
 	case *OperatorExtension:
 		if trace {
 			fmt.Printf("EXTENSION ")
 		}
-		val, h, newi, err := buildTrie(operators, i+1, trace)
-		return &shortNode{Key: op.Key, Val: val}, h, newi, err
+		val, newi, err := buildTrie(operators, i+1, trace)
+		return &shortNode{Key: op.Key, Val: val}, newi, err
 	case *OperatorBranch:
 		if trace {
-			fmt.Printf("BRANCH ")
+			fmt.Printf("BRANCH %b ", op.Mask)
 		}
 		// FIXME: support duoNode
 
@@ -56,27 +71,29 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Has
 		i++
 
 		var err error
-		for j := 0; i <= 16; i++ {
-			if op.Mask&(1<<j) > 0 {
+		for j := uint32(0); j < 16; j++ {
+			fmt.Printf("j = %d\n", j)
+			if op.Mask&(uint32(1)<<j) != 0 {
+				fmt.Printf("    mask(%d) > 0\n", j)
 				var child node
-				child, _, i, err = buildTrie(operators, i, trace)
+				child, i, err = buildTrie(operators, i, trace)
 				branchNode.Children[j] = child
 			}
 		}
 
-		return branchNode, common.Hash{}, i, err
+		return branchNode, i, err
 	case *OperatorHash:
 		if trace {
 			fmt.Printf("HASH ")
 		}
 		hn := hashNode(op.Hash[:])
-		return hn, op.Hash, i + 1, nil
+		return hn, i + 1, nil
 	case *OperatorCode:
 		if trace {
 			fmt.Printf("CODE ")
 		}
 
-		return codeNode(op.Code), common.Hash{}, i + 1, nil
+		return codeNode(op.Code), i + 1, nil
 
 	case *OperatorLeafAccount:
 		if trace {
@@ -98,14 +115,21 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Has
 
 		i++
 		if op.HasCode {
-			code, _, i, err = buildTrie(operators, i, trace)
+			code, i, err = buildTrie(operators, i, trace)
 		}
 
 		var storage node
 		if op.HasStorage {
-			storage, h, i, err = buildTrie(operators, i, trace)
+			storage, i, err = buildTrie(operators, i, trace)
 			account.StorageSize = 0
 			account.HasStorageSize = true
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			var h common.Hash
+			_, err := hasher.hash(storage, true, h[:])
+			if err != nil {
+				panic(err)
+			}
 			account.Root = h
 		} else {
 			account.Root = EmptyRoot
@@ -116,20 +140,20 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Has
 			ok := false
 			cn, ok = code.(codeNode)
 			if !ok {
-				return nil, common.Hash{}, i, errors.New("broken witness")
+				return nil, i, errors.New("broken witness")
 			}
 		}
 
 		accountNode := &accountNode{*account, storage, true, cn, len(cn)}
-		return accountNode, common.Hash{}, i, err
+		return accountNode, i, err
 
 	case *OperatorEmptyRoot:
 		if trace {
 			fmt.Printf("EMPTYROOT ")
 		}
-		return nil, EmptyRoot, i + 1, nil
+		return nil, i + 1, nil
 	default:
-		return nil, common.Hash{}, i + 1, fmt.Errorf("unknown operand type: %T", operator)
+		return nil, i + 1, fmt.Errorf("unknown operand type: %T", operator)
 	}
 
 }
