@@ -393,11 +393,11 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
 					if changeSetData != nil {
-						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
 					if err1 != nil {
-						return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+						return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)",
 							hK,
 							changeSetBlock,
 							timestamp,
@@ -544,11 +544,11 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
 					if changeSetData != nil {
-						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
 					if err1 != nil {
-						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)",
 							hAddrHash, hKeyHash,
 							changeSetBlock,
 							timestamp,
