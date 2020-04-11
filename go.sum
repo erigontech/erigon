@@ -200,7 +200,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/ledgerwatch/bolt v1.4.3 h1:7YJRPodbZOoYA6f61E4wnP/tkPx2L8LxoZ/KHdXndp8=
 github.com/ledgerwatch/bolt v1.4.3/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
-github.com/ledgerwatch/bolt v1.4.4-0.20200222121900-72b0323c5cb2/go.mod h1:N5ODe9aUsis79NxhdSRR39nlRQJORCyB/IDsfwuG+tE=
+github.com/ledgerwatch/bolt v1.4.4-0.20200411120254-f7af984ddc35 h1:M2PNdVTmNrzNagY25qu5LPr0ks9kFt4wUW80OLWpwCE=
+github.com/ledgerwatch/bolt v1.4.4-0.20200411120254-f7af984ddc35/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
 github.com/ledgerwatch/bolt v1.4.4-0.20200411120351-285a7cc2ea83 h1:RyDnES9hSPY/agH+VBbHC/vbJ/QdbjgZcbExhHS3b1w=
 github.com/ledgerwatch/bolt v1.4.4-0.20200411120351-285a7cc2ea83/go.mod h1:4frpcWo7Gjizry2yhNN3T4FK0FrgE/AAUlHvKHC0Dao=
 github.com/leodido/go-urn v1.1.0 h1:Sm1gr51B1kKyfD2BlRcLSiEkffoG96g6TPv6eRoEiB8=
