@@ -197,7 +197,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 		}
 
 		for i, v := range ch.Changes {
-			val, err := StorageChangeSetBytes(b).Find(v.Key)
+			val, err := StorageChangeSetBytes(b).Find(v.Key[:common.HashLength], v.Key[common.HashLength+common.IncarnationLength:])
 			if err != nil {
 				t.Error(err, i)
 			}
@@ -223,4 +223,3 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 		f(t, 10000)
 	})
 }
-

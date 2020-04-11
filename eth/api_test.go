@@ -29,7 +29,6 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/state"
 	"github.com/ledgerwatch/turbo-geth/crypto"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -68,9 +67,6 @@ func (h resultHash) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
 func (h resultHash) Less(i, j int) bool { return bytes.Compare(h[i].Bytes(), h[j].Bytes()) < 0 }
 
 func TestAccountRange(t *testing.T) {
-	if debug.IsThinHistory() {
-		t.Skip()
-	}
 	var (
 		db      = ethdb.NewMemDatabase()
 		tds     = state.NewTrieDbState(common.Hash{}, db, 0)
@@ -164,9 +160,6 @@ func TestAccountRange(t *testing.T) {
 }
 
 func TestEmptyAccountRange(t *testing.T) {
-	if debug.IsThinHistory() {
-		t.Skip()
-	}
 	var (
 		statedb = state.NewDbState(ethdb.NewMemDatabase(), 0)
 	)
@@ -184,9 +177,6 @@ func TestEmptyAccountRange(t *testing.T) {
 }
 
 func TestStorageRangeAt(t *testing.T) {
-	if debug.IsThinHistory() {
-		t.Skip()
-	}
 	// Create a state where account 0x010000... has a few storage entries.
 	var (
 		db      = ethdb.NewMemDatabase()
