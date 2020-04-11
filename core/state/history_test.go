@@ -3,7 +3,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 	"math/rand"
 	"reflect"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
@@ -724,12 +724,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	var err error
 	var startKey [72]byte
 	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
-		err = block2.Add(k, v)
+		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {
@@ -737,12 +736,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 
 	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
-		err = block4.Add(k, v)
+		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {
@@ -750,12 +748,11 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 	}
 
 	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
-		err = block6.Add(k, v)
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {

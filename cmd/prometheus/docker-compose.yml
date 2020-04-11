@@ -5,7 +5,7 @@ services:
   turbo-geth:
     image: turbo-geth:latest
     build: ./../..
-    command: --nousb --metrics --metrics.expensive --pprof --pprofaddr=0.0.0.0 --remote-db-listen-addr 0.0.0.0:9999
+    command: --nousb --metrics --metrics.expensive --pprof --pprofaddr=0.0.0.0 --pprofport=6060 --remote-db-listen-addr=0.0.0.0:9999
     stop_grace_period: 2m
     volumes:
       - ${TGETH_DATADIR:-~/Library/Ethereum}:/root/.ethereum/
