@@ -74,7 +74,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	if err = acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
 	}
-	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(acc.Incarnation))
+	binary.BigEndian.PutUint64(s[common.HashLength:], ^acc.Incarnation)
 	copy(s[common.HashLength+common.IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
