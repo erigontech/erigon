@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+    <title>logo</title>
+    <polygon points="416 617.14 288 672 288 960 512 720 416 617.14" fill="#1ae2e1"/>
+    <polygon points="736 480 512 576 608 617.14 736 480" fill="#ffb5d6"/>
+    <polygon points="512 720 608 617.14 512 576 416 617.14 512 720" fill="#fbdb88"/>
+    <polygon points="608 617.14 736 672 736 960 512 720 608 617.14" fill="#45378e"/>
+    <polygon points="288 480 512 576 416 617.14 288 480" fill="#45378e"/>
+    <polygon points="512 64 512 320 736 416 512 64" fill="#1ae2e1"/>
+    <polygon points="512 64 512 320 288 416 512 64" fill="#ffb5d6"/>
+    <polygon points="512 512 512 320 736 416 512 512" fill="#45378e"/>
+    <polygon points="512 512 512 320 288 416 512 512" fill="#fbdb88"/>
+    <polygon points="512 896 548.95 832 475.05 832 512 896" fill="#fbdb88"/>
+    <polygon points="564.98 961 585.95 924.67 544 924.67 564.98 961" fill="#ffb5d6"/>
+    <g opacity="0.1">
+        <polygon points="416 617.14 288 960 288 960 512 720 416 617.14"/>
+    </g>
+    <polygon points="608 617.14 736 960 736 960 512 720 608 617.14" opacity="0.1"/>
+</svg>

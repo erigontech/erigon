@@ -5,12 +5,18 @@ import (
 	"fmt"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+)
+
+var (
+	trieResolveStatefulTimer = metrics.NewRegisteredTimer("trie/resolve/stateful", nil)
 )
 
 type hookFunction func(*ResolveRequest, node, common.Hash) error
@@ -152,6 +158,8 @@ func (tr *ResolverStateful) RebuildTrie(
 	blockNr uint64,
 	accounts bool,
 	historical bool) error {
+	defer trieResolveStatefulTimer.UpdateSince(time.Now())
+
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder
