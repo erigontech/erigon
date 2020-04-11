@@ -729,7 +729,6 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {
@@ -742,7 +741,6 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {
@@ -755,7 +753,6 @@ func TestBoltDB_WalkAsOf1(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		//fmt.Printf("%v - %v \n", common.BytesToHash(k).String(), string(v))
 		return true, nil
 	})
 	if err != nil {
