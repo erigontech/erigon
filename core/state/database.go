@@ -894,7 +894,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var addrHash common.Hash
 			copy(addrHash[:], key[:common.HashLength])
 			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength+common.IncarnationLength:])
+			copy(keyHash[:], key[common.HashLength:])
 			m, ok := b.storageUpdates[addrHash]
 			if !ok {
 				m = make(map[common.Hash][]byte)
@@ -902,12 +902,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = value
-				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
+				if err := tds.db.Put(dbutils.StorageBucket, key[:2*common.HashLength], value); err != nil {
 					return err
 				}
 			} else {
 				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, key[:2*common.HashLength]); err != nil {
 					return err
 				}
 			}

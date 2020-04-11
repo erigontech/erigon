@@ -23,7 +23,7 @@ var ErrNotFound = errors.New("not found")
 func NewStorageChangeSet() *ChangeSet {
 	return &ChangeSet{
 		Changes: make([]Change, 0),
-		keyLen:  2*common.HashLength + common.IncarnationLength,
+		keyLen:  2*common.HashLength,
 	}
 }
 
@@ -102,7 +102,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 			addrHashesMap[common.BytesToHash(s.Changes[i].Key[0:common.HashLength])],
 			row[0:lenOfAddr],
 		)
-		copy(row[lenOfAddr:lenOfAddr+common.HashLength], common.CopyBytes(s.Changes[i].Key[common.IncarnationLength+common.HashLength:common.IncarnationLength+2*common.HashLength]))
+		copy(row[lenOfAddr:lenOfAddr+common.HashLength], common.CopyBytes(s.Changes[i].Key[common.HashLength:2*common.HashLength]))
 		keys.Write(row)
 
 		lengthOfValues += uint32(len(s.Changes[i].Value))
@@ -179,7 +179,7 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 	valuesPos := lenOfValsPos + uint32(numOfUint8) + uint32(numOfUint16*2) + uint32(numOfUint32*4)
 
 	elementStart := storageEnodingStartElem + storageEnodingLengthOfDict + uint32(dictLen)*common.HashLength
-	key := make([]byte, common.HashLength*2+common.IncarnationLength)
+	key := make([]byte, common.HashLength*2)
 
 	lenOfAddHash := uint32(getNumOfBytesByLen(len(addMap)))
 	//lastValLen:=0
@@ -192,10 +192,9 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 		)
 		//copy key hash
 		copy(
-			key[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength],
+			key[common.HashLength:2*common.HashLength],
 			common.CopyBytes(b[elem+lenOfAddHash:elem+lenOfAddHash+common.HashLength]),
 		)
-		binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^uint64(1))
 		h.Changes[i].Key = common.CopyBytes(key)
 		h.Changes[i].Value = findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32)
 	}
@@ -320,7 +319,7 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 		addrHashMap[i] = common.BytesToHash(b[elemStart : elemStart+common.HashLength])
 	}
 
-	key := make([]byte, common.HashLength*2+common.IncarnationLength)
+	key := make([]byte, common.HashLength*2)
 	elemLength := uint32(getNumOfBytesByLen(int(numOfUniqueItems)))
 	for i := uint32(0); i < numOfItems; i++ {
 		elemStart := storageEnodingStartElem +
@@ -332,10 +331,9 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 		copy(key[0:common.HashLength], readFromMap(addrHashMap, b[elemStart:elemStart+elemLength]).Bytes())
 		//copy key hash
 		copy(
-			key[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength],
+			key[common.HashLength:2*common.HashLength],
 			b[elemStart+elemLength:elemStart+elemLength+common.HashLength],
 		)
-		binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^uint64(1))
 		err := f(common.CopyBytes(key), findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32))
 		if err != nil {
 			return err

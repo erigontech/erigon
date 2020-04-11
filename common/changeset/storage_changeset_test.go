@@ -13,10 +13,6 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-const (
-	defaultIncarnation = 1
-)
-
 func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
 	f := func(t *testing.T, numOfElements int) {
 		// empty StorageChangeSset first
@@ -28,7 +24,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
 			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 			val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-			err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+			err = ch.Add(dbutils.GenerateCompositeTrieKey(addrHash, key), val.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -84,7 +80,7 @@ func TestEncodingStorageWithtRandomIncarnation(t *testing.T) {
 			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 			val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-			err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+			err = ch.Add(dbutils.GenerateCompositeTrieKey(addrHash, key), val.Bytes())
 			if err != nil {
 				t.Error(err)
 			}
@@ -135,7 +131,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationWalk(t *testing.T) {
 			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 			val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-			err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+			err := ch.Add(dbutils.GenerateCompositeTrieKey(addrHash, key), val.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -185,7 +181,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 			val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-			err := ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+			err := ch.Add(dbutils.GenerateCompositeTrieKey(addrHash, key), val.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -197,7 +193,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 		}
 
 		for i, v := range ch.Changes {
-			val, err := StorageChangeSetBytes(b).Find(v.Key[:common.HashLength], v.Key[common.HashLength+common.IncarnationLength:])
+			val, err := StorageChangeSetBytes(b).Find(v.Key[:common.HashLength], v.Key[common.HashLength:])
 			if err != nil {
 				t.Error(err, i)
 			}
