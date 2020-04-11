@@ -1,0 +1,3 @@
+steps:
+  - command: 'make geth'
+    label: "build geth"
