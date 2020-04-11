@@ -1479,7 +1479,7 @@ func (tsw *TrieStateWriter) WriteAccountStorage(_ context.Context, address commo
 func (tds *TrieDbState) ExtractWitness(trace bool, isBinary bool) (*trie.Witness, error) {
 	rs := tds.resolveSetBuilder.Build(isBinary)
 
-	return tds.makeBlockWitness(trace, nil, isBinary)
+	return tds.makeBlockWitness(trace, rs, isBinary)
 }
 
 // ExtractWitness produces block witness for the block just been processed, in a serialised form

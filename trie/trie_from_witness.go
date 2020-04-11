@@ -1,7 +1,6 @@
 package trie
 
 import (
-	"errors"
 	"fmt"
 	"math/big"
 
@@ -10,13 +9,6 @@ import (
 )
 
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
-	trace = true
-	fmt.Printf("witness = len(%v)\n", len(witness.Operators))
-	for i, o := range witness.Operators {
-		fmt.Printf("%d: %T\n", i, o)
-	}
-	fmt.Println("")
-
 	r, _, err := buildTrie(witness.Operators, 0, trace)
 	if err != nil {
 		return nil, err
@@ -70,6 +62,10 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		branchNode := &fullNode{}
 		i++
 
+		// To make a prefix witness, we invert the witness
+		// that has a side effect: children of a branch node are in reverse order
+		// so this code accounts for that
+
 		var err error
 		indexes := make([]uint32, 0)
 		for j := uint32(0); j < 16; j++ {
@@ -118,6 +114,29 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		var code node
 
 		i++
+
+		// storage and code subtries now are also inversed
+		var storage node
+		if op.HasStorage {
+			storage, i, err = buildTrie(operators, i, trace)
+			if storage == nil {
+				account.Root = EmptyRoot
+			} else {
+				account.StorageSize = 0
+				account.HasStorageSize = true
+				hasher := newHasher(false)
+				defer returnHasherToPool(hasher)
+				var h common.Hash
+				_, err := hasher.hash(storage, true, h[:])
+				if err != nil {
+					panic(err)
+				}
+				account.Root = h
+			}
+		} else {
+			account.Root = EmptyRoot
+		}
+
 		if op.HasCode {
 			code, i, err = buildTrie(operators, i, trace)
 			hasher := newHasher(false)
@@ -130,30 +149,9 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 			account.CodeHash = h
 		}
 
-		var storage node
-		if op.HasStorage {
-			storage, i, err = buildTrie(operators, i, trace)
-			account.StorageSize = 0
-			account.HasStorageSize = true
-			hasher := newHasher(false)
-			defer returnHasherToPool(hasher)
-			var h common.Hash
-			_, err := hasher.hash(storage, true, h[:])
-			if err != nil {
-				panic(err)
-			}
-			account.Root = h
-		} else {
-			account.Root = EmptyRoot
-		}
-
 		var cn codeNode
 		if code != nil {
-			ok := false
-			cn, ok = code.(codeNode)
-			if !ok {
-				return nil, i, errors.New("broken witness")
-			}
+			cn, _ = code.(codeNode)
 		}
 
 		accountNode := &accountNode{*account, storage, true, cn, len(cn)}
