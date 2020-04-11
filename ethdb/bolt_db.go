@@ -340,15 +340,15 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return fmt.Errorf("AccountsBucket not found")
+			return fmt.Errorf("sccountsBucket not found")
 		}
 		hB := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if hB == nil {
-			return fmt.Errorf("AccountsHistoryBucket not found")
+			return fmt.Errorf("sccountsHistoryBucket not found")
 		}
 		csB := tx.Bucket(dbutils.AccountChangeSetBucket)
 		if csB == nil {
-			return fmt.Errorf("AccountChangeBucket not found")
+			return fmt.Errorf("sccountChangeBucket not found")
 		}
 		//for state
 		mainCursor := b.Cursor()
