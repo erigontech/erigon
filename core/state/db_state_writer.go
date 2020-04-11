@@ -161,23 +161,17 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
+	fmt.Println(dsw.tds.blockNr,"accountChanges",accountChanges)
 	if debug.IsThinHistory() {
-		for _, change := range accountChanges.Changes {
-			value, err1 := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
-			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err1)
-			}
-			index := dbutils.WrapHistoryIndex(value)
-			index.Append(dsw.tds.blockNr)
-			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err2 != nil {
-				return err2
-			}
+		err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
+		if err != nil {
+			return err
 		}
 	} else {
 		for _, change := range accountChanges.Changes {
 			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err2 != nil {
-				return err2
+			if err = dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err != nil {
+				return err
 			}
 		}
 	}
@@ -186,24 +180,39 @@ func (dsw *DbStateWriter) WriteHistory() error {
 		return err
 	}
 	if debug.IsThinHistory() {
-		for _, change := range storageChanges.Changes {
-			value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, change.Key)
-			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err1)
-			}
-			index := dbutils.WrapHistoryIndex(value)
-			index.Append(dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, change.Key, *index); err != nil {
-				return err
-			}
+		err = dsw.writeIndex(storageChanges, dbutils.StorageHistoryBucket)
+		if err != nil {
+			return err
 		}
 	} else {
 		for _, change := range storageChanges.Changes {
 			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, composite, change.Value); err != nil {
+			if err = dsw.tds.db.Put(dbutils.StorageHistoryBucket, composite, change.Value); err != nil {
 				return err
 			}
 		}
 	}
+	return nil
+}
+
+func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
+	for _, change := range changes.Changes {
+		index,err:=ethdb.FindProperIndexChunk(dsw.tds.db, bucket, change.Key, dsw.tds.blockNr)
+		fmt.Println(common.Bytes2Hex(change.Key), dsw.tds.blockNr, index, err )
+		if err != nil && err!=ethdb.ErrKeyNotFound{
+			return fmt.Errorf("Find chunk failed: %w", err)
+		}
+
+		index.Append(dsw.tds.blockNr)
+		indexKey, err:=index.Key(change.Key)
+		if err!=nil {
+			return err
+		}
+		fmt.Println("Write index", common.Bytes2Hex(indexKey), *index)
+		if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }

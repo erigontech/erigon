@@ -950,7 +950,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	if debug.IsThinHistory() {
 		if len(changedAccounts) > 0 {
 			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-				indexBytes, getErr := tds.db.Get(dbutils.AccountsHistoryBucket, kk)
+				index, getErr := ethdb.FindProperIndexChunk(tds.db, dbutils.AccountsHistoryBucket, kk, timestamp)
 				if getErr != nil {
 					if getErr == ethdb.ErrKeyNotFound {
 						return nil
@@ -958,9 +958,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 					return getErr
 				}
 
-				index := dbutils.WrapHistoryIndex(indexBytes)
 				index.Remove(timestamp)
-
 				if index.Len() == 0 {
 					return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
 				}

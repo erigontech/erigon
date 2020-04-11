@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path"
 
@@ -665,7 +666,9 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	if hB == nil {
 		return nil, ErrKeyNotFound
 	}
-	v, _ := hB.Get(key)
+
+	k,v:=hB.Cursor().Seek(dbutils.IndexChunkKey(key, timestamp))
+	fmt.Println(k, v, timestamp)
 	index := dbutils.WrapHistoryIndex(v)
 
 	changeSetBlock, ok := index.Search(timestamp)

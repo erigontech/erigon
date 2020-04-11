@@ -1,6 +1,8 @@
 package ethdb
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -15,13 +17,17 @@ type ChangesetWalker interface {
 
 func FindProperIndexChunk(db Database, bucket []byte, key []byte, blockNum uint64) (*dbutils.HistoryIndexBytes, error) {
 	var index *dbutils.HistoryIndexBytes
-	err := db.Walk(bucket, dbutils.IndexChunkKey(blockNum, key), 0, func(kk []byte, vv []byte) (b bool, e error) {
+	err := db.Walk(bucket, dbutils.IndexChunkKey(key, blockNum), 0, func(kk []byte, vv []byte) (b bool, e error) {
+		fmt.Println("FindProperIndexChunk dbwalk", dbutils.IndexChunkKey(key, blockNum), blockNum, common.Bytes2Hex(kk), vv)
 		index = dbutils.WrapHistoryIndex(common.CopyBytes(vv))
 		return false, nil
 	})
-
 	if err != nil {
 		return nil, err
+	}
+	if index==nil {
+		fmt.Println("FindProperIndexChunk create new")
+		return dbutils.NewHistoryIndex(), ErrKeyNotFound
 	}
 
 	return index, nil
@@ -43,11 +49,8 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		indexes, ok := ig.cache[string(k)]
 		if !ok || len(indexes) == 0 {
 			var index *dbutils.HistoryIndexBytes
-			key := dbutils.IndexChunkKey(blockNum, k)
-			err := ig.db.Walk(ig.bucketToWrite, key, 0, func(kk []byte, vv []byte) (b bool, e error) {
-				index = dbutils.WrapHistoryIndex(common.CopyBytes(vv))
-				return false, nil
-			})
+
+			index, err:=FindProperIndexChunk(ig.db,ig.bucketToWrite, k, blockNum)
 			if err != nil {
 				return err
 			}
@@ -68,6 +71,68 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		lastIndex.Append(blockNum)
 		return nil
 	}
+}
+
+
+type indexMapper struct {
+	cache map[string]*dbutils.HistoryIndexBytes
+	chunkIDs map[string] []uint64
+}
+
+//key with blockNumber
+func (im indexMapper) LastChunk(key []byte) (*dbutils.HistoryIndexBytes,error)  {
+	chunkIDs,ok:=im.chunkIDs[string(key)]
+	if !ok {
+		return nil, ErrKeyNotFound
+	}
+	index,ok:=im.cache[string(dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))]
+	if !ok {
+		return nil, errors.New("incorrect mapping")
+	}
+
+	return index, nil
+}
+func (im indexMapper) keyAndChunkID(key []byte) ([]byte, uint64)  {
+	return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
+}
+
+//key without blockNumber
+func (im indexMapper) Put(key []byte, index *dbutils.HistoryIndexBytes) error   {
+	indexKey,err:=index.Key(key)
+	if err!=nil {
+		return err
+	}
+
+	ID, ok:=index.FirstElement()
+	if !ok {
+		return errors.New("incorrect index")
+	}
+
+	im.cache[string(indexKey)] = index
+	im.addChunkID(key, ID)
+
+	return nil
+}
+
+func (im indexMapper) addChunkID(key []byte, id uint64) {
+	chunkIDs,ok:=im.chunkIDs[string(key)]
+	if !ok {
+		im.chunkIDs[string(key)] = []uint64{id}
+		return
+	}
+
+	for _, v:=range chunkIDs {
+		if v == id {
+			return
+		}
+	}
+
+	chunkIDs = append(chunkIDs, id)
+	sort.Slice(chunkIDs, func(i, j int) bool {
+		return chunkIDs[i]<chunkIDs[j]
+	})
+
+	im.chunkIDs[string(key)] = chunkIDs
 }
 
 /*
