@@ -53,14 +53,14 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		}
 		keyHex := op.Key
 		val := op.Value
-		return &shortNode{Key: keyHex, Val: valueNode(val)}, i + 1, nil
+		return &shortNode{Key: common.CopyBytes(keyHex), Val: valueNode(val)}, i + 1, nil
 
 	case *OperatorExtension:
 		if trace {
 			fmt.Printf("EXTENSION ")
 		}
 		val, newi, err := buildTrie(operators, i+1, trace)
-		return &shortNode{Key: op.Key, Val: val}, newi, err
+		return &shortNode{Key: common.CopyBytes(op.Key), Val: val}, newi, err
 	case *OperatorBranch:
 		if trace {
 			fmt.Printf("BRANCH %b ", op.Mask)
@@ -71,14 +71,17 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		i++
 
 		var err error
+		indexes := make([]uint32, 0)
 		for j := uint32(0); j < 16; j++ {
-			fmt.Printf("j = %d\n", j)
 			if op.Mask&(uint32(1)<<j) != 0 {
-				fmt.Printf("    mask(%d) > 0\n", j)
-				var child node
-				child, i, err = buildTrie(operators, i, trace)
-				branchNode.Children[j] = child
+				indexes = append(indexes, j)
 			}
+		}
+
+		for zz := len(indexes) - 1; zz >= 0; zz-- {
+			var child node
+			child, i, err = buildTrie(operators, i, trace)
+			branchNode.Children[indexes[zz]] = child
 		}
 
 		return branchNode, i, err
@@ -109,6 +112,7 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		balance.SetBytes(op.Balance.Bytes())
 		account.Balance = *balance
 		account.Initialised = true
+		account.CodeHash = EmptyCodeHash
 
 		var err error
 		var code node
@@ -116,6 +120,14 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		i++
 		if op.HasCode {
 			code, i, err = buildTrie(operators, i, trace)
+			hasher := newHasher(false)
+			defer returnHasherToPool(hasher)
+			var h common.Hash
+			_, err := hasher.hash(code, true, h[:])
+			if err != nil {
+				panic(err)
+			}
+			account.CodeHash = h
 		}
 
 		var storage node
@@ -145,7 +157,7 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		}
 
 		accountNode := &accountNode{*account, storage, true, cn, len(cn)}
-		return accountNode, i, err
+		return &shortNode{Key: common.CopyBytes(op.Key), Val: accountNode}, i, err
 
 	case *OperatorEmptyRoot:
 		if trace {
