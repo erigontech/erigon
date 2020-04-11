@@ -35,9 +35,22 @@ func NewWitnessBuilder(root node, blockNr uint64, trace bool) *WitnessBuilder {
 	}
 }
 
+func inverted(source []WitnessOperator) []WitnessOperator {
+	destination := make([]WitnessOperator, len(source))
+	for si := 0; si < len(source); si++ {
+		di := len(destination) - 1 - si
+		destination[di] = source[si]
+	}
+	return destination
+}
+
 func (b *WitnessBuilder) Build(limiter *MerklePathLimiter) (*Witness, error) {
 	err := b.makeBlockWitness(b.root, []byte{}, limiter, true)
-	witness := NewWitness(b.operands)
+
+	witness := NewWitness(
+		inverted(b.operands), // generate a suffix witness
+	)
+
 	b.operands = nil
 	return witness, err
 }
