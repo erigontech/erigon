@@ -436,7 +436,12 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 }
 
 // splitCursor implements cursor with two keys
-// it is used to ignore incarnations in the
+// it is used to ignore incarnations in the middle
+// of composite storage key, but without
+// reconstructing the key
+// Instead, the key is split into two parts and
+// functions `Seek` and `Next` deliver both
+// parts as well as the corresponding value
 type splitCursor struct {
 	c          *bolt.Cursor // Unlerlying bolt cursor
 	startkey   []byte       // Starting key (also contains bits that need to be preserved)
