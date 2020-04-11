@@ -20,6 +20,7 @@ package ethdb
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path"
 
@@ -335,13 +336,256 @@ func (db *BoltDatabase) MultiWalk(bucket []byte, startkeys [][]byte, fixedbits [
 	return err
 }
 
-func (db *BoltDatabase) walkAsOfThin(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
-	panic("")
+func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	fixedbytes, mask := Bytesmask(fixedbits)
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.AccountsBucket)
+		if b == nil {
+			return fmt.Errorf("AccountsBucket not found")
+		}
+		hB := tx.Bucket(dbutils.AccountsHistoryBucket)
+		if hB == nil {
+			return fmt.Errorf("AccountsHistoryBucket not found")
+		}
+		csB := tx.Bucket(dbutils.AccountChangeSetBucket)
+		if csB == nil {
+			return fmt.Errorf("AccountChangeBucket not found")
+		}
+		//for state
+		mainCursor := b.Cursor()
+		//for historic data
+		historyCursor := hB.Cursor()
+		k, v := mainCursor.Seek(startkey)
+		hK, hV := historyCursor.Seek(startkey)
+		goOn := true
+		var err error
+		for goOn {
+			//exit or next conditions
+			if k != nil && fixedbits > 0 && !bytes.Equal(k[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				k = nil
+			}
+			if k != nil && fixedbits > 0 && (k[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				k = nil
+			}
+			if hK != nil && fixedbits > 0 && !bytes.Equal(hK[:fixedbytes-1], startkey[:fixedbytes-1]) {
+				hK = nil
+			}
+			if hK != nil && fixedbits > 0 && (hK[fixedbytes-1]&mask) != (startkey[fixedbytes-1]&mask) {
+				hK = nil
+			}
+			var cmp int
+			if k == nil {
+				if hK == nil {
+					break
+				} else {
+					cmp = 1
+				}
+			} else if hK == nil {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(k, hK)
+			}
+			if cmp < 0 {
+				goOn, err = walker(k, v)
+			} else {
+				index := dbutils.WrapHistoryIndex(hV)
+				if changeSetBlock, ok := index.Search(timestamp); ok {
+					// Extract value from the changeSet
+					csKey := dbutils.EncodeTimestamp(changeSetBlock)
+					changeSetData, _ := csB.Get(csKey)
+					if changeSetData != nil {
+						return fmt.Errorf("Could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+					}
+					data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
+					if err1 != nil {
+						return fmt.Errorf("Could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+							hK,
+							changeSetBlock,
+							timestamp,
+						)
+					}
+					var acc accounts.Account
+					if err := acc.DecodeForStorage(data); err != nil {
+						return err
+					}
+					if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
+						codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
+						codeHash, _ := codeBucket.Get(dbutils.GenerateStoragePrefix(common.BytesToHash(hK), acc.Incarnation))
+						if len(codeHash) > 0 {
+							acc.CodeHash = common.BytesToHash(codeHash)
+						}
+						data = make([]byte, acc.EncodingLengthForStorage())
+						acc.EncodeForStorage(data)
+					}
+					goOn, err = walker(hK, data)
+				} else if cmp == 0 {
+					goOn, err = walker(k, v)
+				}
+			}
+			if goOn {
+				if cmp <= 0 {
+					k, v = mainCursor.Next()
+				}
+				if cmp >= 0 {
+					hK, hV = historyCursor.Next()
+				}
+			}
+		}
+		return err
+	})
+	return err
+}
+
+// splitCursor implements cursor with two keys
+// it is used to ignore incarnations in the
+type splitCursor struct {
+	c          *bolt.Cursor // Unlerlying bolt cursor
+	startkey   []byte       // Starting key (also contains bits that need to be preserved)
+	matchBytes int
+	mask       uint8
+	part1end   int // Position in the key where the first part ends
+	part2start int // Position in the key where the second part starts
+}
+
+func newSplitCursor(b *bolt.Bucket, startkey []byte, matchBits uint, part1end, part2start int) *splitCursor {
+	var sc splitCursor
+	sc.c = b.Cursor()
+	sc.startkey = startkey
+	sc.part1end = part1end
+	sc.part2start = part2start
+	sc.matchBytes, sc.mask = Bytesmask(matchBits)
+	return &sc
+}
+
+func (sc *splitCursor) matchKey(k []byte) bool {
+	if k == nil {
+		return false
+	}
+	if sc.matchBytes == 0 {
+		return true
+	}
+	if len(k) < sc.matchBytes {
+		return false
+	}
+	if !bytes.Equal(k[:sc.matchBytes-1], sc.startkey[:sc.matchBytes-1]) {
+		return false
+	}
+	return (k[sc.matchBytes-1] & sc.mask) == (sc.startkey[sc.matchBytes-1] & sc.mask)
+}
+
+func (sc *splitCursor) Seek() (key1, key2, val []byte) {
+	k, v := sc.c.Seek(sc.startkey)
+	if !sc.matchKey(k) {
+		return nil, nil, nil
+	}
+	return k[:sc.part1end], k[sc.part2start:], v
+}
+
+func (sc *splitCursor) Next() (key1, key2, val []byte) {
+	k, v := sc.c.Next()
+	if !sc.matchKey(k) {
+		return nil, nil, nil
+	}
+	return k[:sc.part1end], k[sc.part2start:], v
+}
+
+func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, timestamp uint64, walker func(k1, k2, v []byte) (bool, error)) error {
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(dbutils.StorageBucket)
+		if b == nil {
+			return fmt.Errorf("StorageBucket not found")
+		}
+		hB := tx.Bucket(dbutils.StorageHistoryBucket)
+		if hB == nil {
+			return fmt.Errorf("StorageHistoryBucket not found")
+		}
+		csB := tx.Bucket(dbutils.StorageChangeSetBucket)
+		if csB == nil {
+			return fmt.Errorf("StorageChangeBucket not found")
+		}
+		//for storage
+		mainCursor := newSplitCursor(
+			b,
+			startkey,
+			fixedbits,
+			common.HashLength, /* part1end */
+			common.HashLength+common.IncarnationLength, /* part2start */
+		)
+		//for historic data
+		historyCursor := newSplitCursor(
+			hB,
+			startkey,
+			fixedbits,
+			common.HashLength, /* part1end */
+			common.HashLength+common.IncarnationLength, /* part2start */
+		)
+		addrHash, keyHash, v := mainCursor.Seek()
+		hAddrHash, hKeyHash, hV := historyCursor.Seek()
+		goOn := true
+		var err error
+		for goOn {
+			var cmp int
+			if keyHash == nil {
+				if hKeyHash == nil {
+					break
+				} else {
+					cmp = 1
+				}
+			} else if hKeyHash == nil {
+				cmp = -1
+			} else {
+				cmp = bytes.Compare(keyHash, hKeyHash)
+			}
+			if cmp < 0 {
+				goOn, err = walker(addrHash, keyHash, v)
+			} else {
+				index := dbutils.WrapHistoryIndex(hV)
+				if changeSetBlock, ok := index.Search(timestamp); ok {
+					// Extract value from the changeSet
+					csKey := dbutils.EncodeTimestamp(changeSetBlock)
+					changeSetData, _ := csB.Get(csKey)
+					if changeSetData != nil {
+						return fmt.Errorf("Could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+					}
+					data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
+					if err1 != nil {
+						return fmt.Errorf("Could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+							hAddrHash, hKeyHash,
+							changeSetBlock,
+							timestamp,
+						)
+					}
+					goOn, err = walker(hAddrHash, hKeyHash, data)
+				} else if cmp == 0 {
+					goOn, err = walker(addrHash, keyHash, v)
+				}
+			}
+			if goOn {
+				if cmp <= 0 {
+					addrHash, keyHash, v = mainCursor.Next()
+				}
+				if cmp >= 0 {
+					hAddrHash, hKeyHash, hV = historyCursor.Next()
+				}
+			}
+
+		}
+		return err
+	})
+	return err
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
 	if debug.IsThinHistory() {
-		return db.walkAsOfThin(bucket, hBucket, startkey, fixedbits, timestamp, walker)
+		if bytes.Equal(bucket, dbutils.AccountsBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
+			return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)
+		} else if bytes.Equal(bucket, dbutils.StorageBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
+			return db.walkAsOfThinStorage(startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
+				fmt.Printf("walker %x %x %x\n", k2, k2, v)
+				return walker(append(common.CopyBytes(k1), k2...), v)
+			})
+		}
+		panic("Not implemented for arbitrary buckets")
 	}
 
 	fixedbytes, mask := Bytesmask(fixedbits)
@@ -622,8 +866,8 @@ func (db *BoltDatabase) AbstractKV() KV {
 
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:                      db,
-		puts:                    newPuts(),
+		db:   db,
+		puts: newPuts(),
 	}
 	return m
 }
@@ -689,7 +933,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	case debug.IsThinHistory() && bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
 		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
 	case debug.IsThinHistory() && bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
-		data, err = changeset.StorageChangeSetBytes(changeSetData).Find(key)
+		data, err = changeset.StorageChangeSetBytes(changeSetData).Find(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
 	default:
 		data, err = changeset.FindLast(changeSetData, key)
 	}

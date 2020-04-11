@@ -344,7 +344,7 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 	return nil
 }
 
-func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
+func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, error) {
 	if len(b) == 0 {
 		return nil, nil
 	}
@@ -365,7 +365,7 @@ func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 	//todo[boris] here should be binary search
 	for i := uint32(0); i < uint32(numOfUniqueItems); i++ {
 		elemStart = storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict + i*common.HashLength
-		if bytes.Equal(k[0:common.HashLength], b[elemStart:elemStart+common.HashLength]) {
+		if bytes.Equal(addrHash, b[elemStart:elemStart+common.HashLength]) {
 			found = true
 			addHashID = i
 			break
@@ -404,7 +404,7 @@ func (b StorageChangeSetBytes) Find(k []byte) ([]byte, error) {
 			continue
 		}
 
-		if !bytes.Equal(k[common.HashLength+common.IncarnationLength:2*common.HashLength+common.IncarnationLength], b[elemStart+elemLength:elemStart+elemLength+common.HashLength]) {
+		if !bytes.Equal(keyHash, b[elemStart+elemLength:elemStart+elemLength+common.HashLength]) {
 			continue
 		}
 		return findVal(b[lenOfValsPos:valuesPos], b[valuesPos:], i, numOfUint8, numOfUint16, numOfUint32), nil

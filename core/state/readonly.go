@@ -69,8 +69,10 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
-	// TODO: [Issue 99] support incarnations
-	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(FirstContractIncarnation))
+	accData, _ := dbs.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	var acc accounts.Account
+	acc.DecodeForStorage(accData)
+	binary.BigEndian.PutUint64(s[common.HashLength:], ^uint64(acc.Incarnation))
 	copy(s[common.HashLength+common.IncarnationLength:], start)
 	var lastSecKey common.Hash
 	overrideCounter := 0
@@ -89,7 +91,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	err = dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, s[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err = dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength + common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
@@ -97,7 +99,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 			// Skip deleted entries
 			return true, nil
 		}
-		seckey := ks[common.HashLength+common.IncarnationLength:]
+		seckey := ks[common.HashLength:]
 		//fmt.Printf("seckey: %x\n", seckey)
 		si := storageItem{}
 		copy(si.seckey[:], seckey)
