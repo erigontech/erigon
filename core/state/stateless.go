@@ -52,6 +52,16 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 		return nil, err
 	}
 
+	if trace {
+		fmt.Printf("\n >>>> diffz! <<<<<\n")
+		ww, _ := t.ExtractWitness(0, false, nil)
+		blockWitness.WriteDiff(ww, os.Stdout)
+
+		fmt.Println("v*v*v*")
+		t.Fprintf()
+		fmt.Println("V*V*V*")
+	}
+
 	if !isBinary {
 		if t.Hash() != stateRoot {
 			filename := fmt.Sprintf("root_%d.txt", blockNr)

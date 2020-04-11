@@ -267,7 +267,7 @@ func Stateless(
 		default:
 		}
 
-		trace := blockNum == 50492 // false // blockNum == 545080
+		trace := blockNum == 49904 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
 		block := bcb.GetBlockByNumber(blockNum)
 		if block == nil {
@@ -365,6 +365,12 @@ func Stateless(
 				check(err)
 			}
 			s, err = state.NewStateless(preRoot, w, blockNum-1, trace, binary /* is binary */)
+
+			if trace {
+				fmt.Println("<<<<<")
+				tds.Trie().Fprintf()
+				fmt.Println(">>>>>>>>")
+			}
 			if err != nil {
 				fmt.Printf("Error making stateless2 for block %d: %v\n", blockNum, err)
 				filename := fmt.Sprintf("right_%d.txt", blockNum-1)

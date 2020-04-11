@@ -6,6 +6,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
+	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
@@ -41,7 +42,7 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 	switch op := operator.(type) {
 	case *OperatorLeafValue:
 		if trace {
-			fmt.Printf("LEAF ")
+			fmt.Printf("LEAF %x ", op.Value)
 		}
 		keyHex := op.Key
 		val := op.Value
@@ -92,7 +93,7 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 			fmt.Printf("CODE ")
 		}
 
-		return codeNode(op.Code), i + 1, nil
+		return codeNode(common.CopyBytes(op.Code)), i + 1, nil
 
 	case *OperatorLeafAccount:
 		if trace {
@@ -109,9 +110,10 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		account.Balance = *balance
 		account.Initialised = true
 		account.CodeHash = EmptyCodeHash
+		account.Root = EmptyRoot
+		account.HasStorageSize = false
 
 		var err error
-		var code node
 
 		i++
 
@@ -119,11 +121,11 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 		var storage node
 		if op.HasStorage {
 			storage, i, err = buildTrie(operators, i, trace)
-			if storage == nil {
-				account.Root = EmptyRoot
-			} else {
+			if trace {
+				fmt.Printf("\n >>> account.storage = %v\n", storage.fstring(""))
+			}
+			if storage != nil {
 				account.StorageSize = 0
-				account.HasStorageSize = true
 				hasher := newHasher(false)
 				defer returnHasherToPool(hasher)
 				var h common.Hash
@@ -131,30 +133,36 @@ func buildTrie(operators []WitnessOperator, i int, trace bool) (node, int, error
 				if err != nil {
 					panic(err)
 				}
+				if trace {
+					fmt.Printf("\n >>> account.root = %x\n", h)
+				}
 				account.Root = h
 			}
-		} else {
-			account.Root = EmptyRoot
 		}
 
+		var cnode codeNode
 		if op.HasCode {
+			var code node
 			code, i, err = buildTrie(operators, i, trace)
-			hasher := newHasher(false)
-			defer returnHasherToPool(hasher)
-			var h common.Hash
-			_, err := hasher.hash(code, true, h[:])
-			if err != nil {
-				panic(err)
+			if trace {
+				fmt.Printf("got code! %v\n", code)
 			}
-			account.CodeHash = h
+			switch cn := code.(type) {
+			case codeNode:
+				hval := crypto.Keccak256Hash(cn[:])
+				account.CodeHash = hval
+				cnode = cn
+			case hashNode:
+				account.CodeHash = common.BytesToHash(cn[:])
+			default:
+				panic("kaboom!")
+			}
+			if trace {
+				fmt.Printf("codeHash = %x\n", account.CodeHash)
+			}
 		}
 
-		var cn codeNode
-		if code != nil {
-			cn, _ = code.(codeNode)
-		}
-
-		accountNode := &accountNode{*account, storage, true, cn, len(cn)}
+		accountNode := &accountNode{*account, storage, true, cnode, len(cnode)}
 		return &shortNode{Key: common.CopyBytes(op.Key), Val: accountNode}, i, err
 
 	case *OperatorEmptyRoot:

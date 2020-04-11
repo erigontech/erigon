@@ -1286,3 +1286,31 @@ func (t *Trie) evictSubtreeFromHashMap(n node) {
 func (t *Trie) HashMapSize() int {
 	return len(t.hashMap)
 }
+
+func (t *Trie) Fprintf() {
+	printAccRoots(t.root)
+}
+
+func printAccRoots(n node) {
+	switch cn := n.(type) {
+	case *shortNode:
+		printAccRoots(cn.Val)
+	case *duoNode:
+		printAccRoots(cn.child1)
+		printAccRoots(cn.child2)
+	case *fullNode:
+		for _, c := range cn.Children {
+			printAccRoots(c)
+		}
+	case *accountNode:
+		var h common.Hash
+		hr := newHasher(false)
+		hr.hash(cn, true, h[:])
+		if cn.storage != nil {
+			fmt.Printf("account h=%x balance %v root: %x\n\tcode=%x\n\t\n", h, cn.Balance.String(), cn.Root, cn.CodeHash)
+			fmt.Printf(">> acc=%+v\n\n", cn.Account)
+		}
+	default:
+		return
+	}
+}
