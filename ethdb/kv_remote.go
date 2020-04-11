@@ -48,6 +48,10 @@ type remoteNoValuesCursor struct {
 	remoteCursor
 }
 
+func (opts remoteOpts) ReadOnly() remoteOpts {
+	return opts
+}
+
 func (opts remoteOpts) Path(path string) remoteOpts {
 	opts.Remote = opts.Remote.Addr(path)
 	return opts

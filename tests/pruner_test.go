@@ -3,11 +3,12 @@ package tests
 import (
 	"context"
 	"crypto/ecdsa"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"math/big"
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
@@ -667,14 +668,14 @@ func getStat(db ethdb.Database) (stateStats, error) {
 		StorageSuffixRecordsByTimestamp: make(map[uint64]uint32),
 	}
 	err := db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(key, v []byte) (b bool, e error) {
-		timestamp, _ := dbutils.DecodeTimestamp(key)
+		timestamp, _ := dbutils.DecodeTimestamp(common.CopyBytes(key))
 		if _, ok := stat.AccountSuffixRecordsByTimestamp[timestamp]; ok {
 			panic("multiple account suffix records")
 		}
 		stat.AccountSuffixRecordsByTimestamp[timestamp] = uint32(changeset.Len(v))
 
 		innerErr := changeset.Walk(v, func(k, _ []byte) error {
-			compKey, _ := dbutils.CompositeKeySuffix(k, timestamp)
+			compKey, _ := dbutils.CompositeKeySuffix(common.CopyBytes(k), timestamp)
 			_, err := db.Get(dbutils.AccountsHistoryBucket, compKey)
 			if err != nil {
 				stat.ErrAccountsInHistory++

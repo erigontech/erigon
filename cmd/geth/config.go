@@ -74,9 +74,9 @@ type ethstatsConfig struct {
 }
 
 type gethConfig struct {
-	Eth       eth.Config
-	Node      node.Config
-	Ethstats  ethstatsConfig
+	Eth      eth.Config
+	Node     node.Config
+	Ethstats ethstatsConfig
 }
 
 func loadConfig(file string, cfg *gethConfig) error {
@@ -107,8 +107,8 @@ func defaultNodeConfig() node.Config {
 func makeConfigNode(ctx *cli.Context) (*node.Node, gethConfig) {
 	// Load defaults.
 	cfg := gethConfig{
-		Eth:       eth.DefaultConfig,
-		Node:      defaultNodeConfig(),
+		Eth:  eth.DefaultConfig,
+		Node: defaultNodeConfig(),
 	}
 
 	// Load config file.

@@ -7,13 +7,19 @@ import (
 	"math"
 	"runtime/debug"
 	"strings"
+	"time"
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+)
+
+var (
+	trieResolveIHTimer = metrics.NewRegisteredTimer("trie/resolve/ih", nil)
 )
 
 type ResolverStatefulCached struct {
@@ -173,6 +179,8 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	accounts bool,
 	historical bool,
 	trace bool) error {
+	defer trieResolveIHTimer.UpdateSince(time.Now())
+
 	startkeys, fixedbits := tr.PrepareResolveParams()
 	if db == nil {
 		var b strings.Builder

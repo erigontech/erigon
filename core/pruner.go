@@ -185,7 +185,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, key)
+		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, common.CopyBytes(key))
 
 		innerErr := changeset.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
@@ -209,7 +209,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, key)
+		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, common.CopyBytes(key))
 		var innerErr error
 		if debug.IsThinHistory() {
 			innerErr = changeset.StorageChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
@@ -219,7 +219,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		} else {
 			innerErr = changeset.Walk(v, func(cKey, _ []byte) error {
 				compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
+				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, common.CopyBytes(compKey))
 				return nil
 			})
 		}
@@ -351,6 +351,7 @@ func (i *limitIterator) HasMore() bool {
 	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
+
 	return true
 }
 
