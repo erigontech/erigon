@@ -1,102 +1,135 @@
 package trie
 
 import (
+	"errors"
 	"fmt"
 	"math/big"
 
-	"github.com/ledgerwatch/turbo-geth/trie/rlphacks"
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 )
 
 func BuildTrieFromWitness(witness *Witness, isBinary bool, trace bool) (*Trie, error) {
-	hb := NewHashBuilder(false)
-	for _, operator := range witness.Operators {
-		switch op := operator.(type) {
-		case *OperatorLeafValue:
-			if trace {
-				fmt.Printf("LEAF ")
-			}
-			keyHex := op.Key
-			val := op.Value
-			if err := hb.leaf(len(op.Key), keyHex, rlphacks.RlpSerializableBytes(val)); err != nil {
-				return nil, err
-			}
-		case *OperatorExtension:
-			if trace {
-				fmt.Printf("EXTENSION ")
-			}
-			if err := hb.extension(op.Key); err != nil {
-				return nil, err
-			}
-		case *OperatorBranch:
-			if trace {
-				fmt.Printf("BRANCH ")
-			}
-			if err := hb.branch(uint16(op.Mask)); err != nil {
-				return nil, err
-			}
-		case *OperatorHash:
-			if trace {
-				fmt.Printf("HASH ")
-			}
-			if err := hb.hash(op.Hash[:]); err != nil {
-				return nil, err
-			}
-		case *OperatorCode:
-			if trace {
-				fmt.Printf("CODE ")
-			}
-
-			if err := hb.code(op.Code); err != nil {
-				return nil, err
-			}
-
-		case *OperatorLeafAccount:
-			if trace {
-				fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
-			}
-			balance := big.NewInt(0)
-			balance.SetBytes(op.Balance.Bytes())
-			nonce := op.Nonce
-
-			// FIXME: probably not needed, fix hb.accountLeaf
-			fieldSet := uint32(3)
-			if op.HasCode && op.HasStorage {
-				fieldSet = 15
-			}
-
-			// Incarnation is always needed for a hashbuilder.
-			// but it is just our implementation detail needed for contract self-descruction suport with our
-			// db structure. Stateless clients don't access the DB so we can just pass 0 here.
-			incarnaton := uint64(0)
-
-			if err := hb.accountLeaf(len(op.Key), op.Key, 0, balance, nonce, incarnaton, fieldSet); err != nil {
-				return nil, err
-			}
-		case *OperatorEmptyRoot:
-			if trace {
-				fmt.Printf("EMPTYROOT ")
-			}
-			hb.emptyRoot()
-		default:
-			return nil, fmt.Errorf("unknown operand type: %T", operator)
-		}
+	r, h, _, err := buildTrie(witness.Operators, 0, trace)
+	if err != nil {
+		return nil, err
 	}
-	if trace {
-		fmt.Printf("\n")
-	}
-	if !hb.hasRoot() {
-		if isBinary {
-			return NewBinary(EmptyRoot), nil
-		}
-		return New(EmptyRoot), nil
-	}
-	r := hb.root()
+
 	var tr *Trie
 	if isBinary {
-		tr = NewBinary(hb.rootHash())
+		tr = NewBinary(h)
 	} else {
-		tr = New(hb.rootHash())
+		tr = New(h)
 	}
 	tr.root = r
 	return tr, nil
+}
+
+// TODO: hashes
+func buildTrie(operators []WitnessOperator, i int, trace bool) (node, common.Hash, int, error) {
+	if trace {
+		fmt.Printf("idx=%d", i)
+	}
+	operator := operators[i]
+	switch op := operator.(type) {
+	case *OperatorLeafValue:
+		if trace {
+			fmt.Printf("LEAF ")
+		}
+		keyHex := op.Key
+		val := op.Value
+		return &shortNode{Key: keyHex, Val: valueNode(val)}, common.Hash{}, i + 1, nil
+
+	case *OperatorExtension:
+		if trace {
+			fmt.Printf("EXTENSION ")
+		}
+		val, h, newi, err := buildTrie(operators, i+1, trace)
+		return &shortNode{Key: op.Key, Val: val}, h, newi, err
+	case *OperatorBranch:
+		if trace {
+			fmt.Printf("BRANCH ")
+		}
+		// FIXME: support duoNode
+
+		branchNode := &fullNode{}
+		i++
+
+		var err error
+		for j := 0; i <= 16; i++ {
+			if op.Mask&(1<<j) > 0 {
+				var child node
+				child, _, i, err = buildTrie(operators, i, trace)
+				branchNode.Children[j] = child
+			}
+		}
+
+		return branchNode, common.Hash{}, i, err
+	case *OperatorHash:
+		if trace {
+			fmt.Printf("HASH ")
+		}
+		hn := hashNode(op.Hash[:])
+		return hn, op.Hash, i + 1, nil
+	case *OperatorCode:
+		if trace {
+			fmt.Printf("CODE ")
+		}
+
+		return codeNode(op.Code), common.Hash{}, i + 1, nil
+
+	case *OperatorLeafAccount:
+		if trace {
+			fmt.Printf("ACCOUNTLEAF(code=%v storage=%v) ", op.HasCode, op.HasStorage)
+		}
+
+		account := &accounts.Account{}
+
+		account.Nonce = op.Nonce
+		account.Incarnation = uint64(0)
+
+		balance := big.NewInt(0)
+		balance.SetBytes(op.Balance.Bytes())
+		account.Balance = *balance
+		account.Initialised = true
+
+		var err error
+		var code node
+
+		i++
+		if op.HasCode {
+			code, _, i, err = buildTrie(operators, i, trace)
+		}
+
+		var storage node
+		if op.HasStorage {
+			storage, h, i, err = buildTrie(operators, i, trace)
+			account.StorageSize = 0
+			account.HasStorageSize = true
+			account.Root = h
+		} else {
+			account.Root = EmptyRoot
+		}
+
+		var cn codeNode
+		if code != nil {
+			ok := false
+			cn, ok = code.(codeNode)
+			if !ok {
+				return nil, common.Hash{}, i, errors.New("broken witness")
+			}
+		}
+
+		accountNode := &accountNode{*account, storage, true, cn, len(cn)}
+		return accountNode, common.Hash{}, i, err
+
+	case *OperatorEmptyRoot:
+		if trace {
+			fmt.Printf("EMPTYROOT ")
+		}
+		return nil, EmptyRoot, i + 1, nil
+	default:
+		return nil, common.Hash{}, i + 1, fmt.Errorf("unknown operand type: %T", operator)
+	}
+
 }
