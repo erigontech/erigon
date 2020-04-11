@@ -340,15 +340,15 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.AccountsBucket)
 		if b == nil {
-			return fmt.Errorf("sccountsBucket not found")
+			return fmt.Errorf("accountsBucket not found")
 		}
 		hB := tx.Bucket(dbutils.AccountsHistoryBucket)
 		if hB == nil {
-			return fmt.Errorf("sccountsHistoryBucket not found")
+			return fmt.Errorf("accountsHistoryBucket not found")
 		}
 		csB := tx.Bucket(dbutils.AccountChangeSetBucket)
 		if csB == nil {
-			return fmt.Errorf("sccountChangeBucket not found")
+			return fmt.Errorf("accountChangeBucket not found")
 		}
 		//for state
 		mainCursor := b.Cursor()
@@ -393,11 +393,11 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
 					if changeSetData != nil {
-						return fmt.Errorf("Could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
 					if err1 != nil {
-						return fmt.Errorf("Could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+						return fmt.Errorf("could not find key %x in the ChangeSet record for index entry %d (query timestamp %d)\n",
 							hK,
 							changeSetBlock,
 							timestamp,
@@ -492,15 +492,15 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(dbutils.StorageBucket)
 		if b == nil {
-			return fmt.Errorf("StorageBucket not found")
+			return fmt.Errorf("storageBucket not found")
 		}
 		hB := tx.Bucket(dbutils.StorageHistoryBucket)
 		if hB == nil {
-			return fmt.Errorf("StorageHistoryBucket not found")
+			return fmt.Errorf("storageHistoryBucket not found")
 		}
 		csB := tx.Bucket(dbutils.StorageChangeSetBucket)
 		if csB == nil {
-			return fmt.Errorf("StorageChangeBucket not found")
+			return fmt.Errorf("storageChangeBucket not found")
 		}
 		//for storage
 		mainCursor := newSplitCursor(
@@ -544,11 +544,11 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
 					if changeSetData != nil {
-						return fmt.Errorf("Could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
+						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)\n", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
 					if err1 != nil {
-						return fmt.Errorf("Could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)\n",
+						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)\n",
 							hAddrHash, hKeyHash,
 							changeSetBlock,
 							timestamp,
@@ -580,7 +580,6 @@ func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uin
 			return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)
 		} else if bytes.Equal(bucket, dbutils.StorageBucket) && bytes.Equal(hBucket, dbutils.StorageHistoryBucket) {
 			return db.walkAsOfThinStorage(startkey, fixedbits, timestamp, func(k1, k2, v []byte) (bool, error) {
-				fmt.Printf("walker %x %x %x\n", k2, k2, v)
 				return walker(append(common.CopyBytes(k1), k2...), v)
 			})
 		}
