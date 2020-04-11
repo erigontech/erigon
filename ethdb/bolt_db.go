@@ -404,8 +404,8 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 						)
 					}
 					var acc accounts.Account
-					if err := acc.DecodeForStorage(data); err != nil {
-						return err
+					if err2 := acc.DecodeForStorage(data); err2 != nil {
+						return err2
 					}
 					if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 						codeBucket := tx.Bucket(dbutils.ContractCodeBucket)
