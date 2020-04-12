@@ -4,27 +4,24 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"os/signal"
-	"runtime/pprof"
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/cmd/utils"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/internal/debug"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/spf13/cobra"
 )
 
 var (
-	cpuprofile     string
-	cpuProfileFile io.WriteCloser
-	genesisPath    string
-	genesis        *core.Genesis
+	genesisPath string
+	genesis     *core.Genesis
 )
 
 func init() {
-	rootCmd.PersistentFlags().StringVar(&cpuprofile, "cpuprofile", "", "write cpu profile `file`")
+	utils.CobraFlags(rootCmd, append(debug.Flags, utils.MetricsEnabledFlag, utils.MetricsEnabledExpensiveFlag))
 	rootCmd.PersistentFlags().StringVar(&genesisPath, "genesis", "", "path to genesis.json file")
 }
 
@@ -50,15 +47,17 @@ var rootCmd = &cobra.Command{
 	Use:   "state",
 	Short: "state is a utility for Stateless ethereum clients",
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
+		if err := debug.SetupCobra(cmd); err != nil {
+			panic(err)
+		}
+
 		genesis = core.DefaultGenesisBlock()
 		if genesisPath != "" {
 			genesis = genesisFromFile(genesisPath)
 		}
-
-		startProfilingIfNeeded()
 	},
 	PersistentPostRun: func(cmd *cobra.Command, args []string) {
-		stopProfilingIfNeeded()
+		debug.Exit()
 	},
 }
 
@@ -80,31 +79,5 @@ func Execute() {
 	if err := rootCmd.ExecuteContext(rootContext()); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
-	}
-}
-
-func startProfilingIfNeeded() {
-	if cpuprofile != "" {
-		fmt.Println("starting CPU profiling")
-		cpuProfileFile, err := os.Create(cpuprofile)
-		if err != nil {
-			log.Error("could not create CPU profile", "error", err)
-			return
-		}
-		if err := pprof.StartCPUProfile(cpuProfileFile); err != nil {
-			log.Error("could not start CPU profile", "error", err)
-			return
-		}
-	}
-}
-
-func stopProfilingIfNeeded() {
-	if cpuprofile != "" {
-		fmt.Println("stopping CPU profiling")
-		pprof.StopCPUProfile()
-	}
-
-	if cpuProfileFile != nil {
-		cpuProfileFile.Close()
 	}
 }
