@@ -4,28 +4,73 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/types"
+	"github.com/ledgerwatch/turbo-geth/core/vm"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rlp"
 )
 
+const (
+	fileSchemeExportfile = "exportfile"
+	fileSchemeDb         = "db"
+)
+
 type BlockProvider interface {
+	io.Closer
 	FastFwd(uint64) error
 	NextBlock() (*types.Block, error)
+}
+
+func BlockProviderForURI(uri string, createDbFunc CreateDbFunc) (BlockProvider, error) {
+	url, err := url.Parse(uri)
+	if err != nil {
+		return nil, err
+	}
+	switch url.Scheme {
+	case fileSchemeExportfile:
+		fmt.Println("Source of blocks: export file @", url.Path)
+		return NewBlockProviderFromExportFile(url.Path)
+	case fileSchemeDb:
+		fallthrough
+	default:
+		fmt.Println("Source of blocks: db @", url.Path)
+		return NewBlockProviderFromDb(url.Path, createDbFunc)
+	}
 }
 
 type BlockChainBlockProvider struct {
 	currentBlock uint64
 	bc           *core.BlockChain
+	db           ethdb.Database
 }
 
-func NewBlockProviderFromBlockChain(bc *core.BlockChain) BlockProvider {
-	return &BlockChainBlockProvider{
-		bc: bc,
+func NewBlockProviderFromDb(path string, createDbFunc CreateDbFunc) (BlockProvider, error) {
+	ethDb, err := createDbFunc(path)
+	if err != nil {
+		return nil, err
 	}
+	chainConfig := params.MainnetChainConfig
+	engine := ethash.NewFullFaker()
+	chain, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return &BlockChainBlockProvider{
+		bc: chain,
+	}, nil
+}
+
+func (p *BlockChainBlockProvider) Close() error {
+	p.db.Close()
+	return nil
 }
 
 func (p *BlockChainBlockProvider) FastFwd(to uint64) error {
