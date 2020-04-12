@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-SLEEP_TIME=60 * 60
+let SLEEP_TIME=60*60
 
 GOFLAGS=-modcacherw make geth
 
@@ -9,7 +9,7 @@ echo "running geth..."
 
 GETH_PID=$!
 
-echo "sleeping for $SLEEP_TIME"
+echo "sleeping for $SLEEP_TIME seconds"
 
 sleep $SLEEP_TIME
 
