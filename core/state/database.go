@@ -859,11 +859,12 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+	fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
-		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
+		fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
@@ -894,7 +895,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			var addrHash common.Hash
 			copy(addrHash[:], key[:common.HashLength])
 			var keyHash common.Hash
-			copy(keyHash[:], key[common.HashLength:])
+			copy(keyHash[:], key[common.HashLength+common.IncarnationLength:])
 			m, ok := b.storageUpdates[addrHash]
 			if !ok {
 				m = make(map[common.Hash][]byte)
@@ -902,12 +903,12 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 			}
 			if len(value) > 0 {
 				m[keyHash] = value
-				if err := tds.db.Put(dbutils.StorageBucket, key[:2*common.HashLength], value); err != nil {
+				if err := tds.db.Put(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength], value); err != nil {
 					return err
 				}
 			} else {
 				m[keyHash] = nil
-				if err := tds.db.Delete(dbutils.StorageBucket, key[:2*common.HashLength]); err != nil {
+				if err := tds.db.Delete(dbutils.StorageBucket, key[:common.HashLength+common.IncarnationLength+common.HashLength]); err != nil {
 					return err
 				}
 			}

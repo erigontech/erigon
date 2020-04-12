@@ -193,7 +193,10 @@ func (dsw *DbStateWriter) WriteHistory() error {
 			}
 			index := dbutils.WrapHistoryIndex(value)
 			index.Append(dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, change.Key, *index); err != nil {
+			keyNoInc := make([]byte, len(change.Key) - common.IncarnationLength)
+			copy(keyNoInc, change.Key[:common.HashLength])
+			copy(keyNoInc[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
+			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, keyNoInc, *index); err != nil {
 				return err
 			}
 		}
