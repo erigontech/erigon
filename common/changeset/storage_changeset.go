@@ -71,7 +71,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 			addrHashList = append(addrHashList, change.Key[:common.HashLength]...)
 			incarnation := ^binary.BigEndian.Uint64(change.Key[common.HashLength : common.HashLength+common.IncarnationLength])
 			if incarnation != DefaultIncarnation {
-				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], uint32(addrID))
+				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], addrID)
 				binary.BigEndian.PutUint64(addrIdxToIncarnation[4:12], ^incarnation)
 				notDefaultIncarnationList = append(notDefaultIncarnationList, addrIdxToIncarnation[:]...)
 			}
