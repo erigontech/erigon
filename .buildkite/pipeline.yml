@@ -1,9 +1,6 @@
 ---
 steps:
-  - command: 'GOFLAGS=-modcacherw make geth'
-    label: "build geth"
+  - command: './nightly.sh'
+    label: 'build & run geth'
     env:
       BUILDKITE_GOLANG_IMPORT_PATH: "github.com/ledgerwatch/turbo-geth"
-
-  - command: './nightly.sh'
-    label: 'run geth for a bit'

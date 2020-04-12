@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
-SLEEP_TIME=60
+SLEEP_TIME=60 * 60
 
-make geth
+GOFLAGS=-modcacherw make geth
+
+echo "running geth..."
 ./build/bin/geth > tgeth.log 2>&1 &
 
 GETH_PID=$!
