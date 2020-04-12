@@ -187,13 +187,16 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	}
 	if debug.IsThinHistory() {
 		for _, change := range storageChanges.Changes {
-			value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, change.Key)
+			keyNoInc := make([]byte, len(change.Key)-common.IncarnationLength)
+			copy(keyNoInc, change.Key[:common.HashLength])
+			copy(keyNoInc[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
+			value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, keyNoInc)
 			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
 				return fmt.Errorf("db.Get failed: %w", err1)
 			}
 			index := dbutils.WrapHistoryIndex(value)
 			index.Append(dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, change.Key, *index); err != nil {
+			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, keyNoInc, *index); err != nil {
 				return err
 			}
 		}

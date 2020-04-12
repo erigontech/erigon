@@ -3,6 +3,7 @@ package changeset
 import (
 	"bytes"
 	"fmt"
+	"math/rand"
 	"reflect"
 	"sort"
 	"strconv"
@@ -17,7 +18,7 @@ const (
 	defaultIncarnation = 1
 )
 
-func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
+func TestEncodingStorageWithoutNotDefaultIncarnation1(t *testing.T) {
 	f := func(t *testing.T, numOfElements int) {
 		// empty StorageChangeSset first
 		ch := NewStorageChangeSet()
@@ -84,7 +85,7 @@ func TestEncodingStorageWithtRandomIncarnation(t *testing.T) {
 			addrHash, _ := common.HashData([]byte("addrHash" + strconv.Itoa(i)))
 			key, _ := common.HashData([]byte("key" + strconv.Itoa(i)))
 			val, _ := common.HashData([]byte("val" + strconv.Itoa(i)))
-			err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, defaultIncarnation, key), val.Bytes())
+			err = ch.Add(dbutils.GenerateCompositeStorageKey(addrHash, rand.Uint64(), key), val.Bytes())
 			if err != nil {
 				t.Error(err)
 			}
@@ -150,10 +151,10 @@ func TestEncodingStorageWithoutNotDefaultIncarnationWalk(t *testing.T) {
 		i := 0
 		err = StorageChangeSetBytes(b).Walk(func(k, v []byte) error {
 			if !bytes.Equal(k, ch.Changes[i].Key) {
-				t.Error(i, "key was incorrect", k, ch.Changes[i].Key)
+				t.Errorf("%d key was incorrect %x %x", i, k, ch.Changes[i].Key)
 			}
 			if !bytes.Equal(v, ch.Changes[i].Value) {
-				t.Error(i, "val is incorrect", v, ch.Changes[i].Value)
+				t.Errorf("%d val is incorrect %x %x", i, v, ch.Changes[i].Value)
 			}
 			i++
 			return nil
@@ -202,7 +203,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Error("not equal for ", v, val)
+				t.Errorf("not equal for %x %x", v, val)
 			}
 		}
 	}

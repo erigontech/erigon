@@ -507,6 +507,9 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 		if csB == nil {
 			return fmt.Errorf("storageChangeBucket not found")
 		}
+		startkeyNoInc := make([]byte, len(startkey)-common.IncarnationLength)
+		copy(startkeyNoInc, startkey[:common.HashLength])
+		copy(startkeyNoInc[common.HashLength:], startkey[common.HashLength+common.IncarnationLength:])
 		//for storage
 		mainCursor := newSplitCursor(
 			b,
@@ -518,8 +521,8 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 		//for historic data
 		historyCursor := newSplitCursor(
 			hB,
-			startkey,
-			fixedbits,
+			startkeyNoInc,
+			fixedbits-8*common.IncarnationLength,
 			common.HashLength, /* part1end */
 			common.HashLength+common.IncarnationLength, /* part2start */
 		)
@@ -912,7 +915,15 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	if hB == nil {
 		return nil, ErrKeyNotFound
 	}
-	v, _ := hB.Get(key)
+	var v []byte
+	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
+		keyNoInc := make([]byte, len(key)-common.IncarnationLength)
+		copy(keyNoInc, key[:common.HashLength])
+		copy(keyNoInc[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
+		v, _ = hB.Get(keyNoInc)
+	} else {
+		v, _ = hB.Get(key)
+	}
 	index := dbutils.WrapHistoryIndex(v)
 
 	changeSetBlock, ok := index.Search(timestamp)
@@ -933,9 +944,9 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		err  error
 	)
 	switch {
-	case debug.IsThinHistory() && bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
+	case bytes.Equal(dbutils.AccountsHistoryBucket, hBucket):
 		data, err = changeset.AccountChangeSetBytes(changeSetData).FindLast(key)
-	case debug.IsThinHistory() && bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
+	case bytes.Equal(dbutils.StorageHistoryBucket, hBucket):
 		data, err = changeset.StorageChangeSetBytes(changeSetData).Find(key[:common.HashLength], key[common.HashLength+common.IncarnationLength:])
 	default:
 		data, err = changeset.FindLast(changeSetData, key)

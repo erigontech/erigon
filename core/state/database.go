@@ -859,6 +859,7 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+	//fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
