@@ -507,7 +507,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 		if csB == nil {
 			return fmt.Errorf("storageChangeBucket not found")
 		}
-		startkeyNoInc := make([]byte, len(startkey) - common.IncarnationLength)
+		startkeyNoInc := make([]byte, len(startkey)-common.IncarnationLength)
 		copy(startkeyNoInc, startkey[:common.HashLength])
 		copy(startkeyNoInc[common.HashLength:], startkey[common.HashLength+common.IncarnationLength:])
 		//for storage
@@ -522,7 +522,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 		historyCursor := newSplitCursor(
 			hB,
 			startkeyNoInc,
-			fixedbits - 8*common.IncarnationLength,
+			fixedbits-8*common.IncarnationLength,
 			common.HashLength, /* part1end */
 			common.HashLength+common.IncarnationLength, /* part2start */
 		)
@@ -917,7 +917,7 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	}
 	var v []byte
 	if bytes.Equal(dbutils.StorageHistoryBucket, hBucket) {
-		keyNoInc := make([]byte, len(key) - common.IncarnationLength)
+		keyNoInc := make([]byte, len(key)-common.IncarnationLength)
 		copy(keyNoInc, key[:common.HashLength])
 		copy(keyNoInc[common.HashLength:], key[common.HashLength+common.IncarnationLength:])
 		v, _ = hB.Get(keyNoInc)
