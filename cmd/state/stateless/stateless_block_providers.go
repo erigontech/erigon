@@ -112,7 +112,7 @@ func (p *ExportFileBlockProvider) Close() error {
 
 func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 	var b types.Block
-	for true {
+	for {
 		if err := p.stream.Decode(&b); err == io.EOF {
 			return nil
 		} else if err != nil {
@@ -121,7 +121,6 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return nil
 		}
 	}
-	return nil
 }
 
 func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {

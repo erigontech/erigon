@@ -133,7 +133,7 @@ type CreateDbFunc func(string) (ethdb.Database, error)
 func Stateless(
 	ctx context.Context,
 	blockNum uint64,
-	blockSourceUri string,
+	blockSourceURI string,
 	statefile string,
 	triesize uint32,
 	tryPreRoot bool,
@@ -172,7 +172,7 @@ func Stateless(
 	check(err)
 	defer stats.Close()
 
-	blockProvider, err := BlockProviderForURI(blockSourceUri, createDb)
+	blockProvider, err := BlockProviderForURI(blockSourceURI, createDb)
 	check(err)
 	defer blockProvider.Close()
 
@@ -263,7 +263,8 @@ func Stateless(
 
 	}
 
-	blockProvider.FastFwd(blockNum)
+	err = blockProvider.FastFwd(blockNum)
+	check(err)
 
 	for !interrupt {
 		select {
@@ -294,7 +295,8 @@ func Stateless(
 		}
 		for i, tx := range block.Transactions() {
 			statedb.Prepare(tx.Hash(), block.Hash(), i)
-			receipt, err := core.ApplyTransaction(chainConfig, bcb2, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
+			var receipt *types.Receipt
+			receipt, err = core.ApplyTransaction(chainConfig, bcb2, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
 			if err != nil {
 				fmt.Printf("tx %x failed: %v\n", tx.Hash(), err)
 				return
