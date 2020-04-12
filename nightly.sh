@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 
-let SLEEP_TIME=60*60
+# running the job for 5 hours
+let SLEEP_TIME=5*60*60
 
+# GOFLAGS=-modcacherw is required for our CI
+# to be able to remove go modules cache
 GOFLAGS=-modcacherw make geth
 
 echo "running geth..."
