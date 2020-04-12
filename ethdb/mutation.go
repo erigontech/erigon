@@ -10,61 +10,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-type puts map[string]putsBucket //map[bucket]putsBucket
-
-func newPuts() puts {
-	return make(puts)
-}
-
-func (p puts) set(bucket, key, value []byte) {
-	var bucketPuts putsBucket
-	var ok bool
-	if bucketPuts, ok = p[string(bucket)]; !ok {
-		bucketPuts = make(putsBucket)
-		p[string(bucket)] = bucketPuts
-	}
-	bucketPuts[string(key)] = value
-}
-
-func (p puts) Delete(bucket, key []byte) {
-	p.set(bucket, key, nil)
-}
-
-func (p puts) Size() int {
-	var size int
-	for _, put := range p {
-		size += len(put)
-	}
-	return size
-}
-
-type putsBucket map[string][]byte //map[key]value
-
-func (pb putsBucket) Get(key []byte) ([]byte, bool) {
-	value, ok := pb[string(key)]
-	if !ok {
-		return nil, false
-	}
-
-	if value == nil {
-		return nil, true
-	}
-
-	return value, true
-}
-
-func (pb putsBucket) GetStr(key string) ([]byte, bool) {
-	value, ok := pb[key]
-	if !ok {
-		return nil, false
-	}
-
-	if value == nil {
-		return nil, true
-	}
-
-	return value, true
-}
 
 type mutation struct {
 	puts puts // Map buckets to map[key]value
@@ -83,11 +28,7 @@ func (m *mutation) KV() *bolt.DB {
 func (m *mutation) getMem(bucket, key []byte) ([]byte, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-
-	if t, ok := m.puts[string(bucket)]; ok {
-		return t.Get(key)
-	}
-	return nil, false
+	return m.puts.get(bucket, key)
 }
 
 // Can only be called from the worker thread
@@ -105,10 +46,8 @@ func (m *mutation) Get(bucket, key []byte) ([]byte, error) {
 }
 
 func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
-	if t, ok := m.puts[string(bucket)]; ok {
-		if value, ok := t.Get(key); ok {
-			return value, nil
-		}
+	if value, ok := m.puts.get(bucket, key); ok {
+		return value, nil
 	}
 	if m.db != nil {
 		return m.db.Get(bucket, key)
@@ -116,14 +55,33 @@ func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
+// Can only be called from the worker thread
+func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+	//there is a hack for searching index
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	//inverce incarnation
+	indexBytes, err:=m.puts.ChunkByIDOrLast(bucket, key, timestamp)
+	fmt.Println("mutation) GetIndexChunk",common.Bytes2Hex(key), timestamp, indexBytes)
+	if err!=nil && err!=ErrKeyNotFound {
+		return nil, err
+	}
+	if len(indexBytes)>0 {
+		return indexBytes, nil
+	}
+
+	if m.db != nil {
+		return m.db.GetIndexChunk(bucket, key, timestamp)
+	}
+	return nil, ErrKeyNotFound
+}
+
 func (m *mutation) hasMem(bucket, key []byte) bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	if t, ok := m.puts[string(bucket)]; ok {
-		_, ok = t.Get(key)
-		return ok
-	}
-	return false
+	_, ok := m.puts.get(bucket, key)
+	return ok
 }
 
 func (m *mutation) Has(bucket, key []byte) (bool, error) {
@@ -218,7 +176,7 @@ func (m *mutation) Commit() (uint64, error) {
 	defer m.mu.Unlock()
 
 	tuples := common.NewTuples(m.puts.Size(), 3, 1)
-	for bucketStr, bt := range m.puts {
+	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			value, _ := bt.GetStr(key)
@@ -233,21 +191,21 @@ func (m *mutation) Commit() (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("db.MultiPut failed: %w", err)
 	}
-	m.puts = make(puts)
+	m.puts = newPuts()
 	return written, nil
 }
 
 func (m *mutation) Rollback() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.puts = make(puts)
+	m.puts = newPuts()
 }
 
 func (m *mutation) Keys() ([][]byte, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	tuples := common.NewTuples(m.puts.Size(), 2, 1)
-	for bucketStr, bt := range m.puts {
+	for bucketStr, bt := range m.puts.mp {
 		bucketB := []byte(bucketStr)
 		for key := range bt {
 			if err := tuples.Append(bucketB, []byte(key)); err != nil {

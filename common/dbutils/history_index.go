@@ -1,6 +1,7 @@
 package dbutils
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"sort"
@@ -16,6 +17,10 @@ const (
 func NewHistoryIndex() *HistoryIndexBytes {
 	b := make(HistoryIndexBytes, LenBytes*2, 16)
 	return &b
+}
+
+func IsIndexBucket(b []byte) bool {
+	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
 }
 
 func WrapHistoryIndex(b []byte) *HistoryIndexBytes {
@@ -134,12 +139,6 @@ func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
 	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
 
-func IndexChunkKey(key []byte, blockNumber uint64) ([]byte) {
-	blockNumBytes := make([]byte, len(key)+ 8)
-	binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
-	copy(blockNumBytes[:len(key)], key)
-	return blockNumBytes
-}
 func (hi HistoryIndexBytes) Key(key []byte) ([]byte, error) {
 	blockNum, ok := hi.FirstElement()
 	if !ok {
@@ -162,4 +161,12 @@ func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
 		return uint64(binary.LittleEndian.Uint32(hi[2*LenBytes : 2*LenBytes+4])), true
 	}
 	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
+}
+
+
+func IndexChunkKey(key []byte, blockNumber uint64) ([]byte) {
+	blockNumBytes := make([]byte, len(key)+ 8)
+	binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
+	copy(blockNumBytes[:len(key)], key)
+	return blockNumBytes
 }

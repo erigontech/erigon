@@ -93,6 +93,38 @@ func (db *RemoteBoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
+// Get returns the value for a given key if it's present.
+//
+// Deprecated: DB accessors must accept Tx object instead of open Read transaction internally
+func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+
+	// Retrieve the key and increment the miss counter if not found
+	var dat []byte
+	err := db.db.View(context.Background(), func(tx Tx) error {
+		b := tx.Bucket(bucket)
+		if b == nil {
+			return fmt.Errorf("bucket not found, %s", bucket)
+		}
+
+		c:=b.Cursor()
+
+		k,v,err:=c.Seek(dbutils.IndexChunkKey(key, timestamp))
+		if err != nil {
+			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
+		}
+
+		if bytes.HasPrefix(k, key) && v!=nil {
+			dat = make([]byte, len(v))
+			copy(dat, v)
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
+}
+
 // GetAsOf returns the value valid as of a given timestamp.
 //func (db *RemoteBoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 //	return db.db.CmdGetAsOf(context.Background(), bucket, hBucket, key, timestamp)

@@ -165,6 +165,23 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return val, err
 }
 
+func (db *BadgerDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+	var val []byte
+	//todo impliment me
+	err := db.db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(bucketKey(bucket, key))
+		if err != nil {
+			return err
+		}
+		val, err = item.ValueCopy(nil)
+		return err
+	})
+	if err == badger.ErrKeyNotFound {
+		return nil, ErrKeyNotFound
+	}
+	return val, err
+}
+
 // GetAsOf returns the value valid as of a given timestamp.
 func (db *BadgerDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) ([]byte, error) {
 	composite, _ := dbutils.CompositeKeySuffix(key, timestamp)

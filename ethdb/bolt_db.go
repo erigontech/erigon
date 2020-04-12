@@ -175,6 +175,31 @@ func (db *BoltDatabase) Get(bucket, key []byte) ([]byte, error) {
 	return dat, err
 }
 
+// GetIndexChunk returns proper index chunk or return error if index is not created.
+// key must contain inverted block number in the end
+func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
+
+	var dat []byte
+	err := db.db.View(func(tx *bolt.Tx) error {
+		b := tx.Bucket(bucket)
+		if b != nil {
+			c:=b.Cursor()
+			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+			if bytes.HasPrefix(k, key) {
+				if v != nil {
+					dat = make([]byte, len(v))
+					copy(dat, v)
+				}
+			}
+		}
+		return nil
+	})
+	if dat == nil {
+		return nil, ErrKeyNotFound
+	}
+	return dat, err
+}
+
 // getChangeSetByBlockNoLock returns changeset by block and bucket
 func (db *BoltDatabase) GetChangeSetByBlock(hBucket []byte, timestamp uint64) ([]byte, error) {
 	key := dbutils.EncodeTimestamp(timestamp)
@@ -668,6 +693,9 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 	}
 
 	k,v:=hB.Cursor().Seek(dbutils.IndexChunkKey(key, timestamp))
+	if !bytes.HasPrefix(k, key[:len(key)-8]) {
+		return nil, ErrKeyNotFound
+	}
 	fmt.Println(k, v, timestamp)
 	index := dbutils.WrapHistoryIndex(v)
 

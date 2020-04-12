@@ -950,7 +950,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 	if debug.IsThinHistory() {
 		if len(changedAccounts) > 0 {
 			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-				index, getErr := ethdb.FindProperIndexChunk(tds.db, dbutils.AccountsHistoryBucket, kk, timestamp)
+				indexBytes, getErr := tds.db.GetIndexChunk(dbutils.AccountsHistoryBucket, kk, timestamp)
 				if getErr != nil {
 					if getErr == ethdb.ErrKeyNotFound {
 						return nil
@@ -958,11 +958,17 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 					return getErr
 				}
 
-				index.Remove(timestamp)
-				if index.Len() == 0 {
-					return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				chunkKey,err:=index.Key(kk)
+				if err!=nil {
+					return err
 				}
-				return tds.db.Put(dbutils.AccountsHistoryBucket, kk, *index)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
+					return tds.db.Delete(dbutils.AccountsHistoryBucket, chunkKey)
+				}
+				return tds.db.Put(dbutils.AccountsHistoryBucket, chunkKey , *index)
 			})
 			if innerErr != nil {
 				return innerErr
@@ -974,7 +980,7 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 
 		if len(changedStorage) > 0 {
 			innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
-				indexBytes, getErr := tds.db.Get(dbutils.StorageHistoryBucket, kk)
+				indexBytes, getErr := tds.db.GetIndexChunk(dbutils.StorageHistoryBucket, kk, timestamp)
 				if getErr != nil {
 					if getErr == ethdb.ErrKeyNotFound {
 						return nil
@@ -983,12 +989,17 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 				}
 
 				index := dbutils.WrapHistoryIndex(indexBytes)
+				chunkKey,err:=index.Key(kk)
+				if err!=nil {
+					return err
+				}
+
 				index.Remove(timestamp)
 
 				if index.Len() == 0 {
-					return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
+					return tds.db.Delete(dbutils.StorageHistoryBucket, chunkKey)
 				}
-				return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
+				return tds.db.Put(dbutils.StorageHistoryBucket, chunkKey, *index)
 			})
 			if innerErr != nil {
 				return innerErr
