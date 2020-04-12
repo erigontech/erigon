@@ -133,7 +133,7 @@ type CreateDbFunc func(string) (ethdb.Database, error)
 func Stateless(
 	ctx context.Context,
 	blockNum uint64,
-	chaindata string,
+	blockSourceURI string,
 	statefile string,
 	triesize uint32,
 	tryPreRoot bool,
@@ -168,19 +168,14 @@ func Stateless(
 	defer timeF.Close()
 	fmt.Fprintf(timeF, "blockNr,exec,resolve,stateless_exec,calc_root,mod_root\n")
 
-	ethDb, err := createDb(chaindata)
-	check(err)
-	defer ethDb.Close()
-	chainConfig := params.MainnetChainConfig
-
 	stats, err := NewStatsFile(statsfile)
 	check(err)
 	defer stats.Close()
 
-	vmConfig := vm.Config{}
-	engine := ethash.NewFullFaker()
-	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
+	blockProvider, err := BlockProviderForURI(blockSourceURI, createDb)
 	check(err)
+	defer blockProvider.Close()
+
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
@@ -196,8 +191,16 @@ func Stateless(
 		genesisBlock, _, _, err1 := core.DefaultGenesisBlock().ToBlock(nil, writeHistory)
 		check(err1)
 		preRoot = genesisBlock.Header().Root
-	} else {
-		block := bcb.GetBlockByNumber(blockNum - 1)
+	}
+
+	chainConfig := params.MainnetChainConfig
+	vmConfig := vm.Config{}
+	engine := ethash.NewFullFaker()
+	bcb2, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
+	check(err)
+
+	if blockNum > 1 {
+		block := bcb2.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
@@ -260,6 +263,9 @@ func Stateless(
 
 	}
 
+	err = blockProvider.FastFwd(blockNum)
+	check(err)
+
 	for !interrupt {
 		select {
 		case <-ctx.Done():
@@ -269,9 +275,13 @@ func Stateless(
 
 		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
-		block := bcb.GetBlockByNumber(blockNum)
+		block, err := blockProvider.NextBlock()
+		check(err)
 		if block == nil {
 			break
+		}
+		if block.NumberU64() != blockNum {
+			check(fmt.Errorf("block number mismatch (want=%v got=%v)", blockNum, block.NumberU64()))
 		}
 		execStart := time.Now()
 		statedb := state.New(tds)
@@ -285,7 +295,8 @@ func Stateless(
 		}
 		for i, tx := range block.Transactions() {
 			statedb.Prepare(tx.Hash(), block.Hash(), i)
-			receipt, err := core.ApplyTransaction(chainConfig, bcb, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
+			var receipt *types.Receipt
+			receipt, err = core.ApplyTransaction(chainConfig, bcb2, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
 			if err != nil {
 				fmt.Printf("tx %x failed: %v\n", tx.Hash(), err)
 				return
@@ -382,7 +393,7 @@ func Stateless(
 			ibs := state.New(s)
 			ibs.SetTrace(trace)
 			s.SetBlockNr(blockNum)
-			if err = runBlock(ibs, s, s, chainConfig, bcb, block); err != nil {
+			if err = runBlock(ibs, s, s, chainConfig, bcb2, block); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {
