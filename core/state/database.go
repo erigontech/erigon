@@ -859,12 +859,12 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
-	fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
+	//fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
 	if err := tds.db.RewindData(tds.blockNr, blockNr, func(bucket, key, value []byte) error {
-		fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
+		//fmt.Printf("bucket: %x, key: %x, value: %x\n", bucket, key, value)
 		if bytes.Equal(bucket, dbutils.AccountsHistoryBucket) {
 			var addrHash common.Hash
 			copy(addrHash[:], key)
