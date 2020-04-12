@@ -181,6 +181,9 @@ func Stateless(
 	engine := ethash.NewFullFaker()
 	bcb, err := core.NewBlockChain(ethDb, nil, chainConfig, engine, vm.Config{}, nil)
 	check(err)
+
+	blockProvider := NewBlockProviderFromBlockChain(bcb)
+
 	stateDb, err := createDb(statefile)
 	check(err)
 	defer stateDb.Close()
@@ -265,6 +268,8 @@ func Stateless(
 
 	}
 
+	blockProvider.FastFwd(blockNum)
+
 	for !interrupt {
 		select {
 		case <-ctx.Done():
@@ -274,9 +279,13 @@ func Stateless(
 
 		trace := blockNum == 50492 // false // blockNum == 545080
 		tds.SetResolveReads(blockNum >= witnessThreshold)
-		block := bcb.GetBlockByNumber(blockNum)
+		block, err := blockProvider.NextBlock()
+		check(err)
 		if block == nil {
 			break
+		}
+		if block.NumberU64() != blockNum {
+			check(fmt.Errorf("block number mismatch (want=%v got=%v)", blockNum, block.NumberU64()))
 		}
 		execStart := time.Now()
 		statedb := state.New(tds)
@@ -514,4 +523,31 @@ func Stateless(
 	fmt.Printf("Processed %d blocks\n", blockNum)
 	fmt.Printf("Next time specify -block %d\n", blockNum)
 	fmt.Printf("Stateless client analysis took %s\n", time.Since(startTime))
+}
+
+type BlockProvider interface {
+	FastFwd(uint64) error
+	NextBlock() (*types.Block, error)
+}
+
+type BlockChainBlockProvider struct {
+	currentBlock uint64
+	bc           *core.BlockChain
+}
+
+func NewBlockProviderFromBlockChain(bc *core.BlockChain) BlockProvider {
+	return &BlockChainBlockProvider{
+		bc: bc,
+	}
+}
+
+func (p *BlockChainBlockProvider) FastFwd(to uint64) error {
+	p.currentBlock = to
+	return nil
+}
+
+func (p *BlockChainBlockProvider) NextBlock() (*types.Block, error) {
+	block := p.bc.GetBlockByNumber(p.currentBlock)
+	p.currentBlock++
+	return block, nil
 }
