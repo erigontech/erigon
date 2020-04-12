@@ -61,27 +61,27 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	notDefaultIncarnationList := make([]byte, 0)
 
 	//collect information about unique addHashes and non default incarnations
-	var addrId uint32
+	var addrID uint32
 	var addrIdxToIncarnation [12]byte
 	for i, change := range s.Changes {
 		if i == 0 || !bytes.Equal(change.Key[:common.HashLength], s.Changes[i-1].Key[:common.HashLength]) {
 			if i > 0 {
-				addrId++
+				addrID++
 			}
 			addrHashList = append(addrHashList, change.Key[:common.HashLength]...)
 			incarnation := ^binary.BigEndian.Uint64(change.Key[common.HashLength : common.HashLength+common.IncarnationLength])
 			if incarnation != DefaultIncarnation {
-				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], uint32(addrId))
+				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], uint32(addrID))
 				binary.BigEndian.PutUint64(addrIdxToIncarnation[4:12], ^incarnation)
 				notDefaultIncarnationList = append(notDefaultIncarnationList, addrIdxToIncarnation[:]...)
 			}
 		}
-		addrHashesMap[i] = addrId
+		addrHashesMap[i] = addrID
 	}
 
 	//write numOfUniqAddrHashes
 	numOfUniqAddrHashes := make([]byte, storageEnodingLengthOfDict)
-	binary.BigEndian.PutUint16(numOfUniqAddrHashes, uint16(addrId+1))
+	binary.BigEndian.PutUint16(numOfUniqAddrHashes, uint16(addrID+1))
 	if _, err := buf.Write(numOfUniqAddrHashes); err != nil {
 		return nil, err
 	}
@@ -91,7 +91,7 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 		return nil, err
 	}
 
-	lenOfAddr := getNumOfBytesByLen(int(addrId+1))
+	lenOfAddr := getNumOfBytesByLen(int(addrID + 1))
 	numOfUint8 := uint16(0)
 	numOfUint16 := uint16(0)
 	numOfUint32 := uint16(0)
