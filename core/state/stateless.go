@@ -53,8 +53,10 @@ func NewStateless(stateRoot common.Hash, blockWitness *trie.Witness, blockNr uin
 	}
 
 	if trace {
+		fmt.Printf("\n >>>> extractz! <<<<<\n")
+		ww, _ := t.ExtractWitness(0, true, nil)
+
 		fmt.Printf("\n >>>> diffz! <<<<<\n")
-		ww, _ := t.ExtractWitness(0, false, nil)
 		blockWitness.WriteDiff(ww, os.Stdout)
 
 		fmt.Println("v*v*v*")

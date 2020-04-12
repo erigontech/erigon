@@ -196,7 +196,14 @@ func (b *WitnessBuilder) processAccountStorage(n *accountNode, hex []byte, limit
 func (b *WitnessBuilder) makeBlockWitness(
 	nd node, hex []byte, limiter *MerklePathLimiter, force bool) error {
 
+	if b.trace {
+		fmt.Printf(">> makeBlockWitness %T\n", nd)
+	}
+
 	processAccountNode := func(key []byte, storageKey []byte, n *accountNode) error {
+		if b.trace {
+			fmt.Printf(" >>>>>> account.Storage = %T", n.storage)
+		}
 		var hashOnly HashOnly
 		if limiter != nil {
 			hashOnly = limiter.HashOnly
@@ -257,6 +264,7 @@ func (b *WitnessBuilder) makeBlockWitness(
 		if err := b.makeBlockWitness(n.child2, expandKeyHex(hex, i2), limiter, false); err != nil {
 			return err
 		}
+
 		return b.addBranchOp(n.mask)
 
 	case *fullNode:

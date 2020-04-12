@@ -184,6 +184,75 @@ func (hb *HashBuilder) leafHash(length int, keyHex []byte, val rlphacks.RlpSeria
 	return hb.leafHashWithKeyVal(key, val)
 }
 
+func (hb *HashBuilder) accountLeafReversed(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
+	if hb.trace {
+		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
+	}
+	key := keyHex[len(keyHex)-length:]
+	copy(hb.acc.Root[:], EmptyRoot[:])
+	copy(hb.acc.CodeHash[:], EmptyCodeHash[:])
+	hb.acc.Nonce = nonce
+	hb.acc.Balance.Set(balance)
+	hb.acc.Initialised = true
+	hb.acc.StorageSize = storageSize
+	hb.acc.HasStorageSize = hb.acc.StorageSize > 0
+	hb.acc.Incarnation = incarnation
+
+	popped := 0
+	var accountCode codeNode
+	if fieldSet&uint32(8) != 0 {
+		copy(hb.acc.CodeHash[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		ok := false
+		if !bytes.Equal(hb.acc.CodeHash[:], EmptyCodeHash[:]) {
+			stackTop := hb.nodeStack[len(hb.nodeStack)-popped-1]
+			if stackTop != nil { // if we don't have any stack top it might be okay because we didn't resolve the code yet (stateful resolver)
+				// but if we have something on top of the stack that isn't `nil`, it has to be a codeNode
+				accountCode, ok = stackTop.(codeNode)
+				if !ok {
+					return fmt.Errorf("unexpected node type on the node stack, wanted codeNode, got %t:%s", stackTop, stackTop)
+				}
+			}
+		}
+		popped++
+	}
+
+	var root node
+	if fieldSet&uint32(4) != 0 {
+		copy(hb.acc.Root[:], hb.hashStack[len(hb.hashStack)-popped*hashStackStride-common.HashLength:len(hb.hashStack)-popped*hashStackStride])
+		if hb.acc.Root != EmptyRoot {
+			// Root is on top of the stack
+			root = hb.nodeStack[len(hb.nodeStack)-popped-1]
+			if root == nil {
+				root = hashNode(common.CopyBytes(hb.acc.Root[:]))
+			}
+		}
+		popped++
+	}
+
+	var accCopy accounts.Account
+	accCopy.Copy(&hb.acc)
+
+	accountCodeSize := codeSizeUncached
+	if !bytes.Equal(accCopy.CodeHash[:], EmptyCodeHash[:]) && accountCode != nil {
+		accountCodeSize = len(accountCode)
+	}
+
+	s := &shortNode{Key: common.CopyBytes(key), Val: &accountNode{accCopy, root, true, accountCode, accountCodeSize}}
+	// this invocation will take care of the popping given number of items from both hash stack and node stack,
+	// pushing resulting hash to the hash stack, and nil to the node stack
+	if err = hb.accountLeafHashWithKey(key, popped); err != nil {
+		return err
+	}
+	copy(s.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	s.ref.len = 32
+	// Replace top of the stack
+	hb.nodeStack[len(hb.nodeStack)-1] = s
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
+	return nil
+}
+
 func (hb *HashBuilder) accountLeaf(length int, keyHex []byte, storageSize uint64, balance *big.Int, nonce uint64, incarnation uint64, fieldSet uint32) (err error) {
 	if hb.trace {
 		fmt.Printf("ACCOUNTLEAF %d (%b)\n", length, fieldSet)
@@ -456,6 +525,112 @@ func (hb *HashBuilder) branch(set uint16) error {
 		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
 	}
 
+	return nil
+}
+
+func (hb *HashBuilder) branchReversed(set uint16, indexes []uint32) error {
+	if hb.trace {
+		fmt.Printf("BRANCH (%b)\n", set)
+	}
+	f := &fullNode{}
+	digits := bits.OnesCount16(set)
+	if len(hb.nodeStack) < digits {
+		return fmt.Errorf("len(hb.nodeStask) %d < digits %d", len(hb.nodeStack), digits)
+	}
+	nodes := hb.nodeStack[len(hb.nodeStack)-digits:]
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	var i int
+
+	for zz := len(indexes) - 1; zz >= 0; zz-- {
+		digit := indexes[zz]
+
+		if nodes[i] == nil {
+			f.Children[digit] = hashNode(common.CopyBytes(hashes[hashStackStride*i+1 : hashStackStride*(i+1)]))
+		} else {
+			f.Children[digit] = nodes[i]
+		}
+		i++
+	}
+
+	hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
+	hb.nodeStack[len(hb.nodeStack)-1] = f
+	if err := hb.branchHashReversed(set, indexes); err != nil {
+		return err
+	}
+	copy(f.ref.data[:], hb.hashStack[len(hb.hashStack)-common.HashLength:])
+	f.ref.len = 32
+	if hb.trace {
+		fmt.Printf("Stack depth: %d\n", len(hb.nodeStack))
+	}
+
+	return nil
+}
+
+func (hb *HashBuilder) branchHashReversed(set uint16, indexes []uint32) error {
+	if hb.trace {
+		fmt.Printf("BRANCHHASH (%b)\n", set)
+	}
+	digits := bits.OnesCount16(set)
+	if len(hb.hashStack) < hashStackStride*digits {
+		return fmt.Errorf("len(hb.hashStack) %d < hashStackStride*digits %d", len(hb.hashStack), hashStackStride*digits)
+	}
+	hashes := hb.hashStack[len(hb.hashStack)-hashStackStride*digits:]
+	// Calculate the size of the resulting RLP
+	totalSize := 17 // These are 17 length prefixes
+	var zz int
+	for digit := uint(0); digit < 16; digit++ {
+		i := digits - 1 - zz
+		if ((uint16(1) << digit) & set) != 0 {
+			if hashes[hashStackStride*i] == 0x80+common.HashLength {
+				totalSize += common.HashLength
+			} else {
+				// Embedded node
+				totalSize += int(hashes[hashStackStride*i] - rlp.EmptyListCode)
+			}
+			zz++
+		}
+	}
+	hb.sha.Reset()
+	pt := rlphacks.GenerateStructLen(hb.lenPrefix[:], totalSize)
+	if _, err := hb.sha.Write(hb.lenPrefix[:pt]); err != nil {
+		return err
+	}
+	// Output children hashes or embedded RLPs
+	zz = 0
+	hb.b[0] = rlp.EmptyStringCode
+	for digit := uint(0); digit < 17; digit++ {
+		i := digits - 1 - zz
+		if ((uint16(1) << digit) & set) != 0 {
+			if hashes[hashStackStride*i] == byte(0x80+common.HashLength) {
+				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+hashStackStride]); err != nil {
+					return err
+				}
+			} else {
+				// Embedded node
+				size := int(hashes[hashStackStride*i]) - rlp.EmptyListCode
+				if _, err := hb.sha.Write(hashes[hashStackStride*i : hashStackStride*i+size+1]); err != nil {
+					return err
+				}
+			}
+			zz++
+		} else {
+			if _, err := hb.sha.Write(hb.b[:]); err != nil {
+				return err
+			}
+		}
+	}
+	hb.hashStack = hb.hashStack[:len(hb.hashStack)-hashStackStride*digits+hashStackStride]
+	hb.hashStack[len(hb.hashStack)-hashStackStride] = 0x80 + common.HashLength
+	if _, err := hb.sha.Read(hb.hashStack[len(hb.hashStack)-common.HashLength:]); err != nil {
+		return err
+	}
+	if hashStackStride*len(hb.nodeStack) > len(hb.hashStack) {
+		hb.nodeStack = hb.nodeStack[:len(hb.nodeStack)-digits+1]
+		if hb.trace {
+			fmt.Printf("Setting hb.nodeStack[%d] to nil\n", len(hb.nodeStack)-1)
+		}
+		hb.nodeStack[len(hb.nodeStack)-1] = nil
+	}
 	return nil
 }
 

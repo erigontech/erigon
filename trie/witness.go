@@ -158,30 +158,39 @@ func (w *Witness) WriteDiff(w2 *Witness, output io.Writer) {
 			op = w.Operators[i]
 		}
 		if i >= len(w2.Operators) {
+			fmt.Fprintf(output, "unexpected o1[%d] = %T %v; o2[%d] = <doesn't exist>\n", i, op, op, i)
+			continue
+		}
+
+		if w2.Operators[i] == nil {
 			fmt.Fprintf(output, "unexpected o1[%d] = %T %v; o2[%d] = nil\n", i, op, op, i)
 			continue
 		}
+
 		switch o1 := op.(type) {
 		case *OperatorBranch:
 			o2, ok := w2.Operators[i].(*OperatorBranch)
-			if !ok {
+			if !ok || o2 == nil {
 				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+				continue
 			}
 			if o1.Mask != o2.Mask {
 				fmt.Fprintf(output, "o1[%d].Mask = %v; o2[%d].Mask = %v", i, o1.Mask, i, o2.Mask)
 			}
 		case *OperatorHash:
 			o2, ok := w2.Operators[i].(*OperatorHash)
-			if !ok {
+			if !ok || o2 == nil {
 				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+				continue
 			}
 			if !bytes.Equal(o1.Hash.Bytes(), o2.Hash.Bytes()) {
 				fmt.Fprintf(output, "o1[%d].Hash = %s; o2[%d].Hash = %s\n", i, o1.Hash.Hex(), i, o2.Hash.Hex())
 			}
 		case *OperatorCode:
 			o2, ok := w2.Operators[i].(*OperatorCode)
-			if !ok {
+			if !ok || o2 == nil {
 				fmt.Fprintf(output, "o1[%d] = %T %+v; o2[%d] = %T %+v\n", i, o1, o1, i, o2, o2)
+				continue
 			}
 			if !bytes.Equal(o1.Code, o2.Code) {
 				fmt.Fprintf(output, "o1[%d].Code = %x; o2[%d].Code = %x\n", i, o1.Code, i, o2.Code)
