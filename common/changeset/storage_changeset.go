@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	DefaultIncarnation                      = ^uint64(1)
+	DefaultIncarnation                      = uint64(1)
 	storageEnodingIndexSize                 = 4
 	storageEnodingStartElem                 = 4
 	storageEnodingLengthOfNumOfElements     = 4
