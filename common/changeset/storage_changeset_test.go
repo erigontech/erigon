@@ -18,7 +18,7 @@ const (
 	defaultIncarnation = 1
 )
 
-func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
+func TestEncodingStorageWithoutNotDefaultIncarnation1(t *testing.T) {
 	f := func(t *testing.T, numOfElements int) {
 		// empty StorageChangeSset first
 		ch := NewStorageChangeSet()
@@ -203,7 +203,7 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Error("not equal for ", v, val)
+				t.Errorf("not equal for %x %x", v, val)
 			}
 		}
 	}

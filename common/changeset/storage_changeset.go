@@ -56,38 +56,32 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 		return nil, err
 	}
 
-	addrHashesMap := make(map[common.Hash]uint32)
-	addrHashList := make([]byte, 0)
+	addrHashesMap := make([]uint32, n)
+	var addrHashList []byte
 	notDefaultIncarnationList := make([]byte, 0)
 
 	//collect information about unique addHashes and non default incarnations
-	nextIDAddrHash := uint32(0)
-	var addrHash common.Hash
+	var addrId uint32
 	var addrIdxToIncarnation [12]byte
-	for i := 0; i < n; i++ {
-		//copy addrHash
-		copy(
-			addrHash[:],
-			s.Changes[i].Key[0:common.HashLength],
-		)
-
-		//fill addrHashesMap and addrHashList
-		if _, ok := addrHashesMap[addrHash]; !ok {
-			addrHashesMap[addrHash] = nextIDAddrHash
-			nextIDAddrHash++
-			addrHashList = append(addrHashList, addrHash[:]...)
-			incarnation := ^binary.BigEndian.Uint64(s.Changes[i].Key[common.HashLength : common.HashLength+common.IncarnationLength])
+	for i, change := range s.Changes {
+		if i == 0 || !bytes.Equal(change.Key[:common.HashLength], s.Changes[i-1].Key[:common.HashLength]) {
+			if i > 0 {
+				addrId++
+			}
+			addrHashList = append(addrHashList, change.Key[:common.HashLength]...)
+			incarnation := ^binary.BigEndian.Uint64(change.Key[common.HashLength : common.HashLength+common.IncarnationLength])
 			if incarnation != DefaultIncarnation {
-				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], uint32(i))
+				binary.BigEndian.PutUint32(addrIdxToIncarnation[:4], uint32(addrId))
 				binary.BigEndian.PutUint64(addrIdxToIncarnation[4:12], ^incarnation)
 				notDefaultIncarnationList = append(notDefaultIncarnationList, addrIdxToIncarnation[:]...)
 			}
 		}
+		addrHashesMap[i] = addrId
 	}
 
 	//write numOfUniqAddrHashes
 	numOfUniqAddrHashes := make([]byte, storageEnodingLengthOfDict)
-	binary.BigEndian.PutUint16(numOfUniqAddrHashes, uint16(len(addrHashesMap)))
+	binary.BigEndian.PutUint16(numOfUniqAddrHashes, uint16(addrId+1))
 	if _, err := buf.Write(numOfUniqAddrHashes); err != nil {
 		return nil, err
 	}
@@ -97,56 +91,48 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 		return nil, err
 	}
 
-	lenOfAddr := getNumOfBytesByLen(len(addrHashesMap))
-	values := new(bytes.Buffer)
-	lengthes := make([]byte, storageEnodingLengthOfNumTypeOfElements*3)
+	lenOfAddr := getNumOfBytesByLen(int(addrId+1))
 	numOfUint8 := uint16(0)
 	numOfUint16 := uint16(0)
 	numOfUint32 := uint16(0)
 
-	keys := new(bytes.Buffer)
 	lengthOfValues := uint32(0)
 	row := make([]byte, lenOfAddr+common.HashLength)
-	for i := 0; i < len(s.Changes); i++ {
+	for i, change := range s.Changes {
 		writeKeyRow(
-			addrHashesMap[common.BytesToHash(s.Changes[i].Key[0:common.HashLength])],
+			addrHashesMap[i],
 			row[0:lenOfAddr],
 		)
-		copy(row[lenOfAddr:lenOfAddr+common.HashLength], common.CopyBytes(s.Changes[i].Key[common.IncarnationLength+common.HashLength:common.IncarnationLength+2*common.HashLength]))
-		keys.Write(row)
-
-		lengthOfValues += uint32(len(s.Changes[i].Value))
+		copy(row[lenOfAddr:lenOfAddr+common.HashLength], change.Key[common.IncarnationLength+common.HashLength:common.IncarnationLength+2*common.HashLength])
+		buf.Write(row)
+	}
+	// Remember position to fix up the lengths later
+	lengthPos := buf.Len()
+	uint16b := make([]byte, 2)
+	// Reserve 3 positions for lengths
+	buf.Write(uint16b)
+	buf.Write(uint16b)
+	buf.Write(uint16b)
+	uint32b := make([]byte, 4)
+	for _, change := range s.Changes {
+		lengthOfValues += uint32(len(change.Value))
 		switch {
 		case lengthOfValues <= 255:
 			numOfUint8++
-			lengthes = append(lengthes, uint8(lengthOfValues))
+			buf.WriteByte(uint8(lengthOfValues))
 		case lengthOfValues <= 65535:
 			numOfUint16++
-			uint16b := make([]byte, 2)
 			binary.BigEndian.PutUint16(uint16b, uint16(lengthOfValues))
-			lengthes = append(lengthes, uint16b...)
+			buf.Write(uint16b)
 		default:
 			numOfUint32++
-			uint32b := make([]byte, 4)
 			binary.BigEndian.PutUint32(uint32b, lengthOfValues)
-			lengthes = append(lengthes, uint32b...)
+			buf.Write(uint32b)
 		}
-		values.Write(s.Changes[i].Value)
 	}
 
-	binary.BigEndian.PutUint16(lengthes[0:storageEnodingLengthOfNumTypeOfElements], numOfUint8)
-	binary.BigEndian.PutUint16(lengthes[storageEnodingLengthOfNumTypeOfElements:2*storageEnodingLengthOfNumTypeOfElements], numOfUint16)
-	binary.BigEndian.PutUint16(lengthes[2*storageEnodingLengthOfNumTypeOfElements:3*storageEnodingLengthOfNumTypeOfElements], numOfUint32)
-	if _, err := buf.Write(keys.Bytes()); err != nil {
-		return nil, err
-	}
-
-	if _, err := buf.Write(lengthes); err != nil {
-		return nil, err
-	}
-
-	if _, err := buf.Write(values.Bytes()); err != nil {
-		return nil, err
+	for _, change := range s.Changes {
+		buf.Write(change.Value)
 	}
 
 	if len(notDefaultIncarnationList) > 0 {
@@ -155,8 +141,12 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 		}
 	}
 
-	byt := buf.Bytes()
-	return byt, nil
+	b := buf.Bytes()
+	// Fix up the lengths
+	binary.BigEndian.PutUint16(b[lengthPos:], numOfUint8)
+	binary.BigEndian.PutUint16(b[lengthPos+2:], numOfUint16)
+	binary.BigEndian.PutUint16(b[lengthPos+4:], numOfUint32)
+	return b, nil
 }
 
 func DecodeStorage(b []byte) (*ChangeSet, error) {
@@ -178,7 +168,7 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 
 	dictLen := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfDict]))
 	addMap := make(map[uint32][]byte)
-	for i := 0; i < int(dictLen); i++ {
+	for i := 0; i < dictLen; i++ {
 		elemStart := storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict + i*common.HashLength
 		addMap[uint32(i)] = b[elemStart : elemStart+common.HashLength]
 	}
@@ -210,7 +200,6 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 	elementStart := storageEnodingStartElem + storageEnodingLengthOfDict + dictLen*common.HashLength
 
 	lenOfAddHash := getNumOfBytesByLen(len(addMap))
-	//lastValLen:=0
 	for i := 0; i < numOfElements; i++ {
 		//copy addrHash
 		key := make([]byte, common.HashLength*2+common.IncarnationLength)
@@ -218,9 +207,9 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 		addrIdx := getUint32(b[elem : elem+lenOfAddHash])
 		copy(key[:common.HashLength], addMap[addrIdx])
 		if inc, ok := notDefaultIncarnation[addrIdx]; ok {
-			binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^inc)
+			binary.BigEndian.PutUint64(key[common.HashLength:], ^inc)
 		} else {
-			binary.BigEndian.PutUint64(key[common.HashLength:common.HashLength+common.IncarnationLength], ^DefaultIncarnation)
+			binary.BigEndian.PutUint64(key[common.HashLength:], ^DefaultIncarnation)
 		}
 		//copy key hash
 		copy(
@@ -418,26 +407,27 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 		return nil, fmt.Errorf("decode: input too short (%d bytes)", len(b))
 	}
 
-	numOfItems := int(binary.BigEndian.Uint32(b[0:storageEnodingLengthOfNumOfElements]))
+	numOfItems := int(binary.BigEndian.Uint32(b[:storageEnodingLengthOfNumOfElements]))
 	if numOfItems == 0 {
 		return nil, nil
 	}
 
-	numOfUniqueItems := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements : storageEnodingLengthOfNumOfElements+storageEnodingLengthOfDict]))
+	numOfUniqueItems := int(binary.BigEndian.Uint16(b[storageEnodingLengthOfNumOfElements:]))
 	var addHashID uint32
 	found := false
 
-	var elemStart int
+	elemStart := storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict
 	//todo[boris] here should be binary search
 	for i := 0; i < numOfUniqueItems; i++ {
-		elemStart = storageEnodingLengthOfNumOfElements + storageEnodingLengthOfDict + i*common.HashLength
 		if bytes.Equal(addrHash, b[elemStart:elemStart+common.HashLength]) {
 			found = true
 			addHashID = uint32(i)
 			break
 		}
+		elemStart += common.HashLength
 	}
 	if !found {
+		fmt.Printf("did not find addrHash %x\n", addrHash)
 		return nil, ErrNotFound
 	}
 

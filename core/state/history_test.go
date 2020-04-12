@@ -324,7 +324,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 			resultHash := common.BytesToHash(res)
 			if resultHash != v {
-				t.Fatal("incorrect storage history for ", addrHash.String(), v, resultHash)
+				t.Fatalf("incorrect storage history for %x %x %x", addrHash.String(), v, resultHash)
 			}
 		}
 	}
