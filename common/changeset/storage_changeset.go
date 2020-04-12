@@ -17,7 +17,6 @@ const (
 	storageEnodingLengthOfNumOfElements     = 4
 	storageEnodingLengthOfDict              = 2
 	storageEnodingLengthOfNumTypeOfElements = 2
-	storageEnodingLengthOfIncarnationKey    = 4
 )
 
 var ErrNotFound = errors.New("not found")
@@ -186,7 +185,7 @@ func DecodeStorage(b []byte) (*ChangeSet, error) {
 
 	lenOfValsPos := storageEnodingStartElem +
 		2 + dictLen*common.HashLength +
-		numOfElements*(getNumOfBytesByLen(int(dictLen))+common.HashLength)
+		numOfElements*(getNumOfBytesByLen(dictLen)+common.HashLength)
 
 	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos : lenOfValsPos+2]))
 	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+2 : lenOfValsPos+4]))
@@ -334,21 +333,6 @@ func getUint32(row []byte) uint32 {
 	}
 }
 
-func readFromMap(m map[uint32]common.Hash, row []byte) common.Hash {
-	switch len(row) {
-	case 1:
-		return m[uint32(row[0])]
-	case 2:
-		return m[uint32(binary.BigEndian.Uint16(row))]
-	case 4:
-		return m[binary.BigEndian.Uint32(row)]
-	case 8:
-		return m[uint32(binary.BigEndian.Uint64(row))]
-	default:
-		panic("wrong")
-	}
-}
-
 type StorageChangeSetBytes []byte
 
 func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
@@ -399,7 +383,7 @@ func (b StorageChangeSetBytes) Walk(f func(k, v []byte) error) error {
 	}
 
 	key := make([]byte, common.HashLength*2+common.IncarnationLength)
-	elemLength := getNumOfBytesByLen(int(numOfUniqueItems))
+	elemLength := getNumOfBytesByLen(numOfUniqueItems)
 	for i := 0; i < numOfItems; i++ {
 		elemStart := storageEnodingStartElem +
 			storageEnodingLengthOfDict +
@@ -460,7 +444,7 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 	lenOfValsPos := storageEnodingStartElem +
 		storageEnodingLengthOfDict +
 		numOfUniqueItems*common.HashLength +
-		numOfItems*(getNumOfBytesByLen(int(numOfUniqueItems))+common.HashLength)
+		numOfItems*(getNumOfBytesByLen(numOfUniqueItems)+common.HashLength)
 
 	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements]))
 	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2]))
@@ -470,7 +454,7 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 	valuesPos := lenOfValsPos + numOfUint8 + numOfUint16*2 + numOfUint32*4
 
 	//here should be binary search too
-	elemLength := getNumOfBytesByLen(int(numOfUniqueItems))
+	elemLength := getNumOfBytesByLen(numOfUniqueItems)
 	encodedAddHashID := make([]byte, elemLength)
 	writeKeyRow(addHashID, encodedAddHashID)
 	for i := 0; i < numOfItems; i++ {
