@@ -257,39 +257,37 @@ func calculateIncarnationPos3(b []byte, numOfUint8, numOfUint16, numOfUint32 int
 }
 
 func findVal(lenOfVals []byte, values []byte, i int, numOfUint8, numOfUint16, numOfUint32 int) []byte {
-	lenOfValStart := uint32(0)
-	lenOfValEnd := uint32(0)
+	lenOfValStart := 0
+	lenOfValEnd := 0
 	switch {
 	case i < numOfUint8:
-		lenOfValEnd = uint32(lenOfVals[i])
+		lenOfValEnd = int(lenOfVals[i])
 		if i > 0 {
-			lenOfValStart = uint32(lenOfVals[i-1])
+			lenOfValStart = int(lenOfVals[i-1])
 		}
-		return common.CopyBytes(values[lenOfValStart:lenOfValEnd])
 	case i < numOfUint8+numOfUint16:
-		one := i*2 - numOfUint8
-		lenOfValEnd = uint32(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+		one := (i-numOfUint8)*2 + numOfUint8
+		lenOfValEnd = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
 		if i-1 < numOfUint8 {
-			lenOfValStart = uint32(lenOfVals[i-1])
+			lenOfValStart = int(lenOfVals[i-1])
 		} else {
 			one = (i-1)*2 - numOfUint8
-			lenOfValStart = uint32(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+			lenOfValStart = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
 		}
-		return common.CopyBytes(values[lenOfValStart:lenOfValEnd])
 	case i < numOfUint8+numOfUint16+numOfUint32:
 		one := numOfUint8 + numOfUint16*2 + (i-numOfUint8-numOfUint16)*4
-		lenOfValEnd = binary.BigEndian.Uint32(lenOfVals[one : one+4])
+		lenOfValEnd = int(binary.BigEndian.Uint32(lenOfVals[one : one+4]))
 		if i-1 < numOfUint8+numOfUint16 {
 			one = (i-1)*2 - numOfUint8
-			lenOfValStart = uint32(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
+			lenOfValStart = int(binary.BigEndian.Uint16(lenOfVals[one : one+2]))
 		} else {
-			one := numOfUint8 + numOfUint16*2 + (i-1-numOfUint8-numOfUint16)*4
-			lenOfValStart = binary.BigEndian.Uint32(lenOfVals[one : one+4])
+			one = numOfUint8 + numOfUint16*2 + (i-1-numOfUint8-numOfUint16)*4
+			lenOfValStart = int(binary.BigEndian.Uint32(lenOfVals[one : one+4]))
 		}
-		return common.CopyBytes(values[lenOfValStart:lenOfValEnd])
 	default:
 		panic("findval err")
 	}
+	return common.CopyBytes(values[lenOfValStart:lenOfValEnd])
 }
 
 func writeKeyRow(id uint32, row []byte) {
@@ -431,20 +429,20 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 		return nil, ErrNotFound
 	}
 
+	elemLength := getNumOfBytesByLen(numOfUniqueItems)
 	lenOfValsPos := storageEnodingStartElem +
 		storageEnodingLengthOfDict +
 		numOfUniqueItems*common.HashLength +
-		numOfItems*(getNumOfBytesByLen(numOfUniqueItems)+common.HashLength)
+		numOfItems*(elemLength+common.HashLength)
 
-	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements]))
-	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2]))
-	numOfUint32 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2 : lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*3]))
+	numOfUint8 := int(binary.BigEndian.Uint16(b[lenOfValsPos:]))
+	numOfUint16 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements:]))
+	numOfUint32 := int(binary.BigEndian.Uint16(b[lenOfValsPos+storageEnodingLengthOfNumTypeOfElements*2:]))
 
 	lenOfValsPos += storageEnodingLengthOfNumTypeOfElements * 3
 	valuesPos := lenOfValsPos + numOfUint8 + numOfUint16*2 + numOfUint32*4
 
 	//here should be binary search too
-	elemLength := getNumOfBytesByLen(numOfUniqueItems)
 	encodedAddHashID := make([]byte, elemLength)
 	writeKeyRow(addHashID, encodedAddHashID)
 	for i := 0; i < numOfItems; i++ {
