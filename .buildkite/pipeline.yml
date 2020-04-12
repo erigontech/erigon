@@ -1,6 +1,6 @@
 ---
 steps:
-  - command: 'make geth'
+  - command: 'make geth && chmod -R a+rwx $GOPATH'
     label: "build geth"
     env:
       BUILDKITE_GOLANG_IMPORT_PATH: "github.com/ledgerwatch/turbo-geth"
