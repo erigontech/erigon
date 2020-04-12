@@ -1734,6 +1734,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 		}
 	}
 	cache := &core.CacheConfig{
+		Disabled:            true, // no pruning for auxiliary commands
 		TrieCleanLimit:      eth.DefaultConfig.TrieCleanCache,
 		TrieCleanNoPrefetch: ctx.GlobalBool(CacheNoPrefetchFlag.Name),
 		TrieDirtyLimit:      eth.DefaultConfig.TrieDirtyCache,
