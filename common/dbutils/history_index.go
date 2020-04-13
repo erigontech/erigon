@@ -163,9 +163,8 @@ func (hi HistoryIndexBytes) FirstElement() (uint64, bool) {
 	return binary.LittleEndian.Uint64(hi[2*LenBytes : 2*LenBytes+8]), true
 }
 
-
-func IndexChunkKey(key []byte, blockNumber uint64) ([]byte) {
-	blockNumBytes := make([]byte, len(key)+ 8)
+func IndexChunkKey(key []byte, blockNumber uint64) []byte {
+	blockNumBytes := make([]byte, len(key)+8)
 	binary.BigEndian.PutUint64(blockNumBytes[len(key):], ^(blockNumber))
 	copy(blockNumBytes[:len(key)], key)
 	return blockNumBytes

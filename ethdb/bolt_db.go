@@ -20,7 +20,6 @@ package ethdb
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"path"
 
@@ -183,7 +182,7 @@ func (db *BoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]b
 	err := db.db.View(func(tx *bolt.Tx) error {
 		b := tx.Bucket(bucket)
 		if b != nil {
-			c:=b.Cursor()
+			c := b.Cursor()
 			k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 			if bytes.HasPrefix(k, key) {
 				if v != nil {
@@ -230,6 +229,7 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 	err := db.db.View(func(tx *bolt.Tx) error {
 		if debug.IsThinHistory() {
 			v, err := BoltDBFindByHistory(tx, hBucket, key, timestamp)
+
 			if err != nil {
 				log.Debug("BoltDB BoltDBFindByHistory err", "err", err)
 			} else {
@@ -648,8 +648,8 @@ func (db *BoltDatabase) AbstractKV() KV {
 
 func (db *BoltDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:                      db,
-		puts:                    newPuts(),
+		db:   db,
+		puts: newPuts(),
 	}
 	return m
 }
@@ -692,11 +692,14 @@ func BoltDBFindByHistory(tx *bolt.Tx, hBucket []byte, key []byte, timestamp uint
 		return nil, ErrKeyNotFound
 	}
 
-	k,v:=hB.Cursor().Seek(dbutils.IndexChunkKey(key, timestamp))
-	if !bytes.HasPrefix(k, key[:len(key)-8]) {
-		return nil, ErrKeyNotFound
+	c := hB.Cursor()
+	k, v := c.Seek(dbutils.IndexChunkKey(key, timestamp))
+	if !bytes.HasPrefix(k, key) {
+		k, v = c.Prev()
+		if !bytes.HasPrefix(k, key) {
+			return nil, ErrKeyNotFound
+		}
 	}
-	fmt.Println(k, v, timestamp)
 	index := dbutils.WrapHistoryIndex(v)
 
 	changeSetBlock, ok := index.Search(timestamp)

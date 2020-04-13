@@ -106,14 +106,14 @@ func (db *RemoteBoltDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64
 			return fmt.Errorf("bucket not found, %s", bucket)
 		}
 
-		c:=b.Cursor()
+		c := b.Cursor()
 
-		k,v,err:=c.Seek(dbutils.IndexChunkKey(key, timestamp))
+		k, v, err := c.Seek(dbutils.IndexChunkKey(key, timestamp))
 		if err != nil {
 			return fmt.Errorf("%w. bucket: %s, key: %s", err, bucket, key)
 		}
 
-		if bytes.HasPrefix(k, key) && v!=nil {
+		if bytes.HasPrefix(k, key) && v != nil {
 			dat = make([]byte, len(v))
 			copy(dat, v)
 		}

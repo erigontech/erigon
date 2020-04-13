@@ -7,16 +7,14 @@ import (
 	"sort"
 )
 
-
 type puts struct {
-	mp map[string]putsBucket //map[bucket]putsBucket
-	chunkIDs map[string][]uint64 //map[key_of_chunk_without_id]chunkIDs
+	mp       map[string]putsBucket //map[bucket]putsBucket
+	chunkIDs map[string][]uint64   //map[key_of_chunk_without_id]chunkIDs
 }
-
 
 func newPuts() puts {
 	return puts{
-		mp:make(map[string]putsBucket),
+		mp:       make(map[string]putsBucket),
 		chunkIDs: make(map[string][]uint64),
 	}
 }
@@ -31,7 +29,7 @@ func (p puts) set(bucket, key, value []byte) {
 	if debug.IsThinHistory() && dbutils.IsIndexBucket(bucket) {
 		//keyWithoutID, chunkID:=keyAndChunkID(key)
 		//v,err:=p.ChunkByIDOrLast(bucket, keyWithoutID, chunkID)
-		keyWithoutID, ID:=keyAndChunkID(key)
+		keyWithoutID, ID := keyAndChunkID(key)
 		p.addChunkID(keyWithoutID, ID)
 	}
 
@@ -59,16 +57,15 @@ func (p puts) Size() int {
 	return size
 }
 
-
-func (p puts) ChunkByIDOrLast(bucket, key []byte, timestamp uint64) ([]byte,error)  {
-	chunkIDs,ok:=p.chunkIDs[string(key)]
+func (p puts) ChunkByIDOrLast(bucket, key []byte, timestamp uint64) ([]byte, error) {
+	chunkIDs, ok := p.chunkIDs[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
 	}
 
-	for _,chunk:=range chunkIDs {
+	for _, chunk := range chunkIDs {
 		if timestamp == chunk {
-			index,ok:=p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
+			index, ok := p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
 			if !ok {
 				return nil, errors.New("incorrect mapping")
 			}
@@ -78,7 +75,7 @@ func (p puts) ChunkByIDOrLast(bucket, key []byte, timestamp uint64) ([]byte,erro
 
 	//inverted
 	if timestamp > chunkIDs[len(chunkIDs)-1] {
-		index,ok:=p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
+		index, ok := p.get(bucket, dbutils.IndexChunkKey(key, chunkIDs[len(chunkIDs)-1]))
 		if !ok {
 			return nil, errors.New("incorrect mapping")
 		}
@@ -89,15 +86,14 @@ func (p puts) ChunkByIDOrLast(bucket, key []byte, timestamp uint64) ([]byte,erro
 	return nil, ErrKeyNotFound
 }
 
-
 //key without blockNumber
-func (p puts) Put(mp putsBucket, key []byte, index *dbutils.HistoryIndexBytes) error   {
-	indexKey,err:=index.Key(key)
-	if err!=nil {
+func (p puts) Put(mp putsBucket, key []byte, index *dbutils.HistoryIndexBytes) error {
+	indexKey, err := index.Key(key)
+	if err != nil {
 		return err
 	}
 
-	ID, ok:=index.FirstElement()
+	ID, ok := index.FirstElement()
 	if !ok {
 		return errors.New("incorrect index")
 	}
@@ -109,13 +105,13 @@ func (p puts) Put(mp putsBucket, key []byte, index *dbutils.HistoryIndexBytes) e
 }
 
 func (p puts) addChunkID(key []byte, id uint64) {
-	chunkIDs,ok:=p.chunkIDs[string(key)]
+	chunkIDs, ok := p.chunkIDs[string(key)]
 	if !ok {
 		p.chunkIDs[string(key)] = []uint64{id}
 		return
 	}
 
-	for _, v:=range chunkIDs {
+	for _, v := range chunkIDs {
 		if v == id {
 			return
 		}
@@ -123,14 +119,11 @@ func (p puts) addChunkID(key []byte, id uint64) {
 
 	chunkIDs = append(chunkIDs, id)
 	sort.Slice(chunkIDs, func(i, j int) bool {
-		return chunkIDs[i]<chunkIDs[j]
+		return chunkIDs[i] < chunkIDs[j]
 	})
 
 	p.chunkIDs[string(key)] = chunkIDs
 }
-
-
-
 
 type putsBucket map[string][]byte //map[key]value
 

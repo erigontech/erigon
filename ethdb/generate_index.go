@@ -16,7 +16,7 @@ type ChangesetWalker interface {
 
 func FindProperIndexChunk(db Database, bucket []byte, key []byte, blockNum uint64) (*dbutils.HistoryIndexBytes, error) {
 	indexBytes, err := db.GetIndexChunk(bucket, key, blockNum)
-	if err==ErrKeyNotFound {
+	if err == ErrKeyNotFound {
 		return dbutils.NewHistoryIndex(), nil
 	}
 	if err != nil {
@@ -26,19 +26,18 @@ func FindProperIndexChunk(db Database, bucket []byte, key []byte, blockNum uint6
 	return dbutils.WrapHistoryIndex(indexBytes), nil
 }
 
-func keyWithoutChunkID(key []byte) ([]byte)  {
-	if len(key) == common.HashLength || len(key) == common.HashLength*2 + common.IncarnationLength {
+func keyWithoutChunkID(key []byte) []byte {
+	if len(key) == common.HashLength || len(key) == common.HashLength*2+common.IncarnationLength {
 		return key[:len(key)-8]
 	}
 	panic(common.Bytes2Hex(key))
 }
-func keyAndChunkID(key []byte) ([]byte, uint64)  {
-	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2 + common.IncarnationLength +8 {
+func keyAndChunkID(key []byte) ([]byte, uint64) {
+	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+common.IncarnationLength+8 {
 		return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
 	}
 	panic(common.Bytes2Hex(key))
 }
-
 
 const maxChunkSize = 1000
 
@@ -57,7 +56,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		if !ok || len(indexes) == 0 {
 			var index *dbutils.HistoryIndexBytes
 
-			index, err:=FindProperIndexChunk(ig.db,ig.bucketToWrite, k, blockNum)
+			index, err := FindProperIndexChunk(ig.db, ig.bucketToWrite, k, blockNum)
 			if err != nil {
 				return err
 			}

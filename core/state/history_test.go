@@ -59,12 +59,12 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		t.FailNow()
 	}
 	if debug.IsThinHistory() {
-		indexBytes, err:=db.GetIndexChunk(dbutils.AccountsHistoryBucket,  addrHashes[0].Bytes(), 1)
-		if err != nil {
+		indexBytes, innerErr := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes(), 1)
+		if innerErr != nil {
 			t.Fatal(err)
 		}
 
-		index:=dbutils.WrapHistoryIndex(indexBytes)
+		index := dbutils.WrapHistoryIndex(indexBytes)
 
 		parsed, innerErr := index.Decode()
 		if innerErr != nil {
@@ -289,12 +289,12 @@ func TestMutationCommitThinHistory(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		indexBytes,err:=db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
+		indexBytes, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), 2)
 		if err != nil {
 			t.Fatal("error on get account", i, err)
 		}
 
-		index:=dbutils.WrapHistoryIndex(indexBytes)
+		index := dbutils.WrapHistoryIndex(indexBytes)
 		parsedIndex, err := index.Decode()
 		if err != nil {
 			t.Fatal("error on get account", i, err)

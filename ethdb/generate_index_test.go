@@ -128,11 +128,11 @@ func TestCheckIndexes(t *testing.T) {
 	err = db.Walk(dbutils.AccountChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		blockNum, _ := dbutils.DecodeTimestamp(k)
 		fmt.Println("process", blockNum, string(k))
-		err := changeset.AccountChangeSetBytes(v).Walk(func(key, val []byte) error {
+		err = changeset.AccountChangeSetBytes(v).Walk(func(key, val []byte) error {
 			b := make([]byte, 8)
 			binary.BigEndian.PutUint64(b, ^(blockNum))
 			find := append(common.CopyBytes(key), b...)
-			err := db.Walk(aib, find, 32, func(kk []byte, vv []byte) (b bool, e error) {
+			err = db.Walk(aib, find, 32, func(kk []byte, vv []byte) (b bool, e error) {
 				index := dbutils.WrapHistoryIndex(common.CopyBytes(vv))
 				if findVal, ok := index.Search(blockNum); ok == false {
 					t.Error(blockNum, findVal, common.Bytes2Hex(find))
@@ -509,12 +509,12 @@ func TestName2(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	db.Walk(bucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+	db.Walk(bucket, []byte{}, 0, func(k, v []byte) (b bool, e error) { //nolint
 		fmt.Println(string(k), k[3], v)
 		return true, nil
 	})
 	fmt.Println("-------------------------------")
-	db.db.View(func(tx *bolt.Tx) error {
+	db.db.View(func(tx *bolt.Tx) error { // nolint
 		b := tx.Bucket(bucket)
 		c := b.Cursor()
 		k, v := c.Seek(append(key, ^uint8(11)))
@@ -523,7 +523,7 @@ func TestName2(t *testing.T) {
 	})
 	fmt.Println("-------------------------------")
 
-	db.Walk(bucket, append(key, ^uint8(11)), 0, func(k, v []byte) (b bool, e error) {
+	db.Walk(bucket, append(key, ^uint8(11)), 0, func(k, v []byte) (b bool, e error) {  //nolint
 		fmt.Println(string(k), k[3], v)
 		return false, nil
 	})
@@ -685,37 +685,5 @@ func generateSTIndexesDB() {
 			fmt.Println("Accont changeset finished")
 			break
 		}
-	}
-}
-
-func TestIndexMapper(t *testing.T) {
-	im:=indexMapper{
-		cache:    make(map[string]*dbutils.HistoryIndexBytes),
-		chunkIDs: make(map[string][]uint64),
-	}
-
-	key:=[]byte("some key")
-	if err:=im.Put(key,dbutils.NewHistoryIndex().Append(1)); err!=nil {
-		t.Fatal(1, err)
-	}
-	index,err:=im.LastChunk(key)
-	if err!=nil {
-		t.Fatal(err)
-	}
-	if v,ok:= index.FirstElement(); !ok || v!=1 {
-		t.Fatal(v, ok,im)
-	}
-
-	if err:=im.Put(key,dbutils.NewHistoryIndex().Append(2)); err!=nil {
-		t.Fatal(2, err)
-	}
-
-	index,err=im.LastChunk(key)
-	if err!=nil {
-		t.Fatal(err)
-	}
-
-	if v,ok:= index.FirstElement(); !ok || v!=2 {
-		t.Fatal(v, ok, im)
 	}
 }

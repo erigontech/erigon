@@ -161,7 +161,7 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println(dsw.tds.blockNr,"accountChanges",accountChanges)
+
 	if debug.IsThinHistory() {
 		err = dsw.writeIndex(accountChanges, dbutils.AccountsHistoryBucket)
 		if err != nil {
@@ -197,19 +197,18 @@ func (dsw *DbStateWriter) WriteHistory() error {
 
 func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte) error {
 	for _, change := range changes.Changes {
-		indexBytes,err:=dsw.tds.db.GetIndexChunk(bucket, change.Key, dsw.tds.blockNr)
-		if err != nil && err!=ethdb.ErrKeyNotFound{
-			return fmt.Errorf("Find chunk failed: %w", err)
+		indexBytes, err := dsw.tds.db.GetIndexChunk(bucket, change.Key, dsw.tds.blockNr)
+		if err != nil && err != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("find chunk failed: %w", err)
 		}
-		fmt.Println("dsw.tds.db.GetIndexChunk", indexBytes)
-		index:=dbutils.WrapHistoryIndex(indexBytes)
 
+		index := dbutils.WrapHistoryIndex(indexBytes)
 		index.Append(dsw.tds.blockNr)
-		indexKey, err:=index.Key(change.Key)
-		if err!=nil {
+		indexKey, err := index.Key(change.Key)
+		if err != nil {
 			return err
 		}
-		fmt.Println("writeIndex", common.Bytes2Hex(indexKey), *index)
+
 		if err := dsw.tds.db.Put(bucket, indexKey, *index); err != nil {
 			return err
 		}

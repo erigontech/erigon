@@ -10,11 +10,10 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 )
 
-
 type mutation struct {
 	puts puts // Map buckets to map[key]value
-	mu                      sync.RWMutex
-	db                      Database
+	mu   sync.RWMutex
+	db   Database
 }
 
 func (m *mutation) KV() *bolt.DB {
@@ -62,12 +61,11 @@ func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, 
 	defer m.mu.RUnlock()
 
 	//inverce incarnation
-	indexBytes, err:=m.puts.ChunkByIDOrLast(bucket, key, timestamp)
-	fmt.Println("mutation) GetIndexChunk",common.Bytes2Hex(key), timestamp, indexBytes)
-	if err!=nil && err!=ErrKeyNotFound {
+	indexBytes, err := m.puts.ChunkByIDOrLast(bucket, key, timestamp)
+	if err != nil && err != ErrKeyNotFound {
 		return nil, err
 	}
-	if len(indexBytes)>0 {
+	if len(indexBytes) > 0 {
 		return indexBytes, nil
 	}
 
@@ -223,8 +221,8 @@ func (m *mutation) Close() {
 
 func (m *mutation) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:                      m,
-		puts:                    newPuts(),
+		db:   m,
+		puts: newPuts(),
 	}
 	return mm
 }
@@ -268,17 +266,17 @@ type RWCounterDecorator struct {
 }
 
 type DBCounterStats struct {
-	Put             uint64
-	Get             uint64
-	GetS            uint64
-	GetAsOf         uint64
-	Has             uint64
-	Walk            uint64
-	WalkAsOf        uint64
-	MultiWalk       uint64
-	MultiWalkAsOf   uint64
-	Delete          uint64
-	MultiPut        uint64
+	Put           uint64
+	Get           uint64
+	GetS          uint64
+	GetAsOf       uint64
+	Has           uint64
+	Walk          uint64
+	WalkAsOf      uint64
+	MultiWalk     uint64
+	MultiWalkAsOf uint64
+	Delete        uint64
+	MultiPut      uint64
 }
 
 func (d *RWCounterDecorator) Put(bucket, key, value []byte) error {
@@ -328,8 +326,8 @@ func (d *RWCounterDecorator) MemCopy() Database {
 }
 func (d *RWCounterDecorator) NewBatch() DbWithPendingMutations {
 	mm := &mutation{
-		db:                      d,
-		puts:                    newPuts(),
+		db:   d,
+		puts: newPuts(),
 	}
 	return mm
 }
