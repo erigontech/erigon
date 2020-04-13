@@ -141,9 +141,11 @@ func SetupCobra(cmd *cobra.Command) error {
 	if err != nil {
 		return err
 	}
-	err = glogger.BacktraceAt(backtrace)
-	if err != nil {
-		return err
+	if backtrace != "" {
+		err = glogger.BacktraceAt(backtrace)
+		if err != nil {
+			return err
+		}
 	}
 	log.Root().SetHandler(glogger)
 
