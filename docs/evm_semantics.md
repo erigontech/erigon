@@ -2,19 +2,19 @@ Corresponding code is in the folder `semantics`.
 
 ## EVM without opcodes (Ether transfers only)
 We start with looking at a very restricted version of EVM, having no opcodes. That means only Ether transfers are possible.
-Even that simingly simple case already has a relatively complex semantics.
+Even that seemingly simple case already has a relatively complex semantics.
 
-First, we would like to define that kind semantics we are looking for. Ethereum is a state machine, which has a global state, and
+First, we would like to define what kind semantics we are looking for. Ethereum is a state machine, which has a global state, and
 transactions that trigger some state transition. There are also some state transitions that happen at the end of each block. These are
 related to miner and ommer rewards. The transition from one state to another is deterministic. Given the initial state, some extra
 environment (recent header hashes, current block number, timestamp of the current block), and the transaction object, there is only
-one possible end state of the transition, which is valid. For this reason, the state transitions are often described as a state
+one possible valid end state of the transition. For this reason, the state transitions are often described as a state
 transition function:
 
 `STATE_end = STATE_TR_FUNC(STATE_init, env, tx)`
 
 But this is not the only way to describe state transitions.
-And it is not always the most convinient. In our approach, we will instead describe state transitions as a set of boolean expressions.
+And it is not always the most convinient way. In our approach, we will instead describe state transitions as a set of boolean expressions.
 They are boolean in the sense that they can be evaluated to either `true` or `false`, but they can rely on variety of types.
 These expressions will only tell us whether certain combination of the initial state, environment, transaction object, and the end state,
 are all part of a valid state transition. However, they do not have a goal of helping us to determine (compute) the end state from
@@ -22,14 +22,14 @@ the initial state, environment, and the transaction object. So they look more li
 
 `EXPRESSION(STATE_init, env, tx, STATE_end) == true?`
 
-Moreover, this representation allows for some non determinsm, which means there could be some extra "oracle" input that helps the
+Moreover, this representation allows for some non determinsm, which means that there could be some extra "oracle" input that helps the
 evaluation:
 
 `EXPRESSION(STATE_init, env, tx, STATE_end, ORACLE_input) == true?`
 
-From our experience with EVM and Ethereum, we know that each transaction can normally be decomposed to series of intermediate transition.
+From our experience with EVM and Ethereum, we know that each transaction can normally be decomposed into series of intermediate transitions.
 These intermediate transitions could be various internal accounting steps of Ethereum (like purchasing gas for Ether, or gas refunds), or
-steps of EVM interpreter. In other words, it would decompose into something like this:
+steps of the EVM interpreter. In other words, the decomposion could look omething like this:
 
 `EXPRESSION_1(STATE_init, env, tx, STATE_1, ORACLE_input1) == E1`
 
@@ -60,7 +60,7 @@ Balance, nonce, and code length are integers. Code is an array of integers (one 
 Storage is also an array of integers. Since the length of the storage is not observable from within the EVM, we do not need
 to represent it.
 
-Transaction is a structure. The field which will be concerned with first is the sender. Although we are used to think of
+Transaction is a structure. The field which we will be concerned with first is the sender. Although we are used to think of
 sender as being an address, which is 20-byte string, for the purpose of semantic description, it will be an integer,
 usually quite large, in the range `[0..2^160)`. These integers are used as indices in the state array. Therefore,
 if `tx.sender` is the variable used for transaction sender, and `state` is the variable used for the state,
@@ -72,17 +72,17 @@ are satisfied:
 
 If these two conditions are satisfied, and we assume that the transaction made it into a block, the sender must
 "purchase" the gas. It is important to do it here, because once gas is purchased, it can only be given back after
-the transaction's full execution, either in the case of no error, or by running into opcode `REVERT` in the top
-most execution context. Therefore, at this point, the state needs to be modified to subtract the cost of the
-purchased gas. It is important, because during the execution, the balance of sender's account can be observed by
-the `BALANCE` opcode, and situations where subtraction was made and not made can be distinguished, and lead to
+the transaction's full execution, either in the case of no error, or by running into a `REVERT` opcode in the top-most
+execution context. Therefore, at this point, the state needs to be modified to subtract the cost of the
+purchased gas. It is important, because during the execution, the balance of the sender's account can be observed by
+a `BALANCE` opcode, and situations where subtraction was made and not made can be distinguished, and lead to
 different outcomes. In order to describe such state transition, we will use the notation of substitution rules
 (these can always be transformed into logical expressions). Our rules will consist of three parts: pattern,
 substitution, and guard.
 
 In the pattern, we describe the initial state of the transition. Pattern matching is a powerful resource, and it
 comes with these aspects:
-1. It allows matching part of a sequence while ignoring the rest of that sequence.
+1. It allows matching a part of a sequence while ignoring the rest of that sequence.
 2. It can match types, letting us avoid the type-reflection functions in the semantics.
 3. It can bind variables, to be used in the other two parts of the rule - substitution and guard.
 We hope that the destructuring aspect of pattern matching will not be required for our purposes.
@@ -90,8 +90,8 @@ We hope that the destructuring aspect of pattern matching will not be required f
 In the substitution, we describe how the part matched by the pattern in the initial state will look like
 in the end state. Substitution can use any variables bound by the pattern.
 
-The guard is a boolean expression. It contains at least one variable bound by the pattern, and specified the
+The guard is a boolean expression. It contains at least one variable bound by the pattern, and specifies the
 condition under which the entire rule is applicable. If the guard evaluates to `false`, and, consequently,
-the rule is not applicable, there can be another rule that is. Since EVM is deterministic by design, we expect
-that in a correct semantics, at most one rule is applicable in any given configuration.
+the rule is not applicable, there can be another rule that is applicable. Since EVM is deterministic by design,
+we expect that in a correct semantics, at most one rule is applicable in any given configuration.
 
