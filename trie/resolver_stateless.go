@@ -3,6 +3,13 @@ package trie
 import (
 	"bytes"
 	"io"
+	"time"
+
+	"github.com/ledgerwatch/turbo-geth/metrics"
+)
+
+var (
+	trieResolveStatelessTimer = metrics.NewRegisteredTimer("trie/resolve/stateless", nil)
 )
 
 type ResolverStateless struct {
@@ -18,6 +25,8 @@ func NewResolverStateless(requests []*ResolveRequest, hookFunction hookFunction)
 }
 
 func (r *ResolverStateless) RebuildTrie(db WitnessStorage, blockNr uint64, trieLimit uint32, startPos int64) (int64, error) {
+	defer trieResolveStatelessTimer.UpdateSince(time.Now())
+
 	serializedWitness, err := db.GetWitnessesForBlock(blockNr, trieLimit)
 	if err != nil {
 		return 0, err

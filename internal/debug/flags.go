@@ -25,13 +25,15 @@ import (
 	"os/signal"
 	"runtime"
 	"syscall"
+	"time"
 
+	"github.com/fjl/memsize/memsizeui"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ledgerwatch/turbo-geth/metrics/exp"
-	"github.com/fjl/memsize/memsizeui"
 	colorable "github.com/mattn/go-colorable"
 	"github.com/mattn/go-isatty"
+	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
 
@@ -110,6 +112,102 @@ func init() {
 	}
 	ostream = log.StreamHandler(output, log.TerminalFormat(usecolor))
 	glogger = log.NewGlogHandler(ostream)
+}
+
+func SetupCobra(cmd *cobra.Command) error {
+	flags := cmd.Flags()
+	dbg, err := flags.GetBool(debugFlag.Name)
+	if err != nil {
+		return err
+	}
+	lvl, err := flags.GetInt(verbosityFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	vmodule, err := flags.GetString(vmoduleFlag.Name)
+	if err != nil {
+		return err
+	}
+	backtrace, err := flags.GetString(backtraceAtFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	// logging
+	log.PrintOrigins(dbg)
+	glogger.Verbosity(log.Lvl(lvl))
+	err = glogger.Vmodule(vmodule)
+	if err != nil {
+		return err
+	}
+	if backtrace != "" {
+		err = glogger.BacktraceAt(backtrace)
+		if err != nil {
+			return err
+		}
+	}
+	log.Root().SetHandler(glogger)
+
+	memprofilerate, err := flags.GetInt(memprofilerateFlag.Name)
+	if err != nil {
+		return err
+	}
+	blockprofilerate, err := flags.GetInt(blockprofilerateFlag.Name)
+	if err != nil {
+		return err
+	}
+	traceFile, err := flags.GetString(traceFlag.Name)
+	if err != nil {
+		return err
+	}
+	cpuFile, err := flags.GetString(cpuprofileFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	// profiling, tracing
+	runtime.MemProfileRate = memprofilerate
+	Handler.SetBlockProfileRate(blockprofilerate)
+	if traceFile != "" {
+		if err2 := Handler.StartGoTrace(traceFile); err2 != nil {
+			return err2
+		}
+	}
+	if cpuFile != "" {
+		if err2 := Handler.StartCPUProfile(cpuFile); err2 != nil {
+			return err2
+		}
+	}
+
+	go func() {
+		c := make(chan os.Signal, 1)
+		signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
+		<-c
+		Exit()
+	}()
+	pprof, err := flags.GetBool(pprofFlag.Name)
+	if err != nil {
+		return err
+	}
+	pprofAddr, err := flags.GetString(pprofAddrFlag.Name)
+	if err != nil {
+		return err
+	}
+	pprofPort, err := flags.GetInt(pprofPortFlag.Name)
+	if err != nil {
+		return err
+	}
+
+	// pprof server
+	if pprof {
+		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort))
+	}
+
+	// Start system runtime metrics collection
+	go metrics.CollectProcessMetrics(3 * time.Second)
+
+	return nil
 }
 
 // Setup initializes profiling and logging based on the CLI flags.

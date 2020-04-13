@@ -21,7 +21,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
 	"github.com/ledgerwatch/turbo-geth/ethdb/remote/remotechain"
 	"github.com/ledgerwatch/turbo-geth/ethdb/typedbucket"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -50,7 +49,7 @@ const (
 	PrintProgressEvery = 100_000
 	CommitEvery        = 100_000
 	MaxIterationsPerTx = 10_000_000
-	CursorBatchSize    = uint64(10_000)
+	CursorBatchSize    = uint(10_000)
 )
 
 func check(e error) {
@@ -156,10 +155,10 @@ type StateGrowth1Reporter struct {
 	lastTimestamps *typedbucket.Uint64 `codec:"-"`
 	commit         func(ctx context.Context)
 	rollback       func(ctx context.Context)
-	remoteDb       *remote.DB `codec:"-"`
+	remoteDB       ethdb.KV `codec:"-"`
 }
 
-func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth1Reporter {
+func NewStateGrowth1Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth1Reporter {
 	var LastTimestampsBucket = []byte("sg1_accounts_last_timestamps")
 	var ProgressKey = []byte("state_growth_1")
 
@@ -167,7 +166,7 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	var localTx *bolt.Tx
 	var lastTimestamps *bolt.Bucket
 
-	if localTx, err = localDb.Begin(true); err != nil {
+	if localTx, err = localDB.Begin(true); err != nil {
 		panic(err)
 	}
 
@@ -176,7 +175,7 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	}
 
 	rep := &StateGrowth1Reporter{
-		remoteDb:         remoteDb,
+		remoteDB:         remoteDB,
 		HistoryKey:       []byte{},
 		AccountKey:       []byte{},
 		MaxTimestamp:     0,
@@ -188,7 +187,7 @@ func NewStateGrowth1Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
-		localTx, err = localDb.Begin(true)
+		localTx, err = localDB.Begin(true)
 		if err != nil {
 			panic(err)
 		}
@@ -230,7 +229,7 @@ func (r *StateGrowth1Reporter) StateGrowth1(ctx context.Context) {
 
 beginTx:
 	// Go through the history of account first
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
@@ -239,16 +238,13 @@ beginTx:
 			}
 		}
 
-		b := tx.Bucket(dbutils.AccountsHistoryBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
+		c := tx.Bucket(dbutils.AccountsHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
 
-		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
+		for k, vSize, err := c.Seek(r.HistoryKey); k != nil || err != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
 			}
+			vIsEmpty := vSize == 0
 			i++
 			r.HistoryKey = k
 			if r.interrupt(ctx, i, startTime) {
@@ -293,18 +289,13 @@ beginTx:
 
 beginTx2:
 	// Go through the current state
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		pre := tx.Bucket(dbutils.PreimagePrefix)
 		if pre == nil {
 			return nil
 		}
-		b := tx.Bucket(dbutils.AccountsBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-
-		for k, _, err := c.SeekKey(r.AccountKey); k != nil || err != nil; k, _, err = c.NextKey() {
+		c := tx.Bucket(dbutils.AccountsBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		for k, _, err := c.Seek(r.AccountKey); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -379,12 +370,12 @@ type StateGrowth2Reporter struct {
 	// For each address hash, when was it last accounted
 	creationsByBlock *typedbucket.Int `codec:"-"`
 
-	remoteDb *remote.DB `codec:"-"`
+	remoteDB ethdb.KV `codec:"-"`
 	commit   func(ctx context.Context)
 	rollback func(ctx context.Context)
 }
 
-func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *StateGrowth2Reporter {
+func NewStateGrowth2Reporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *StateGrowth2Reporter {
 	var LastTimestampsBucket = []byte("sg2_accounts_last_timestamps")
 	var CreationsByBlockBucket = []byte("sg2_creations_by_block")
 	var ProgressKey = []byte("state_growth_2")
@@ -394,7 +385,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	var lastTimestamps *bolt.Bucket
 	var creationsByBlock *bolt.Bucket
 
-	if localTx, err = localDb.Begin(true); err != nil {
+	if localTx, err = localDB.Begin(true); err != nil {
 		panic(err)
 	}
 
@@ -407,7 +398,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 	}
 
 	rep := &StateGrowth2Reporter{
-		remoteDb:         remoteDb,
+		remoteDB:         remoteDB,
 		HistoryKey:       []byte{},
 		StorageKey:       []byte{},
 		MaxTimestamp:     0,
@@ -419,7 +410,7 @@ func NewStateGrowth2Reporter(ctx context.Context, remoteDb *remote.DB, localDb *
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDb.Begin(true); err != nil {
+		if localTx, err = localDB.Begin(true); err != nil {
 			panic(err)
 		}
 
@@ -461,7 +452,7 @@ func (r *StateGrowth2Reporter) StateGrowth2(ctx context.Context) {
 
 beginTx:
 	// Go through the history of account first
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
@@ -470,16 +461,12 @@ beginTx:
 			}
 		}
 
-		b := tx.Bucket(dbutils.StorageHistoryBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-
-		for k, vIsEmpty, err := c.SeekKey(r.HistoryKey); k != nil || err != nil; k, vIsEmpty, err = c.NextKey() {
+		c := tx.Bucket(dbutils.StorageHistoryBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		for k, vSize, err := c.Seek(r.HistoryKey); k != nil || err != nil; k, vSize, err = c.Next() {
 			if err != nil {
 				return err
 			}
+			vIsEmpty := vSize == 0
 			r.HistoryKey = k
 			i++
 			if r.interrupt(ctx, i, startTime) {
@@ -529,13 +516,9 @@ beginTx:
 
 beginTx2:
 	// Go through the current state
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-		for k, _, err := c.SeekKey(r.StorageKey); k != nil || err != nil; k, _, err = c.NextKey() {
+	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
+		c := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		for k, _, err := c.Seek(r.StorageKey); k != nil || err != nil; k, _, err = c.Next() {
 			if err != nil {
 				return err
 			}
@@ -616,7 +599,7 @@ beginTx2:
 }
 
 type GasLimitReporter struct {
-	remoteDb               *remote.DB `codec:"-"`
+	remoteDB               ethdb.KV `codec:"-"`
 	StartedWhenBlockNumber uint64
 	HeaderPrefixKey1       []byte
 	HeaderPrefixKey2       []byte
@@ -628,7 +611,7 @@ type GasLimitReporter struct {
 	rollback func(ctx context.Context)
 }
 
-func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt.DB) *GasLimitReporter {
+func NewGasLimitReporter(ctx context.Context, remoteDB ethdb.KV, localDB *bolt.DB) *GasLimitReporter {
 	var MainHashesBucket = []byte("gl_main_hashes")
 	var ProgressKey = []byte("gas_limit")
 
@@ -636,7 +619,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 	var localTx *bolt.Tx
 	var mainHashes *bolt.Bucket
 
-	if localTx, err = localDb.Begin(true); err != nil {
+	if localTx, err = localDB.Begin(true); err != nil {
 		panic(err)
 	}
 	if mainHashes, err = localTx.CreateBucketIfNotExists(MainHashesBucket, false); err != nil {
@@ -644,7 +627,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 	}
 
 	rep := &GasLimitReporter{
-		remoteDb:         remoteDb,
+		remoteDB:         remoteDB,
 		HeaderPrefixKey1: []byte{},
 		HeaderPrefixKey2: []byte{},
 		mainHashes:       typedbucket.NewUint64(mainHashes),
@@ -654,7 +637,7 @@ func NewGasLimitReporter(ctx context.Context, remoteDb *remote.DB, localDb *bolt
 		if err = localTx.Commit(); err != nil {
 			panic(err)
 		}
-		if localTx, err = localDb.Begin(true); err != nil {
+		if localTx, err = localDB.Begin(true); err != nil {
 			panic(err)
 		}
 
@@ -701,7 +684,7 @@ func (r *GasLimitReporter) GasLimits(ctx context.Context) {
 	var processingDone bool
 
 beginTx:
-	if err := r.remoteDb.View(ctx, func(tx *remote.Tx) error {
+	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
 		var err error
 		if r.StartedWhenBlockNumber == 0 {
 			r.StartedWhenBlockNumber, err = remotechain.ReadLastBlockNumber(tx)
@@ -710,18 +693,12 @@ beginTx:
 			}
 		}
 
-		b := tx.Bucket(dbutils.HeaderPrefix)
-		if b == nil {
-			return nil
-		}
-
-		c := b.Cursor(remote.DefaultCursorOpts.PrefetchSize(CursorBatchSize))
-
 		fmt.Println("Preloading block numbers...")
 
+		c := tx.Bucket(dbutils.HeaderPrefix).Cursor().Prefetch(CursorBatchSize)
 		for k, v, err := c.Seek(r.HeaderPrefixKey1); k != nil || err != nil; k, v, err = c.Next() {
 			if err != nil {
-				return fmt.Errorf("loop break: %w", err)
+				return err
 			}
 			i++
 			r.HeaderPrefixKey1 = k
@@ -1552,9 +1529,9 @@ func storageUsage() {
 
 func tokenUsage() {
 	startTime := time.Now()
-	//remoteDb, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDB, err := bolt.Open("/home/akhounov/.ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	db, err := bolt.Open("/Volumes/tb4/turbo-geth/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
-	//remoteDb, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
+	//remoteDB, err := bolt.Open("/Users/alexeyakhunov/Library/Ethereum/geth/chaindata", 0600, &bolt.Options{ReadOnly: true})
 	check(err)
 	defer db.Close()
 	tokensFile, err := os.Open("tokens.csv")

@@ -25,12 +25,12 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/forkid"
@@ -1113,7 +1113,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 				resolver.SetHistorical(true)
 				resolver.AddRequest(rr)
 
-				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+				if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
 					return err2
 				}
 
@@ -1173,7 +1173,7 @@ func (pm *ProtocolManager) handleFirehoseMsg(p *firehosePeer) error {
 					resolver.SetHistorical(true)
 					resolver.AddRequest(rr)
 
-					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64()); err2 != nil {
+					if err2 := resolver.ResolveWithDb(pm.blockchain.ChainDb(), block.NumberU64(), false); err2 != nil {
 						return err2
 					}
 
@@ -1281,8 +1281,12 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 			return fmt.Errorf("json.Unmarshal: %w", err)
 		}
 
-		ethDb := ethdb.NewMemDatabase()
-		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis)
+		_ = os.Remove("simulator")
+		ethDb, err := ethdb.NewBoltDatabase("simulator")
+		if err != nil {
+			return err
+		}
+		chainConfig, _, _, err := core.SetupGenesisBlock(ethDb, genesis, true /* history */)
 		if err != nil {
 			return fmt.Errorf("SetupGenesisBlock: %w", err)
 		}
@@ -1303,16 +1307,13 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
 		go pm.syncer()
-		remotedbserver.StartDeprecated(ethDb, "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
+		remotedbserver.StartDeprecated(ethDb.AbstractKV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync
 		downloader.MaxHashFetch = 512 * 10
 		downloader.MaxBlockFetch = 128 * 10
 		downloader.MaxHeaderFetch = 192 * 10
 		downloader.MaxReceiptFetch = 256 * 10
-
-		// hacks to enable asserts
-		debug.IntermediateTrieHashAssertDbIntegrity = true
 
 		log.Warn("Succeed to set new Genesis")
 		if err := p2p.Send(p.rw, DebugSetGenesisMsg, "{}"); err != nil {

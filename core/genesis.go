@@ -152,10 +152,15 @@ func (e *GenesisMismatchError) Error() string {
 // error is a *params.ConfigCompatError and the new, unwritten config is returned.
 //
 // The returned chain configuration is never nil.
-func SetupGenesisBlock(db ethdb.Database, genesis *Genesis) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
-	return SetupGenesisBlockWithOverride(db, genesis, nil, nil)
+func SetupGenesisBlock(db ethdb.Database, genesis *Genesis, history bool) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+	return SetupGenesisBlockWithOverride(db, genesis, nil, nil, history)
 }
-func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, overrideIstanbul *big.Int, overrideMuirGlacier *big.Int) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
+func SetupGenesisBlockWithOverride(db ethdb.Database,
+	genesis *Genesis,
+	overrideIstanbul *big.Int,
+	overrideMuirGlacier *big.Int,
+	history bool,
+) (*params.ChainConfig, common.Hash, *state.IntraBlockState, error) {
 	var stateDB *state.IntraBlockState
 
 	if genesis != nil && genesis.Config == nil {
@@ -170,22 +175,22 @@ func SetupGenesisBlockWithOverride(db ethdb.Database, genesis *Genesis, override
 		} else {
 			log.Info("Writing custom genesis block")
 		}
-		block, stateDB, err := genesis.Commit(db)
+		block, stateDB1, err := genesis.Commit(db, history)
 		if err != nil {
 			return nil, common.Hash{}, nil, err
 		}
-		return genesis.Config, block.Hash(), stateDB, err
+		return genesis.Config, block.Hash(), stateDB1, err
 	}
 
 	// Check whether the genesis block is already written.
 	if genesis != nil {
-		block, stateDB, _, err := genesis.ToBlock(nil)
+		block, stateDB1, _, err := genesis.ToBlock(nil, history)
 		if err != nil {
 			return genesis.Config, common.Hash{}, nil, err
 		}
 		hash := block.Hash()
 		if hash != stored {
-			return genesis.Config, block.Hash(), stateDB, &GenesisMismatchError{stored, hash}
+			return genesis.Config, block.Hash(), stateDB1, &GenesisMismatchError{stored, hash}
 		}
 	}
 
@@ -242,7 +247,7 @@ func (g *Genesis) configOrDefault(ghash common.Hash) *params.ChainConfig {
 
 // ToBlock creates the genesis block and writes state of a genesis specification
 // to the given database (or discards it if nil).
-func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockState, *state.TrieDbState, error) {
+func (g *Genesis) ToBlock(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, *state.TrieDbState, error) {
 	if db == nil {
 		db = ethdb.NewMemDatabase()
 	}
@@ -250,6 +255,7 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 
 	tds.StartNewBuffer()
 	statedb := state.New(tds)
+	tds.SetNoHistory(!history)
 	for addr, account := range g.Alloc {
 		statedb.AddBalance(addr, account.Balance)
 		statedb.SetCode(addr, account.Code)
@@ -296,10 +302,10 @@ func (g *Genesis) ToBlock(db ethdb.Database) (*types.Block, *state.IntraBlockSta
 
 // Commit writes the block and state of a genesis specification to the database.
 // The block is committed as the canonical head block.
-func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockState, error) {
+func (g *Genesis) Commit(db ethdb.Database, history bool) (*types.Block, *state.IntraBlockState, error) {
 	batch := db.NewBatch()
 	//fmt.Printf("Generating genesis\n")
-	block, statedb, tds, err := g.ToBlock(batch)
+	block, statedb, tds, err := g.ToBlock(batch, history)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -314,8 +320,19 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 		return nil, nil, err
 	}
 	tds.SetBlockNr(0)
-	if err := statedb.CommitBlock(context.Background(), tds.DbStateWriter()); err != nil {
+	blockWriter := tds.DbStateWriter()
+	if err := statedb.CommitBlock(context.Background(), blockWriter); err != nil {
 		return nil, statedb, fmt.Errorf("cannot write state: %v", err)
+	}
+	// Always write changesets
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		return nil, statedb, fmt.Errorf("cannot write change sets: %v", err)
+	}
+	// Optionally write history
+	if history {
+		if err := blockWriter.WriteHistory(); err != nil {
+			return nil, statedb, fmt.Errorf("cannot write history: %v", err)
+		}
 	}
 	if _, err := batch.Commit(); err != nil {
 		return nil, nil, err
@@ -335,7 +352,7 @@ func (g *Genesis) Commit(db ethdb.Database) (*types.Block, *state.IntraBlockStat
 // MustCommit writes the genesis block and state to db, panicking on error.
 // The block is committed as the canonical head block.
 func (g *Genesis) MustCommit(db ethdb.Database) *types.Block {
-	block, _, err := g.Commit(db)
+	block, _, err := g.Commit(db, true /* history */)
 	if err != nil {
 		panic(err)
 	}

@@ -1,39 +1,50 @@
-package ethdb
+package state
 
 import (
 	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"context"
 	"math/big"
 	"math/rand"
 	"reflect"
 	"sort"
+	"strconv"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
+	"github.com/ledgerwatch/turbo-geth/trie"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestMutation_DeleteTimestamp(t *testing.T) {
-	db := NewMemDatabase()
+	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()
 
 	acc := make([]*accounts.Account, 10)
+	addr := make([]common.Address, 10)
 	addrHashes := make([]common.Hash, 10)
+	tds := NewTrieDbState(common.Hash{}, mutDB, 1)
+	blockWriter := tds.DbStateWriter()
+	ctx := context.Background()
+	emptyAccount := accounts.NewAccount()
 	for i := range acc {
-		acc[i], addrHashes[i] = randomAccount(t)
-		b := make([]byte, acc[i].EncodingLengthForStorage())
-		acc[i].EncodeForStorage(b)
-		err := mutDB.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
-		if err != nil {
+		acc[i], addr[i], addrHashes[i] = randomAccount(t)
+		if err := blockWriter.UpdateAccountData(ctx, addr[i], &emptyAccount /* original */, acc[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
-
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
 	_, err := mutDB.Commit()
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +80,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 		}
 	}
 
-	err = mutDB.DeleteTimestamp(1)
+	err = tds.deleteTimestamp(1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,19 +90,19 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 
 	_, err = db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
-	if err != ErrKeyNotFound {
+	if err != ethdb.ErrKeyNotFound {
 		t.Fatal("changeset must be deleted")
 	}
 
 	if debug.IsThinHistory() {
 		_, err = db.Get(dbutils.AccountsHistoryBucket, addrHashes[0].Bytes())
-		if err != ErrKeyNotFound {
+		if err != ethdb.ErrKeyNotFound {
 			t.Fatal("account must be deleted")
 		}
 	} else {
 		compositeKey, _ := dbutils.CompositeKeySuffix(addrHashes[0].Bytes(), 1)
 		_, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
-		if err != ErrKeyNotFound {
+		if err != ethdb.ErrKeyNotFound {
 			t.Fatal("account must be deleted")
 		}
 	}
@@ -101,7 +112,7 @@ func TestMutationCommit(t *testing.T) {
 	if debug.IsThinHistory() {
 		t.Skip()
 	}
-	db := NewMemDatabase()
+	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()
 
 	numOfAccounts := 5
@@ -130,7 +141,7 @@ func TestMutationCommit(t *testing.T) {
 			t.Fatal("Accounts not equals")
 		}
 
-		compositeKey, _ := dbutils.CompositeKeySuffix(addrHash.Bytes(), 1)
+		compositeKey, _ := dbutils.CompositeKeySuffix(addrHash.Bytes(), 2)
 		b, err = db.Get(dbutils.AccountsHistoryBucket, compositeKey)
 		if err != nil {
 			t.Fatal("error on get account", i, err)
@@ -148,7 +159,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -159,11 +170,11 @@ func TestMutationCommit(t *testing.T) {
 		if !reflect.DeepEqual(resAccStorage, accStateStorage[i]) {
 			spew.Dump("res", resAccStorage)
 			spew.Dump("expected", accHistoryStateStorage[i])
-			t.Log("incorrect storage", i)
+			t.Fatal("incorrect storage", i)
 		}
 
 		resAccStorage = make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageHistoryBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:common.HashLength+8+common.HashLength])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -178,7 +189,7 @@ func TestMutationCommit(t *testing.T) {
 		}
 	}
 
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +213,7 @@ func TestMutationCommit(t *testing.T) {
 		t.Fatal("incorrect account changeset")
 	}
 
-	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,9 +226,13 @@ func TestMutationCommit(t *testing.T) {
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
+			keyHash, err1 := common.HashData(key.Bytes())
+			if err1 != nil {
+				t.Fatal(err1)
+			}
 			value := common.Hash{uint8(10 + j)}
-			if err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, key), value.Bytes()); err != nil {
-				t.Fatal(err)
+			if err2 := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes()); err2 != nil {
+				t.Fatal(err2)
 			}
 
 		}
@@ -242,7 +257,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		t.Skip()
 	}
 
-	db := NewMemDatabase()
+	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()
 
 	numOfAccounts := 5
@@ -287,7 +302,7 @@ func TestMutationCommitThinHistory(t *testing.T) {
 		}
 
 		resAccStorage := make(map[common.Hash]common.Hash)
-		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), common.HashLength+8, func(k, v []byte) (b bool, e error) {
+		err = db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation), 8*(common.HashLength+8), func(k, v []byte) (b bool, e error) {
 			resAccStorage[common.BytesToHash(k[common.HashLength+8:])] = common.BytesToHash(v)
 			return true, nil
 		})
@@ -309,34 +324,40 @@ func TestMutationCommitThinHistory(t *testing.T) {
 
 			resultHash := common.BytesToHash(res)
 			if resultHash != v {
-				t.Fatal("incorrect storage history for ", addrHash.String(), v, resultHash)
+				t.Fatalf("incorrect storage history for %x %x %x", addrHash.String(), v, resultHash)
 			}
 		}
 	}
 
-	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err := db.Get(dbutils.AccountChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	expectedChangeSet := changeset.NewAccountChangeSet()
 	for i := range addrHashes {
-		b := make([]byte, accHistory[i].EncodingLengthForStorage())
-		accHistory[i].EncodeForStorage(b)
+		// Make ajustments for THIN_HISTORY
+		c := accHistory[i].SelfCopy()
+		copy(c.CodeHash[:], emptyCodeHash)
+		c.Root = trie.EmptyRoot
+		bLen := c.EncodingLengthForStorage()
+		b := make([]byte, bLen)
+		c.EncodeForStorage(b)
 		innerErr := expectedChangeSet.Add(addrHashes[i].Bytes(), b)
 		if innerErr != nil {
 			t.Fatal(innerErr)
 		}
-
 	}
-
-	expectedData, err := changeset.EncodeChangeSet(expectedChangeSet)
+	sort.Sort(expectedChangeSet)
+	expectedData, err := changeset.EncodeAccounts(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
+		spew.Dump("res", csData)
+		spew.Dump("expected", expectedData)
 		t.Fatal("incorrect changeset")
 	}
 
-	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(1))
+	csData, err = db.Get(dbutils.StorageChangeSetBucket, dbutils.EncodeTimestamp(2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,14 +370,17 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	for i, addrHash := range addrHashes {
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
+			keyHash, err1 := common.HashData(key.Bytes())
+			if err1 != nil {
+				t.Fatal(err1)
+			}
 			value := common.Hash{uint8(10 + j)}
-			err := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, key), value.Bytes())
-			if err != nil {
-				t.Fatal(err)
+			if err2 := expectedChangeSet.Add(dbutils.GenerateCompositeStorageKey(addrHash, accHistory[i].Incarnation, keyHash), value.Bytes()); err2 != nil {
+				t.Fatal(err2)
 			}
 		}
 	}
-
+	sort.Sort(expectedChangeSet)
 	expectedData, err = changeset.EncodeStorage(expectedChangeSet)
 	assert.NoError(t, err)
 	if !bytes.Equal(csData, expectedData) {
@@ -366,106 +390,117 @@ func TestMutationCommitThinHistory(t *testing.T) {
 	}
 }
 
-func generateAccountsWithStorageAndHistory(t *testing.T, db Putter, numOfAccounts, numOfStateKeys int) ([]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash) {
+func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numOfAccounts, numOfStateKeys int) ([]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash, []*accounts.Account, []map[common.Hash]common.Hash) {
 	t.Helper()
 
 	accHistory := make([]*accounts.Account, numOfAccounts)
 	accState := make([]*accounts.Account, numOfAccounts)
 	accStateStorage := make([]map[common.Hash]common.Hash, numOfAccounts)
 	accHistoryStateStorage := make([]map[common.Hash]common.Hash, numOfAccounts)
+	addrs := make([]common.Address, numOfAccounts)
 	addrHashes := make([]common.Hash, numOfAccounts)
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	blockWriter := tds.DbStateWriter()
+	ctx := context.Background()
 	for i := range accHistory {
-		var b []byte
-		accHistory[i], addrHashes[i] = randomAccount(t)
+		accHistory[i], addrs[i], addrHashes[i] = randomAccount(t)
 		accHistory[i].Balance = *big.NewInt(100)
 		accHistory[i].CodeHash = common.Hash{uint8(10 + i)}
 		accHistory[i].Root = common.Hash{uint8(10 + i)}
-		accHistory[i].Incarnation = uint64(i)
-
-		b = make([]byte, accHistory[i].EncodingLengthForStorage())
-		accHistory[i].EncodeForStorage(b)
-
-		err := db.PutS(dbutils.AccountsHistoryBucket, addrHashes[i].Bytes(), b, 1, false)
-		if err != nil {
-			t.Fatal(err)
-		}
+		accHistory[i].Incarnation = uint64(i + 1)
 
 		accState[i] = accHistory[i].SelfCopy()
 		accState[i].Nonce++
 		accState[i].Balance = *big.NewInt(200)
-		b = make([]byte, accState[i].EncodingLengthForStorage())
-		accState[i].EncodeForStorage(b)
-
-		err = db.Put(dbutils.AccountsBucket, addrHashes[i].Bytes(), b)
-		if err != nil {
-			t.Fatal(err)
-		}
 
 		accStateStorage[i] = make(map[common.Hash]common.Hash)
 		accHistoryStateStorage[i] = make(map[common.Hash]common.Hash)
 		for j := 0; j < numOfStateKeys; j++ {
 			key := common.Hash{uint8(i*100 + j)}
-			value := common.Hash{uint8(j)}
-			accStateStorage[i][key] = value
-			err = db.Put(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHashes[i], accHistory[i].Incarnation, key), value.Bytes())
+			keyHash, err := common.HashData(key.Bytes())
 			if err != nil {
 				t.Fatal(err)
 			}
+			newValue := common.Hash{uint8(j)}
+			if newValue != (common.Hash{}) {
+				// Empty value is not considered to be present
+				accStateStorage[i][keyHash] = newValue
+			}
 
-			newValue := common.Hash{uint8(10 + j)}
-			accHistoryStateStorage[i][key] = newValue
-			err = db.PutS(
-				dbutils.StorageHistoryBucket,
-				dbutils.GenerateCompositeStorageKey(addrHashes[i], accHistory[i].Incarnation, key),
-				newValue.Bytes(),
-				1,
-				false,
-			)
-			if err != nil {
+			value := common.Hash{uint8(10 + j)}
+			accHistoryStateStorage[i][keyHash] = value
+			if err := blockWriter.WriteAccountStorage(ctx, addrs[i], accHistory[i].Incarnation, &key, &value, &newValue); err != nil {
 				t.Fatal(err)
 			}
 		}
+		if err := blockWriter.UpdateAccountData(ctx, addrs[i], accHistory[i] /* original */, accState[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tds.SetBlockNr(2)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
 	}
 	return addrHashes, accState, accStateStorage, accHistory, accHistoryStateStorage
 }
 
 func TestMutation_GetAsOf(t *testing.T) {
-	db := NewMemDatabase()
+	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()
+	tds := NewTrieDbState(common.Hash{}, mutDB, 0)
+	blockWriter := tds.DbStateWriter()
+	ctx := context.Background()
+	emptyAccount := accounts.NewAccount()
 
-	acc, addrHash := randomAccount(t)
+	acc, addr, addrHash := randomAccount(t)
 	acc2 := acc.SelfCopy()
 	acc2.Nonce = 1
 	acc4 := acc.SelfCopy()
 	acc4.Nonce = 3
 
-	b := make([]byte, acc.EncodingLengthForStorage())
-	acc.EncodeForStorage(b)
-	err := db.Put(dbutils.AccountsBucket, addrHash.Bytes(), b)
-	if err != nil {
+	tds.SetBlockNr(0)
+	if err := blockWriter.UpdateAccountData(ctx, addr, &emptyAccount, acc2); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
 
-	b = make([]byte, acc2.EncodingLengthForStorage())
-	acc2.EncodeForStorage(b)
-	err = db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 2, false)
-	if err != nil {
+	blockWriter = tds.DbStateWriter()
+	tds.SetBlockNr(2)
+	if err := blockWriter.UpdateAccountData(ctx, addr, acc2, acc4); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
 
-	b = make([]byte, acc4.EncodingLengthForStorage())
-	acc4.EncodeForStorage(b)
-	err = db.PutS(dbutils.AccountsHistoryBucket, addrHash.Bytes(), b, 4, false)
-	if err != nil {
+	blockWriter = tds.DbStateWriter()
+	tds.SetBlockNr(4)
+	if err := blockWriter.UpdateAccountData(ctx, addr, acc4, acc); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = mutDB.Commit()
-	if err != nil {
+	if _, err := mutDB.Commit(); err != nil {
 		t.Fatal(err)
 	}
 
-	b, err = db.Get(dbutils.AccountsBucket, addrHash.Bytes())
+	b, err := db.Get(dbutils.AccountsBucket, addrHash.Bytes())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +583,7 @@ func TestMutation_GetAsOf(t *testing.T) {
 	}
 }
 
-func randomAccount(t *testing.T) (*accounts.Account, common.Hash) {
+func randomAccount(t *testing.T) (*accounts.Account, common.Address, common.Hash) {
 	t.Helper()
 	key, err := crypto.GenerateKey()
 	if err != nil {
@@ -562,5 +597,183 @@ func randomAccount(t *testing.T) (*accounts.Account, common.Hash) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &acc, addrHash
+	return &acc, addr, addrHash
+}
+
+func TestBoltDB_WalkAsOf1(t *testing.T) {
+	if debug.IsThinHistory() {
+		t.Skip()
+	}
+	db := ethdb.NewMemDatabase()
+	tds := NewTrieDbState(common.Hash{}, db, 1)
+	blockWriter := tds.DbStateWriter()
+	ctx := context.Background()
+	emptyVal := common.Hash{}
+
+	block2Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block4Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block6Expected := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	//create state and history
+	for i := uint8(1); i <= 7; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
+		val3 := common.BytesToHash([]byte("block 3 " + strconv.Itoa(int(i))))
+		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		if i <= 2 {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val3, &val5); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := block2Expected.Add(key, []byte("block 3 "+strconv.Itoa(int(i)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tds.SetBlockNr(3)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
+	blockWriter = tds.DbStateWriter()
+	for i := uint8(3); i <= 7; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, 1, keyHash)
+		val5 := common.BytesToHash([]byte("block 5 " + strconv.Itoa(int(i))))
+		val := common.BytesToHash([]byte("state   " + strconv.Itoa(int(i))))
+		if i > 4 {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &emptyVal); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			if err := blockWriter.WriteAccountStorage(ctx, addr, 1, &k, &val5, &val); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := block4Expected.Add(key, []byte("block 5 "+strconv.Itoa(int(i)))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tds.SetBlockNr(5)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
+	blockWriter = tds.DbStateWriter()
+	for i := uint8(1); i < 5; i++ {
+		addr := common.Address{i}
+		addrHash, _ := common.HashData(addr[:])
+		k := common.Hash{i}
+		keyHash, _ := common.HashData(k[:])
+		key := dbutils.GenerateCompositeStorageKey(addrHash, uint64(1), keyHash)
+		val := []byte("state   " + strconv.Itoa(int(i)))
+		err := block6Expected.Add(key, val)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if i <= 2 {
+			err = block4Expected.Add(key, val)
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	tds.SetBlockNr(6)
+	if err := blockWriter.WriteChangeSets(); err != nil {
+		t.Fatal(err)
+	}
+	if err := blockWriter.WriteHistory(); err != nil {
+		t.Fatal(err)
+	}
+	block2 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block4 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	block6 := &changeset.ChangeSet{
+		Changes: make([]changeset.Change, 0),
+	}
+
+	//walk and collect walkAsOf result
+	var err error
+	var startKey [72]byte
+	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 2, func(k []byte, v []byte) (b bool, e error) {
+		err = block2.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 4, func(k []byte, v []byte) (b bool, e error) {
+		err = block4.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startKey[:], 0, 6, func(k []byte, v []byte) (b bool, e error) {
+		err = block6.Add(common.CopyBytes(k), common.CopyBytes(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sort.Sort(block2Expected)
+	if !reflect.DeepEqual(block2, block2Expected) {
+		spew.Dump("expected", block2Expected)
+		spew.Dump("current", block2)
+		t.Fatal("block 2 result is incorrect")
+	}
+	sort.Sort(block4Expected)
+	if !reflect.DeepEqual(block4, block4Expected) {
+		spew.Dump("expected", block4Expected)
+		spew.Dump("current", block4)
+		t.Fatal("block 4 result is incorrect")
+	}
+	sort.Sort(block6Expected)
+	if !reflect.DeepEqual(block6, block6Expected) {
+		spew.Dump("expected", block6Expected)
+		spew.Dump("current", block6)
+		t.Fatal("block 6 result is incorrect")
+	}
 }

@@ -3,8 +3,10 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"container/heap"
 	"context"
 	"encoding/binary"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
@@ -24,7 +26,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
@@ -400,22 +401,6 @@ func bucketStats(chaindata string) {
 	})
 }
 
-func bucketPrefixStats(chaindata string) {
-	db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
-	check(err)
-	stats := map[uint8]uint64{}
-	db.View(func(tx *bolt.Tx) error {
-		c := tx.Bucket(dbutils.StorageBucket).Cursor()
-		for k, v := c.First(); k != nil; k, v = c.Next() {
-			stats[k[0]] += uint64(len(v))
-		}
-		return nil
-	})
-	for k, v := range stats {
-		fmt.Printf("%x %dKb\n", k, v)
-	}
-}
-
 func readTrieLog() ([]float64, map[int][]float64, []float64) {
 	data, err := ioutil.ReadFile("dust/hack.log")
 	check(err)
@@ -631,7 +616,7 @@ func trieChart() {
 }
 
 func execToBlock(chaindata string, block uint64, fromScratch bool) {
-	state.MaxTrieCacheGen = 32
+	state.MaxTrieCacheSize = 32
 	blockDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
 	bcb, err := core.NewBlockChain(blockDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
@@ -645,15 +630,12 @@ func execToBlock(chaindata string, block uint64, fromScratch bool) {
 	defer stateDb.Close()
 
 	//_, _, _, err = core.SetupGenesisBlock(stateDb, core.DefaultGenesisBlock())
-	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil)
+	_, _, _, err = core.SetupGenesisBlockWithOverride(stateDb, nil, nil, nil, false /* history */)
 	check(err)
 	bc, err := core.NewBlockChain(stateDb, nil, params.MainnetChainConfig, ethash.NewFaker(), vm.Config{}, nil)
 	check(err)
 	tds, err := bc.GetTrieDbState()
 	check(err)
-	if debug.IsIntermediateTrieHash() && fromScratch {
-		_ = tds.Rebuild()
-	}
 
 	importedBn := tds.GetBlockNr()
 	if importedBn == 0 {
@@ -709,9 +691,6 @@ func extractTrie(block int) {
 	check(err)
 	baseBlock := bc.GetBlockByNumber(uint64(block))
 	tds := state.NewTrieDbState(baseBlock.Root(), stateDb, baseBlock.NumberU64())
-	startTime := time.Now()
-	tds.Rebuild()
-	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
 	filename := fmt.Sprintf("right_%d.txt", baseBlock.NumberU64())
@@ -742,12 +721,9 @@ func testRewind(chaindata string, block, rewind int) {
 	defer db.Rollback()
 	tds := state.NewTrieDbState(baseBlock.Root(), db, baseBlockNr)
 	tds.SetHistorical(baseBlockNr != currentBlockNr)
-	startTime := time.Now()
-	tds.Rebuild()
-	fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 	rebuiltRoot := tds.LastRoot()
 	fmt.Printf("Rebuit root hash: %x\n", rebuiltRoot)
-	startTime = time.Now()
+	startTime := time.Now()
 	rewindLen := uint64(rewind)
 
 	err = tds.UnwindTo(baseBlockNr - rewindLen)
@@ -779,9 +755,6 @@ func testRewind(chaindata string, block, rewind int) {
 			tds, err = state.NewTrieDbState(rewoundBlock.Root(), db, rewoundBlock.NumberU64())
 			tds.SetHistorical(true)
 			check(err)
-			startTime := time.Now()
-			tds.Rebuild()
-			fmt.Printf("Rebuld done in %v\n", time.Since(startTime))
 			rebuiltRoot, err := tds.TrieRoot()
 			fmt.Printf("Rebuilt root: %x\n", rebuiltRoot)
 			check(err)
@@ -807,7 +780,7 @@ func testStartup() {
 	rootHash := currentBlock.Root()
 	req := t.NewResolveRequest(nil, key, 0, rootHash[:])
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, currentBlockNr)
+	err = r.ResolveWithDb(ethDb, currentBlockNr, false)
 	if err != nil {
 		fmt.Printf("%v\n", err)
 	}
@@ -815,7 +788,6 @@ func testStartup() {
 }
 
 func testResolveCached() {
-	debug.IntermediateTrieHashAssertDbIntegrity = true
 	execToBlock(node.DefaultDataDir()+"/geth/chaindata", 100_000_000, false)
 	return
 	//startTime := time.Now()
@@ -843,7 +815,7 @@ func testResolveCached() {
 
 		r2 := trie.NewResolver(2, true, currentBlockNr)
 		r2.AddRequest(tries[1].NewResolveRequest(nil, common.FromHex(key), 0, currentBlock.Root().Bytes()))
-		err = r2.ResolveStatefulCached(ethDb, currentBlockNr)
+		err = r2.ResolveStatefulCached(ethDb, currentBlockNr, false)
 		check(err)
 
 		bufs := [2]*bytes.Buffer{
@@ -967,14 +939,14 @@ func testResolve(chaindata string) {
 	var contract []byte
 	//contract := common.FromHex("0x578e1f34346cb1067347b2ad256ada250b7853de763bd54110271a39e0cd52750000000000000000")
 	r := trie.NewResolver(10, true, 10000000)
-	r.SetHistorical(false)
+	r.SetHistorical(true)
 	var key []byte
-	key = common.FromHex("0d050f050306070a0b05090d0a050908000a03050d0008030a01030e0e0808000d0c000b0b050b0c0a0601050a000308010601090005010808040f06010b090d10")
-	resolveHash := common.FromHex("8894372f37cc47e5b342f1caca60668089cf12c95a7984f1d73d220c325fffa9")
+	key = common.FromHex("040c05040b050a0305030b0403070d0d0a0e0b070d040b0f080b03090d0109070c05000a0d070f0c03090d07090a0704010e040a0609010e01020508030b0f0210")
+	resolveHash := common.FromHex("eff69d72861c76bbf3ffde71abff1b09609d7cc5f2be594a29b1954507d0497b")
 	t := trie.New(common.Hash{})
-	req := t.NewResolveRequest(contract, key, 5, resolveHash)
+	req := t.NewResolveRequest(contract, key, 0, resolveHash)
 	r.AddRequest(req)
-	err = r.ResolveWithDb(ethDb, 10000000)
+	err = r.ResolveWithDb(ethDb, 10000000, false)
 	if err != nil {
 		fmt.Printf("Resolve error: %v\n", err)
 	}
@@ -1041,7 +1013,7 @@ func printFullNodeRLPs() {
 }
 
 func testDifficulty() {
-	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil)
+	genesisBlock, _, _, err := core.DefaultGenesisBlock().ToBlock(nil, false /* history */)
 	check(err)
 	d1 := ethash.CalcDifficulty(params.MainnetChainConfig, 100000, genesisBlock.Header())
 	fmt.Printf("Block 1 difficulty: %d\n", d1)
@@ -1051,7 +1023,7 @@ func testDifficulty() {
 func testBlockHashes(chaindata string, block int, stateRoot common.Hash) {
 	ethDb, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	blocksToSearch := 1000
+	blocksToSearch := 10000000
 	for i := uint64(block); i < uint64(block+blocksToSearch); i++ {
 		hash := rawdb.ReadCanonicalHash(ethDb, i)
 		header := rawdb.ReadHeader(ethDb, hash, i)
@@ -1589,6 +1561,36 @@ func generateLoop(db ethdb.Database, startBlock uint64, interruptCh chan bool) (
 	return blockNum, finished
 }
 
+func generateLoop1(db ethdb.Database, startBlock uint64, interruptCh chan bool) (uint64, bool) {
+	f, _ := os.OpenFile(".lookups.tmp",
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	defer f.Close()
+	entry := make([]byte, 36)
+	var blockNum = startBlock
+	var interrupt bool
+	var finished = true
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+		if body == nil {
+			break
+		}
+		for _, tx := range body.Transactions {
+			copy(entry[:32], tx.Hash().Bytes())
+			binary.BigEndian.PutUint32(entry[32:], uint32(blockNum))
+			_, _ = f.Write(append(entry, '\n'))
+		}
+		blockNum++
+		// Check for interrupts
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	return blockNum, finished
+}
+
 func fillSortRange(db rawdb.DatabaseReader, lookups []uint64, entry []byte, start, end int) {
 	for j := start; j < end; j++ {
 		binary.BigEndian.PutUint64(entry[:], lookups[j])
@@ -1669,6 +1671,341 @@ func GenerateTxLookups1(chaindata string, block int) {
 	log.Info("Tx committing done", "duration", time.Since(startTime))
 }
 
+func GenerateTxLookups2(chaindata string) {
+	startTime := time.Now()
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	//nolint: errcheck
+	db.DeleteBucket(dbutils.TxLookupPrefix)
+	log.Info("Open databased and deleted tx lookup bucket", "duration", time.Since(startTime))
+	startTime = time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	generateTxLookups2(db, blockNum, interruptCh)
+	log.Info("All done", "duration", time.Since(startTime))
+}
+
+type LookupFile struct {
+	reader io.Reader
+	file   *os.File
+	buffer []byte
+	pos    uint64
+}
+
+type Entries []byte
+
+type HeapElem struct {
+	val   []byte
+	index int
+}
+
+type Heap []HeapElem
+
+func (h Heap) Len() int {
+	return len(h)
+}
+
+func (h Heap) Less(i, j int) bool {
+	return bytes.Compare(h[i].val, h[j].val) < 0
+}
+func (h Heap) Swap(i, j int) {
+	h[i], h[j] = h[j], h[i]
+}
+
+func (h *Heap) Push(x interface{}) {
+	// Push and Pop use pointer receivers because they modify the slice's length,
+	// not just its contents.
+	*h = append(*h, x.(HeapElem))
+}
+
+func (h *Heap) Pop() interface{} {
+	old := *h
+	n := len(old)
+	x := old[n-1]
+	*h = old[0 : n-1]
+	return x
+}
+
+func (a Entries) Len() int {
+	return len(a) / 35
+}
+
+func (a Entries) Less(i, j int) bool {
+	return bytes.Compare(a[35*i:35*i+35], a[35*j:35*j+35]) < 0
+}
+
+func (a Entries) Swap(i, j int) {
+	tmp := common.CopyBytes(a[35*i : 35*i+35])
+	copy(a[35*i:35*i+35], a[35*j:35*j+35])
+	copy(a[35*j:35*j+35], tmp)
+}
+
+func insertInFileForLookups2(file *os.File, entries Entries, it uint64) {
+	sorted := entries[:35*it]
+	sort.Sort(sorted)
+	_, err := file.Write(sorted)
+	check(err)
+	log.Info("File Insertion Occured")
+}
+
+func generateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+	var bufferLen int = 143360 // 35 * 4096
+	var count uint64 = 5000000
+	var entries Entries = make([]byte, count*35)
+	bn := make([]byte, 3)
+	var lookups []LookupFile
+	var iterations uint64
+	var blockNum = startBlock
+	var interrupt bool
+	filename := fmt.Sprintf(".lookups_%d.tmp", len(lookups))
+	fileTmp, _ := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+
+		if body == nil {
+			log.Info("Now Inserting to file")
+			insertInFileForLookups2(fileTmp, entries, iterations)
+			lookups = append(lookups, LookupFile{nil, nil, nil, 35})
+			iterations = 0
+			entries = nil
+			fileTmp.Close()
+			break
+		}
+
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+		bn[0] = byte(blockNum >> 16)
+		bn[1] = byte(blockNum >> 8)
+		bn[2] = byte(blockNum)
+
+		for _, tx := range body.Transactions {
+			copy(entries[35*iterations:], tx.Hash().Bytes())
+			copy(entries[35*iterations+32:], bn)
+			iterations++
+			if iterations == count {
+				log.Info("Now Inserting to file")
+				insertInFileForLookups2(fileTmp, entries, iterations)
+				lookups = append(lookups, LookupFile{nil, nil, nil, 35})
+				iterations = 0
+				fileTmp.Close()
+				filename = fmt.Sprintf(".lookups_%d.tmp", len(lookups))
+				fileTmp, _ = os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+			}
+		}
+		blockNum++
+		if blockNum%100000 == 0 {
+			log.Info("Processed", "blocks", blockNum, "iterations", iterations)
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+			log.Info("Memory", "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
+		}
+	}
+	batch := db.NewBatch()
+	h := &Heap{}
+	heap.Init(h)
+	for i := range lookups {
+		file, err := os.Open(fmt.Sprintf(".lookups_%d.tmp", i))
+		check(err)
+		lookups[i].file = file
+		lookups[i].reader = bufio.NewReader(file)
+		lookups[i].buffer = make([]byte, bufferLen)
+		check(err)
+		n, err := lookups[i].file.Read(lookups[i].buffer)
+		if n != bufferLen {
+			lookups[i].buffer = lookups[i].buffer[:n]
+		}
+		heap.Push(h, HeapElem{lookups[i].buffer[:35], i})
+	}
+
+	for !interrupt && len(*h) != 0 {
+		val := (heap.Pop(h)).(HeapElem)
+		if lookups[val.index].pos == uint64(bufferLen) {
+			if val.val[32] != 0 {
+				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
+				check(err)
+			} else {
+				err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
+				check(err)
+			}
+			n, _ := lookups[val.index].reader.Read(lookups[val.index].buffer)
+			iterations++
+			if n == 0 {
+				err := lookups[val.index].file.Close()
+				check(err)
+				os.Remove(fmt.Sprintf(".lookups_%d.tmp", val.index))
+			} else {
+				if n != bufferLen {
+					lookups[val.index].buffer = lookups[val.index].buffer[:n]
+				}
+				lookups[val.index].pos = 35
+				heap.Push(h, HeapElem{lookups[val.index].buffer[:35], val.index})
+			}
+			continue
+		}
+
+		heap.Push(h, HeapElem{lookups[val.index].buffer[lookups[val.index].pos : lookups[val.index].pos+35], val.index})
+		lookups[val.index].pos += 35
+		iterations++
+		if val.val[32] != 0 {
+			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[32:]))
+			check(err)
+		} else {
+			err := batch.Put(dbutils.TxLookupPrefix, val.val[:32], common.CopyBytes(val.val[33:]))
+			check(err)
+		}
+
+		if iterations%1000000 == 0 {
+			batch.Commit()
+			log.Info("Commit Occured", "progress", iterations)
+		}
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+	}
+	batch.Commit()
+	batch.Close()
+}
+
+func ValidateTxLookups2(chaindata string) {
+	startTime := time.Now()
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	//nolint: errcheck
+	startTime = time.Now()
+	sigs := make(chan os.Signal, 1)
+	interruptCh := make(chan bool, 1)
+	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigs
+		interruptCh <- true
+	}()
+	var blockNum uint64 = 1
+	validateTxLookups2(db, blockNum, interruptCh)
+	log.Info("All done", "duration", time.Since(startTime))
+}
+
+func validateTxLookups2(db *ethdb.BoltDatabase, startBlock uint64, interruptCh chan bool) {
+	blockNum := startBlock
+	iterations := 0
+	var interrupt bool
+	// Validation Process
+	blockBytes := big.NewInt(0)
+	for !interrupt {
+		blockHash := rawdb.ReadCanonicalHash(db, blockNum)
+		body := rawdb.ReadBody(db, blockHash, blockNum)
+
+		if body == nil {
+			break
+		}
+
+		select {
+		case interrupt = <-interruptCh:
+			log.Info("interrupted, please wait for cleanup...")
+		default:
+		}
+		blockBytes.SetUint64(blockNum)
+		bn := blockBytes.Bytes()
+
+		for _, tx := range body.Transactions {
+			val, err := db.Get(dbutils.TxLookupPrefix, tx.Hash().Bytes())
+			iterations++
+			if iterations%100000 == 0 {
+				log.Info("Validated", "entries", iterations, "number", blockNum)
+			}
+			if bytes.Compare(val, bn) != 0 {
+				check(err)
+				panic(fmt.Sprintf("Validation process failed(%d). Expected %b, got %b", iterations, bn, val))
+			}
+		}
+		blockNum++
+	}
+}
+
+func indexSize(chaindata string) {
+	//db, err := bolt.Open(chaindata, 0600, &bolt.Options{ReadOnly: true})
+	db, err := ethdb.NewBoltDatabase(chaindata)
+	check(err)
+	defer db.Close()
+	fStorage, err := os.Create("index_sizes_storage.csv")
+	check(err)
+	defer fStorage.Close()
+	fAcc, err := os.Create("index_sizes_acc.csv")
+	check(err)
+	defer fAcc.Close()
+	csvAcc := csv.NewWriter(fAcc)
+	defer csvAcc.Flush()
+	err = csvAcc.Write([]string{"key", "ln"})
+	check(err)
+	csvStorage := csv.NewWriter(fStorage)
+	defer csvStorage.Flush()
+	err = csvStorage.Write([]string{"key", "ln"})
+
+	i := 0
+	maxLenAcc := 0
+	accountsOver4096 := 0
+	if err := db.Walk(dbutils.AccountsHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		i++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenAcc)
+		}
+		if len(v) > maxLenAcc {
+			maxLenAcc = len(v)
+		}
+		if len(v) > 4096 {
+			accountsOver4096++
+		}
+		if err := csvAcc.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
+			panic(err)
+		}
+
+		return true, nil
+	}); err != nil {
+		check(err)
+	}
+
+	i = 0
+	maxLenSt := 0
+	storageOver4096 := 0
+	if err := db.Walk(dbutils.StorageHistoryBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
+		i++
+		if i%10_000_000 == 0 {
+			fmt.Println(i/10_000_000, maxLenSt)
+		}
+
+		if len(v) > maxLenSt {
+			maxLenSt = len(v)
+		}
+		if len(v) > 4096 {
+			storageOver4096++
+		}
+		if err := csvStorage.Write([]string{common.Bytes2Hex(k), strconv.Itoa(len(v))}); err != nil {
+			panic(err)
+		}
+
+		return true, nil
+	}); err != nil {
+		check(err)
+	}
+
+	fmt.Println("Results:")
+	fmt.Println("maxLenAcc:", maxLenAcc)
+	fmt.Println("maxLenSt:", maxLenSt)
+	fmt.Println("account over 4096 index:", accountsOver4096)
+	fmt.Println("storage over 4096 index:", storageOver4096)
+}
+
 func main() {
 	var (
 		ostream log.Handler
@@ -1704,9 +2041,6 @@ func main() {
 	//defer db.Close()
 	if *action == "bucketStats" {
 		bucketStats(*chaindata)
-	}
-	if *action == "bucketPrefixStats" {
-		bucketPrefixStats(*chaindata)
 	}
 	if *action == "syncChart" {
 		mychart()
@@ -1784,7 +2118,15 @@ func main() {
 	if *action == "gen-tx-lookup-1" {
 		GenerateTxLookups1(*chaindata, *block)
 	}
-	if *action == "dbslice" {
-		dbSlice(*chaindata, common.FromHex(*name))
+
+	if *action == "gen-tx-lookup-2" {
+		GenerateTxLookups2(*chaindata)
+	}
+
+	if *action == "val-tx-lookup-2" {
+		ValidateTxLookups2(*chaindata)
+	}
+	if *action == "indexSize" {
+		indexSize(*chaindata)
 	}
 }

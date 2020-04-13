@@ -10,7 +10,6 @@ var gerEnv sync.Once
 var ThinHistory bool
 
 var itcEnv sync.Once
-var intermediateTrieHash bool
 
 // atomic: bit 0 is the value, bit 1 is the initialized flag
 var getNodeData uint32
@@ -25,16 +24,6 @@ func IsThinHistory() bool {
 		_, ThinHistory = os.LookupEnv("THIN_HISTORY")
 	})
 	return ThinHistory
-}
-
-func IsIntermediateTrieHash() bool {
-	itcEnv.Do(func() {
-		_, intermediateTrieHash = os.LookupEnv("INTERMEDIATE_TRIE_CACHE")
-		if !intermediateTrieHash {
-			_, intermediateTrieHash = os.LookupEnv("INTERMEDIATE_TRIE_HASH")
-		}
-	})
-	return intermediateTrieHash
 }
 
 // IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
@@ -64,6 +53,3 @@ func OverrideGetNodeData(val bool) {
 		atomic.StoreUint32(&getNodeData, gndInitializedFlag)
 	}
 }
-
-// --------------- Flags which are enabling additional runtime checks and asserts ----------------
-var IntermediateTrieHashAssertDbIntegrity = false

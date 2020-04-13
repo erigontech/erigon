@@ -6,29 +6,12 @@ import (
 	"sort"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
-	"github.com/ledgerwatch/turbo-geth/log"
 )
 
 var emptyHash [32]byte
 
 type ResolveFunc func(*Resolver) error
-
-func (t *Trie) Rebuild(db ethdb.Database, blockNr uint64) error {
-	if t.root == nil {
-		return nil
-	}
-	n, ok := t.root.(hashNode)
-	if !ok {
-		return fmt.Errorf("Rebuild: Expected hashNode, got %T", t.root)
-	}
-	if err := t.rebuildHashes(db, nil, 0, blockNr, true, n); err != nil {
-		return err
-	}
-	log.Info("Rebuilt top of account trie and verified", "root hash", n)
-	return nil
-}
 
 // Resolver looks up (resolves) some keys and corresponding values from a database.
 // One resolver per trie (prefix).
@@ -143,9 +126,9 @@ const (
 )
 
 // ResolveWithDb resolves and hooks subtries using a state database.
-func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64) error {
-	if debug.IsIntermediateTrieHash() && !tr.historical {
-		return tr.ResolveStatefulCached(db, blockNr)
+func (tr *Resolver) ResolveWithDb(db ethdb.Database, blockNr uint64, trace bool) error {
+	if !tr.historical {
+		return tr.ResolveStatefulCached(db, blockNr, trace)
 	}
 
 	return tr.ResolveStateful(db, blockNr)
@@ -168,7 +151,7 @@ func (tr *Resolver) ResolveStateful(db ethdb.Database, blockNr uint64) error {
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
 }
 
-func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) error {
+func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64, trace bool) error {
 	var hf hookFunction
 	if tr.collectWitnesses {
 		hf = tr.extractWitnessAndHookSubtrie
@@ -179,7 +162,7 @@ func (tr *Resolver) ResolveStatefulCached(db ethdb.Database, blockNr uint64) err
 	sort.Stable(tr)
 
 	resolver := NewResolverStatefulCached(tr.topLevels, tr.requests, hf)
-	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical); err != nil {
+	if err := resolver.RebuildTrie(db, blockNr, tr.accounts, tr.historical, trace); err != nil {
 		return err
 	}
 	return resolver.AttachRequestedCode(db, tr.codeRequests)
@@ -237,11 +220,4 @@ func (tr *Resolver) extractWitnessAndHookSubtrie(currentReq *ResolveRequest, hbR
 	tr.witnesses = append(tr.witnesses, witness)
 
 	return hookSubtrie(currentReq, hbRoot, hbHash)
-}
-
-func (t *Trie) rebuildHashes(db ethdb.Database, key []byte, pos int, blockNr uint64, accounts bool, expected hashNode) error {
-	req := t.NewResolveRequest(nil, key, pos, expected)
-	r := NewResolver(5, accounts, blockNr)
-	r.AddRequest(req)
-	return r.ResolveWithDb(db, blockNr)
 }

@@ -8,7 +8,7 @@ import (
 
 	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/cmd/state/stateless"
-	"github.com/ledgerwatch/turbo-geth/ethdb/remote"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/spf13/cobra"
 )
 
@@ -17,20 +17,21 @@ func init() {
 		Use:   "stateGrowth",
 		Short: "stateGrowth",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx := cmd.Context()
+
 			localDb, err := bolt.Open(file()+"_sg", 0600, &bolt.Options{})
 			if err != nil {
 				panic(err)
 			}
-			ctx := getContext()
 
-			remoteDb, err := remote.Open(ctx, remote.DefaultOpts.Addr(remoteDbAddress))
+			remoteDB, err := ethdb.NewRemote().Path(remoteDbAddress).Open(ctx)
 			if err != nil {
 				return err
 			}
 
 			fmt.Println("Processing started...")
-			stateless.NewStateGrowth1Reporter(ctx, remoteDb, localDb).StateGrowth1(ctx)
-			stateless.NewStateGrowth2Reporter(ctx, remoteDb, localDb).StateGrowth2(ctx)
+			stateless.NewStateGrowth1Reporter(ctx, remoteDB, localDb).StateGrowth1(ctx)
+			stateless.NewStateGrowth2Reporter(ctx, remoteDB, localDb).StateGrowth2(ctx)
 			return nil
 		},
 	}

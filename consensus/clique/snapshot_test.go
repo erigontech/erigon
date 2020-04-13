@@ -404,7 +404,7 @@ func TestClique(t *testing.T) {
 		}
 		// Create a pristine blockchain with the genesis injected
 		db := ethdb.NewMemDatabase()
-		genesis.Commit(db)
+		genesis.MustCommit(db)
 
 		// Assemble a chain of headers from the cast votes
 		config := *params.TestChainConfig
@@ -421,7 +421,7 @@ func TestClique(t *testing.T) {
 			continue
 		}
 
-		genesisBlock, _, _, _ := genesis.ToBlock(db)
+		genesisBlock, _, _, _ := genesis.ToBlock(db, false /* history */)
 		ctx := chain.WithContext(context.Background(), big.NewInt(genesisBlock.Number().Int64()+1))
 		blocks, _ := core.GenerateChain(ctx, &config, genesisBlock, engine, db, len(tt.votes), func(j int, gen *core.BlockGen) {
 			// Cast the vote contained in this block

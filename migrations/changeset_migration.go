@@ -67,7 +67,7 @@ func splitChangeSetMigration(batchSize int) Migration {
 					}
 
 					for currentKey != nil {
-						changesetsToRemove = append(changesetsToRemove, currentKey)
+						changesetsToRemove = append(changesetsToRemove, common.CopyBytes(currentKey))
 						ts, bucket := dbutils.DecodeTimestamp(currentKey)
 						encTS := dbutils.EncodeTimestamp(ts)
 
@@ -83,9 +83,9 @@ func splitChangeSetMigration(batchSize int) Migration {
 									return innerErr
 								}
 
-								accChangesets = append(accChangesets, encTS, v)
+								accChangesets = append(accChangesets, encTS, common.CopyBytes(v))
 							} else {
-								accChangesets = append(accChangesets, encTS, currentValue)
+								accChangesets = append(accChangesets, encTS, common.CopyBytes(currentValue))
 							}
 
 						case bytes.Equal(dbutils.StorageHistoryBucket, bucket):
@@ -100,10 +100,10 @@ func splitChangeSetMigration(batchSize int) Migration {
 									log.Error("Error on encode storage changeset", "err", innerErr)
 									return innerErr
 								}
-								storageChangesets = append(storageChangesets, encTS, v)
+								storageChangesets = append(storageChangesets, encTS, common.CopyBytes(v))
 
 							} else {
-								storageChangesets = append(storageChangesets, encTS, currentValue)
+								storageChangesets = append(storageChangesets, encTS, common.CopyBytes(currentValue))
 							}
 						}
 

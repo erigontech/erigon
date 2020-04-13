@@ -37,14 +37,10 @@ type TesterProtocol struct {
 	// This is to prevent double counting them
 	forkBase   uint64
 	forkHeight uint64
-
-	genesisReady chan bool
 }
 
 func NewTesterProtocol() *TesterProtocol {
-	return &TesterProtocol{
-		genesisReady: make(chan bool, 1),
-	}
+	return &TesterProtocol{}
 }
 
 // Return true if the block has already been marked. If the block has not been marked, returns false and marks it
@@ -125,10 +121,6 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 		return fmt.Errorf("failed to send DebugSetGenesisMsg message to peer: %w", err)
 	}
 
-	time.Sleep(2 * time.Second)
-
-	tp.genesisReady <- true
-
 	/* todo: Server does send DebugSetGenesisMsg, but next code does timeout
 	msg, err := rw.ReadMsg()
 	if err != nil {
@@ -147,14 +139,11 @@ func (tp *TesterProtocol) debugProtocolRun(ctx context.Context, peer *p2p.Peer, 
 	*/
 
 	log.Info("eth set custom genesis.config")
-	for {
-		// Read the next message
-		_, _ = rw.ReadMsg()
-	}
+	time.Sleep(time.Second)
+	return nil
 }
 
 func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2p.MsgReadWriter) error {
-	<-tp.genesisReady
 	log.Info("Ethereum peer connected", "peer", peer.Name())
 	log.Debug("Protocol version", "version", tp.protocolVersion)
 
@@ -200,6 +189,12 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	emptyBlocks := 0
 	signaledHead := false
 	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
@@ -232,6 +227,12 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 	tp.announceForkHeaders(rw)
 	log.Info("Announced fork blocks")
 	for i := 0; i < 10000; i++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		// Read the next message
 		msg, err = rw.ReadMsg()
 		if err != nil {
@@ -247,7 +248,7 @@ func (tp *TesterProtocol) protocolRun(ctx context.Context, peer *p2p.Peer, rw p2
 				return err
 			}
 		case msg.Code == eth.NewBlockHashesMsg:
-			if signaledHead, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
+			if _, err = tp.handleNewBlockHashesMsg(msg, rw); err != nil {
 				return err
 			}
 		default:

@@ -17,14 +17,12 @@
 package state_test
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/big"
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind"
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -41,7 +39,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 // Create revival problem
@@ -737,7 +734,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	if !st.Exist(contractAddress) {
 		t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 	}
-	// We expect number 0x42 in the position [2], because it is the block number 2
+
 	check0 := st.GetState(contractAddress, common.BigToHash(big.NewInt(0)))
 	if check0 != common.HexToHash("0x0") {
 		t.Errorf("expected 0x00 in position 0, got: %x", check0)
@@ -1156,206 +1153,6 @@ func TestWrongIncarnation2(t *testing.T) {
 
 }
 
-func TestClearTombstonesForReCreatedAccount(t *testing.T) {
-	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
-
-	accKey := fmt.Sprintf("11%062x", 0)
-	k1 := fmt.Sprintf("11%062x", 0)
-	k2 := fmt.Sprintf("2211%062x", 0)
-	k3 := fmt.Sprintf("2233%062x", 0)
-	k4 := fmt.Sprintf("44%062x", 0)
-
-	storageKey := func(incarnation uint64, storageKey string) []byte {
-		return append(dbutils.GenerateStoragePrefix(common.HexToHash(accKey), incarnation), common.FromHex(storageKey)...)
-	}
-
-	putStorage := func(incarnation uint64, k string, v string) {
-		err := db.Put(dbutils.StorageBucket, storageKey(incarnation, k), common.FromHex(v))
-		require.NoError(err)
-	}
-
-	checkProps := func() {
-		if err := db.KV().View(func(tx *bolt.Tx) error {
-			inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-			storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-			for k, v := inter.First(); k != nil; k, v = inter.Next() {
-				if len(v) > 0 {
-					continue
-				}
-
-				// each tomb must cover storage
-				addrHash := common.CopyBytes(k[:common.HashLength])
-				storageK, _ := storage.Seek(addrHash)
-				if !bytes.HasPrefix(storageK, addrHash) {
-					panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
-				} else {
-					incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
-					hideStorage := false
-					for ; incarnation > 0; incarnation-- {
-						kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
-						kWithInc = append(kWithInc, k[common.HashLength:]...)
-						storageK, _ = storage.Seek(kWithInc)
-						if bytes.HasPrefix(storageK, kWithInc) {
-							hideStorage = true
-						}
-					}
-					if !hideStorage {
-						panic(fmt.Sprintf("tombstone %x has no storage to hide\n", k))
-					}
-				}
-			}
-			return nil
-		}); err != nil {
-			panic(err)
-		}
-	}
-
-	//printBucket := func() {
-	//	fmt.Printf("IH bucket print\n")
-	//	_ = db.HasKV().View(func(tx *bolt.Tx) error {
-	//		tx.Bucket(dbutils.IntermediateTrieHashBucket).ForEach(func(k, v []byte) error {
-	//			if len(v) == 0 {
-	//				fmt.Printf("IH: %x\n", k)
-	//			}
-	//			return nil
-	//		})
-	//		return nil
-	//	})
-	//	fmt.Printf("IH bucket print END\n")
-	//}
-
-	acc := accounts.NewAccount()
-	acc.Incarnation = 1
-	encodedAcc := make([]byte, acc.EncodingLengthForStorage())
-	acc.EncodeForStorage(encodedAcc)
-	err := db.Put(dbutils.AccountsBucket, common.FromHex(accKey), encodedAcc)
-	require.NoError(err)
-
-	putStorage(2, k1, "hi")
-	putStorage(2, k2, "hi")
-	putStorage(2, k3, "hi")
-	putStorage(2, k4, "hi")
-
-	// step 1: delete account
-	batch := db.NewBatch()
-	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
-	require.NoError(err)
-	_, err = batch.Commit()
-	require.NoError(err)
-	//printBucket()
-	checkProps()
-
-	untouchedAcc := fmt.Sprintf("99%062x", 0)
-	checks := map[string]bool{
-		accKey:       true,
-		untouchedAcc: false,
-	}
-
-	for k, expect := range checks {
-		ok, err1 := state.HasTombstone(db, common.FromHex(k))
-		require.NoError(err1, k)
-		assert.Equal(expect, ok, k)
-	}
-
-	// step 2: re-create account
-	batch = db.NewBatch()
-	err = state.ClearTombstonesForReCreatedAccount(batch, common.HexToHash(accKey))
-	require.NoError(err)
-	_, err = batch.Commit()
-	require.NoError(err)
-	//printBucket()
-	checkProps()
-
-	checks = map[string]bool{
-		accKey:        false,
-		accKey + "11": true,
-		accKey + "22": true,
-		accKey + "aa": false,
-	}
-
-	for k, expect := range checks {
-		ok, err1 := state.HasTombstone(db, common.FromHex(k))
-		require.NoError(err1, k)
-		assert.Equal(expect, ok, k)
-	}
-
-	// step 3: re-create storage
-	batch = db.NewBatch()
-	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k2))
-	require.NoError(err)
-	_, err = batch.Commit()
-	require.NoError(err)
-	//printBucket()
-	checkProps()
-
-	checks = map[string]bool{
-		accKey + "11":     true,
-		accKey + k2:       false,
-		accKey + "22":     false,
-		accKey + "2200":   false,
-		accKey + "2211":   false,
-		accKey + "2233":   true,
-		accKey + "223300": false,
-		accKey + "22ab":   false,
-		accKey + "44":     true,
-	}
-
-	for k, expect := range checks {
-		ok, err1 := state.HasTombstone(db, common.FromHex(k))
-		require.NoError(err1, k)
-		assert.Equal(expect, ok, k)
-	}
-
-	// step 4: create one new storage
-	batch = db.NewBatch()
-	err = state.ClearTombstonesForNewStorage(batch, common.FromHex(accKey+k4))
-	require.NoError(err)
-	_, err = batch.Commit()
-	require.NoError(err)
-	//printBucket()
-	checkProps()
-
-	checks = map[string]bool{
-		accKey + k2:         false, // results of step2 preserved
-		accKey + "22":       false, // results of step2 preserved
-		accKey + "2211":     false, // results of step2 preserved
-		accKey + "22110000": false, // results of step2 preserved
-		accKey + "2233":     true,  // results of step2 preserved
-		accKey + "44":       false, // results of step2 preserved
-	}
-
-	for k, expect := range checks {
-		ok, err := state.HasTombstone(db, common.FromHex(k))
-		require.NoError(err, k)
-		assert.Equal(expect, ok, k)
-	}
-
-	// step 5: delete account again - it must remove all tombstones and keep only 1 which will cover account itself
-	batch = db.NewBatch()
-	err = state.PutTombstoneForDeletedAccount(batch, common.FromHex(accKey))
-	require.NoError(err)
-	_, err = batch.Commit()
-	require.NoError(err)
-	//printBucket()
-	checkProps()
-
-	checks = map[string]bool{
-		accKey:       true,
-		untouchedAcc: false,
-
-		// accKey + "2233" was true on previous step, don't delete this tombstone even one with shorter prefix exists.
-		// Because account creation must do predictable amount of operations.
-		accKey + "2233": true,
-	}
-
-	for k, expect := range checks {
-		ok, err1 := state.HasTombstone(db, common.FromHex(k))
-		require.NoError(err1, k)
-		assert.Equal(expect, ok, k)
-	}
-}
-
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
 
@@ -1399,4 +1196,106 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	trieCode, err = tds.ReadAccountCode(contract, newCodeHash)
 	assert.NoError(t, err, "you can receive the new code")
 	assert.Equal(t, newCode, trieCode, "new code should be received")
+}
+
+// TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
+func TestCacheCodeSizeSeparately(t *testing.T) {
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+
+	db := ethdb.NewMemDatabase()
+	tds := state.NewTrieDbState(root, db, 0)
+	tds.SetResolveReads(true)
+	tsw := tds.DbStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+
+	code := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, code)
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
+
+	oldSize := tds.Trie().TrieSize()
+
+	tds.StartNewBuffer()
+
+	codeHash := common.BytesToHash(crypto.Keccak256(code))
+	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, len(code), codeSize, "new code should be received")
+
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
+
+	newSize := tds.Trie().TrieSize()
+	assert.Equal(t, oldSize, newSize, "should not load codeNode, so the size shouldn't change")
+
+	tds.StartNewBuffer()
+
+	code2, err := tds.ReadAccountCode(contract, codeHash)
+	assert.NoError(t, err, "you can receive the new code")
+	assert.Equal(t, code, code2, "new code should be received")
+
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
+
+	newSize2 := tds.Trie().TrieSize()
+	assert.Equal(t, oldSize, newSize2-len(code), "should load codeNode when requesting new data ")
+}
+
+// TestCacheCodeSizeInTrie makes sure that we dont just read from the DB all the time
+func TestCacheCodeSizeInTrie(t *testing.T) {
+	contract := common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624")
+	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
+
+	db := ethdb.NewMemDatabase()
+	tds := state.NewTrieDbState(root, db, 0)
+	tds.SetResolveReads(true)
+	tsw := tds.DbStateWriter()
+	intraBlockState := state.New(tds)
+	ctx := context.Background()
+	// Start the 1st transaction
+	tds.StartNewBuffer()
+	intraBlockState.CreateAccount(contract, true)
+
+	code := []byte{0x01, 0x02, 0x03, 0x04}
+
+	intraBlockState.SetCode(contract, code)
+	intraBlockState.AddBalance(contract, big.NewInt(1000000000))
+	if err := intraBlockState.FinalizeTx(ctx, tsw); err != nil {
+		t.Errorf("error finalising 1st tx: %v", err)
+	}
+
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
+
+	tds.StartNewBuffer()
+
+	codeHash := common.BytesToHash(crypto.Keccak256(code))
+	codeSize, err := tds.ReadAccountCodeSize(contract, codeHash)
+	assert.NoError(t, err, "you can receive the code size ")
+	assert.Equal(t, len(code), codeSize, "you can receive the code size")
+
+	if _, err = tds.ResolveStateTrie(false, false); err != nil {
+		assert.NoError(t, err)
+	}
+
+	assert.NoError(t, db.Delete(dbutils.CodeBucket, codeHash[:]))
+
+	codeSize2, err := tds.ReadAccountCodeSize(contract, codeHash)
+	assert.NoError(t, err, "you can still receive code size even with empty DB")
+	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
 }

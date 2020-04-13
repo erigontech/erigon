@@ -1,9 +1,6 @@
 package ethdb
 
 import (
-	"bytes"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 )
 
 // Maximum length (in bytes of encoded timestamp)
@@ -80,34 +77,4 @@ func decode7to8(b []byte) []byte {
 		}
 	}
 	return out
-}
-
-// addToChangeSet is not part the AccountChangeSet API, and it is only used in the test settings.
-// In the production settings, ChangeSets encodings are never modified.
-// In production settings (mutation.PutS) we always first populate AccountChangeSet object,
-// then encode it once, and then only work with the encoding
-func addToChangeSet(hb, b []byte, key []byte, value []byte) ([]byte, error) {
-	var (
-		cs  *changeset.ChangeSet
-		err error
-	)
-
-	if bytes.Equal(hb, dbutils.AccountsHistoryBucket) {
-		cs, err = changeset.DecodeAccounts(b)
-	} else {
-		cs, err = changeset.DecodeStorage(b)
-	}
-	if err != nil {
-		return nil, err
-	}
-	err = cs.Add(key, value)
-	if err != nil {
-		return nil, err
-	}
-
-	if bytes.Equal(hb, dbutils.AccountsHistoryBucket) {
-		return changeset.EncodeAccounts(cs)
-	} else {
-		return changeset.EncodeStorage(cs)
-	}
 }

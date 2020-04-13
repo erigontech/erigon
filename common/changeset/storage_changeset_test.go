@@ -3,21 +3,22 @@ package changeset
 import (
 	"bytes"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/stretchr/testify/assert"
 	"math/rand"
 	"reflect"
 	"sort"
 	"strconv"
 	"testing"
+
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/stretchr/testify/assert"
 )
 
 const (
 	defaultIncarnation = 1
 )
 
-func TestEncodingStorageWithoutNotDefaultIncarnation(t *testing.T) {
+func TestEncodingStorageWithoutNotDefaultIncarnation1(t *testing.T) {
 	f := func(t *testing.T, numOfElements int) {
 		// empty StorageChangeSset first
 		ch := NewStorageChangeSet()
@@ -150,10 +151,10 @@ func TestEncodingStorageWithoutNotDefaultIncarnationWalk(t *testing.T) {
 		i := 0
 		err = StorageChangeSetBytes(b).Walk(func(k, v []byte) error {
 			if !bytes.Equal(k, ch.Changes[i].Key) {
-				t.Error(i, "key was incorrect", k, ch.Changes[i].Key)
+				t.Errorf("%d key was incorrect %x %x", i, k, ch.Changes[i].Key)
 			}
 			if !bytes.Equal(v, ch.Changes[i].Value) {
-				t.Error(i, "val is incorrect", v, ch.Changes[i].Value)
+				t.Errorf("%d val is incorrect %x %x", i, v, ch.Changes[i].Value)
 			}
 			i++
 			return nil
@@ -197,12 +198,12 @@ func TestEncodingStorageWithoutNotDefaultIncarnationFind(t *testing.T) {
 		}
 
 		for i, v := range ch.Changes {
-			val, err := StorageChangeSetBytes(b).Find(v.Key)
+			val, err := StorageChangeSetBytes(b).Find(v.Key[:common.HashLength], v.Key[common.HashLength+common.IncarnationLength:])
 			if err != nil {
 				t.Error(err, i)
 			}
 			if !bytes.Equal(val, v.Value) {
-				t.Error("not equal for ", v, val)
+				t.Errorf("not equal for %x %x", v, val)
 			}
 		}
 	}

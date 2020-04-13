@@ -11,7 +11,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/common/hexutil"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
-	"github.com/ledgerwatch/turbo-geth/crypto"
 )
 
 // ChangeSetWriter is a mock StateWriter that accumulates changes in-memory into ChangeSets.
@@ -29,24 +28,28 @@ func NewChangeSetWriter() *ChangeSetWriter {
 	}
 }
 
-func (w *ChangeSetWriter) GetAccountChanges() *changeset.ChangeSet {
+func (w *ChangeSetWriter) GetAccountChanges() (*changeset.ChangeSet, error) {
 	cs := changeset.NewAccountChangeSet()
 	for key, val := range w.accountChanges {
-		if err := cs.Add(crypto.Keccak256(key.Bytes()), val); err != nil {
-			panic(err)
+		addrHash, err := common.HashData(key[:])
+		if err != nil {
+			return nil, err
+		}
+		if err := cs.Add(addrHash[:], val); err != nil {
+			return nil, err
 		}
 	}
-	return cs
+	return cs, nil
 }
 
-func (w *ChangeSetWriter) GetStorageChanges() *changeset.ChangeSet {
+func (w *ChangeSetWriter) GetStorageChanges() (*changeset.ChangeSet, error) {
 	cs := changeset.NewStorageChangeSet()
 	for key, val := range w.storageChanges {
 		if err := cs.Add([]byte(key), val); err != nil {
-			panic(err)
+			return nil, err
 		}
 	}
-	return cs
+	return cs, nil
 }
 
 func (w *ChangeSetWriter) UpdateAccountData(ctx context.Context, address common.Address, original, account *accounts.Account) error {

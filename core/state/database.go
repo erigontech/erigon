@@ -14,13 +14,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with the go-ethereum library. If not, see <http://www.gnu.org/licenses/>.
 
+//nolint:scopelint
 package state
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -28,19 +28,18 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ledgerwatch/bolt"
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
-	"github.com/ledgerwatch/turbo-geth/common/pool"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"github.com/ledgerwatch/turbo-geth/trie"
 )
 
-// Trie cache generation limit after which to evict trie nodes from memory.
-var MaxTrieCacheGen = uint32(1024 * 1024)
+// MaxTrieCacheSize is the trie cache size limit after which to evict trie nodes from memory.
+var MaxTrieCacheSize = uint64(1024 * 1024)
 
 const (
 	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
@@ -95,6 +94,7 @@ func (nw *NoopWriter) CreateContract(address common.Address) error {
 // A change period can be transaction within a block, or a block within group of blocks
 type Buffer struct {
 	codeReads      map[common.Hash]common.Hash
+	codeSizeReads  map[common.Hash]common.Hash
 	codeUpdates    map[common.Hash][]byte
 	storageUpdates map[common.Hash]map[common.Hash][]byte
 	storageReads   map[common.Hash]map[common.Hash]struct{}
@@ -107,6 +107,7 @@ type Buffer struct {
 // Prepares buffer for work or clears previous data
 func (b *Buffer) initialise() {
 	b.codeReads = make(map[common.Hash]common.Hash)
+	b.codeSizeReads = make(map[common.Hash]common.Hash)
 	b.codeUpdates = make(map[common.Hash][]byte)
 	b.storageUpdates = make(map[common.Hash]map[common.Hash][]byte)
 	b.storageReads = make(map[common.Hash]map[common.Hash]struct{})
@@ -133,6 +134,10 @@ func (b *Buffer) merge(other *Buffer) {
 
 	for addrHash, code := range other.codeUpdates {
 		b.codeUpdates[addrHash] = code
+	}
+
+	for address, codeHash := range other.codeSizeReads {
+		b.codeSizeReads[address] = codeHash
 	}
 
 	for addrHash, om := range other.storageUpdates {
@@ -171,29 +176,28 @@ func (b *Buffer) merge(other *Buffer) {
 
 // TrieDbState implements StateReader by wrapping a trie and a database, where trie acts as a cache for the database
 type TrieDbState struct {
-	t                      *trie.Trie
-	tMu                    *sync.Mutex
-	db                     ethdb.Database
-	blockNr                uint64
-	buffers                []*Buffer
-	aggregateBuffer        *Buffer // Merge of all buffers
-	currentBuffer          *Buffer
-	historical             bool
-	noHistory              bool
-	resolveReads           bool
-	savePreimages          bool
-	enableIntermediateHash bool
-	resolveSetBuilder      *trie.ResolveSetBuilder
-	tp                     *trie.TriePruning
-	newStream              trie.Stream
-	hashBuilder            *trie.HashBuilder
-	resolver               *trie.Resolver
-	incarnationMap         map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
+	t                 *trie.Trie
+	tMu               *sync.Mutex
+	db                ethdb.Database
+	blockNr           uint64
+	buffers           []*Buffer
+	aggregateBuffer   *Buffer // Merge of all buffers
+	currentBuffer     *Buffer
+	historical        bool
+	noHistory         bool
+	resolveReads      bool
+	savePreimages     bool
+	resolveSetBuilder *trie.ResolveSetBuilder
+	tp                *trie.Eviction
+	newStream         trie.Stream
+	hashBuilder       *trie.HashBuilder
+	resolver          *trie.Resolver
+	incarnationMap    map[common.Hash]uint64 // Temporary map of incarnation in case we cannot figure out from the database
 }
 
 func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDbState {
 	t := trie.New(root)
-	tp := trie.NewTriePruning(blockNr)
+	tp := trie.NewEviction()
 
 	tds := &TrieDbState{
 		t:                 t,
@@ -206,12 +210,11 @@ func NewTrieDbState(root common.Hash, db ethdb.Database, blockNr uint64) *TrieDb
 		hashBuilder:       trie.NewHashBuilder(false),
 		incarnationMap:    make(map[common.Hash]uint64),
 	}
-	t.SetTouchFunc(tp.Touch)
 
-	if debug.IsIntermediateTrieHash() {
-		tp.SetUnloadNodeFunc(tds.putIntermediateHash)
-		tp.SetCreateNodeFunc(tds.delIntermediateHash)
-	}
+	tp.SetBlockNumber(blockNr)
+
+	t.AddObserver(tp)
+	t.AddObserver(NewIntermediateHashes(tds.db, tds.db))
 
 	return tds
 }
@@ -232,17 +235,14 @@ func (tds *TrieDbState) SetNoHistory(nh bool) {
 	tds.noHistory = nh
 }
 
-func (tds *TrieDbState) EnableIntermediateHash(v bool) {
-	tds.enableIntermediateHash = v
-}
-
 func (tds *TrieDbState) Copy() *TrieDbState {
 	tds.tMu.Lock()
 	tcopy := *tds.t
 	tds.tMu.Unlock()
 
 	n := tds.getBlockNr()
-	tp := trie.NewTriePruning(n)
+	tp := trie.NewEviction()
+	tp.SetBlockNumber(n)
 
 	cpy := TrieDbState{
 		t:              &tcopy,
@@ -254,287 +254,10 @@ func (tds *TrieDbState) Copy() *TrieDbState {
 		incarnationMap: make(map[common.Hash]uint64),
 	}
 
-	if debug.IsIntermediateTrieHash() {
-		cpy.tp.SetUnloadNodeFunc(cpy.putIntermediateHash)
-		cpy.tp.SetCreateNodeFunc(cpy.delIntermediateHash)
-	}
+	cpy.t.AddObserver(tp)
+	cpy.t.AddObserver(NewIntermediateHashes(cpy.db, cpy.db))
 
 	return &cpy
-}
-
-func ClearTombstonesForReCreatedAccount(db ethdb.MinDatabase, addrHash common.Hash) error {
-	addrHashBytes := addrHash[:]
-	if ok, err := HasTombstone(db, addrHashBytes); err != nil {
-		return err
-	} else if !ok {
-		return nil
-	}
-
-	var boltDb *bolt.DB
-	if hasBolt, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasBolt.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	var toPut [][]byte
-	if err := boltDb.Update(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("ClearTombstonesForReCreatedAccount(%x): %w\n", addrHash, err))
-				}
-			}()
-		}
-
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-		k, _ := storage.Seek(addrHashBytes)
-		if !bytes.HasPrefix(k, addrHashBytes) {
-			return nil
-		}
-
-		buf := pool.GetBuffer(256)
-		defer pool.PutBuffer(buf)
-
-		incarnation := dbutils.DecodeIncarnation(k[common.HashLength : common.HashLength+8])
-		for ; incarnation > 0; incarnation-- {
-			accWithInc := dbutils.GenerateStoragePrefix(addrHash, incarnation)
-			for k, _ = storage.Seek(accWithInc); k != nil; k, _ = storage.Next() {
-				if !bytes.HasPrefix(k, accWithInc) {
-					k = nil
-				}
-
-				if k == nil {
-					break
-				}
-
-				buf.Reset()
-				dbutils.RemoveIncarnationFromKey(k, &buf.B)
-				toPut = append(toPut, common.CopyBytes(buf.B[:common.HashLength+1]))
-			}
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-	for _, k := range toPut {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-			return err
-		}
-	}
-
-	if err := db.Delete(dbutils.IntermediateTrieHashBucket, addrHashBytes); err != nil {
-		return err
-	}
-	return nil
-}
-
-// PutTombstoneForDeletedAccount - placing tombstone only if given account has storage in database
-func PutTombstoneForDeletedAccount(db ethdb.MinDatabase, addrHash []byte) error {
-	if len(addrHash) != common.HashLength {
-		return nil
-	}
-
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-
-	buf := pool.GetBuffer(64)
-	defer pool.PutBuffer(buf)
-
-	hasStorage := false
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("PutTombstoneForDeletedAccount(%x): %w\n", addrHash, err))
-				}
-			}()
-		}
-
-		// place 1 tombstone to account if it has storage
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-		k, _ := storage.Seek(addrHash)
-		if !bytes.HasPrefix(k, addrHash) {
-			return nil
-		}
-
-		if k != nil {
-			hasStorage = true
-		}
-
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	if !hasStorage {
-		return nil
-	}
-
-	return db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(addrHash), []byte{})
-}
-
-func ClearTombstonesForNewStorage(db ethdb.MinDatabase, storageKeyNoInc []byte) error {
-	var boltDb *bolt.DB
-	if hasKV, ok := db.(ethdb.HasKV); ok {
-		boltDb = hasKV.KV()
-	} else {
-		return fmt.Errorf("only Bolt supported yet, given: %T", db)
-	}
-	addrHashBytes := common.CopyBytes(storageKeyNoInc[:common.HashLength])
-
-	var toPut [][]byte
-	var toDelete [][]byte
-	if err := boltDb.View(func(tx *bolt.Tx) error {
-		if debug.IntermediateTrieHashAssertDbIntegrity {
-			defer func() {
-				if err := StorageTombstonesIntegrityDBCheck(tx); err != nil {
-					panic(fmt.Errorf("ClearTombstonesForNewStorage(%x): %w\n", storageKeyNoInc, err))
-				}
-			}()
-		}
-
-		interBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-		storageK, _ := storage.Seek(addrHashBytes)
-		if !bytes.HasPrefix(storageK, addrHashBytes) {
-			storageK = nil
-		}
-		if storageK == nil {
-			return nil
-		}
-
-		kWithInc := pool.GetBuffer(256)
-		defer pool.PutBuffer(kWithInc)
-		kWithInc.B = kWithInc.B[:0]
-		kWithInc.B = append(kWithInc.B, storageK[:common.HashLength+8]...)
-		kWithInc.B = append(kWithInc.B, storageKeyNoInc[common.HashLength:]...)
-
-		buf := pool.GetBuffer(256)
-		defer pool.PutBuffer(buf)
-
-		for i := common.HashLength + 1; i < len(storageKeyNoInc)-1; i++ { // +1 because first step happened during account re-creation
-			tombStone, _ := interBucket.Get(storageKeyNoInc[:i])
-			foundTombstone := tombStone != nil && len(tombStone) == 0
-			if !foundTombstone {
-				continue
-			}
-
-			for storageK, _ = storage.Seek(kWithInc.B[:i+8]); storageK != nil; storageK, _ = storage.Next() {
-				if !bytes.HasPrefix(storageK, kWithInc.B[:i+8]) {
-					storageK = nil
-				}
-				if storageK == nil {
-					break
-				}
-
-				if storageK[i+8] == storageKeyNoInc[i] { // clear path for given storage
-					continue
-				}
-
-				buf.Reset()
-				dbutils.RemoveIncarnationFromKey(storageK[:i+1+8], &buf.B)
-				toPut = append(toPut, common.CopyBytes(buf.B))
-			}
-			toDelete = append(toDelete, common.CopyBytes(storageKeyNoInc[:i]))
-			break
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	for _, k := range toPut {
-		if err := db.Put(dbutils.IntermediateTrieHashBucket, k, []byte{}); err != nil {
-			return err
-		}
-	}
-
-	for _, k := range toDelete {
-		if err := db.Delete(dbutils.IntermediateTrieHashBucket, k); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func StorageTombstonesIntegrityDBCheck(tx *bolt.Tx) error {
-	inter := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-	cOverlap := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
-	storage := tx.Bucket(dbutils.StorageBucket).Cursor()
-
-	for k, v := inter.First(); k != nil; k, v = inter.Next() {
-		if len(v) > 0 {
-			continue
-		}
-
-		// 1 prefix must be covered only by 1 tombstone
-		from := append(k, []byte{0, 0}...)
-		for overlapK, overlapV := cOverlap.Seek(from); overlapK != nil; overlapK, overlapV = cOverlap.Next() {
-			if !bytes.HasPrefix(overlapK, from) {
-				overlapK = nil
-			}
-			if len(overlapV) > 0 {
-				continue
-			}
-
-			if bytes.HasPrefix(overlapK, k) {
-				return fmt.Errorf("%x is prefix of %x\n", overlapK, k)
-			}
-		}
-
-		addrHash := common.CopyBytes(k[:common.HashLength])
-		storageK, _ := storage.Seek(addrHash)
-		if !bytes.HasPrefix(storageK, addrHash) {
-			return fmt.Errorf("tombstone %x has no storage to hide\n", k)
-		} else {
-			incarnation := dbutils.DecodeIncarnation(storageK[common.HashLength : common.HashLength+8])
-			hideStorage := false
-			for ; incarnation > 0; incarnation-- {
-				kWithInc := dbutils.GenerateStoragePrefix(common.BytesToHash(addrHash), incarnation)
-				kWithInc = append(kWithInc, k[common.HashLength:]...)
-				storageK, _ = storage.Seek(kWithInc)
-				if bytes.HasPrefix(storageK, kWithInc) {
-					hideStorage = true
-				}
-			}
-			if !hideStorage {
-				return fmt.Errorf("tombstone %x has no storage to hide\n", k)
-			}
-		}
-	}
-	return nil
-}
-
-func (tds *TrieDbState) putIntermediateHash(key []byte, nodeHash []byte) {
-	if err := tds.db.Put(dbutils.IntermediateTrieHashBucket, common.CopyBytes(key), common.CopyBytes(nodeHash)); err != nil {
-		log.Warn("could not put intermediate trie hash", "err", err)
-	}
-}
-
-func (tds *TrieDbState) delIntermediateHash(prefixAsNibbles []byte) {
-	if len(prefixAsNibbles) == 0 {
-		return
-	}
-
-	if len(prefixAsNibbles)%2 == 1 { // only put to bucket prefixes with even number of nibbles
-		return
-	}
-
-	key := make([]byte, len(prefixAsNibbles)/2)
-	trie.CompressNibbles(prefixAsNibbles, &key)
-
-	if err := tds.db.Delete(dbutils.IntermediateTrieHashBucket, key); err != nil {
-		log.Warn("could not delete intermediate trie hash", "err", err)
-		return
-	}
 }
 
 func (tds *TrieDbState) Database() ethdb.Database {
@@ -583,6 +306,7 @@ func (tds *TrieDbState) WithNewBuffer() *TrieDbState {
 		resolveSetBuilder: tds.resolveSetBuilder,
 		tp:                tds.tp,
 		hashBuilder:       trie.NewHashBuilder(false),
+		incarnationMap:    make(map[common.Hash]uint64),
 	}
 	tds.tMu.Unlock()
 
@@ -601,7 +325,7 @@ func (tds *TrieDbState) LastRoot() common.Hash {
 // ComputeTrieRoots is a combination of `ResolveStateTrie` and `UpdateStateTrie`
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 func (tds *TrieDbState) ComputeTrieRoots() ([]common.Hash, error) {
-	if _, err := tds.ResolveStateTrie(false); err != nil {
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		return nil, err
 	}
 	return tds.UpdateStateTrie()
@@ -706,8 +430,12 @@ func (tds *TrieDbState) populateStorageBlockProof(storageTouches common.StorageK
 	return nil
 }
 
-func (tds *TrieDbState) buildCodeTouches(withReads bool) map[common.Hash]common.Hash {
+func (tds *TrieDbState) buildCodeTouches() map[common.Hash]common.Hash {
 	return tds.aggregateBuffer.codeReads
+}
+
+func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
+	return tds.aggregateBuffer.codeSizeReads
 }
 
 // Builds a sorted list of all address hashes that were touched within the
@@ -754,10 +482,28 @@ func (tds *TrieDbState) buildAccountTouches(withReads bool, withValues bool) (co
 	return accountTouches, aValues
 }
 
-func (tds *TrieDbState) resolveCodeTouches(codeTouches map[common.Hash]common.Hash, resolveFunc trie.ResolveFunc) error {
+func (tds *TrieDbState) resolveCodeTouches(
+	codeTouches map[common.Hash]common.Hash,
+	codeSizeTouches map[common.Hash]common.Hash,
+	resolveFunc trie.ResolveFunc,
+) error {
 	firstRequest := true
 	for address, codeHash := range codeTouches {
-		if need, req := tds.t.NeedResolutonForCode(address, codeHash); need {
+		delete(codeSizeTouches, codeHash)
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, true /*bytecode*/); need {
+			if tds.resolver == nil {
+				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
+				tds.resolver.SetHistorical(tds.historical)
+			} else if firstRequest {
+				tds.resolver.Reset(0, true, tds.blockNr)
+			}
+			firstRequest = false
+			tds.resolver.AddCodeRequest(req)
+		}
+	}
+
+	for address, codeHash := range codeSizeTouches {
+		if need, req := tds.t.NeedResolutonForCode(address, codeHash, false /*bytecode*/); need {
 			if tds.resolver == nil {
 				tds.resolver = trie.NewResolver(0, true, tds.blockNr)
 				tds.resolver.SetHistorical(tds.historical)
@@ -834,7 +580,10 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 	accountTouches, _ := tds.buildAccountTouches(tds.resolveReads, false)
 
 	// Prepare (resolve) contract code reads so that actual modifications can proceed without database access
-	codeTouches := tds.buildCodeTouches(tds.resolveReads)
+	codeTouches := tds.buildCodeTouches()
+
+	// Prepare (resolve) contract code size reads so that actual modifications can proceed without database access
+	codeSizeTouches := tds.buildCodeSizeTouches()
 
 	var err error
 
@@ -842,7 +591,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 		return err
 	}
 
-	if err = tds.resolveCodeTouches(codeTouches, resolveFunc); err != nil {
+	if err = tds.resolveCodeTouches(codeTouches, codeSizeTouches, resolveFunc); err != nil {
 		return err
 	}
 
@@ -864,7 +613,7 @@ func (tds *TrieDbState) resolveStateTrieWithFunc(resolveFunc trie.ResolveFunc) e
 
 // ResolveStateTrie resolves parts of the state trie that would be necessary for any updates
 // (and reads, if `resolveReads` is set).
-func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness, error) {
+func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool, trace bool) ([]*trie.Witness, error) {
 	var witnesses []*trie.Witness
 
 	resolveFunc := func(resolver *trie.Resolver) error {
@@ -872,7 +621,7 @@ func (tds *TrieDbState) ResolveStateTrie(extractWitnesses bool) ([]*trie.Witness
 			return nil
 		}
 		resolver.CollectWitnesses(extractWitnesses)
-		if err := resolver.ResolveWithDb(tds.db, tds.blockNr); err != nil {
+		if err := resolver.ResolveWithDb(tds.db, tds.blockNr, trace); err != nil {
 			return err
 		}
 
@@ -908,7 +657,7 @@ func (tds *TrieDbState) ResolveStateTrieStateless(database trie.WitnessStorage) 
 			return nil
 		}
 
-		pos, err := resolver.ResolveStateless(database, tds.blockNr, MaxTrieCacheGen, startPos)
+		pos, err := resolver.ResolveStateless(database, tds.blockNr, uint32(MaxTrieCacheSize), startPos)
 		if err != nil {
 			return err
 		}
@@ -956,20 +705,12 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				continue
 			}
 			alreadyCreated[addrHash] = struct{}{}
-			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-				b.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
-			if account, ok := tds.aggregateBuffer.accountUpdates[addrHash]; ok && account != nil {
-				tds.aggregateBuffer.accountUpdates[addrHash].Root = trie.EmptyRoot
-			}
+
 			//fmt.Println("updateTrieRoots del subtree", addrHash.String())
 
 			// The only difference between Delete and DeleteSubtree is that Delete would delete accountNode too,
 			// wherewas DeleteSubtree will keep the accountNode, but will make the storage sub-trie empty
 			tds.t.DeleteSubtree(addrHash[:])
-			if debug.IsIntermediateTrieHash() {
-				_ = ClearTombstonesForReCreatedAccount(tds.db, addrHash)
-			}
 		}
 
 		for addrHash, account := range b.accountUpdates {
@@ -993,11 +734,7 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				if len(v) > 0 {
 					//fmt.Printf("Update storage trie addrHash %x, keyHash %x: %x\n", addrHash, keyHash, v)
 					if forward {
-
-						if debug.IsIntermediateTrieHash() {
-							_ = ClearTombstonesForNewStorage(tds.db, cKey)
-						}
-
+						_ = ClearTombstonesForNewStorage(tds.db, cKey)
 						tds.t.Update(cKey, v)
 					} else {
 						// If rewinding, it might not be possible to execute storage item update.
@@ -1094,25 +831,12 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 			}
 
 			tds.t.DeleteSubtree(addrHash[:])
-			if debug.IsIntermediateTrieHash() {
-				_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
-			}
+			_ = PutTombstoneForDeletedAccount(tds.db, addrHash[:])
 		}
 		roots[i] = tds.t.Hash()
 	}
 
 	return roots, nil
-}
-
-func HasTombstone(db ethdb.MinDatabase, prefix []byte) (bool, error) {
-	v, err := db.Get(dbutils.IntermediateTrieHashBucket, prefix)
-	if err != nil {
-		if errors.Is(err, ethdb.ErrKeyNotFound) {
-			return false, nil
-		}
-		return false, err
-	}
-	return v != nil && len(v) == 0, nil
 }
 
 func (tds *TrieDbState) clearUpdates() {
@@ -1121,23 +845,9 @@ func (tds *TrieDbState) clearUpdates() {
 	tds.aggregateBuffer = nil
 }
 
-func (tds *TrieDbState) Rebuild() error {
-	tds.tMu.Lock()
-	defer tds.tMu.Unlock()
-	err := tds.t.Rebuild(tds.db, tds.blockNr)
-	if err != nil {
-		return err
-	}
-
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	log.Info("Memory after rebuild", "nodes", tds.tp.NodeCount(), "alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
-	return nil
-}
-
 func (tds *TrieDbState) SetBlockNr(blockNr uint64) {
 	tds.setBlockNr(blockNr)
-	tds.tp.SetBlockNr(blockNr)
+	tds.tp.SetBlockNumber(blockNr)
 }
 
 func (tds *TrieDbState) GetBlockNr() uint64 {
@@ -1145,6 +855,7 @@ func (tds *TrieDbState) GetBlockNr() uint64 {
 }
 
 func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
+	//fmt.Printf("Unwind from block %d to block %d\n", tds.blockNr, blockNr)
 	tds.StartNewBuffer()
 	b := tds.currentBuffer
 
@@ -1202,7 +913,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 	}); err != nil {
 		return err
 	}
-	if _, err := tds.ResolveStateTrie(false); err != nil {
+	if _, err := tds.ResolveStateTrie(false, false); err != nil {
 		return err
 	}
 
@@ -1212,13 +923,107 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 		return err
 	}
 	for i := tds.blockNr; i > blockNr; i-- {
-		if err := tds.db.DeleteTimestamp(i); err != nil {
+		if err := tds.deleteTimestamp(i); err != nil {
 			return err
 		}
 	}
 
 	tds.clearUpdates()
 	tds.setBlockNr(blockNr)
+	return nil
+}
+
+func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
+	changeSetKey := dbutils.EncodeTimestamp(timestamp)
+	changedAccounts, err := tds.db.Get(dbutils.AccountChangeSetBucket, changeSetKey)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return err
+	}
+	changedStorage, err := tds.db.Get(dbutils.StorageChangeSetBucket, changeSetKey)
+	if err != nil && err != ethdb.ErrKeyNotFound {
+		return err
+	}
+
+	if debug.IsThinHistory() {
+		if len(changedAccounts) > 0 {
+			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
+				indexBytes, getErr := tds.db.Get(dbutils.AccountsHistoryBucket, kk)
+				if getErr != nil {
+					if getErr == ethdb.ErrKeyNotFound {
+						return nil
+					}
+					return getErr
+				}
+
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
+					return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
+				}
+				return tds.db.Put(dbutils.AccountsHistoryBucket, kk, *index)
+			})
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+
+		if len(changedStorage) > 0 {
+			innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
+				indexBytes, getErr := tds.db.Get(dbutils.StorageHistoryBucket, kk)
+				if getErr != nil {
+					if getErr == ethdb.ErrKeyNotFound {
+						return nil
+					}
+					return getErr
+				}
+
+				index := dbutils.WrapHistoryIndex(indexBytes)
+				index.Remove(timestamp)
+
+				if index.Len() == 0 {
+					return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
+				}
+				return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
+			})
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+	} else {
+		if len(changedAccounts) > 0 {
+			innerErr := changeset.Walk(changedAccounts, func(kk, _ []byte) error {
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				return tds.db.Delete(dbutils.AccountsHistoryBucket, composite)
+			})
+
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+		if len(changedStorage) > 0 {
+			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
+				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
+				return tds.db.Delete(dbutils.StorageHistoryBucket, composite)
+			})
+
+			if innerErr != nil {
+				return innerErr
+			}
+			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
@@ -1394,6 +1199,12 @@ func (tds *TrieDbState) readAccountCodeFromTrie(addrHash []byte) ([]byte, bool) 
 	return tds.t.GetAccountCode(addrHash)
 }
 
+func (tds *TrieDbState) readAccountCodeSizeFromTrie(addrHash []byte) (int, bool) {
+	tds.tMu.Lock()
+	defer tds.tMu.Unlock()
+	return tds.t.GetAccountCodeSize(addrHash)
+}
+
 func (tds *TrieDbState) ReadAccountCode(address common.Address, codeHash common.Hash) (code []byte, err error) {
 	if bytes.Equal(codeHash[:], emptyCodeHash) {
 		return nil, nil
@@ -1432,10 +1243,11 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		return 0, err
 	}
 
-	if code, ok := tds.readAccountCodeFromTrie(addrHash[:]); ok {
-		codeSize, err = len(code), nil
+	if cached, ok := tds.readAccountCodeSizeFromTrie(addrHash[:]); ok {
+		codeSize, err = cached, nil
 	} else {
-		code, err = tds.ReadAccountCode(address, codeHash)
+		var code []byte
+		code, err = tds.db.Get(dbutils.CodeBucket, codeHash[:])
 		if err != nil {
 			return 0, err
 		}
@@ -1452,7 +1264,8 @@ func (tds *TrieDbState) ReadAccountCodeSize(address common.Address, codeHash com
 		// we have to be careful, because the code might change
 		// during the block executuion, so we are always
 		// storing the latest code hash
-		tds.currentBuffer.codeReads[addrHash] = codeHash
+		tds.currentBuffer.codeSizeReads[addrHash] = codeHash
+		// FIXME: support codeSize in witnesses if makes sense
 		tds.resolveSetBuilder.ReadCode(codeHash)
 	}
 	return codeSize, nil
@@ -1502,28 +1315,69 @@ type TrieStateWriter struct {
 	tds *TrieDbState
 }
 
-func (tds *TrieDbState) PruneTries(print bool) {
+func (tds *TrieDbState) EvictTries(print bool) {
 	tds.tMu.Lock()
 	defer tds.tMu.Unlock()
+	strict := print
 	tds.incarnationMap = make(map[common.Hash]uint64)
 	if print {
-		prunableNodes := tds.t.CountPrunableNodes()
-		fmt.Printf("[Before] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
+		trieSize := tds.t.TrieSize()
+		fmt.Println("") // newline for better formatting
+		fmt.Printf("[Before] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
 	}
 
-	tds.tp.PruneTo(tds.t, int(MaxTrieCacheGen))
+	if strict {
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
+		accountedAccounts := tds.tp.NumberOf()
+		if actualAccounts != accountedAccounts {
+			panic(fmt.Errorf("account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
+		}
+		fmt.Printf("checking number --> ok\n")
+
+		actualSize := uint64(tds.t.TrieSize())
+		accountedSize := tds.tp.TotalSize()
+
+		if actualSize != accountedSize {
+			panic(fmt.Errorf("account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
+		}
+		fmt.Printf("checking size --> ok\n")
+	}
+
+	tds.tp.EvictToFitSize(tds.t, MaxTrieCacheSize)
+
+	if strict {
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
+		accountedAccounts := tds.tp.NumberOf()
+		if actualAccounts != accountedAccounts {
+			panic(fmt.Errorf("after eviction account number mismatch: trie=%v eviction=%v", actualAccounts, accountedAccounts))
+		}
+		fmt.Printf("checking number --> ok\n")
+
+		actualSize := uint64(tds.t.TrieSize())
+		accountedSize := tds.tp.TotalSize()
+
+		if actualSize != accountedSize {
+			panic(fmt.Errorf("after eviction account size mismatch: trie=%v eviction=%v", actualSize, accountedSize))
+		}
+		fmt.Printf("checking size --> ok\n")
+	}
 
 	if print {
-		prunableNodes := tds.t.CountPrunableNodes()
-		fmt.Printf("[After] Actual prunable nodes: %d, accounted: %d\n", prunableNodes, tds.tp.NodeCount())
+		trieSize := tds.t.TrieSize()
+		fmt.Printf("[After] Actual nodes size: %d, accounted size: %d\n", trieSize, tds.tp.TotalSize())
+
+		actualAccounts := uint64(tds.t.NumberOfAccounts())
+		fmt.Println("number of leaves: ", actualAccounts)
 	}
 
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	log.Info("Memory", "nodes", tds.tp.NodeCount(), "hashes", tds.t.HashMapSize(),
+	log.Info("Memory", "nodes size", tds.tp.TotalSize(), "hashes", tds.t.HashMapSize(),
 		"alloc", int(m.Alloc/1024), "sys", int(m.Sys/1024), "numGC", int(m.NumGC))
 	if print {
-		fmt.Printf("Pruning done. Nodes: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.NodeCount(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
+		fmt.Printf("Eviction done. Nodes size: %d, alloc: %d, sys: %d, numGC: %d\n", tds.tp.TotalSize(), int(m.Alloc/1024), int(m.Sys/1024), int(m.NumGC))
 	}
 }
 
@@ -1531,8 +1385,9 @@ func (tds *TrieDbState) TrieStateWriter() *TrieStateWriter {
 	return &TrieStateWriter{tds: tds}
 }
 
+// DbStateWriter creates a writer that is designed to write changes into the database batch
 func (tds *TrieDbState) DbStateWriter() *DbStateWriter {
-	return &DbStateWriter{tds: tds}
+	return &DbStateWriter{tds: tds, csw: NewChangeSetWriter()}
 }
 
 func accountsEqual(a1, a2 *accounts.Account) bool {

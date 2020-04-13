@@ -2,7 +2,8 @@ package dbutils
 
 import (
 	"encoding/binary"
-	"fmt"
+	"sort"
+
 	"github.com/ledgerwatch/turbo-geth/common/math"
 )
 
@@ -67,8 +68,8 @@ func (hi *HistoryIndexBytes) Append(v uint64) *HistoryIndexBytes {
 	return hi
 }
 
-func (hi *HistoryIndexBytes) Len() uint32 {
-	return binary.LittleEndian.Uint32((*hi)[0:LenBytes])
+func (hi HistoryIndexBytes) Len() uint32 {
+	return binary.LittleEndian.Uint32(hi[:LenBytes])
 }
 
 //most common operation is remove one from the tail
@@ -110,59 +111,25 @@ Loop:
 	return hi
 }
 
-func (hi *HistoryIndexBytes) Search(v uint64) (uint64, bool) {
-	if len(*hi) < 4 {
-		fmt.Println(1)
+func (hi HistoryIndexBytes) Search(v uint64) (uint64, bool) {
+	if len(hi) == 0 {
 		return 0, false
 	}
-	numOfElements := binary.LittleEndian.Uint32((*hi)[0:LenBytes])
-	numOfUint32Elements := binary.LittleEndian.Uint32((*hi)[LenBytes : 2*LenBytes])
-	var itemLen uint32
-
-	if numOfElements == 0 {
-		fmt.Println(2)
-		return 0, false
-	}
-
-	//check last element
-	var lastElement uint64
-	if numOfUint32Elements < numOfElements {
-		lastElement = binary.LittleEndian.Uint64((*hi)[LenBytes*2+numOfUint32Elements*4+ItemLen*(numOfElements-numOfUint32Elements)-ItemLen : LenBytes*2+numOfUint32Elements*4+ItemLen*(numOfElements-numOfUint32Elements)])
-	} else {
-		lastElement = uint64(binary.LittleEndian.Uint32((*hi)[LenBytes*2+numOfUint32Elements*4-4 : LenBytes*2+numOfUint32Elements*4]))
-	}
-
-	if lastElement < v {
-		return 0, false
-	}
-	var currentElement uint64
-	var elemEnd uint32
-
-	for i := numOfElements - 1; i > 0; i-- {
+	numOfElements := int(binary.LittleEndian.Uint32(hi[0:LenBytes]))
+	numOfUint32Elements := int(binary.LittleEndian.Uint32(hi[LenBytes : 2*LenBytes]))
+	elements := hi[LenBytes*2:]
+	idx := sort.Search(numOfElements, func (i int) bool {
 		if i > numOfUint32Elements {
-			elemEnd = LenBytes*2 + numOfUint32Elements*4 + (i-numOfUint32Elements)*8
-			currentElement = binary.LittleEndian.Uint64((*hi)[elemEnd-8 : elemEnd])
-			itemLen = 8
-		} else {
-			elemEnd = LenBytes*2 + i*4
-			currentElement = uint64(binary.LittleEndian.Uint32((*hi)[elemEnd-4 : elemEnd]))
-			itemLen = 4
+			return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (i-numOfUint32Elements)*8:]) >= v
 		}
-
-		switch {
-		case currentElement == v:
-			return v, true
-		case currentElement < v:
-			if itemLen == 4 {
-				return uint64(binary.LittleEndian.Uint32((*hi)[elemEnd : elemEnd+itemLen])), true
-			}
-			return binary.LittleEndian.Uint64((*hi)[elemEnd : elemEnd+itemLen]), true
-		default:
-			continue
-		}
+		return uint64(binary.LittleEndian.Uint32(elements[i*4:])) >= v
+	})
+	if idx == numOfElements {
+		return 0, false
 	}
-	if numOfUint32Elements == 0 {
-		return binary.LittleEndian.Uint64((*hi)[LenBytes*2 : 2*LenBytes+ItemLen]), true
+	if idx > numOfUint32Elements {
+		return binary.LittleEndian.Uint64(elements[numOfUint32Elements*4 + (idx-numOfUint32Elements)*8:]), true
 	}
-	return uint64(binary.LittleEndian.Uint32((*hi)[2*LenBytes : 2*LenBytes+4])), true
+	return uint64(binary.LittleEndian.Uint32(elements[idx*4:])), true
 }
+

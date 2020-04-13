@@ -103,7 +103,7 @@ func (t *BlockTest) Run() error {
 
 	// import pre accounts & construct test genesis block & state root
 	db := ethdb.NewMemDatabase()
-	gblock, _, err := t.genesis(config).Commit(db)
+	gblock, _, err := t.genesis(config).Commit(db, false /* history */)
 	if err != nil {
 		return err
 	}

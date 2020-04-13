@@ -142,12 +142,18 @@ func New(ctx *node.ServiceContext, config *Config) (*Ethereum, error) {
 		return nil, err
 	}
 	if ctx.Config.RemoteDbListenAddress != "" {
-		if casted, ok := chainDb.(ethdb.HasKV); ok {
-			remotedbserver.StartDeprecated(casted, ctx.Config.RemoteDbListenAddress)
+		if casted, ok := chainDb.(ethdb.HasAbstractKV); ok {
+			remotedbserver.StartDeprecated(casted.AbstractKV(), ctx.Config.RemoteDbListenAddress)
 		}
 	}
 
-	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(chainDb, config.Genesis, config.OverrideIstanbul, config.OverrideMuirGlacier)
+	chainConfig, genesisHash, _, genesisErr := core.SetupGenesisBlockWithOverride(
+		chainDb,
+		config.Genesis,
+		config.OverrideIstanbul,
+		config.OverrideMuirGlacier,
+		config.StorageMode.History,
+	)
 	if _, ok := genesisErr.(*params.ConfigCompatError); genesisErr != nil && !ok {
 		return nil, genesisErr
 	}

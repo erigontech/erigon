@@ -68,7 +68,10 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 		db = ethdb.NewMemDatabase()
 	}
 
-	genesis := new(Genesis).MustCommit(db)
+	genesis, _, err := new(Genesis).Commit(db, true /* history */)
+	if err != nil {
+		panic(err)
+	}
 
 	// Initialize a fresh chain with only a genesis block
 	cacheConfig := &CacheConfig{
@@ -94,7 +97,7 @@ func newCanonical(engine consensus.Engine, n int, full bool) (context.Context, e
 	}
 	// Header-only chain requested
 	headers := makeHeaderChain(ctx, genesis.Header(), n, engine, db.MemCopy(), canonicalSeed)
-	_, err := blockchain.InsertHeaderChain(headers, 1)
+	_, err = blockchain.InsertHeaderChain(headers, 1)
 	return ctx, db, blockchain, err
 }
 
@@ -173,25 +176,34 @@ func testBlockChainImport(chain types.Blocks, blockchain *BlockChain) error {
 		}
 		parent := blockchain.GetBlockByHash(block.ParentHash())
 		tds := state.NewTrieDbState(parent.Root(), blockchain.db, parent.NumberU64())
-		tds.Rebuild()
 		statedb := state.New(tds)
-		if err = blockchain.db.DeleteTimestamp(block.NumberU64()); err != nil {
-			return err
-		}
-		receipts, _, usedGas, err := blockchain.Processor().Process(block, statedb, tds, vm.Config{})
+		receipts, _, usedGas, root, err := blockchain.Processor().PreProcess(block, statedb, tds, vm.Config{})
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
 			return err
 		}
-		//statedb.FinalizeTx(false, tds.TrieStateWriter())
-		err = blockchain.validator.ValidateState(block, parent, statedb, tds, receipts, usedGas)
+		err = blockchain.validator.ValidateGasAndRoot(block, root, usedGas, tds)
+		if err != nil {
+			blockchain.reportBlock(block, receipts, err)
+			return err
+		}
+		err = blockchain.Processor().PostProcess(block, tds, receipts)
+		if err != nil {
+			blockchain.reportBlock(block, receipts, err)
+			return err
+		}
+		err = blockchain.validator.ValidateReceipts(block, receipts)
 		if err != nil {
 			blockchain.reportBlock(block, receipts, err)
 			return err
 		}
 		blockchain.chainmu.Lock()
 		tds.SetBlockNr(block.NumberU64())
-		if err := statedb.CommitBlock(ctx, tds.DbStateWriter()); err != nil {
+		blockWriter := tds.DbStateWriter()
+		if err := statedb.CommitBlock(ctx, blockWriter); err != nil {
+			return err
+		}
+		if err := blockWriter.WriteChangeSets(); err != nil {
 			return err
 		}
 		if _, err := blockchain.db.Commit(); err != nil {
@@ -1533,7 +1545,7 @@ func doModesTest(history, preimages, receipts, txlookup bool) error {
 			Config: &params.ChainConfig{ChainID: big.NewInt(1), EIP150Block: big.NewInt(0), EIP155Block: big.NewInt(2), HomesteadBlock: new(big.Int)},
 			Alloc:  GenesisAlloc{address: {Balance: funds}, deleteAddr: {Balance: new(big.Int)}},
 		}
-		genesis = gspec.MustCommit(db)
+		genesis, _, _ = gspec.Commit(db, history)
 	)
 
 	cacheConfig := &CacheConfig{

@@ -54,6 +54,10 @@ func (bg *BlockGenerator) GetHeaderByHash(hash common.Hash) *types.Header {
 	return bg.headersByHash[hash]
 }
 
+func (bg *BlockGenerator) Genesis() *types.Block {
+	return bg.genesisBlock
+}
+
 func (bg *BlockGenerator) GetHeaderByNumber(number uint64) *types.Header {
 	return bg.headersByNumber[number]
 }
@@ -151,19 +155,21 @@ func (*NoopBackend) SubscribeFilterLogs(ctx context.Context, query ethereum.Filt
 	panic("must not be called")
 }
 
-func genBlock(db ethdb.Database,
+func makeGenBlock(db ethdb.Database,
 	genesis *core.Genesis,
 	extra []byte,
 	coinbaseKey *ecdsa.PrivateKey,
+	isFork bool,
+	forkBase, forkHeight uint64,
 	r *rand.Rand,
 ) func(coinbase common.Address, i int, gen *core.BlockGen) {
 	var err error
 	amount := big.NewInt(1) // 1 wei
 
-	var nonce uint64
+	var nonce int64 = -1
 	txOpts := bind.NewKeyedTransactor(coinbaseKey)
 	txOpts.GasPrice = big.NewInt(1)
-	txOpts.GasLimit = 3 * params.TxGasContractCreation
+	txOpts.GasLimit = 20 * params.TxGas
 	txOpts.Nonce = big.NewInt(0) // nonce of the sender (coinbase)
 
 	var revive *contracts.Revive2
@@ -172,29 +178,71 @@ func genBlock(db ethdb.Database,
 	var phoenixAddress common.Address
 	backend := &NoopBackend{db: db, genesis: genesis}
 
+	var store = func() *types.Transaction {
+		nonce++
+		txOpts.Nonce.SetInt64(nonce)
+		tx, err := phoenix.Store(txOpts)
+		if err != nil {
+			panic(err)
+		}
+		return tx
+	}
+
+	var incr = func() *types.Transaction {
+		nonce++
+		txOpts.Nonce.SetInt64(nonce)
+		tx, err := phoenix.Increment(txOpts)
+		if err != nil {
+			panic(err)
+		}
+		return tx
+	}
+
+	var deploy = func() *types.Transaction {
+		nonce++
+		txOpts.Nonce.SetInt64(nonce)
+		tx, err := revive.Deploy(txOpts, [32]byte{})
+		if err != nil {
+			panic(err)
+		}
+		return tx
+	}
+
+	var die = func() *types.Transaction {
+		nonce++
+		txOpts.Nonce.SetInt64(nonce)
+		tx, err := phoenix.Die(txOpts)
+		if err != nil {
+			panic(err)
+		}
+		return tx
+	}
+
 	return func(coinbase common.Address, i int, gen *core.BlockGen) {
-		blockNr := int(gen.Number().Uint64())
+		blockNr := gen.Number().Uint64()
 
 		gen.SetCoinbase(coinbase)
-		if gen.GetHeader().GasLimit <= 15*params.TxGasContractCreation {
+		if gen.GetHeader().GasLimit <= 40*params.TxGas { // ~700 blocks
 			return
 		}
 		gen.SetExtra(extra)
-		gen.SetNonce(types.EncodeNonce(nonce))
-
-		signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
-
+		gen.SetNonce(types.EncodeNonce(txOpts.Nonce.Uint64()))
 		var tx *types.Transaction
 		switch true {
 		case blockNr == 10001: // create 0 account
+			nonce++
+			txOpts.Nonce.SetInt64(nonce)
 			account0 := common.HexToAddress("0000000000000000000000000000000000000000")
-			tx = types.NewTransaction(nonce, account0, amount, params.TxGas, nil, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), account0, amount, params.TxGas, txOpts.GasPrice, nil)
+			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
 		case blockNr == 10002: // deploy factory
+			nonce++
+			txOpts.Nonce.SetInt64(nonce)
 			reviveAddress, tx, revive, err = contracts.DeployRevive2(txOpts, backend)
 			if err != nil {
 				panic(err)
@@ -211,88 +259,34 @@ func genBlock(db ethdb.Database,
 			}
 			gen.AddTx(tx)
 		case blockNr == 10003: // call .deploy() method on factory
-			tx, err = revive.Deploy(txOpts, [32]byte{})
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			gen.AddTx(deploy())
 		case i >= 10004 && i <= 20000: // gen big storage
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			gen.AddTx(store())
 		case blockNr == 20001: // kill contract with big storage
-			tx, err = phoenix.Die(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-		case blockNr == 20002: // revive Phoenix and add to it some storage in same Tx
-			tx, err = revive.Deploy(txOpts, [32]byte{})
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-		case blockNr == 20003: // add some storage and kill Phoenix in same Tx
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Die(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = revive.Deploy(txOpts, [32]byte{})
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
-			nonce++
-			txOpts.Nonce.SetUint64(nonce)
-			tx, err = phoenix.Store(txOpts)
-			if err != nil {
-				panic(err)
-			}
-			gen.AddTx(tx)
+			gen.AddTx(die())
+		case blockNr == forkBase-1: // revive Phoenix and add to it some storage in same Tx
+			gen.AddTx(deploy())
+			gen.AddTx(store())
+			gen.AddTx(incr()) // last increment, set last value to 2
+		case !isFork && blockNr == forkBase+1:
+			gen.AddTx(die())
+			gen.AddTx(deploy())
+			gen.AddTx(store())
+		case isFork && blockNr == forkBase+1:
+			// skip self-destruct, deploy and store steps
+			// it means in fork we will have value=2, while in non-fork value=1
 		default:
+			nonce++
+			txOpts.Nonce.SetInt64(nonce)
 			to := randAddress(r)
-			tx = types.NewTransaction(nonce, to, amount, params.TxGas, txOpts.GasPrice, nil)
+			tx = types.NewTransaction(txOpts.Nonce.Uint64(), to, amount, params.TxGas, txOpts.GasPrice, nil)
+			signer := types.MakeSigner(genesis.Config, txOpts.Nonce)
 			signedTx, err1 := types.SignTx(tx, signer, coinbaseKey)
 			if err1 != nil {
 				panic(err1)
 			}
 			gen.AddTx(signedTx)
 		}
-		nonce++
-		txOpts.Nonce.SetUint64(nonce)
 	}
 }
 
@@ -344,7 +338,7 @@ func NewBlockGenerator(ctx context.Context, outputFile string, initialHeight int
 	}
 	coinbase := crypto.PubkeyToAddress(coinbaseKey.PublicKey)
 
-	genBlockFunc := genBlock(db, genesis, extra, coinbaseKey, r)
+	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, false, 0, 0, r)
 	genBlock := func(i int, gen *core.BlockGen) {
 		genBlockFunc(coinbase, i, gen)
 	}
@@ -423,11 +417,12 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	}
 	forkCoinbase := crypto.PubkeyToAddress(forkCoinbaseKey.PublicKey)
 
-	genBlockFunc := genBlock(db, genesis, extra, coinbaseKey, r)
+	genBlockFunc := makeGenBlock(db, genesis, extra, coinbaseKey, true, forkBase, forkHeight, r)
 	genBlock := func(i int, gen *core.BlockGen) {
 		if gen.Number().Uint64() >= forkBase {
 			coinbase = forkCoinbase
 		}
+
 		genBlockFunc(coinbase, i, gen)
 	}
 
@@ -475,7 +470,13 @@ func NewForkGenerator(ctx context.Context, base *BlockGenerator, outputFile stri
 	if err := bg.blocksToFile(outputFile, blocks); err != nil {
 		return nil, err
 	}
-	base.forkId.Next = forkBase
+
+	blockchain, err := core.NewBlockChain(db, nil, genesis.Config, ethash.NewFullFaker(), vm.Config{}, nil)
+	if err != nil {
+		return nil, err
+	}
+	bg.forkId = forkid.NewID(blockchain)
+
 	bg.input, err = os.Open(outputFile)
 	if err != nil {
 		return nil, err

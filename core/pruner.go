@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sync"
 	"time"
+
+	"github.com/ledgerwatch/turbo-geth/common/changeset"
+	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -142,10 +143,6 @@ func (p *BasicPruner) WriteLastPrunedBlockNum(num uint64) {
 }
 
 func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
-	if !debug.IsIntermediateTrieHash() {
-		return nil
-	}
-
 	keysToRemove := newKeysToRemove()
 	if err := db.Walk(dbutils.IntermediateTrieHashBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		if len(v) > 0 && len(k) != common.HashLength { // marker of self-destructed account is - empty value
@@ -153,14 +150,14 @@ func PruneStorageOfSelfDestructedAccounts(db ethdb.Database) error {
 		}
 
 		if err := db.Walk(dbutils.StorageBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, k)
+			keysToRemove.StorageKeys = append(keysToRemove.StorageKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
 			return false, err
 		}
 
 		if err := db.Walk(dbutils.IntermediateTrieHashBucket, k, common.HashLength*8, func(k, _ []byte) (b bool, e error) {
-			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, k)
+			keysToRemove.IntermediateTrieHashKeys = append(keysToRemove.IntermediateTrieHashKeys, common.CopyBytes(k))
 			return true, nil
 		}); err != nil {
 			return false, err
@@ -188,7 +185,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, key)
+		keysToRemove.AccountChangeSet = append(keysToRemove.AccountChangeSet, common.CopyBytes(key))
 
 		innerErr := changeset.Walk(v, func(cKey, _ []byte) error {
 			compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
@@ -212,7 +209,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 			return false, nil
 		}
 
-		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, key)
+		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, common.CopyBytes(key))
 		var innerErr error
 		if debug.IsThinHistory() {
 			innerErr = changeset.StorageChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
@@ -222,7 +219,7 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		} else {
 			innerErr = changeset.Walk(v, func(cKey, _ []byte) error {
 				compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, compKey)
+				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, common.CopyBytes(compKey))
 				return nil
 			})
 		}
@@ -354,6 +351,7 @@ func (i *limitIterator) HasMore() bool {
 	if bytes.Equal(i.currentBucket, lastBatch.bucket) && len(lastBatch.keys) == i.currentNum {
 		return false
 	}
+
 	return true
 }
 

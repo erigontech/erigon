@@ -47,6 +47,11 @@ func TestBlockchain(t *testing.T) {
 	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain2.json`, "Work in progress")
 	bt.fails(`(?m)^TestBlockchain/TransitionTests/bcFrontierToHomestead/blockChainFrontierWithLargerTDvsHomesteadBlockchain.json`, "Work in progress")
 
+	bt.fails(`(?m)^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheck.json`, "Work in progress")
+	bt.fails(`(?m)^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate.json`, "Work in progress")
+	bt.fails(`(?m)^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Constantinople`, "Work in progress")
+	bt.fails(`(?m)^TestBlockchain/ValidBlocks/bcStateTests/suicideStorageCheckVCreate2.json/suicideStorageCheckVCreate2_Istanbul`, "Work in progress")
+
 	bt.walk(t, blockTestDir, func(t *testing.T, name string, test *BlockTest) {
 		if err := bt.checkFailure(t, test.Run()); err != nil {
 			t.Error(err)

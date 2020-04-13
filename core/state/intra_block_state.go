@@ -128,6 +128,11 @@ func (sdb *IntraBlockState) SetTrace(trace bool) {
 func (sdb *IntraBlockState) setError(err error) {
 	sdb.Lock()
 	defer sdb.Unlock()
+	sdb.setErrorUnsafe(err)
+}
+
+// setErrorUnsafe sets error but should be called in medhods that already have locks
+func (sdb *IntraBlockState) setErrorUnsafe(err error) {
 	if sdb.dbErr == nil {
 		sdb.dbErr = err
 	}
@@ -343,7 +348,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr common.Address) int {
 	}
 	len, err := sdb.stateReader.ReadAccountCodeSize(addr, common.BytesToHash(stateObject.CodeHash()))
 	if err != nil {
-		sdb.setError(err)
+		sdb.setErrorUnsafe(err)
 	}
 	return len
 }
@@ -724,7 +729,6 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 	var original *accounts.Account
 	if previous == nil {
 		account = &accounts.Account{}
-		account.Root.SetBytes(trie.EmptyRoot[:])
 		if obj := sdb.stateObjects[addr]; obj != nil && obj.deleted {
 			original = &obj.original
 		} else {
@@ -735,6 +739,7 @@ func (sdb *IntraBlockState) createObject(addr common.Address, previous *stateObj
 		account.Incarnation = NonContractIncarnation
 		original = &previous.original
 	}
+	account.Root.SetBytes(trie.EmptyRoot[:]) // old storage should be ignored
 	newobj = newObject(sdb, addr, account, original)
 	newobj.setNonce(0) // sets the object to dirty
 	if previous == nil {
@@ -905,9 +910,6 @@ func (sdb *IntraBlockState) CommitBlock(ctx context.Context, stateWriter StateWr
 		sdb.stateObjectsDirty[addr] = struct{}{}
 	}
 	for addr, stateObject := range sdb.stateObjects {
-		if common.IsCanceled(ctx) {
-			return ctx.Err()
-		}
 		_, isDirty := sdb.stateObjectsDirty[addr]
 		if err := updateAccount(ctx, stateWriter, addr, stateObject, isDirty); err != nil {
 			return err

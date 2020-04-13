@@ -24,10 +24,12 @@ const LookupStorageForm = ({ api }) => {
 
   return (
     <div>
+      <SearchField
+        placeholder="lookup by prefix"
+        disabled={state.loading}
+        onSubmit={(data) => search(data.search, api, setState)}
+      />
       {state.loading && <Spinner animation="border" />}
-      {!state.loading && (
-        <SearchField placeholder="lookup by prefix" onClick={(prefix) => search(prefix, api, setState)} />
-      )}
       {state.data && <Details data={state.data} />}
     </div>
   );

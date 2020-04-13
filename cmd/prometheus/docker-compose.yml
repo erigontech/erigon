@@ -1,0 +1,53 @@
+version: '2.2'
+
+services:
+
+  turbo-geth:
+    image: turbo-geth:latest
+    build: ./../..
+    command: --nousb --metrics --metrics.expensive --pprof --pprofaddr=0.0.0.0 --pprofport=6060 --remote-db-listen-addr=0.0.0.0:9999
+    stop_grace_period: 2m
+    volumes:
+      - ${TGETH_DATADIR:-~/Library/Ethereum}:/root/.ethereum/
+    ports:
+      - 30303:30303
+      - 8545:8545
+      - 9999:9999
+
+  prometheus:
+    image: prom/prometheus
+    ports:
+      - 9090:9090
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus:/prometheus
+
+  grafana:
+    image: grafana/grafana
+    ports:
+      - 3000:3000
+    depends_on:
+      prometheus:
+        condition: service_started
+    volumes:
+      - ./grafana:/var/lib/grafana
+      - ./datasources:/etc/grafana/provisioning/datasources
+      - ./dashboards:/etc/grafana/provisioning/dashboards
+
+  restapi:
+    image: turbo-geth-restapi:latest
+    build:
+      context: ./../../
+      dockerfile: ./cmd/restapi/Dockerfile
+    command: --remote-db-addr turbo-geth:9999
+    ports:
+      - 8080:8080
+
+  debugui:
+    image: turbo-geth-debugui:latest
+    build: ./../../debug-web-ui
+    stdin_open: true
+    ports:
+      - 3001:3000
+
+

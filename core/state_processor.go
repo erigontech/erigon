@@ -111,30 +111,31 @@ func FormatLogs(logs []vm.StructLog) []StructLogRes {
 	return formatted
 }
 
-// Process processes the state changes according to the Ethereum rules by running
-// the transaction messages using the statedb and applying any rewards to both
+// PreProcess processes the state changes according to the Ethereum rules by running
+// the transaction messages using the IntraBlockState and applying any rewards to both
 // the processor (coinbase) and any included uncles.
 //
-// Process returns the receipts and logs accumulated during the process and
+// PreProcess returns the receipts and logs accumulated during the process and
 // returns the amount of gas that was used in the process. If any of the
 // transactions failed to execute due to insufficient gas it will return an error.
-func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (types.Receipts, []*types.Log, uint64, error) {
-	var (
-		receipts types.Receipts
-		usedGas  = new(uint64)
-		header   = block.Header()
-		allLogs  []*types.Log
-		gp       = new(GasPool).AddGas(block.GasLimit())
-	)
+//
+// PreProcess does not calculate receipt roots (required pre-Byzantium)
+// and does not update the TrieDbState. For those two call PostProcess afterwards.
+func (p *StateProcessor) PreProcess(block *types.Block, ibs *state.IntraBlockState, tds *state.TrieDbState, cfg vm.Config) (
+	receipts types.Receipts, allLogs []*types.Log, usedGas uint64, root common.Hash, err error) {
+
+	header := block.Header()
+	gp := new(GasPool).AddGas(block.GasLimit())
+
 	// Mutate the block and state according to any hard-fork specs
 	if p.config.DAOForkSupport && p.config.DAOForkBlock != nil && p.config.DAOForkBlock.Cmp(block.Number()) == 0 {
-		misc.ApplyDAOHardFork(statedb)
+		misc.ApplyDAOHardFork(ibs)
 	}
 	// Iterate over and process the individual transactions
 	tds.StartNewBuffer()
 	for i, tx := range block.Transactions() {
 		txHash := tx.Hash()
-		statedb.Prepare(txHash, block.Hash(), i)
+		ibs.Prepare(txHash, block.Hash(), i)
 		writeTrace := false
 		if !cfg.Debug && p.txTraceHash != nil && bytes.Equal(p.txTraceHash, txHash[:]) {
 			// This code is useful when debugging a certain transaction. If uncommented, together with the code
@@ -145,7 +146,8 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 			cfg.Debug = true
 			writeTrace = true
 		}
-		receipt, err := ApplyTransaction(p.config, p.bc, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, cfg)
+		var receipt *types.Receipt
+		receipt, err = ApplyTransaction(p.config, p.bc, nil, gp, ibs, tds.TrieStateWriter(), header, tx, &usedGas, cfg)
 		// This code is useful when debugging a certain transaction. If uncommented, together with the code
 		// at the end of this function, after the execution of transaction with given hash, the file
 		// structlogs.txt will contain full trace of the transactin in JSON format. This can be compared
@@ -167,7 +169,7 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 			cfg.Tracer = nil
 		}
 		if err != nil {
-			return nil, nil, 0, err
+			return
 		}
 		receipts = append(receipts, receipt)
 		allLogs = append(allLogs, receipt.Logs...)
@@ -176,22 +178,35 @@ func (p *StateProcessor) Process(block *types.Block, statedb *state.IntraBlockSt
 		}
 	}
 	// Finalize the block, applying any consensus engine specific extras (e.g. block rewards)
-	p.engine.Finalize(p.config, header, statedb, block.Transactions(), block.Uncles())
+	p.engine.Finalize(p.config, header, ibs, block.Transactions(), block.Uncles())
 	ctx := p.config.WithEIPsFlags(context.Background(), header.Number)
-	if err := statedb.FinalizeTx(ctx, tds.TrieStateWriter()); err != nil {
-		return receipts, allLogs, *usedGas, err
-	}
-	roots, err := tds.ComputeTrieRoots()
+	err = ibs.FinalizeTx(ctx, tds.TrieStateWriter())
 	if err != nil {
-		return receipts, allLogs, *usedGas, err
+		return
 	}
-	if !p.config.IsByzantium(header.Number) {
+
+	// Calculate the state root
+	_, err = tds.ResolveStateTrie(false, false)
+	if err != nil {
+		return
+	}
+	root, err = tds.CalcTrieRoots(false)
+	return receipts, allLogs, usedGas, root, err
+}
+
+// PostProcess calculates receipt roots (required pre-Byzantium) and updates the TrieDbState.
+// PostProcess should be called after PreProcess.
+func (p *StateProcessor) PostProcess(block *types.Block, tds *state.TrieDbState, receipts types.Receipts) error {
+	roots, err := tds.UpdateStateTrie()
+	if err != nil {
+		return err
+	}
+	if !p.config.IsByzantium(block.Header().Number) {
 		for i, receipt := range receipts {
 			receipt.PostState = roots[i].Bytes()
 		}
 	}
-	header.Root = roots[len(roots)-1]
-	return receipts, allLogs, *usedGas, err
+	return nil
 }
 
 // ApplyTransaction attempts to apply a transaction to the given state database

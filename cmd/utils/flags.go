@@ -32,6 +32,7 @@ import (
 	"text/template"
 	"time"
 
+	pcsclite "github.com/gballet/go-libpcsclite"
 	"github.com/ledgerwatch/turbo-geth/accounts"
 	"github.com/ledgerwatch/turbo-geth/accounts/keystore"
 	"github.com/ledgerwatch/turbo-geth/common"
@@ -61,8 +62,7 @@ import (
 	"github.com/ledgerwatch/turbo-geth/p2p/netutil"
 	"github.com/ledgerwatch/turbo-geth/params"
 	"github.com/ledgerwatch/turbo-geth/rpc"
-
-	pcsclite "github.com/gballet/go-libpcsclite"
+	"github.com/spf13/cobra"
 	"github.com/urfave/cli"
 )
 
@@ -1589,7 +1589,7 @@ func SetEthConfig(ctx *cli.Context, stack *node.Node, cfg *eth.Config) {
 
 	// TODO(fjl): move trie cache generations into config
 	if gen := ctx.GlobalInt(TrieCacheGenFlag.Name); gen > 0 {
-		state.MaxTrieCacheGen = uint32(gen)
+		state.MaxTrieCacheSize = uint64(gen)
 	}
 }
 
@@ -1713,7 +1713,7 @@ func MakeGenesis(ctx *cli.Context) *core.Genesis {
 func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chainDb ethdb.Database) {
 	var err error
 	chainDb = MakeChainDatabase(ctx, stack)
-	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx))
+	config, _, _, err := core.SetupGenesisBlock(chainDb, MakeGenesis(ctx), false /* history */)
 	if err != nil {
 		Fatalf("%v", err)
 	}
@@ -1734,6 +1734,7 @@ func MakeChain(ctx *cli.Context, stack *node.Node) (chain *core.BlockChain, chai
 		}
 	}
 	cache := &core.CacheConfig{
+		Disabled:            true, // no pruning for auxiliary commands
 		TrieCleanLimit:      eth.DefaultConfig.TrieCleanCache,
 		TrieCleanNoPrefetch: ctx.GlobalBool(CacheNoPrefetchFlag.Name),
 		TrieDirtyLimit:      eth.DefaultConfig.TrieDirtyCache,
@@ -1791,5 +1792,21 @@ func MigrateFlags(action func(ctx *cli.Context) error) func(*cli.Context) error 
 			}
 		}
 		return action(ctx)
+	}
+}
+
+func CobraFlags(cmd *cobra.Command, urfaveCliFlags []cli.Flag) {
+	flags := cmd.PersistentFlags()
+	for _, flag := range urfaveCliFlags {
+		switch f := flag.(type) {
+		case cli.IntFlag:
+			flags.Int(f.Name, f.Value, f.Usage)
+		case cli.StringFlag:
+			flags.String(f.Name, f.Value, f.Usage)
+		case cli.BoolFlag:
+			flags.Bool(f.Name, false, f.Usage)
+		default:
+			panic(fmt.Errorf("unexpected type: %T", flag))
+		}
 	}
 }

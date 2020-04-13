@@ -110,7 +110,7 @@ func GenerateCompositeStorageKey(addressHash common.Hash, incarnation uint64, se
 func GenerateStoragePrefix(addressHash common.Hash, incarnation uint64) []byte {
 	prefix := make([]byte, common.HashLength+8)
 	copy(prefix, addressHash[:])
-	binary.BigEndian.PutUint64(prefix[common.HashLength:], incarnation^^uint64(0))
+	binary.BigEndian.PutUint64(prefix[common.HashLength:], ^incarnation)
 	return prefix
 }
 
