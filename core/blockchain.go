@@ -1674,56 +1674,36 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 		if !bc.cacheConfig.DownloadOnly {
 			stateDB = state.New(bc.trieDbState)
 			// Process block using the parent state as reference point.
-			//t0 := time.Now()
-			receipts, logs, usedGas, err = bc.processor.Process(block, stateDB, bc.trieDbState, bc.vmConfig)
-			//t1 := time.Now()
+			receipts, logs, usedGas, root, err = bc.processor.PreProcess(block, stateDB, bc.trieDbState, bc.vmConfig)
+			reuseTrieDbState := true
 			if err != nil {
-				bc.db.Rollback()
-				bc.setTrieDbState(nil)
-				bc.reportBlock(block, receipts, err)
-				if bc.committedBlock.Load() != nil {
-					bc.currentBlock.Store(bc.committedBlock.Load())
-				}
+				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
 				return k, err
 			}
-			// Update the metrics touched during block processing
-			/*
-				accountReadTimer.Update(statedb.AccountReads)     // Account reads are complete, we can mark them
-				storageReadTimer.Update(statedb.StorageReads)     // Storage reads are complete, we can mark them
-				accountUpdateTimer.Update(statedb.AccountUpdates) // Account updates are complete, we can mark them
-				storageUpdateTimer.Update(statedb.StorageUpdates) // Storage updates are complete, we can mark them
 
-				triehash := statedb.AccountHashes + statedb.StorageHashes // Save to not double count in validation
-				trieproc := statedb.AccountReads + statedb.AccountUpdates
-				trieproc += statedb.StorageReads + statedb.StorageUpdates
-
-				blockExecutionTimer.Update(time.Since(substart) - trieproc - triehash)
-			*/
-
-			// Validate the state using the default validator
-			err = bc.Validator().ValidateState(block, parent, stateDB, bc.trieDbState, receipts, usedGas)
+			err = bc.Validator().ValidateGasAndRoot(block, root, usedGas, bc.trieDbState)
 			if err != nil {
-				bc.db.Rollback()
-				bc.setTrieDbState(nil)
-				bc.reportBlock(block, receipts, err)
-				if bc.committedBlock.Load() != nil {
-					bc.currentBlock.Store(bc.committedBlock.Load())
-				}
+				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
+				return k, err
+			}
+
+			reuseTrieDbState = false
+			err = bc.processor.PostProcess(block, bc.trieDbState, receipts)
+			if err != nil {
+				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
+				return k, err
+			}
+
+			err = bc.Validator().ValidateReceipts(block, receipts)
+			if err != nil {
+				bc.rollbackBadBlock(block, receipts, err, reuseTrieDbState)
 				return k, err
 			}
 		}
 		proctime := time.Since(start)
 
-		// Update the metrics touched during block validation
-		/*
-			accountHashTimer.Update(statedb.AccountHashes) // Account hashes are complete, we can mark them
-			storageHashTimer.Update(statedb.StorageHashes) // Storage hashes are complete, we can mark them
-
-			blockValidationTimer.Update(time.Since(substart) - (statedb.AccountHashes + statedb.StorageHashes - triehash))
-		*/
 		// Write the block to the chain and get the status.
 		status, err := bc.writeBlockWithState(ctx, block, receipts, logs, stateDB, bc.trieDbState, false)
-		//t3 := time.Now()
 		if err != nil {
 			bc.db.Rollback()
 			bc.setTrieDbState(nil)
@@ -1732,16 +1712,6 @@ func (bc *BlockChain) insertChain(ctx context.Context, chain types.Blocks, verif
 			}
 			return k, err
 		}
-		//atomic.StoreUint32(&followupInterrupt, 1)
-
-		// Update the metrics touched during block commit
-		/*
-			accountCommitTimer.Update(statedb.AccountCommits) // Account commits are complete, we can mark them
-			storageCommitTimer.Update(statedb.StorageCommits) // Storage commits are complete, we can mark them
-
-			blockWriteTimer.Update(time.Since(substart) - statedb.AccountCommits - statedb.StorageCommits)
-			blockInsertTimer.UpdateSince(start)
-		*/
 
 		switch status {
 		case CanonStatTy:
@@ -2097,6 +2067,19 @@ Error: %v
 Callers: %v
 ##############################
 `, bc.chainConfig, block.Number(), block.Hash(), receiptString, err, debug.Callers(20)))
+}
+
+func (bc *BlockChain) rollbackBadBlock(block *types.Block, receipts types.Receipts, err error, reuseTrieDbState bool) {
+	bc.db.Rollback()
+	if reuseTrieDbState {
+		bc.setTrieDbState(bc.trieDbState.WithNewBuffer())
+	} else {
+		bc.setTrieDbState(nil)
+	}
+	bc.reportBlock(block, receipts, err)
+	if bc.committedBlock.Load() != nil {
+		bc.currentBlock.Store(bc.committedBlock.Load())
+	}
 }
 
 // InsertHeaderChain attempts to insert the given header chain in to the local
