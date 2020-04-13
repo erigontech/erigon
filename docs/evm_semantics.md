@@ -104,7 +104,7 @@ state, tx ==> store(state, tx.sender, account{
                                           codelength: prevaccount.codelength,
                                           code: prevaccount.code,
                                           storage: prevaccount.storage
-                                       }), tx, tx.gasLimit
+                                       }), tx.gasLimit, tx
 WHERE prevaccount = select(state, tx.sender)
       prevbalance = prevaccount.balance
       cost = tx.gasLimit * tx.gasPrice
