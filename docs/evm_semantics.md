@@ -95,3 +95,25 @@ condition under which the entire rule is applicable. If the guard evaluates to `
 the rule is not applicable, there can be another rule that is applicable. Since EVM is deterministic by design,
 we expect that in a correct semantics, at most one rule is applicable in any given configuration.
 
+Our gas purchasing transition can be expressed by the following rule:
+
+```
+state, tx ==> store(state, tx.sender, account{
+                                          balance: prevbalance - cost,
+                                          nonce: prevaccount.nonce,
+                                          codelength: prevaccount.codelength,
+                                          code: prevaccount.code,
+                                          storage: prevaccount.storage
+                                       }), tx, tx.gasLimit
+WHERE prevaccount = select(state, tx.sender)
+      prevbalance = prevaccount.balance
+      cost = tx.gasLimit * tx.gasPrice
+WHEN prevaccount.nonce = tx.nonce AND prevbalance >= cost
+```
+
+We have introduced `WHERE` section to define some variable for convinience, and placed the guard into the `WHEN` section.
+Pattern and substitution are on the first line, separated by the arrow `==>`. One needs to notice that the substution
+contains three-element sequence whereas the pattern contains only two elements. If the gas purchase is successful,
+the "gas" object gets introduced. It will be useful for the subsequent rules, because now we can make all of them
+simply require the presence of that "gas" object, instead of repeating the guards of the gas purchasing rule.
+
