@@ -44,6 +44,8 @@ func ExportFile(filePath, chaindataPath string) error {
 		}
 
 		if blockFromExport == nil { // no more blocks left
+			fmt.Println("")
+			fmt.Println("Export file verified OK")
 			return nil // its okay
 		}
 
@@ -58,11 +60,6 @@ func ExportFile(filePath, chaindataPath string) error {
 
 		fmt.Printf("\rVerified: blocks=%8d", blockFromExport.NumberU64())
 	}
-
-	fmt.Println("")
-	fmt.Println("Export file verified OK")
-
-	return nil
 }
 
 func compareBlocks(fromExport, fromChaindata *types.Block) error {
@@ -77,6 +74,8 @@ func compareBlocks(fromExport, fromChaindata *types.Block) error {
 	fromExportHash := fromExport.Hash()
 	fromChaindataHash := fromChaindata.Hash()
 	if !bytes.Equal(fromExportHash[:], fromChaindataHash[:]) {
+		// this error message intentionally is structured this way because it is printed to the console.
+		//nolint:golint,stylecheck
 		return fmt.Errorf("hashes mismatch:\n\t<    export=%x\n\t> chaindata=%x\n", fromExport.Hash(), fromChaindata.Hash())
 	}
 
