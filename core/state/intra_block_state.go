@@ -677,7 +677,7 @@ func (sdb *IntraBlockState) getStateObject(addr common.Address) (stateObject *st
 	}
 	account, err := sdb.stateReader.ReadAccountData(addr)
 	if err != nil {
-		sdb.setError(err)
+		sdb.setErrorUnsafe(err)
 		return nil
 	}
 	if account == nil {
