@@ -402,8 +402,8 @@ func StateSnapshot(blockNum uint64) error {
 	return nil
 }
 
-func VerifySnapshot(blockNum uint64, chaindata string) {
-	ethDb, err := ethdb.NewBoltDatabase(chaindata)
+func VerifySnapshot(path string) {
+	ethDb, err := ethdb.NewBoltDatabase(path)
 	check(err)
 	defer ethDb.Close()
 	hash := rawdb.ReadHeadBlockHash(ethDb)
