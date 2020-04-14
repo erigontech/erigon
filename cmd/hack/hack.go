@@ -2017,7 +2017,7 @@ func getModifiedAccounts(chaindata string) {
 func walkOverStorage(chaindata string) {
 	db, err := ethdb.NewBoltDatabase(chaindata)
 	check(err)
-	var startkey [32+8+32]byte
+	var startkey [32 + 8 + 32]byte
 	h, err := common.HashData(common.FromHex("0x109c4f2ccc82c4d77bde15f306707320294aea3f"))
 	check(err)
 	copy(startkey[:], h[:])

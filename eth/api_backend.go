@@ -212,7 +212,7 @@ func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*typ
 	}
 	receipts, err := b.GetReceipts(ctx, hash)
 	if err != nil {
-		return nil, fmt.Errorf("GetReceipt error: %v", err)
+		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
 	if receipts == nil {
 		return nil, nil
