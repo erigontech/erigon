@@ -3,14 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"encoding/base64"
+	//"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"path"
+	//"path"
 	"strings"
 	"time"
 
@@ -169,7 +169,8 @@ type EthLogs struct {
 }
 
 func post(client *http.Client, url, request string, response interface{}) error {
-	//start := time.Now()
+	log.Info("Getting", "url", url, "request", request)
+	start := time.Now()
 	r, err := client.Post(url, "application/json", strings.NewReader(request))
 	if err != nil {
 		return err
@@ -180,7 +181,7 @@ func post(client *http.Client, url, request string, response interface{}) error 
 	}
 	decoder := json.NewDecoder(r.Body)
 	err = decoder.Decode(response)
-	// fmt.Printf("%s %s %f\n", url, request, time.Since(start).Seconds())
+	log.Info("Got in", "time", time.Since(start).Seconds())
 	return err
 }
 
@@ -286,6 +287,17 @@ func compareBalances(balance, balanceg *EthBalance) bool {
 	return true
 }
 
+func printModifiedAccounts(ma *DebugModifiedAccounts) {
+	r := ma.Result
+	rset := make(map[common.Address]struct{})
+	for _, a := range r {
+		rset[a] = struct{}{}
+	}
+	for a := range rset {
+		fmt.Printf("%x\n", a)
+	}
+}
+
 func compareModifiedAccounts(ma, mag *DebugModifiedAccounts) (bool, map[common.Address]struct{}) {
 	r := ma.Result
 	rg := mag.Result
@@ -300,17 +312,23 @@ func compareModifiedAccounts(ma, mag *DebugModifiedAccounts) (bool, map[common.A
 	for _, a := range r {
 		if _, ok := rsetg[a]; !ok {
 			fmt.Printf("%x not present in rg\n", a)
-			// We tolerate that
-			//return false
+			return false, nil
 		}
 	}
 	for _, a := range rg {
 		if _, ok := rset[a]; !ok {
 			fmt.Printf("%x not present in r\n", a)
-			return false, nil
+			// We tolerate that
+			//return false, nil
 		}
 	}
 	return true, rset
+}
+
+func printStorageRange(sm map[common.Hash]storageEntry) {
+	for k, _ := range sm {
+		fmt.Printf("%x\n", k)
+	}
 }
 
 func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
@@ -319,9 +337,14 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 			fmt.Printf("%x not present in smg\n", k)
 			return false
 		} else {
-			if k != crypto.Keccak256Hash(v.Key[:]) {
-				fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
+			if v.Key == nil {
+				fmt.Printf("v.Key == nil for %x\n", k)
 				return false
+			} else {
+				if k != crypto.Keccak256Hash(v.Key[:]) {
+					fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
+					return false
+				}
 			}
 			if v.Value != vg.Value {
 				fmt.Printf("Different values for %x: %x %x [%x]\n", k, v.Value, vg.Value, *v.Key)
@@ -329,9 +352,13 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 			}
 		}
 	}
-	for k := range smg {
+	for k, v := range smg {
 		if _, ok := sm[k]; !ok {
 			fmt.Printf("%x not present in sm\n", k)
+			return false
+		}
+		if k != crypto.Keccak256Hash(v.Key[:]) {
+			fmt.Printf("Sec key (g) %x does not match key %x\n", k, *v.Key)
 			return false
 		}
 	}
@@ -458,8 +485,8 @@ const TurboGeth = "turbo_geth"
 
 var routes = map[string]string{
 	//Geth:      "http://192.168.1.96:8545",
-	Geth:      "http://localhost:8545",
-	TurboGeth: "http://localhost:9545",
+	Geth:      "http://192.168.1.238:8545",
+	TurboGeth: "http://192.168.1.126:8545",
 }
 
 type CallResult struct {
@@ -510,7 +537,7 @@ func (g *RequestGenerator) getModifiedAccountsByNumber(prevBn int, bn int) strin
 }
 
 func (g *RequestGenerator) getLogs(prevBn int, bn int, account common.Address) string {
-	const template = `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
+	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID)
 }
 
@@ -551,6 +578,7 @@ func bench1(needCompare bool, fullTest bool) {
 	// This goroutine writing results of server calls into several files:
 	// results to /$tmp$/turbo_geth_stress_test/results_*.csv
 	// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
+	/*
 	go func() {
 		var err error
 		files := map[string]map[string]*os.File{
@@ -615,7 +643,7 @@ func bench1(needCompare bool, fullTest bool) {
 			}
 		}
 	}()
-
+	*/
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
@@ -624,7 +652,7 @@ func bench1(needCompare bool, fullTest bool) {
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	resultsCh <- res
+	//resultsCh <- res
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -634,16 +662,19 @@ func bench1(needCompare bool, fullTest bool) {
 		return
 	}
 	lastBlock := blockNumber.Number
+	if lastBlock > 5000000 {
+		lastBlock = 5000000
+	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 1250001
+	firstBn := 49000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
 		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
-		resultsCh <- res
+		//resultsCh <- res
 		if res.Err != nil {
 			fmt.Printf("Could not retrieve block %d: %v\n", bn, res.Err)
 			return
@@ -656,7 +687,6 @@ func bench1(needCompare bool, fullTest bool) {
 		if needCompare {
 			var bg EthBlockByNumber
 			res = reqGen.TurboGeth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &bg)
-			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not retrieve block g %d: %v\n", bn, res.Err)
 				return
@@ -689,7 +719,7 @@ func bench1(needCompare bool, fullTest bool) {
 					for nextKey != nil {
 						var sr DebugStorageRange
 						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
-						resultsCh <- res
+						//resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
 							return
@@ -712,7 +742,7 @@ func bench1(needCompare bool, fullTest bool) {
 						for nextKey != nil {
 							var srg DebugStorageRange
 							res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &srg)
-							resultsCh <- res
+							//resultsCh <- res
 							if res.Err != nil {
 								fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, res.Err)
 								return
@@ -731,6 +761,11 @@ func bench1(needCompare bool, fullTest bool) {
 						//fmt.Printf("storageRange g: %d\n", len(smg))
 						if !compareStorageRanges(sm, smg) {
 							fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
+							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
+							fmt.Printf("================sm\n")
+							printStorageRange(sm)
+							fmt.Printf("================smg\n")
+							printStorageRange(smg)
 							return
 						}
 					}
@@ -746,7 +781,7 @@ func bench1(needCompare bool, fullTest bool) {
 
 			var trace EthTxTrace
 			res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
-			resultsCh <- res
+			//resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, res.Err)
 				print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
@@ -760,7 +795,7 @@ func bench1(needCompare bool, fullTest bool) {
 			if needCompare {
 				var traceg EthTxTrace
 				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
-				resultsCh <- res
+				//resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Could not trace transaction g %s: %v\n", tx.Hash, res.Err)
 					print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
@@ -779,7 +814,7 @@ func bench1(needCompare bool, fullTest bool) {
 
 			var receipt EthReceipt
 			res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
-			resultsCh <- res
+			//resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, res.Err)
 				print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
@@ -792,7 +827,7 @@ func bench1(needCompare bool, fullTest bool) {
 			if needCompare {
 				var receiptg EthReceipt
 				res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
-				resultsCh <- res
+				//resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Count not get receipt g: %s: %v\n", tx.Hash, res.Err)
 					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
@@ -818,7 +853,7 @@ func bench1(needCompare bool, fullTest bool) {
 
 		var balance EthBalance
 		res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
-		resultsCh <- res
+		//resultsCh <- res
 		if res.Err != nil {
 			fmt.Printf("Could not get account balance: %v\n", res.Err)
 			return
@@ -830,7 +865,7 @@ func bench1(needCompare bool, fullTest bool) {
 		if needCompare {
 			var balanceg EthBalance
 			res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
-			resultsCh <- res
+			//resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not get account balance g: %v\n", res.Err)
 				return
@@ -850,7 +885,7 @@ func bench1(needCompare bool, fullTest bool) {
 			reqGen.reqID++
 			var ma DebugModifiedAccounts
 			res = reqGen.Geth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma)
-			resultsCh <- res
+			//resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not get modified accounts: %v\n", res.Err)
 				return
@@ -862,7 +897,7 @@ func bench1(needCompare bool, fullTest bool) {
 			if needCompare {
 				var mag DebugModifiedAccounts
 				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
-				resultsCh <- res
+				//resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
 					return
@@ -871,17 +906,21 @@ func bench1(needCompare bool, fullTest bool) {
 					fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
 					return
 				}
-				ok, accountSet := compareModifiedAccounts(&ma, &mag)
+				ok, _ := compareModifiedAccounts(&ma, &mag)
 				if !ok {
 					fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
+					fmt.Printf("ma-------------------------\n")
+					printModifiedAccounts(&ma)
+					fmt.Printf("\nmag-------------------------\n")
+					printModifiedAccounts(&mag)
 					return
 				}
-
+				/*
 				reqGen.reqID++
 				for account := range accountSet {
 					var logs EthLogs
 					res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
-					resultsCh <- res
+					//resultsCh <- res
 					if res.Err != nil {
 						fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
 						return
@@ -892,7 +931,7 @@ func bench1(needCompare bool, fullTest bool) {
 					}
 					var logsg EthLogs
 					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-					resultsCh <- res
+					//resultsCh <- res
 					if res.Err != nil {
 						fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
 						return
@@ -906,6 +945,7 @@ func bench1(needCompare bool, fullTest bool) {
 						return
 					}
 				}
+				*/
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
 			prevBn = bn
@@ -1176,7 +1216,7 @@ func bench5() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogeth_url := "http://localhost:9545"
+	turbogeth_url := "http://192.168.1.126:9545"
 	file, err := os.Open("txs.txt")
 	if err != nil {
 		panic(err)
@@ -1262,6 +1302,45 @@ func bench6() {
 	}
 }
 
+func bench7() {
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+	turbogeth_url := "http://192.168.1.126:8545"
+	blockhash := common.HexToHash("0x820b9eb70726aef7706b4db5b55ec6d6684fa155e0f964c8253970861f96ab6b")
+	req_id := 1
+	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
+	sm := make(map[common.Hash]storageEntry)
+	start := common.HexToHash("0xf9b13da5a2865143a9bb5ad68c1241df890b5fe3f35e94e7dae2e2e480710461")
+
+	req_id++
+	template := `
+{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}
+	`
+	i := 5
+	nextKey := &start
+	for nextKey != nil {
+		var sr DebugStorageRange
+		if err := post(client, turbogeth_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
+			fmt.Printf("Could not get storageRange: %v\n", err)
+			return
+		}
+		if sr.Error != nil {
+			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
+			break
+		} else {
+			nextKey = sr.Result.NextKey
+			for k, v := range sr.Result.Storage {
+				sm[k] = v
+				if v.Key == nil {
+					fmt.Printf("%x: %x", k, v)
+				}
+			}
+		}
+	}
+	fmt.Printf("storageRange: %d\n", len(sm))
+}
+
 func main() {
 
 	var (
@@ -1286,6 +1365,8 @@ func main() {
 	case "fixState":
 		fixState(*chaindata, *url)
 	case "bench1":
-		bench1(false, false)
+		bench1(true, true)
+	case "bench7":
+		bench7()
 	}
 }

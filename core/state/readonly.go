@@ -140,6 +140,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 				} else {
 					log.Error("Error getting preimage", "err", err)
 					innerErr = err
+					return false
 				}
 			}
 			cb(item.key, item.seckey, item.value)
