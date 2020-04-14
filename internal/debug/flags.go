@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	_ "net/http/pprof"
+	"net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime"
@@ -199,13 +199,8 @@ func SetupCobra(cmd *cobra.Command) error {
 		return err
 	}
 
-	// pprof server
-	if pprof {
-		StartPProf(fmt.Sprintf("%s:%d", pprofAddr, pprofPort))
-	}
-
-	// Start system runtime metrics collection
-	go metrics.CollectProcessMetrics(3 * time.Second)
+	// metrics and pprof server
+	StartPProf(pprof, metrics.Enabled, fmt.Sprintf("%s:%d", pprofAddr, pprofPort))
 
 	return nil
 }
@@ -241,25 +236,39 @@ func Setup(ctx *cli.Context) error {
 		Exit()
 	}()
 
-	// pprof server
-	if ctx.GlobalBool(pprofFlag.Name) {
-		address := fmt.Sprintf("%s:%d", ctx.GlobalString(pprofAddrFlag.Name), ctx.GlobalInt(pprofPortFlag.Name))
-		StartPProf(address)
-	}
+	address := fmt.Sprintf("%s:%d", ctx.GlobalString(pprofAddrFlag.Name), ctx.GlobalInt(pprofPortFlag.Name))
+	StartPProf(ctx.GlobalBool(pprofFlag.Name), metrics.Enabled, address)
 	return nil
 }
 
-func StartPProf(address string) {
-	// Hook go-metrics into expvar on any /debug/metrics request, load all vars
-	// from the registry into expvar, and execute regular expvar handler.
-	exp.Exp(metrics.DefaultRegistry)
-	http.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
-	log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
-	go func() {
-		if err := http.ListenAndServe(address, nil); err != nil {
-			log.Error("Failure in running pprof server", "err", err)
-		}
-	}()
+func StartPProf(enablePprof bool, enableMetrics bool, address string) {
+	mux := http.NewServeMux()
+	if enablePprof {
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+		log.Info("Starting pprof server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	}
+
+	if enableMetrics {
+		// Hook go-metrics into expvar on any /debug/metrics request, load all vars
+		// from the registry into expvar, and execute regular expvar handler.
+		exp.Exp(metrics.DefaultRegistry, mux)
+		mux.Handle("/memsize/", http.StripPrefix("/memsize", &Memsize))
+		// Start system runtime metrics collection
+		go metrics.CollectProcessMetrics(3 * time.Second)
+		log.Info("Starting metrics server", "addr", fmt.Sprintf("http://%s/debug/pprof", address))
+	}
+
+	if enableMetrics || enablePprof {
+		go func() {
+			if err := http.ListenAndServe(address, mux); err != nil {
+				log.Error("Failure in running metrics server", "err", err)
+			}
+		}()
+	}
 }
 
 // Exit stops all running profiles, flushing their output to the

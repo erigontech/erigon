@@ -36,14 +36,14 @@ func (exp *exp) expHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 // Exp will register an expvar powered metrics handler with http.DefaultServeMux on "/debug/vars"
-func Exp(r metrics.Registry) {
+func Exp(r metrics.Registry, mux *http.ServeMux) {
 	h := ExpHandler(r)
 	// this would cause a panic:
 	// panic: http: multiple registrations for /debug/vars
 	// http.HandleFunc("/debug/vars", e.expHandler)
 	// haven't found an elegant way, so just use a different endpoint
-	http.Handle("/debug/metrics", h)
-	http.Handle("/debug/metrics/prometheus", prometheus.Handler(r))
+	mux.Handle("/debug/metrics", h)
+	mux.Handle("/debug/metrics/prometheus", prometheus.Handler(r))
 }
 
 // ExpHandler will return an expvar powered metrics handler.

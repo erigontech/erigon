@@ -26,7 +26,12 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/ethdb/codecpool"
 	"github.com/ledgerwatch/turbo-geth/log"
+	"github.com/ledgerwatch/turbo-geth/metrics"
 	"github.com/ugorji/go/codec"
+)
+
+var (
+	availableConnections = metrics.NewRegisteredGauge("db/remote/conn_free", nil)
 )
 
 // Version is the current version of the remote db protocol. If the protocol changes in a non backwards compatible way,
@@ -190,6 +195,7 @@ func (db *DB) getConnection(ctx context.Context) (io.Reader, io.Writer, io.Close
 	case <-ctx.Done():
 		return nil, nil, nil, ctx.Err()
 	case conn := <-db.connectionPool:
+		availableConnections.Dec(1)
 		return conn.in, conn.out, conn.closer, nil
 	}
 }
@@ -197,6 +203,7 @@ func (db *DB) getConnection(ctx context.Context) (io.Reader, io.Writer, io.Close
 func (db *DB) returnConn(ctx context.Context, in io.Reader, out io.Writer, closer io.Closer) {
 	select {
 	case db.connectionPool <- &conn{in: in, out: out, closer: closer}:
+		availableConnections.Inc(1)
 	case <-ctx.Done():
 	}
 }
@@ -287,20 +294,16 @@ func Open(parentCtx context.Context, opts DbOpts) (*DB, error) {
 	}()
 	db.cancelConnections = cancelConnections
 
-	traceTicker := time.NewTicker(3 * time.Second)
 	pingTicker := time.NewTicker(db.opts.PingEvery)
 	db.doPing = pingTicker.C
 	go func() {
 		defer pingTicker.Stop()
-		defer traceTicker.Stop()
 
 		for {
 			select {
 			default:
 			case <-ctx.Done():
 				return
-			case <-traceTicker.C:
-				logger.Trace("connections in pool", "amount", len(db.connectionPool))
 			}
 
 			db.autoReconnect(ctx)

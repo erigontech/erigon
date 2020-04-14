@@ -3,7 +3,6 @@ version: '2.2'
 services:
 
   turbo-geth:
-    image: turbo-geth:latest
     build: ./../..
     command: --nousb --metrics --metrics.expensive --pprof --pprofaddr=0.0.0.0 --pprofport=6060 --remote-db-listen-addr=0.0.0.0:9999
     stop_grace_period: 2m
@@ -12,6 +11,7 @@ services:
     ports:
       - 30303:30303
       - 8545:8545
+      - 6060:6060
       - 9999:9999
 
   prometheus:
@@ -26,16 +26,12 @@ services:
     image: grafana/grafana
     ports:
       - 3000:3000
-    depends_on:
-      prometheus:
-        condition: service_started
     volumes:
       - ./grafana:/var/lib/grafana
       - ./datasources:/etc/grafana/provisioning/datasources
       - ./dashboards:/etc/grafana/provisioning/dashboards
 
   restapi:
-    image: turbo-geth-restapi:latest
     build:
       context: ./../../
       dockerfile: ./cmd/restapi/Dockerfile
@@ -44,7 +40,6 @@ services:
       - 8080:8080
 
   debugui:
-    image: turbo-geth-debugui:latest
     build: ./../../debug-web-ui
     stdin_open: true
     ports:
