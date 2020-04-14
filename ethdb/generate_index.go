@@ -26,12 +26,6 @@ func FindProperIndexChunk(db Database, bucket []byte, key []byte, blockNum uint6
 	return dbutils.WrapHistoryIndex(indexBytes), nil
 }
 
-func keyWithoutChunkID(key []byte) []byte {
-	if len(key) == common.HashLength || len(key) == common.HashLength*2+common.IncarnationLength {
-		return key[:len(key)-8]
-	}
-	panic(common.Bytes2Hex(key))
-}
 func keyAndChunkID(key []byte) ([]byte, uint64) {
 	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+common.IncarnationLength+8 {
 		return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
@@ -89,7 +83,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 func (ig *IndexGenerator) generateIndex() error {
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 	batchSize := ig.db.IdealBatchSize() * 3
 	//addrHash - > index or addhash + inverted firshBlock for full chunk contracts
@@ -137,6 +131,9 @@ func (ig *IndexGenerator) generateIndex() error {
 
 			return true, nil
 		})
+		if err != nil {
+			return err
+		}
 
 		if len(ig.cache) > 0 {
 			err = commit()

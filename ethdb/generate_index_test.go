@@ -23,7 +23,7 @@ func TestName1(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	ig := IndexGenerator{
@@ -50,7 +50,7 @@ func TestName11(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	ig := IndexGenerator{
@@ -77,7 +77,7 @@ func TestRegenerateIndexes(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	ig := IndexGenerator{
@@ -120,7 +120,7 @@ func TestCheckIndexes(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	aib := []byte("hAT31")
@@ -157,11 +157,11 @@ func TestCheckIndexes(t *testing.T) {
 	err = db.Walk(dbutils.StorageChangeSetBucket, []byte{}, 0, func(k, v []byte) (b bool, e error) {
 		blockNum, _ := dbutils.DecodeTimestamp(k)
 		fmt.Println("process", blockNum, string(k))
-		err := changeset.StorageChangeSetBytes(v).Walk(func(key, val []byte) error {
+		err = changeset.StorageChangeSetBytes(v).Walk(func(key, val []byte) error {
 			b := make([]byte, 8)
 			binary.BigEndian.PutUint64(b, ^(blockNum))
 			find := append(key, b...)
-			err := db.Walk(sib, find, 72, func(kk []byte, vv []byte) (b bool, e error) {
+			err = db.Walk(sib, find, 72, func(kk []byte, vv []byte) (b bool, e error) {
 				index := dbutils.WrapHistoryIndex(common.CopyBytes(vv))
 				if findVal, ok := index.Search(blockNum); ok == false {
 					t.Error(blockNum, findVal, common.Bytes2Hex(find))
@@ -195,7 +195,7 @@ func TestMore1000Calc(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	aib := []byte("hAT31")
@@ -249,8 +249,8 @@ func TestMore1000Calc(t *testing.T) {
 		NumOfIndexes uint64
 	}, 0, len(more100index))
 	for hash, v := range more100index {
-		p, err := db.Get(dbutils.PreimagePrefix, []byte(hash))
-		if err != nil {
+		p, innerErr := db.Get(dbutils.PreimagePrefix, []byte(hash))
+		if innerErr != nil {
 			t.Error(err)
 		}
 		if len(p) == 0 {
@@ -286,9 +286,9 @@ func TestMore1000Calc(t *testing.T) {
 		NumOfIndexes uint64
 	}, 0, len(more10index))
 	for hash, v := range more10index {
-		p, err := db.Get(dbutils.PreimagePrefix, []byte(hash))
-		if err != nil {
-			t.Error(err)
+		p, innerErr := db.Get(dbutils.PreimagePrefix, []byte(hash))
+		if innerErr != nil {
+			t.Error(innerErr)
 		}
 		if len(p) == 0 {
 			t.Error("empty")
@@ -325,7 +325,7 @@ func TestMore1000CalcStr(t *testing.T) {
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 
 	sib := []byte("hST31")
@@ -464,24 +464,24 @@ func TestSecondTypeIndex(t *testing.T) {
 			fmt.Println(i)
 		}
 		i++
-		ui, err := dbutils.WrapHistoryIndex(v).Decode()
-		if err != nil {
-			return false, err
+		ui, innerErr := dbutils.WrapHistoryIndex(v).Decode()
+		if innerErr != nil {
+			return false, innerErr
 		}
 		for _, val := range ui {
 			numOfMultiput++
 			key := make([]byte, common.HashLength+8)
 			copy(key[0:common.HashLength], k[0:common.HashLength])
 			binary.BigEndian.PutUint64(key[common.HashLength:], val)
-			if err := tuples.Append(bucket, key, []byte{}); err != nil {
-				t.Fatal("tuple append", err)
+			if innerErr = tuples.Append(bucket, key, []byte{}); innerErr != nil {
+				t.Fatal("tuple append", innerErr)
 			}
 		}
 		if numOfMultiput > db2.IdealBatchSize() {
 			fmt.Println("Multiput", len(tuples.Values)/3, db2.IdealBatchSize())
 			sort.Sort(tuples)
-			if _, err := db2.MultiPut(tuples.Values...); err != nil {
-				t.Fatal(err)
+			if _, innerErr = db2.MultiPut(tuples.Values...); innerErr != nil {
+				t.Fatal(innerErr)
 			}
 			numOfMultiput = 0
 			tuples = common.NewTuples(db2.IdealBatchSize(), 3, 1)
@@ -529,14 +529,14 @@ func TestName2(t *testing.T) {
 	})
 }
 
-func generateIndexesDB() {
+func TestGenerateIndexesDB(t *testing.T) {
 	db, err := NewBoltDatabase(statePath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 	tuplesSize := 100000
 
@@ -613,14 +613,14 @@ func generateIndexesDB() {
 
 const statePath = "/media/b00ris/nvme/thin_last/geth/chaindata"
 
-func generateSTIndexesDB() {
+func TestGenerateSTIndexesDB(t *testing.T) {
 	db, err := NewBoltDatabase(statePath)
 	if err != nil {
 		log.Fatal(err)
 	}
 	ts := time.Now()
 	defer func() {
-		fmt.Println("end:", time.Now().Sub(ts))
+		fmt.Println("end:", time.Since(ts))
 	}()
 	tuplesSize := 100000
 
