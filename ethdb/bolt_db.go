@@ -392,7 +392,7 @@ func (db *BoltDatabase) walkAsOfThinAccounts(startkey []byte, fixedbits uint, ti
 					// Extract value from the changeSet
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
-					if changeSetData != nil {
+					if changeSetData == nil {
 						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.AccountChangeSetBytes(changeSetData).FindLast(hK)
@@ -524,7 +524,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 			startkeyNoInc,
 			fixedbits-8*common.IncarnationLength,
 			common.HashLength, /* part1end */
-			common.HashLength+common.IncarnationLength, /* part2start */
+			common.HashLength, /* part2start */
 		)
 		addrHash, keyHash, v := mainCursor.Seek()
 		hAddrHash, hKeyHash, hV := historyCursor.Seek()
@@ -551,15 +551,16 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 					// Extract value from the changeSet
 					csKey := dbutils.EncodeTimestamp(changeSetBlock)
 					changeSetData, _ := csB.Get(csKey)
-					if changeSetData != nil {
+					if changeSetData == nil {
 						return fmt.Errorf("could not find ChangeSet record for index entry %d (query timestamp %d)", changeSetBlock, timestamp)
 					}
 					data, err1 := changeset.StorageChangeSetBytes(changeSetData).Find(hAddrHash, hKeyHash)
 					if err1 != nil {
-						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d)",
+						return fmt.Errorf("could not find key %x%x in the ChangeSet record for index entry %d (query timestamp %d): %v",
 							hAddrHash, hKeyHash,
 							changeSetBlock,
 							timestamp,
+							err1,
 						)
 					}
 					goOn, err = walker(hAddrHash, hKeyHash, data)
@@ -583,6 +584,7 @@ func (db *BoltDatabase) walkAsOfThinStorage(startkey []byte, fixedbits uint, tim
 }
 
 func (db *BoltDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func(k []byte, v []byte) (bool, error)) error {
+	//fmt.Printf("WalkAsOf %x %x %x %d %d\n", bucket, hBucket, startkey, fixedbits, timestamp)
 	if debug.IsThinHistory() {
 		if bytes.Equal(bucket, dbutils.AccountsBucket) && bytes.Equal(hBucket, dbutils.AccountsHistoryBucket) {
 			return db.walkAsOfThinAccounts(startkey, fixedbits, timestamp, walker)

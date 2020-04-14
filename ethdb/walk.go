@@ -17,6 +17,7 @@
 package ethdb
 
 import (
+	//"bytes"
 	"fmt"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
@@ -118,7 +119,7 @@ func RewindData(db Getter, timestampSrc, timestampDst uint64, df func(bucket, ke
 }
 
 func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]common.Address, error) {
-	var keys [][]byte
+	keys := make(map[common.Hash]struct{})
 	startCode := dbutils.EncodeTimestamp(startTimestamp)
 	if err := db.Walk(dbutils.AccountChangeSetBucket, startCode, 0, func(k, v []byte) (bool, error) {
 		keyTimestamp, _ := dbutils.DecodeTimestamp(k)
@@ -127,8 +128,8 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 			return false, nil
 		}
 
-		walker := func(k, _ []byte) error {
-			keys = append(keys, k)
+		walker := func(addrHash, _ []byte) error {
+			keys[common.BytesToHash(addrHash)] = struct{}{}
 			return nil
 		}
 		var innerErr error
@@ -152,8 +153,8 @@ func GetModifiedAccounts(db Getter, startTimestamp, endTimestamp uint64) ([]comm
 	accounts := make([]common.Address, len(keys))
 	idx := 0
 
-	for _, key := range keys {
-		value, err := db.Get(dbutils.PreimagePrefix, key)
+	for key := range keys {
+		value, err := db.Get(dbutils.PreimagePrefix, key[:])
 		if err != nil {
 			return nil, fmt.Errorf("could not get preimage for key %x", key)
 		}
