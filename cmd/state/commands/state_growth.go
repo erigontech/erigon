@@ -36,7 +36,6 @@ func init() {
 		},
 	}
 
-	withChaindata(stateGrowthCmd)
 	withRemoteDb(stateGrowthCmd)
 	rootCmd.AddCommand(stateGrowthCmd)
 }
