@@ -19,6 +19,7 @@ package eth
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 
 	"github.com/ledgerwatch/turbo-geth/accounts"
@@ -234,7 +235,7 @@ func (b *EthAPIBackend) GetLogs(ctx context.Context, hash common.Hash) ([][]*typ
 	}
 	receipts, err := b.GetReceipts(ctx, hash)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getReceipt error: %v", err)
 	}
 	if receipts == nil {
 		return nil, nil

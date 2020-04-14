@@ -92,11 +92,6 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 	}
 
 	lenOfAddr := getNumOfBytesByLen(int(addrID + 1))
-	numOfUint8 := uint16(0)
-	numOfUint16 := uint16(0)
-	numOfUint32 := uint16(0)
-
-	lengthOfValues := uint32(0)
 	row := make([]byte, lenOfAddr+common.HashLength)
 	for i, change := range s.Changes {
 		writeKeyRow(
@@ -106,6 +101,12 @@ func EncodeStorage(s *ChangeSet) ([]byte, error) {
 		copy(row[lenOfAddr:lenOfAddr+common.HashLength], change.Key[common.IncarnationLength+common.HashLength:common.IncarnationLength+2*common.HashLength])
 		buf.Write(row)
 	}
+	numOfUint8 := uint16(0)
+	numOfUint16 := uint16(0)
+	numOfUint32 := uint16(0)
+
+	lengthOfValues := uint32(0)
+
 	// Remember position to fix up the lengths later
 	lengthPos := buf.Len()
 	uint16b := make([]byte, 2)
@@ -425,8 +426,7 @@ func (b StorageChangeSetBytes) Find(addrHash []byte, keyHash []byte) ([]byte, er
 		elemStart += common.HashLength
 	}
 	if !found {
-		fmt.Printf("did not find addrHash %x\n", addrHash)
-		return nil, ErrNotFound
+		return nil, fmt.Errorf("did not find addrHash %x", addrHash)
 	}
 
 	elemLength := getNumOfBytesByLen(numOfUniqueItems)
