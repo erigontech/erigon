@@ -56,7 +56,6 @@ func TestManagedTx(t *testing.T) {
 
 	for _, db := range writeDBs {
 		db := db
-
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
 			b := tx.Bucket(dbutils.AccountsBucket)
 			for i := uint8(0); i < 10; i++ {
