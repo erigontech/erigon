@@ -872,6 +872,9 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
+//
+// can pass incarnation=0 if start from root, method internally will
+// put incarnation from accountNode when pass it by traverse
 func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode node) {
 	var nn node
 	switch n := origNode.(type) {

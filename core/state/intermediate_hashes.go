@@ -41,11 +41,11 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 	trie.CompressNibbles(prefixAsNibbles, &buf.B)
 
 	var key []byte
-	if len(buf.B) > 32 {
-		key = make([]byte, 0, len(buf.B)+8)
-		key = append(key, buf.B[:common.HashLength]...)
+	if len(buf.B) > common.HashLength {
+		key = make([]byte, len(buf.B)+8)
+		copy(key, buf.B[:common.HashLength])
 		binary.BigEndian.PutUint64(key[common.HashLength:], ^incarnation)
-		key = append(key, buf.B[common.HashLength:]...)
+		copy(key[common.HashLength+8:], buf.B[common.HashLength:])
 	} else {
 		key = common.CopyBytes(buf.B)
 	}
@@ -68,7 +68,7 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 
 	var key []byte
 	if len(buf.B) > 32 {
-		key = make([]byte, 0, len(buf.B)+8)
+		key = make([]byte, len(buf.B)+8)
 		key = append(key, buf.B[:common.HashLength]...)
 		binary.BigEndian.PutUint64(key[common.HashLength:], ^incarnation)
 		key = append(key, buf.B[common.HashLength:]...)
