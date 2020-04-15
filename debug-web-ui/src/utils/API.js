@@ -44,12 +44,13 @@ export default class API {
     });
   }
 
-  lookupStorageTombstones(prefix) {
+  lookupStorageTombstones(prefix, tombstones) {
     return axios({
       url: this.endpoint('/api/v1/intermediate-hash/'),
       method: 'get',
       params: {
         prefix: prefix,
+        tombstones: tombstones,
       },
     });
   }
