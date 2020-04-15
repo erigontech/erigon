@@ -139,25 +139,12 @@ func keyIsBefore(k1, k2 []byte) (bool, []byte) {
 		return true, k1
 	}
 
-	switch cmp(k1, k2) {
+	switch bytes.Compare(k1, k2) {
 	case -1, 0:
 		return true, k1
 	default:
 		return false, k2
 	}
-}
-
-// cmpWithoutIncarnation - removing incarnation from 2nd key if necessary
-func cmp(k1, k2 []byte) int {
-	if k1 == nil {
-		return 1
-	}
-
-	if k2 == nil {
-		return -1
-	}
-
-	return bytes.Compare(k1, k2)
 }
 
 func (tr *ResolverStatefulCached) RebuildTrie(
@@ -177,6 +164,7 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		}
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
+	trace = blockNr == 672257
 	if trace {
 		fmt.Printf("RebuildTrie %d\n", len(startkeys))
 		for _, startkey := range startkeys {
@@ -367,19 +355,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				fmt.Printf("For loop: %x, %x\n", cacheK, k)
 			}
 
-			// Special case: self-destructed accounts.
-			// self-destructed accounts may be marked in IH bucket by empty value
-			// in this case: skip all IH keys of given prefix
-			if cacheV != nil && len(cacheV) == 0 {
-				next, ok := nextSubtree(cacheK)
-				if !ok { // no siblings left
-					cacheK, cacheV = nil, nil
-					continue
-				}
-				cacheK, cacheV = cache.Seek(next)
-				continue
-			}
-
 			// for Address bucket, skip cache keys longer than 31 bytes
 			if isAccountBucket {
 				for len(cacheK) > maxAccountKeyLen {
@@ -446,9 +421,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 						}
 						fixedbytes, mask = ethdb.Bytesmask(fixedbits[rangeIdx])
 						startkey = startkeys[rangeIdx]
-						if tr.trace {
-							fmt.Printf("RemoveInc2 startkey= %x\n", startkey)
-						}
 					}
 				}
 			}
