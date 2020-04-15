@@ -193,18 +193,6 @@
           "interval": "",
           "legendFormat": "db/ih/delete",
           "refId": "B"
-        },
-        {
-          "expr": "rate(db_ih_tombstone_insert{instance=\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "db/ih/tombstone_insert",
-          "refId": "C"
-        },
-        {
-          "expr": "rate(db_ih_tombstone_delete{instance=\"$instance\"}[1m])",
-          "interval": "",
-          "legendFormat": "db/ih/tombstone_delete",
-          "refId": "D"
         }
       ],
       "thresholds": [],
