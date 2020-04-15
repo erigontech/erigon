@@ -7,7 +7,6 @@ import (
 )
 
 var gerEnv sync.Once
-var ThinHistory bool
 
 var itcEnv sync.Once
 
@@ -18,13 +17,6 @@ const (
 	gndValueFlag = 1 << iota
 	gndInitializedFlag
 )
-
-func IsThinHistory() bool {
-	gerEnv.Do(func() {
-		_, ThinHistory = os.LookupEnv("THIN_HISTORY")
-	})
-	return ThinHistory
-}
 
 // IsGetNodeData indicates whether the GetNodeData functionality should be enabled.
 // By default that's driven by the presence or absence of DISABLE_GET_NODE_DATA environment variable.

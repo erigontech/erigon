@@ -345,8 +345,8 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:                      db,
-		puts:                    newPuts(),
+		db:   db,
+		puts: newPuts(),
 	}
 	return m
 }
@@ -399,10 +399,6 @@ func (db *BadgerDatabase) MemCopy() Database {
 // TODO [Issue 144] Implement the methods
 
 func (db *BadgerDatabase) WalkAsOf(bucket, hBucket, startkey []byte, fixedbits uint, timestamp uint64, walker func([]byte, []byte) (bool, error)) error {
-	panic("Not implemented")
-}
-
-func (db *BadgerDatabase) MultiWalkAsOf(bucket, hBucket []byte, startkeys [][]byte, fixedbits []uint, timestamp uint64, walker func(int, []byte, []byte) error) error {
 	panic("Not implemented")
 }
 

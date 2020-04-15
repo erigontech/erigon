@@ -8,7 +8,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/trie"
@@ -72,11 +71,8 @@ func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation ui
 	if err := dsw.tds.db.Put(dbutils.CodeBucket, codeHash[:], code); err != nil {
 		return err
 	}
-	if debug.IsThinHistory() {
-		//save contract to codeHash mapping
-		return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, incarnation), codeHash.Bytes())
-	}
-	return nil
+	//save contract to codeHash mapping
+	return dsw.tds.db.Put(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, incarnation), codeHash.Bytes())
 }
 
 func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address common.Address, incarnation uint64, key, original, value *common.Hash) error {
@@ -123,11 +119,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 		return err
 	}
 	var accountSerialised []byte
-	if debug.IsThinHistory() {
-		accountSerialised, err = changeset.EncodeAccounts(accountChanges)
-	} else {
-		accountSerialised, err = changeset.EncodeChangeSet(accountChanges)
-	}
+	accountSerialised, err = changeset.EncodeAccounts(accountChanges)
 	if err != nil {
 		return err
 	}
@@ -141,11 +133,7 @@ func (dsw *DbStateWriter) WriteChangeSets() error {
 	}
 	var storageSerialized []byte
 	if storageChanges.Len() > 0 {
-		if debug.IsThinHistory() {
-			storageSerialized, err = changeset.EncodeStorage(storageChanges)
-		} else {
-			storageSerialized, err = changeset.EncodeChangeSet(storageChanges)
-		}
+		storageSerialized, err = changeset.EncodeStorage(storageChanges)
 		if err != nil {
 			return err
 		}
@@ -161,51 +149,33 @@ func (dsw *DbStateWriter) WriteHistory() error {
 	if err != nil {
 		return err
 	}
-	if debug.IsThinHistory() {
-		for _, change := range accountChanges.Changes {
-			value, err1 := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
-			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err1)
-			}
-			index := dbutils.WrapHistoryIndex(value)
-			index.Append(dsw.tds.blockNr)
-			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err2 != nil {
-				return err2
-			}
+	for _, change := range accountChanges.Changes {
+		value, err1 := dsw.tds.db.Get(dbutils.AccountsHistoryBucket, change.Key)
+		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("db.Get failed: %w", err1)
 		}
-	} else {
-		for _, change := range accountChanges.Changes {
-			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, composite, change.Value); err2 != nil {
-				return err2
-			}
+		index := dbutils.WrapHistoryIndex(value)
+		index.Append(dsw.tds.blockNr)
+		if err2 := dsw.tds.db.Put(dbutils.AccountsHistoryBucket, change.Key, *index); err2 != nil {
+			return err2
 		}
 	}
 	storageChanges, err := dsw.csw.GetStorageChanges()
 	if err != nil {
 		return err
 	}
-	if debug.IsThinHistory() {
-		for _, change := range storageChanges.Changes {
-			keyNoInc := make([]byte, len(change.Key)-common.IncarnationLength)
-			copy(keyNoInc, change.Key[:common.HashLength])
-			copy(keyNoInc[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
-			value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, keyNoInc)
-			if err1 != nil && err1 != ethdb.ErrKeyNotFound {
-				return fmt.Errorf("db.Get failed: %w", err1)
-			}
-			index := dbutils.WrapHistoryIndex(value)
-			index.Append(dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, keyNoInc, *index); err != nil {
-				return err
-			}
+	for _, change := range storageChanges.Changes {
+		keyNoInc := make([]byte, len(change.Key)-common.IncarnationLength)
+		copy(keyNoInc, change.Key[:common.HashLength])
+		copy(keyNoInc[common.HashLength:], change.Key[common.HashLength+common.IncarnationLength:])
+		value, err1 := dsw.tds.db.Get(dbutils.StorageHistoryBucket, keyNoInc)
+		if err1 != nil && err1 != ethdb.ErrKeyNotFound {
+			return fmt.Errorf("db.Get failed: %w", err1)
 		}
-	} else {
-		for _, change := range storageChanges.Changes {
-			composite, _ := dbutils.CompositeKeySuffix(change.Key, dsw.tds.blockNr)
-			if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, composite, change.Value); err != nil {
-				return err
-			}
+		index := dbutils.WrapHistoryIndex(value)
+		index.Append(dsw.tds.blockNr)
+		if err := dsw.tds.db.Put(dbutils.StorageHistoryBucket, keyNoInc, *index); err != nil {
+			return err
 		}
 	}
 	return nil
