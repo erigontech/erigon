@@ -96,7 +96,7 @@ func (m *mockObserver) CodeNodeSizeChanged(hex []byte, newSize uint) {
 	m.createdNodes[common.Bytes2Hex(hex)] = newSize
 }
 
-func (m *mockObserver) WillUnloadBranchNode(hex []byte, hash common.Hash) {
+func (m *mockObserver) WillUnloadBranchNode(hex []byte, hash common.Hash, incarnation uint64) {
 	dictKey := common.Bytes2Hex(hex)
 	value := m.unloadedNodes[dictKey]
 	value++
@@ -104,7 +104,7 @@ func (m *mockObserver) WillUnloadBranchNode(hex []byte, hash common.Hash) {
 	m.unloadedNodeHashes[dictKey] = common.CopyBytes(hash[:])
 }
 
-func (m *mockObserver) BranchNodeLoaded(hex []byte) {
+func (m *mockObserver) BranchNodeLoaded(hex []byte, incarnation uint64) {
 	dictKey := common.Bytes2Hex(hex)
 	value := m.reloadedNodes[dictKey]
 	value++
