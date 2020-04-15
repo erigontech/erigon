@@ -58,7 +58,7 @@ var (
 var secureKeyPrefix = []byte("secure-key-")
 
 // secureKeyLength is the length of the above prefix + 32byte hash.
-const secureKeyLength = 11 + 32
+const secureKeyLength = secureKeyPrefixLength + 32
 
 // DatabaseReader wraps the Get method of a backing store for the trie.
 type DatabaseReader interface {
