@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
@@ -210,23 +209,16 @@ func Prune(db ethdb.Database, blockNumFrom uint64, blockNumTo uint64) error {
 		}
 
 		keysToRemove.StorageChangeSet = append(keysToRemove.StorageChangeSet, common.CopyBytes(key))
-		var innerErr error
-		if debug.IsThinHistory() {
-			innerErr = changeset.StorageChangeSetBytes(v).Walk(func(cKey, _ []byte) error {
-				//todo implement pruning for thin history
-				return nil
-			})
-		} else {
-			innerErr = changeset.Walk(v, func(cKey, _ []byte) error {
-				compKey, _ := dbutils.CompositeKeySuffix(cKey, timestamp)
-				keysToRemove.StorageHistoryKeys = append(keysToRemove.StorageHistoryKeys, common.CopyBytes(compKey))
-				return nil
-			})
+
+		noop := func(cKey, _ []byte) error {
+			//todo implement pruning for thin history
+			return nil
 		}
 
-		if innerErr != nil {
+		if innerErr := changeset.StorageChangeSetBytes(v).Walk(noop); innerErr != nil {
 			return false, innerErr
 		}
+
 		return true, nil
 	})
 	if err != nil {
