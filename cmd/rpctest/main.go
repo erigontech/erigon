@@ -906,7 +906,7 @@ func bench1(needCompare bool, fullTest bool) {
 					fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
 					return
 				}
-				ok, _ := compareModifiedAccounts(&ma, &mag)
+				ok, accountSet := compareModifiedAccounts(&ma, &mag)
 				if !ok {
 					fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
 					fmt.Printf("ma-------------------------\n")
@@ -915,7 +915,6 @@ func bench1(needCompare bool, fullTest bool) {
 					printModifiedAccounts(&mag)
 					return
 				}
-				/*
 				reqGen.reqID++
 				for account := range accountSet {
 					var logs EthLogs
@@ -945,7 +944,6 @@ func bench1(needCompare bool, fullTest bool) {
 						return
 					}
 				}
-				*/
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
 			}
 			prevBn = bn
