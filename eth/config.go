@@ -96,7 +96,7 @@ type StorageMode struct {
 	ThinHistory bool
 }
 
-var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true, ThinHistory: false}
+var DefaultStorageMode = StorageMode{History: true, Receipts: false, TxIndex: true, Preimages: true, ThinHistory: true}
 
 func (m StorageMode) ToString() string {
 	modeString := ""
