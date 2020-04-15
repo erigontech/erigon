@@ -37,31 +37,32 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 		tests := []struct {
 			content map[string]string
 			prefix  string
+			start   string
 			order   []string
 		}{
 			// Empty databases should be iterable
-			{map[string]string{}, "", nil},
-			{map[string]string{}, "non-existent-prefix", nil},
+			{map[string]string{}, "", "", nil},
+			{map[string]string{}, "non-existent-prefix", "", nil},
 
 			// Single-item databases should be iterable
-			{map[string]string{"key": "val"}, "", []string{"key"}},
-			{map[string]string{"key": "val"}, "k", []string{"key"}},
-			{map[string]string{"key": "val"}, "l", nil},
+			{map[string]string{"key": "val"}, "", "", []string{"key"}},
+			{map[string]string{"key": "val"}, "k", "", []string{"key"}},
+			{map[string]string{"key": "val"}, "l", "", nil},
 
 			// Multi-item databases should be fully iterable
 			{
 				map[string]string{"k1": "v1", "k5": "v5", "k2": "v2", "k4": "v4", "k3": "v3"},
-				"",
+				"", "",
 				[]string{"k1", "k2", "k3", "k4", "k5"},
 			},
 			{
 				map[string]string{"k1": "v1", "k5": "v5", "k2": "v2", "k4": "v4", "k3": "v3"},
-				"k",
+				"k", "",
 				[]string{"k1", "k2", "k3", "k4", "k5"},
 			},
 			{
 				map[string]string{"k1": "v1", "k5": "v5", "k2": "v2", "k4": "v4", "k3": "v3"},
-				"l",
+				"l", "",
 				nil,
 			},
 			// Multi-item databases should be prefix-iterable
@@ -70,7 +71,7 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 					"ka1": "va1", "ka5": "va5", "ka2": "va2", "ka4": "va4", "ka3": "va3",
 					"kb1": "vb1", "kb5": "vb5", "kb2": "vb2", "kb4": "vb4", "kb3": "vb3",
 				},
-				"ka",
+				"ka", "",
 				[]string{"ka1", "ka2", "ka3", "ka4", "ka5"},
 			},
 			{
@@ -78,7 +79,24 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 					"ka1": "va1", "ka5": "va5", "ka2": "va2", "ka4": "va4", "ka3": "va3",
 					"kb1": "vb1", "kb5": "vb5", "kb2": "vb2", "kb4": "vb4", "kb3": "vb3",
 				},
-				"kc",
+				"kc", "",
+				nil,
+			},
+			// Multi-item databases should be prefix-iterable with start position
+			{
+				map[string]string{
+					"ka1": "va1", "ka5": "va5", "ka2": "va2", "ka4": "va4", "ka3": "va3",
+					"kb1": "vb1", "kb5": "vb5", "kb2": "vb2", "kb4": "vb4", "kb3": "vb3",
+				},
+				"ka", "3",
+				[]string{"ka3", "ka4", "ka5"},
+			},
+			{
+				map[string]string{
+					"ka1": "va1", "ka5": "va5", "ka2": "va2", "ka4": "va4", "ka3": "va3",
+					"kb1": "vb1", "kb5": "vb5", "kb2": "vb2", "kb4": "vb4", "kb3": "vb3",
+				},
+				"ka", "8",
 				nil,
 			},
 		}
@@ -137,28 +155,28 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 		{
 			got, want := iterateKeysFromKey(db, []byte("1")), []string{"1", "10", "11", "12"}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("IteratorWithPrefix(1): got: %s; want: %s", got, want)
+				t.Errorf("IteratorWith(1,nil): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
 			got, want := iterateKeysFromKey(db, []byte("5")), []string{}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("IteratorWithPrefix(1): got: %s; want: %s", got, want)
+				t.Errorf("IteratorWith(5,nil): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
 			got, want := iterateKeysFromKey(db, []byte("2")), []string{"2", "20", "21", "22", "3", "4", "6"}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("IteratorWithStart(2): got: %s; want: %s", got, want)
+				t.Errorf("IteratorWith(nil,2): got: %s; want: %s", got, want)
 			}
 		}
 
 		{
 			got, want := iterateKeysFromKey(db, []byte("5")), []string{"6"}
 			if !reflect.DeepEqual(got, want) {
-				t.Errorf("IteratorWithStart(2): got: %s; want: %s", got, want)
+				t.Errorf("IteratorWith(nil,5): got: %s; want: %s", got, want)
 			}
 		}
 	})
@@ -247,6 +265,38 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 				t.Errorf("got: %s; want: %s", got, want)
 			}
 		}
+			it := db.NewIterator(nil, nil)
+			if got, want := iterateKeys(it), []string{"2", "3", "4", "5", "6"}; !reflect.DeepEqual(got, want) {
+				t.Errorf("got: %s; want: %s", got, want)
+			}
+		}
+	})
+
+	t.Run("BatchReplay", func(t *testing.T) {
+		db := New()
+		defer db.Close()
+
+		want := []string{"1", "2", "3", "4"}
+		b := db.NewBatch()
+		for _, k := range want {
+			if err := b.Put([]byte(k), nil); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		b2 := db.NewBatch()
+		if err := b.Replay(b2); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := b2.Replay(db); err != nil {
+			t.Fatal(err)
+		}
+
+		it := db.NewIterator(nil, nil)
+		if got := iterateKeys(it); !reflect.DeepEqual(got, want) {
+			t.Errorf("got: %s; want: %s", got, want)
+		}
 	})
 }
 
@@ -261,5 +311,6 @@ func iterateKeysFromKey(db ethdb.Database, fromKey []byte) []string {
 		return true, nil
 	})
 	sort.Strings(keys)
+	it.Release()
 	return keys
 }

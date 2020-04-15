@@ -301,6 +301,9 @@ func ExportPreimages(db ethdb.Database, fn string) error {
 		writer = gzip.NewWriter(writer)
 		defer writer.(*gzip.Writer).Close()
 	}
+	// Iterate over the preimages and export them
+	it := db.NewIterator([]byte("secure-key-"), nil)
+	defer it.Release()
 
 	log.Info("Exported preimages", "file", fn)
 	return nil
