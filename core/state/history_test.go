@@ -90,10 +90,7 @@ func TestMutation_DeleteTimestamp(t *testing.T) {
 	}
 }
 
-
 func TestMutationCommitThinHistory(t *testing.T) {
-	t.Skip()
-
 	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()
 
