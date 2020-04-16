@@ -721,11 +721,11 @@ func bench1(needCompare bool, fullTest bool) {
 						//resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
-							//return
+							break
 						}
 						if sr.Error != nil {
 							fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
-							//break
+							break
 						} else {
 							nextKey = sr.Result.NextKey
 							for k, v := range sr.Result.Storage {
@@ -735,7 +735,7 @@ func bench1(needCompare bool, fullTest bool) {
 					}
 
 					//fmt.Printf("storageRange: %d\n", len(sm))
-					if needCompare && res.Err == nil && sr.Error == nil {
+					if needCompare {
 						smg := make(map[common.Hash]storageEntry)
 						nextKey = &common.Hash{}
 						for nextKey != nil {
@@ -758,14 +758,16 @@ func bench1(needCompare bool, fullTest bool) {
 						}
 
 						//fmt.Printf("storageRange g: %d\n", len(smg))
-						if !compareStorageRanges(sm, smg) {
-							fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
-							fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
-							fmt.Printf("================sm\n")
-							printStorageRange(sm)
-							fmt.Printf("================smg\n")
-							printStorageRange(smg)
-							return
+						if res.Err == nil && sr.Error == nil {
+							if !compareStorageRanges(sm, smg) {
+								fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
+								fmt.Printf("len(sm) %d, len(smg) %d\n", len(sm), len(smg))
+								fmt.Printf("================sm\n")
+								printStorageRange(sm)
+								fmt.Printf("================smg\n")
+								printStorageRange(smg)
+								return
+							}
 						}
 					}
 
@@ -791,7 +793,7 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
-			if needCompare && res.Err == nil && trace.Error == nil {
+			if needCompare {
 				var traceg EthTxTrace
 				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
 				//resultsCh <- res
@@ -804,9 +806,11 @@ func bench1(needCompare bool, fullTest bool) {
 					fmt.Printf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
 					return
 				}
-				if !compareTraces(&trace, &traceg) {
-					fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
-					return
+				if res.Err == nil && trace.Error == nil {
+					if !compareTraces(&trace, &traceg) {
+						fmt.Printf("Different traces block %d, tx %s\n", bn, tx.Hash)
+						return
+					}
 				}
 			}
 			reqGen.reqID++
@@ -893,7 +897,7 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
 				//return
 			}
-			if needCompare && res.Err == nil && ma.Error == nil {
+			if needCompare {
 				var mag DebugModifiedAccounts
 				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 				//resultsCh <- res
@@ -905,42 +909,44 @@ func bench1(needCompare bool, fullTest bool) {
 					fmt.Printf("Error getting modified accounts g: %d %s\n", mag.Error.Code, mag.Error.Message)
 					return
 				}
-				ok, accountSet := compareModifiedAccounts(&ma, &mag)
-				if !ok {
-					fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
-					fmt.Printf("ma-------------------------\n")
-					printModifiedAccounts(&ma)
-					fmt.Printf("\nmag-------------------------\n")
-					printModifiedAccounts(&mag)
-					return
-				}
-				reqGen.reqID++
-				for account := range accountSet {
-					var logs EthLogs
-					res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
-					//resultsCh <- res
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
+				if res.Err == nil && ma.Error == nil {
+					ok, accountSet := compareModifiedAccounts(&ma, &mag)
+					if !ok {
+						fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
+						fmt.Printf("ma-------------------------\n")
+						printModifiedAccounts(&ma)
+						fmt.Printf("\nmag-------------------------\n")
+						printModifiedAccounts(&mag)
 						return
 					}
-					if logs.Error != nil {
-						fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
-						return
-					}
-					var logsg EthLogs
-					res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-					//resultsCh <- res
-					if res.Err != nil {
-						fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
-						return
-					}
-					if logsg.Error != nil {
-						fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
-						return
-					}
-					if !compareLogs(&logs, &logsg) {
-						fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
-						return
+					reqGen.reqID++
+					for account := range accountSet {
+						var logs EthLogs
+						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
+						//resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
+							return
+						}
+						if logs.Error != nil {
+							fmt.Printf("Error getting logs for account %x: %d %s\n", account, logs.Error.Code, logs.Error.Message)
+							return
+						}
+						var logsg EthLogs
+						res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
+						//resultsCh <- res
+						if res.Err != nil {
+							fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
+							return
+						}
+						if logsg.Error != nil {
+							fmt.Printf("Error getting logs for account g %x: %d %s\n", account, logsg.Error.Code, logsg.Error.Message)
+							return
+						}
+						if !compareLogs(&logs, &logsg) {
+							fmt.Printf("Different logs for account %x and block %d-%d\n", account, prevBn, bn)
+							return
+						}
 					}
 				}
 				fmt.Printf("Done blocks %d-%d, modified accounts: %d (%d)\n", prevBn, bn, len(ma.Result), len(mag.Result))
