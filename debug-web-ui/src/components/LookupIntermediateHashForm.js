@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 
 import Row from 'react-bootstrap/Row';
 import Col from 'react-bootstrap/Col';
-import { Form, Spinner, Table } from 'react-bootstrap';
+import { Spinner, Table } from 'react-bootstrap';
 
 import SearchField from './SearchField.js';
 
-const search = (prefix, tombstones, api, setState) => {
+const search = (prefix, api, setState) => {
   setState({ hashes: undefined, loading: true });
 
   const lookupSuccess = (response) => setState({ hashes: response.data, loading: false });
@@ -18,7 +18,7 @@ const search = (prefix, tombstones, api, setState) => {
     });
   };
 
-  return api.lookupStorageTombstones(prefix, tombstones).then(lookupSuccess).catch(lookupFail);
+  return api.lookupStorageTombstones(prefix).then(lookupSuccess).catch(lookupFail);
 };
 
 const LookupIntermediateHashForm = ({ api }) => {
@@ -29,10 +29,8 @@ const LookupIntermediateHashForm = ({ api }) => {
       <SearchField
         placeholder="lookup by prefix"
         disabled={state.loading}
-        onSubmit={(data) => search(data.search, data.tombstones, api, setState)}
-      >
-        <Form.Check name="tombstones" type="checkbox" label="Show tombstones" />
-      </SearchField>
+        onSubmit={(data) => search(data.search, api, setState)}
+      />
       {state.loading && <Spinner animation="border" />}
       {state.hashes && <Details hashes={state.hashes} />}
     </div>
