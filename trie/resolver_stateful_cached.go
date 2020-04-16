@@ -313,6 +313,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 			tr.fieldSet = AccountFieldSetNotAccount
 		}
 	}
+
 	return nil
 }
 
