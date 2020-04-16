@@ -164,7 +164,6 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 		}
 		return fmt.Errorf("unexpected resolution: %s at %s", b.String(), debug.Stack())
 	}
-	trace = blockNr == 672257
 	if trace {
 		fmt.Printf("RebuildTrie %d\n", len(startkeys))
 		for _, startkey := range startkeys {
@@ -232,8 +231,8 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	if tr.trace {
-		fmt.Printf("Walker Cached: blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", blockNr, keyIdx, kAsNibbles, v, fromCache)
+	if tr.trace && fromCache {
+		fmt.Printf("Walker Cached: blockNr: %t, %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", isAccount, blockNr, keyIdx, kAsNibbles, v, fromCache)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -333,17 +332,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	startkey := startkeys[rangeIdx]
 
 	err := db.View(func(tx *bolt.Tx) error {
-		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
-		if cacheBucket == nil {
-			return nil
-		}
-		cache := cacheBucket.Cursor()
-
-		b := tx.Bucket(bucket)
-		if b == nil {
-			return nil
-		}
-		c := b.Cursor()
+		cache := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+		c := tx.Bucket(bucket).Cursor()
 
 		k, v := c.Seek(startkey)
 		cacheK, cacheV := cache.Seek(startkey)
@@ -429,10 +419,8 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			DecompressNibbles(minKey, &keyAsNibbles.B)
 
 			if !fromCache {
-				if len(v) > 0 {
-					if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
-						return err
-					}
+				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
+					return err
 				}
 				k, v = c.Next()
 				continue
@@ -460,7 +448,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			}
 
 			// skip subtree
-
 			next, ok := nextSubtree(cacheK)
 			if !ok { // no siblings left
 				if canUseCache { // last sub-tree was taken from cache, then nothing to look in the main bucket. Can stop.

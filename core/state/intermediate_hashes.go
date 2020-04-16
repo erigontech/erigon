@@ -1,8 +1,6 @@
 package state
 
 import (
-	"encoding/binary"
-
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/pool"
@@ -42,10 +40,11 @@ func (ih *IntermediateHashes) WillUnloadBranchNode(prefixAsNibbles []byte, nodeH
 
 	var key []byte
 	if len(buf.B) > common.HashLength {
-		key = make([]byte, len(buf.B)+8)
-		copy(key, buf.B[:common.HashLength])
-		binary.BigEndian.PutUint64(key[common.HashLength:], ^incarnation)
-		copy(key[common.HashLength+8:], buf.B[common.HashLength:])
+		if incarnation == 0 {
+			panic("0 incarnation")
+		}
+
+		key = dbutils.GenerateCompositeStoragePrefix(buf.B[:common.HashLength], incarnation, buf.B[common.HashLength:])
 	} else {
 		key = common.CopyBytes(buf.B)
 	}
@@ -67,11 +66,11 @@ func (ih *IntermediateHashes) BranchNodeLoaded(prefixAsNibbles []byte, incarnati
 	trie.CompressNibbles(prefixAsNibbles, &buf.B)
 
 	var key []byte
-	if len(buf.B) > 32 {
-		key = make([]byte, len(buf.B)+8)
-		key = append(key, buf.B[:common.HashLength]...)
-		binary.BigEndian.PutUint64(key[common.HashLength:], ^incarnation)
-		key = append(key, buf.B[common.HashLength:]...)
+	if len(buf.B) > common.HashLength {
+		if incarnation == 0 {
+			panic("0 incarnation")
+		}
+		key = dbutils.GenerateCompositeStoragePrefix(buf.B[:common.HashLength], incarnation, buf.B[common.HashLength:])
 	} else {
 		key = common.CopyBytes(buf.B)
 	}
