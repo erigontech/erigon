@@ -722,11 +722,11 @@ func bench1(needCompare bool, fullTest bool) {
 						//resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
-							return
+							//return
 						}
 						if sr.Error != nil {
 							fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
-							break
+							//break
 						} else {
 							nextKey = sr.Result.NextKey
 							for k, v := range sr.Result.Storage {
@@ -736,7 +736,7 @@ func bench1(needCompare bool, fullTest bool) {
 					}
 
 					//fmt.Printf("storageRange: %d\n", len(sm))
-					if needCompare {
+					if needCompare && res.Err == nil && sr.Error == nil {
 						smg := make(map[common.Hash]storageEntry)
 						nextKey = &common.Hash{}
 						for nextKey != nil {
@@ -785,14 +785,14 @@ func bench1(needCompare bool, fullTest bool) {
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, res.Err)
 				print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
-				return
+				//return
 			}
 
 			if trace.Error != nil {
 				fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
-			if needCompare {
+			if needCompare && res.Err == nil  && trace.Error == nil {
 				var traceg EthTxTrace
 				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
 				//resultsCh <- res
@@ -888,13 +888,13 @@ func bench1(needCompare bool, fullTest bool) {
 			//resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not get modified accounts: %v\n", res.Err)
-				return
+				//return
 			}
 			if ma.Error != nil {
 				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
-				return
+				//return
 			}
-			if needCompare {
+			if needCompare && res.Err == nil && ma.Error != nil {
 				var mag DebugModifiedAccounts
 				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 				//resultsCh <- res
