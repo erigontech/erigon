@@ -175,19 +175,18 @@ func (tr *ResolverStateful) RebuildTrie(
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
+			err = db.MultiWalk(dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
 	} else {
 		if historical {
 			panic("historical data is not implemented")
 		} else {
-			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
+			err = db.MultiWalk(dbutils.CurrentStateBucket, startkeys, fixedbits, tr.WalkerStorage)
 		}
 	}
 	if err != nil {
 		return err
 	}
-
 	if err = tr.finaliseRoot(); err != nil {
 		return fmt.Errorf("error in finaliseRoot, for block %d: %w", blockNr, err)
 	}
@@ -225,6 +224,10 @@ func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
 	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
+	if isAccount && len(k) > 32 {
+		return nil
+	}
+
 	if keyIdx != tr.keyIdx {
 		if err := tr.finaliseRoot(); err != nil {
 			return err
