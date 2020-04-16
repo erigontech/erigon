@@ -893,7 +893,7 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
 				//return
 			}
-			if needCompare && res.Err == nil && ma.Error != nil {
+			if needCompare && res.Err == nil && ma.Error == nil {
 				var mag DebugModifiedAccounts
 				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 				//resultsCh <- res
