@@ -326,7 +326,7 @@ func compareModifiedAccounts(ma, mag *DebugModifiedAccounts) (bool, map[common.A
 }
 
 func printStorageRange(sm map[common.Hash]storageEntry) {
-	for k, _ := range sm {
+	for k := range sm {
 		fmt.Printf("%x\n", k)
 	}
 }
@@ -340,11 +340,10 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 			if v.Key == nil {
 				fmt.Printf("v.Key == nil for %x\n", k)
 				return false
-			} else {
-				if k != crypto.Keccak256Hash(v.Key[:]) {
-					fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
-					return false
-				}
+			}
+			if k != crypto.Keccak256Hash(v.Key[:]) {
+				fmt.Printf("Sec key %x does not match key %x\n", k, *v.Key)
+				return false
 			}
 			if v.Value != vg.Value {
 				fmt.Printf("Different values for %x: %x %x [%x]\n", k, v.Value, vg.Value, *v.Key)
@@ -579,70 +578,70 @@ func bench1(needCompare bool, fullTest bool) {
 	// results to /$tmp$/turbo_geth_stress_test/results_*.csv
 	// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
 	/*
-	go func() {
-		var err error
-		files := map[string]map[string]*os.File{
-			Geth:      make(map[string]*os.File),
-			TurboGeth: make(map[string]*os.File),
-		}
-		vegetaFiles := map[string]map[string]*os.File{
-			Geth:      make(map[string]*os.File),
-			TurboGeth: make(map[string]*os.File),
-		}
-		tmpDir := os.TempDir()
-		fmt.Printf("tmp dir is: %s\n", tmpDir)
-		dir := path.Join(tmpDir, "turbo_geth_stress_test")
-		if err = os.MkdirAll(dir, 0770); err != nil {
-			panic(err)
-		}
-
-		for _, route := range []string{Geth, TurboGeth} {
-			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
-				file := path.Join(dir, "results_"+route+"_"+method+".csv")
-				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-				if err != nil {
-					panic(err)
-				}
+		go func() {
+			var err error
+			files := map[string]map[string]*os.File{
+				Geth:      make(map[string]*os.File),
+				TurboGeth: make(map[string]*os.File),
 			}
-		}
-
-		for _, route := range []string{Geth, TurboGeth} {
-			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
-				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
-				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-				if err != nil {
-					panic(err)
-				}
+			vegetaFiles := map[string]map[string]*os.File{
+				Geth:      make(map[string]*os.File),
+				TurboGeth: make(map[string]*os.File),
 			}
-		}
-
-		for res := range resultsCh {
-			if res.Err != nil {
-				fmt.Printf("error response. target: %s, err: %s\n", res.Target, res.Err)
-			}
-			// files with call stats
-			if f, ok := files[res.Target][res.Method]; ok {
-				row := fmt.Sprintf("%d, %s, %d\n", res.RequestID, res.Method, res.Took.Microseconds())
-				if _, err := fmt.Fprint(f, row); err != nil {
-					panic(err)
-				}
+			tmpDir := os.TempDir()
+			fmt.Printf("tmp dir is: %s\n", tmpDir)
+			dir := path.Join(tmpDir, "turbo_geth_stress_test")
+			if err = os.MkdirAll(dir, 0770); err != nil {
+				panic(err)
 			}
 
-			// vegeta files, write into all target files
-			// because if "needCompare" is false - then we don't have responses from TurboGeth
-			// but we still have enough information to build vegeta file for TurboGeth
-			for _, target := range []string{Geth, TurboGeth} {
-				if f, ok := vegetaFiles[target][res.Method]; ok {
-					template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
-					row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))
-
-					if _, err := fmt.Fprint(f, row+"\n"); err != nil {
+			for _, route := range []string{Geth, TurboGeth} {
+				for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+					file := path.Join(dir, "results_"+route+"_"+method+".csv")
+					files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+					if err != nil {
 						panic(err)
 					}
 				}
 			}
-		}
-	}()
+
+			for _, route := range []string{Geth, TurboGeth} {
+				for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+					file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
+					vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+					if err != nil {
+						panic(err)
+					}
+				}
+			}
+
+			for res := range resultsCh {
+				if res.Err != nil {
+					fmt.Printf("error response. target: %s, err: %s\n", res.Target, res.Err)
+				}
+				// files with call stats
+				if f, ok := files[res.Target][res.Method]; ok {
+					row := fmt.Sprintf("%d, %s, %d\n", res.RequestID, res.Method, res.Took.Microseconds())
+					if _, err := fmt.Fprint(f, row); err != nil {
+						panic(err)
+					}
+				}
+
+				// vegeta files, write into all target files
+				// because if "needCompare" is false - then we don't have responses from TurboGeth
+				// but we still have enough information to build vegeta file for TurboGeth
+				for _, target := range []string{Geth, TurboGeth} {
+					if f, ok := vegetaFiles[target][res.Method]; ok {
+						template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
+						row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))
+
+						if _, err := fmt.Fprint(f, row+"\n"); err != nil {
+							panic(err)
+						}
+					}
+				}
+			}
+		}()
 	*/
 	var res CallResult
 	reqGen := &RequestGenerator{
@@ -716,8 +715,8 @@ func bench1(needCompare bool, fullTest bool) {
 					reqGen.reqID++
 					sm := make(map[common.Hash]storageEntry)
 					nextKey := &common.Hash{}
+					var sr DebugStorageRange
 					for nextKey != nil {
-						var sr DebugStorageRange
 						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
 						//resultsCh <- res
 						if res.Err != nil {
@@ -792,7 +791,7 @@ func bench1(needCompare bool, fullTest bool) {
 				fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 			}
 
-			if needCompare && res.Err == nil  && trace.Error == nil {
+			if needCompare && res.Err == nil && trace.Error == nil {
 				var traceg EthTxTrace
 				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
 				//resultsCh <- res
@@ -1214,7 +1213,7 @@ func bench5() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogeth_url := "http://192.168.1.126:9545"
+	turbogethURL := "http://192.168.1.126:9545"
 	file, err := os.Open("txs.txt")
 	if err != nil {
 		panic(err)
@@ -1225,7 +1224,7 @@ func bench5() {
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		req_id++
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
+		if err := post(client, turbogethURL, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
 			fmt.Printf("Count not get receipt: %s: %v\n", scanner.Text(), err)
 			return
 		}
@@ -1304,14 +1303,14 @@ func bench7() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogeth_url := "http://192.168.1.126:8545"
+	turbogethURL := "http://192.168.1.126:8545"
 	blockhash := common.HexToHash("0x820b9eb70726aef7706b4db5b55ec6d6684fa155e0f964c8253970861f96ab6b")
-	req_id := 1
+	reqID := 1
 	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
 	sm := make(map[common.Hash]storageEntry)
 	start := common.HexToHash("0xf9b13da5a2865143a9bb5ad68c1241df890b5fe3f35e94e7dae2e2e480710461")
 
-	req_id++
+	reqID++
 	template := `
 {"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}
 	`
@@ -1319,7 +1318,7 @@ func bench7() {
 	nextKey := &start
 	for nextKey != nil {
 		var sr DebugStorageRange
-		if err := post(client, turbogeth_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
+		if err := post(client, turbogethURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
 			fmt.Printf("Could not get storageRange: %v\n", err)
 			return
 		}
@@ -1343,14 +1342,14 @@ func bench8() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogeth_url := "http://localhost:8545"
-	req_id := 1
+	turbogethURL := "http://localhost:8545"
+	reqID := 1
 	to := common.HexToAddress("0x9653c9859b18f8777fe4eec9a67c9f64f3d6f62a")
 
-	req_id++
+	reqID++
 	template := `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
 	var logs EthLogs
-	if err := post(client, turbogeth_url, fmt.Sprintf(template, 49000, 49100, to, req_id), &logs); err != nil {
+	if err := post(client, turbogethURL, fmt.Sprintf(template, 49000, 49100, to, reqID), &logs); err != nil {
 		fmt.Printf("Could not get eth_getLogs: %v\n", err)
 		return
 	}
