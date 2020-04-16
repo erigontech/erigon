@@ -1339,6 +1339,26 @@ func bench7() {
 	fmt.Printf("storageRange: %d\n", len(sm))
 }
 
+func bench8() {
+	var client = &http.Client{
+		Timeout: time.Second * 600,
+	}
+	turbogeth_url := "http://localhost:8545"
+	req_id := 1
+	to := common.HexToAddress("0x9653c9859b18f8777fe4eec9a67c9f64f3d6f62a")
+
+	req_id++
+	template := `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
+	var logs EthLogs
+	if err := post(client, turbogeth_url, fmt.Sprintf(template, 49000, 49100, to, req_id), &logs); err != nil {
+		fmt.Printf("Could not get eth_getLogs: %v\n", err)
+		return
+	}
+	if logs.Error != nil {
+		fmt.Printf("Error getting eth_getLogs: %d %s\n", logs.Error.Code, logs.Error.Message)
+	}
+}
+
 func main() {
 
 	var (
@@ -1366,5 +1386,7 @@ func main() {
 		bench1(true, true)
 	case "bench7":
 		bench7()
+	case "bench8":
+		bench8()
 	}
 }
