@@ -490,94 +490,14 @@ func TestIsBefore(t *testing.T) {
 
 	contract := fmt.Sprintf("2%063x", 0)
 	storageKey := common.Hex2Bytes(contract + "ffffffff" + fmt.Sprintf("10%062x", 0))
-	cacheKey := common.Hex2Bytes(contract + "20")
+	cacheKey := common.Hex2Bytes(contract + "ffffffff" + "20")
 	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.False(is)
 	assert.Equal(fmt.Sprintf("%x", storageKey), fmt.Sprintf("%x", minKey))
 
 	storageKey = common.Hex2Bytes(contract + "ffffffffffffffff" + fmt.Sprintf("20%062x", 0))
-	cacheKey = common.Hex2Bytes(contract + "10")
+	cacheKey = common.Hex2Bytes(contract + "ffffffffffffffff" + "10")
 	is, minKey = keyIsBefore(cacheKey, storageKey)
 	assert.True(is)
 	assert.Equal(fmt.Sprintf("%x", cacheKey), fmt.Sprintf("%x", minKey))
-}
-
-func TestHexIncrement(t *testing.T) {
-	assert := assert.New(t)
-	k := common.Hex2Bytes("f2fd")
-
-	k, ok := nextSubtree(k)
-	assert.True(ok)
-	assert.Equal("f2fe", common.Bytes2Hex(k))
-	k, ok = nextSubtree(k)
-	assert.True(ok)
-	assert.Equal("f2ff", common.Bytes2Hex(k))
-	k, ok = nextSubtree(k)
-	assert.True(ok)
-	assert.Equal("f300", common.Bytes2Hex(k))
-
-	k = common.Hex2Bytes("ffffff")
-	assert.Nil(nextSubtree(k))
-	k = common.Hex2Bytes("ffff")
-	assert.Nil(nextSubtree(k))
-	k = common.Hex2Bytes("ff")
-	assert.Nil(nextSubtree(k))
-	k = common.Hex2Bytes("")
-	assert.Nil(nextSubtree(k))
-}
-
-func TestCmpWithoutIncarnation(t *testing.T) {
-	assert := assert.New(t)
-	type TestCase struct {
-		k1     string
-		k2     string
-		expect int
-	}
-	cases := []TestCase{
-		{
-			k1:     "f2fd",
-			k2:     "f2ff",
-			expect: -1,
-		},
-		{
-			k1:     "f2fd",
-			k2:     "f2f0",
-			expect: 1,
-		},
-		{
-			k1:     "f2ff",
-			k2:     "f2ff",
-			expect: 0,
-		},
-		{
-			k1:     fmt.Sprintf("%064x1%063x", 0, 0),
-			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
-			expect: -1,
-		},
-		{
-			k1:     fmt.Sprintf("%064x7%063x", 0, 0),
-			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
-			expect: 1,
-		},
-		{
-			k1:     fmt.Sprintf("%064x6%063x", 0, 0),
-			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
-			expect: 0,
-		},
-		{
-			k1:     fmt.Sprintf("%064x1", 0),
-			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
-			expect: -1,
-		},
-		{
-			k1:     fmt.Sprintf("%064x70", 0),
-			k2:     fmt.Sprintf("%064x00000000000000006%063x", 0, 0),
-			expect: 1,
-		},
-	}
-
-	for _, tc := range cases {
-		r := cmpWithoutIncarnation(common.Hex2Bytes(tc.k1), common.Hex2Bytes(tc.k2))
-		assert.Equal(tc.expect, r, fmt.Sprintf("k1: %s\nk2: %s", tc.k1, tc.k2))
-	}
 }
