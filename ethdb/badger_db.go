@@ -167,14 +167,20 @@ func (db *BadgerDatabase) Get(bucket, key []byte) ([]byte, error) {
 
 func (db *BadgerDatabase) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
 	var val []byte
-	//todo impliment me
+	var innerErr error
+
 	err := db.db.View(func(txn *badger.Txn) error {
-		item, err := txn.Get(bucketKey(bucket, key))
-		if err != nil {
-			return err
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		it.Seek(bucketKey(bucket, dbutils.IndexChunkKey(key, timestamp)))
+		if it.ValidForPrefix(bucketKey(bucket, key)) {
+			val, innerErr = it.Item().ValueCopy(nil)
+			if innerErr != nil {
+				return innerErr
+			}
+			return nil
 		}
-		val, err = item.ValueCopy(nil)
-		return err
+		return badger.ErrKeyNotFound
 	})
 	if err == badger.ErrKeyNotFound {
 		return nil, ErrKeyNotFound
@@ -362,8 +368,8 @@ func (db *BadgerDatabase) RewindData(timestampSrc, timestampDst uint64, df func(
 
 func (db *BadgerDatabase) NewBatch() DbWithPendingMutations {
 	m := &mutation{
-		db:                      db,
-		puts:                    newPuts(),
+		db:   db,
+		puts: newPuts(),
 	}
 	return m
 }

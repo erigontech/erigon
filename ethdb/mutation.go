@@ -54,14 +54,12 @@ func (m *mutation) getNoLock(bucket, key []byte) ([]byte, error) {
 	return nil, ErrKeyNotFound
 }
 
-// Can only be called from the worker thread
 func (m *mutation) GetIndexChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
 	//there is a hack for searching index
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	//inverce incarnation
-	indexBytes, err := m.puts.ChunkByIDOrLast(bucket, key, timestamp)
+	indexBytes, err := m.puts.ChunkByIDOrLastChunk(bucket, key, timestamp)
 	if err != nil && err != ErrKeyNotFound {
 		return nil, err
 	}

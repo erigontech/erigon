@@ -1,42 +1,34 @@
-package ethdb
+package core
 
 import (
-	"encoding/binary"
+	"bytes"
+	//"encoding/binary"
 	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
 	"sort"
 	"time"
 )
 
-type ChangesetWalker interface {
-	Walk(func([]byte, []byte) error) error
-}
-
-func FindProperIndexChunk(db Database, bucket []byte, key []byte, blockNum uint64) (*dbutils.HistoryIndexBytes, error) {
-	indexBytes, err := db.GetIndexChunk(bucket, key, blockNum)
-	if err == ErrKeyNotFound {
-		return dbutils.NewHistoryIndex(), nil
+func NewIndexGenerator(db ethdb.Database, changeSetBucket []byte, indexBucket []byte, walkerAdapter func([]byte) ChangesetWalker) *IndexGenerator {
+	fixedBits := uint(common.HashLength)
+	if bytes.Equal(changeSetBucket, dbutils.StorageChangeSetBucket) {
+		fixedBits = common.HashLength*2 + common.IncarnationLength
 	}
-	if err != nil {
-		return nil, err
+	return &IndexGenerator{
+		db:            db,
+		csBucket:      changeSetBucket,
+		bucketToWrite: indexBucket,
+		fixedBits:     fixedBits,
+		csWalker:      walkerAdapter,
+		cache:         nil,
 	}
-	fmt.Println("FindProperIndexChunk", common.Bytes2Hex(key), indexBytes)
-	return dbutils.WrapHistoryIndex(indexBytes), nil
 }
-
-func keyAndChunkID(key []byte) ([]byte, uint64) {
-	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+common.IncarnationLength+8 {
-		return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
-	}
-	panic(common.Bytes2Hex(key))
-}
-
-const maxChunkSize = 1000
 
 type IndexGenerator struct {
-	db            Database
+	db            ethdb.Database
 	csBucket      []byte
 	bucketToWrite []byte
 	fixedBits     uint
@@ -48,14 +40,17 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 	return func(k, v []byte) error {
 		indexes, ok := ig.cache[string(k)]
 		if !ok || len(indexes) == 0 {
-			var index *dbutils.HistoryIndexBytes
 
-			index, err := FindProperIndexChunk(ig.db, ig.bucketToWrite, k, blockNum)
+			indexBytes, err := ig.db.GetIndexChunk(ig.bucketToWrite, k, blockNum)
 			if err != nil {
 				return err
 			}
-			if index == nil || len(*index)+8 > maxChunkSize {
+			var index *dbutils.HistoryIndexBytes
+
+			if len(indexBytes) == 0 || dbutils.CheckNewIndexChunk(indexBytes) {
 				index = dbutils.NewHistoryIndex()
+			} else {
+				index = dbutils.WrapHistoryIndex(indexBytes)
 			}
 
 			indexes = append(indexes, index)
@@ -63,7 +58,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		}
 
 		lastIndex := indexes[len(indexes)-1]
-		if len(*lastIndex)+8 > maxChunkSize {
+		if len(*lastIndex)+8 > dbutils.MaxChunkSize {
 			lastIndex = dbutils.NewHistoryIndex()
 			indexes = append(indexes, lastIndex)
 			ig.cache[string(k)] = indexes
@@ -80,14 +75,19 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 	return false, nil
 })
 */
-func (ig *IndexGenerator) generateIndex() error {
-	ts := time.Now()
-	defer func() {
-		fmt.Println("end:", time.Since(ts))
-	}()
+func (ig *IndexGenerator) GenerateIndex() error {
+	startTime := time.Now()
 	batchSize := ig.db.IdealBatchSize() * 3
 	//addrHash - > index or addhash + inverted firshBlock for full chunk contracts
 	ig.cache = make(map[string][]*dbutils.HistoryIndexBytes, batchSize)
+
+	//todo add truncate to all db
+	if bolt, ok := ig.db.(*ethdb.BoltDatabase); ok {
+		err := bolt.DeleteBucket(ig.bucketToWrite)
+		if err != nil {
+			return err
+		}
+	}
 
 	commit := func() error {
 		tuples := common.NewTuples(len(ig.cache), 3, 1)
@@ -125,6 +125,7 @@ func (ig *IndexGenerator) generateIndex() error {
 			}
 
 			if len(ig.cache) > batchSize {
+				log.Info("Next chunk", "currentKey", common.Bytes2Hex(currentKey), "time", time.Since(startTime))
 				stop = false
 				return false, nil
 			}
@@ -149,4 +150,8 @@ func (ig *IndexGenerator) generateIndex() error {
 
 	log.Info("Generation index finished", "bucket", string(ig.bucketToWrite))
 	return nil
+}
+
+type ChangesetWalker interface {
+	Walk(func([]byte, []byte) error) error
 }

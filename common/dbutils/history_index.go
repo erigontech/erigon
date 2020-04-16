@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	LenBytes = 4
-	ItemLen  = 8
+	LenBytes     = 4
+	ItemLen      = 8
+	MaxChunkSize = 1000
 )
 
 func NewHistoryIndex() *HistoryIndexBytes {
@@ -21,6 +22,9 @@ func NewHistoryIndex() *HistoryIndexBytes {
 
 func IsIndexBucket(b []byte) bool {
 	return bytes.Equal(b, AccountsHistoryBucket) || bytes.Equal(b, StorageHistoryBucket)
+}
+func CheckNewIndexChunk(b []byte) bool {
+	return len(b)+8 > MaxChunkSize
 }
 
 func WrapHistoryIndex(b []byte) *HistoryIndexBytes {

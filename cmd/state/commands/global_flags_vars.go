@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/spf13/cobra"
 )
 
@@ -9,6 +10,8 @@ var (
 	statsfile       string
 	block           uint64
 	remoteDbAddress string
+	changeSetBucket string
+	indexBucket     string
 )
 
 func withBlock(cmd *cobra.Command) {
@@ -31,4 +34,12 @@ func withStatsfile(cmd *cobra.Command) {
 
 func withRemoteDb(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&remoteDbAddress, "remote-db-addr", "", "remote db rpc address")
+}
+
+func withCSBucket(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&changeSetBucket, "changeset-bucket", string(dbutils.AccountChangeSetBucket), string(dbutils.AccountChangeSetBucket)+" for account and "+string(dbutils.StorageChangeSetBucket)+" for storage")
+}
+
+func withIndexBucket(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&indexBucket, "index-bucket", string(dbutils.AccountsHistoryBucket), string(dbutils.AccountsHistoryBucket)+" for account and "+string(dbutils.StorageHistoryBucket)+" for storage")
 }

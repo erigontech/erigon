@@ -1,7 +1,9 @@
 package ethdb
 
 import (
+	"encoding/binary"
 	"errors"
+	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"sort"
@@ -27,8 +29,6 @@ func (p puts) set(bucket, key, value []byte) {
 		p.mp[string(bucket)] = bucketPuts
 	}
 	if debug.IsThinHistory() && dbutils.IsIndexBucket(bucket) {
-		//keyWithoutID, chunkID:=keyAndChunkID(key)
-		//v,err:=p.ChunkByIDOrLast(bucket, keyWithoutID, chunkID)
 		keyWithoutID, ID := keyAndChunkID(key)
 		p.addChunkID(keyWithoutID, ID)
 	}
@@ -57,7 +57,7 @@ func (p puts) Size() int {
 	return size
 }
 
-func (p puts) ChunkByIDOrLast(bucket, key []byte, timestamp uint64) ([]byte, error) {
+func (p puts) ChunkByIDOrLastChunk(bucket, key []byte, timestamp uint64) ([]byte, error) {
 	chunkIDs, ok := p.chunkIDs[string(key)]
 	if !ok {
 		return nil, ErrKeyNotFound
@@ -151,4 +151,11 @@ func (pb putsBucket) GetStr(key string) ([]byte, bool) {
 	}
 
 	return value, true
+}
+
+func keyAndChunkID(key []byte) ([]byte, uint64) {
+	if len(key) == common.HashLength+8 || len(key) == common.HashLength*2+common.IncarnationLength+8 {
+		return key[:len(key)-8], ^binary.BigEndian.Uint64(key[len(key)-8:])
+	}
+	panic(common.Bytes2Hex(key))
 }

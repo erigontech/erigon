@@ -450,6 +450,204 @@ func generateAccountsWithStorageAndHistory(t *testing.T, db ethdb.Database, numO
 	return addrHashes, accState, accStateStorage, accHistory, accHistoryStateStorage
 }
 
+func TestMutationIndexChunking(t *testing.T) {
+	boltDB := ethdb.NewMemDatabase()
+	mutDB := boltDB.NewBatch()
+	bgDB, err := ethdb.NewEphemeralBadger()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dbs := []ethdb.Database{mutDB, ethdb.NewMemDatabase(), bgDB}
+	for _, db := range dbs {
+		db := db
+		t.Run(reflect.TypeOf(db).String(), func(t *testing.T) {
+
+			tds := NewTrieDbState(common.Hash{}, db, 0)
+			blockWriter := tds.DbStateWriter()
+			ctx := context.Background()
+			emptyAccount := accounts.NewAccount()
+
+			acc, addr, addrHash := randomAccount(t)
+
+			m := make(map[string][]byte)
+			for i := uint64(0); i < 250; i++ {
+				tds.SetBlockNr(i)
+				newAcc := acc.SelfCopy()
+				newAcc.Nonce = i
+				if err := blockWriter.UpdateAccountData(ctx, addr, &emptyAccount, newAcc); err != nil {
+					t.Fatal(err)
+				}
+				if err := blockWriter.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
+				if err := blockWriter.WriteHistory(); err != nil {
+					t.Fatal(err)
+				}
+
+				v, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
+				if err != nil && err != ethdb.ErrKeyNotFound {
+					t.Error(err)
+				}
+				index := dbutils.WrapHistoryIndex(v)
+				k, err := index.Key(addrHash.Bytes())
+				if err != nil {
+					t.Error(i, err)
+				}
+				m[string(k)] = *index
+			}
+
+			if len(m) != 2 {
+				spew.Dump(m)
+				t.Fatal("incorrect number of chunks")
+			}
+			k := dbutils.IndexChunkKey(addrHash.Bytes(), 0)
+			vv, err := dbutils.WrapHistoryIndex(m[string(k)]).Decode()
+			if err != nil {
+				t.Fatal(dbutils.IndexChunkKey(addrHash.Bytes(), 0), err)
+			}
+
+			firstChunkValues := make([]uint64, 247)
+			for i := range firstChunkValues {
+				firstChunkValues[i] = uint64(i)
+			}
+			if !reflect.DeepEqual(vv, firstChunkValues) {
+				spew.Dump(vv)
+				spew.Dump(firstChunkValues)
+				t.Fatal("not equals")
+			}
+
+			k = dbutils.IndexChunkKey(addrHash.Bytes(), 247)
+			vv, err = dbutils.WrapHistoryIndex(m[string(k)]).Decode()
+			if err != nil {
+				t.Fatal(dbutils.IndexChunkKey(addrHash.Bytes(), 0), err)
+			}
+
+			secondChunkValues := []uint64{247, 248, 249}
+			if !reflect.DeepEqual(vv, secondChunkValues) {
+				spew.Dump(vv)
+				spew.Dump(firstChunkValues)
+				t.Fatal("not equals")
+			}
+
+		})
+	}
+}
+
+func TestMutationGetAsOfCheck(t *testing.T) {
+	boltDB := ethdb.NewMemDatabase()
+	mutDB := boltDB.NewBatch()
+
+	/*
+		todo uncomment after add thin history to badgerdb
+		bgDB,err:= ethdb.NewEphemeralBadger()
+		if err!=nil {
+			t.Fatal(err)
+		}
+
+	*/
+
+	dbs := []ethdb.Database{
+		mutDB,
+		ethdb.NewMemDatabase(),
+		//bgDB,
+	}
+	for _, db := range dbs {
+		db := db
+		t.Run(reflect.TypeOf(db).String(), func(t *testing.T) {
+			tds := NewTrieDbState(common.Hash{}, db, 0)
+			blockWriter := tds.DbStateWriter()
+			ctx := context.Background()
+
+			firstAccNonce := uint64(2)
+
+			acc, addr, addrHash := randomAccount(t)
+			prevAcc := acc.SelfCopy()
+			prevAcc.Nonce = firstAccNonce
+
+			m := make(map[string][]byte)
+			for i := uint64(5); i < 255; i++ {
+				tds.SetBlockNr(i)
+				newAcc := acc.SelfCopy()
+				newAcc.Nonce = i
+				if err := blockWriter.UpdateAccountData(ctx, addr, prevAcc, newAcc); err != nil {
+					t.Fatal(err)
+				}
+				prevAcc = newAcc.SelfCopy()
+				if err := blockWriter.WriteChangeSets(); err != nil {
+					t.Fatal(err)
+				}
+				if err := blockWriter.WriteHistory(); err != nil {
+					t.Fatal(err)
+				}
+
+				v, err := db.GetIndexChunk(dbutils.AccountsHistoryBucket, addrHash.Bytes(), i)
+				if err != nil && err != ethdb.ErrKeyNotFound {
+					t.Error(err)
+				}
+				index := dbutils.WrapHistoryIndex(v)
+				k, err := index.Key(addrHash.Bytes())
+				if err != nil {
+					t.Error(i, err)
+				}
+				m[string(k)] = *index
+			}
+			if commiter, ok := db.(ethdb.DbWithPendingMutations); ok {
+				_, err := commiter.Commit()
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if len(m) != 2 {
+				spew.Dump(m)
+				t.Fatal("incorrect number of chunks")
+			}
+
+			k := dbutils.IndexChunkKey(addrHash.Bytes(), 5)
+			vv, err := dbutils.WrapHistoryIndex(m[string(k)]).Decode()
+			if err != nil {
+				t.Fatal(dbutils.IndexChunkKey(addrHash.Bytes(), 0), err)
+			}
+			if len(vv) == 0 {
+				t.Fatal("empty index")
+			}
+
+			firstChunkValues := make([]uint64, 247)
+			for i := range firstChunkValues {
+				firstChunkValues[i] = uint64(i + 5)
+			}
+			if !reflect.DeepEqual(vv, firstChunkValues) {
+				spew.Dump(vv)
+				spew.Dump(firstChunkValues)
+				t.Fatal("not equals")
+			}
+
+			checkNonceForBlock := func(blockNum, correctNonce uint64) {
+				t.Helper()
+				v, err := db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash.Bytes(), blockNum)
+				if err != nil {
+					t.Fatal(err)
+				}
+				gotAcc := accounts.NewAccount()
+				err = gotAcc.DecodeForStorage(v)
+				if err != nil {
+					t.Fatal(err)
+				}
+
+				if gotAcc.Nonce != correctNonce {
+					t.Fatal("incorrect nonce for ", blockNum, " block", "got", gotAcc.Nonce, "wait", correctNonce)
+				}
+			}
+
+			checkNonceForBlock(1, firstAccNonce)
+			checkNonceForBlock(5, firstAccNonce)
+			checkNonceForBlock(6, 5)
+			checkNonceForBlock(255, 254)
+			checkNonceForBlock(247, 246)
+			checkNonceForBlock(248, 247)
+		})
+	}
+}
+
 func TestMutation_GetAsOf(t *testing.T) {
 	db := ethdb.NewMemDatabase()
 	mutDB := db.NewBatch()

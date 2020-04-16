@@ -42,6 +42,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err := dsw.csw.UpdateAccountData(ctx, address, original, account); err != nil {
 		return err
 	}
+
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
@@ -202,7 +203,13 @@ func (dsw *DbStateWriter) writeIndex(changes *changeset.ChangeSet, bucket []byte
 			return fmt.Errorf("find chunk failed: %w", err)
 		}
 
-		index := dbutils.WrapHistoryIndex(indexBytes)
+		var index *dbutils.HistoryIndexBytes
+		if len(indexBytes) == 0 || dbutils.CheckNewIndexChunk(indexBytes) {
+			index = dbutils.NewHistoryIndex()
+		} else {
+			index = dbutils.WrapHistoryIndex(indexBytes)
+		}
+
 		index.Append(dsw.tds.blockNr)
 		indexKey, err := index.Key(change.Key)
 		if err != nil {
