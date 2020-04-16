@@ -173,13 +173,13 @@ func (tr *ResolverStateful) RebuildTrie(
 	var err error
 	if accounts {
 		if historical {
-			err = db.MultiWalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerAccounts)
+			panic("historical data is not implemented")
 		} else {
 			err = db.MultiWalk(dbutils.AccountsBucket, startkeys, fixedbits, tr.WalkerAccounts)
 		}
 	} else {
 		if historical {
-			err = db.MultiWalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkeys, fixedbits, blockNr+1, tr.WalkerStorage)
+			panic("historical data is not implemented")
 		} else {
 			err = db.MultiWalk(dbutils.StorageBucket, startkeys, fixedbits, tr.WalkerStorage)
 		}

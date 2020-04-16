@@ -31,7 +31,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/changeset"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -762,48 +761,24 @@ func (tds *TrieDbState) updateTrieRoots(forward bool) ([]common.Hash, error) {
 				}
 			}
 
-			if forward || debug.IsThinHistory() {
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.t.DeepHash(addrHash[:])
-					if ok {
-						account.Root = root
-						//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
-					} else {
-						//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
+			if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
+				ok, root := tds.t.DeepHash(addrHash[:])
+				if ok {
+					account.Root = root
+					//fmt.Printf("(b)Set %x root for addrHash %x\n", root, addrHash)
+				} else {
+					//fmt.Printf("(b)Set empty root for addrHash %x\n", addrHash)
+					account.Root = trie.EmptyRoot
 				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, root := tds.t.DeepHash(addrHash[:])
-					if ok {
-						account.Root = root
-						//fmt.Printf("Set %x root for addrHash %x\n", root, addrHash)
-					} else {
-						//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
-						account.Root = trie.EmptyRoot
-					}
-				}
-			} else {
-				// Simply comparing the correctness of the storageRoot computations
-				if account, ok := b.accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
-				}
-				if account, ok := accountUpdates[addrHash]; ok && account != nil {
-					ok, h := tds.t.DeepHash(addrHash[:])
-					if !ok {
-						h = trie.EmptyRoot
-					}
-
-					if account.Root != h {
-						return nil, fmt.Errorf("mismatched storage root for %x: expected %x, got %x", addrHash, account.Root, h)
-					}
+			}
+			if account, ok := accountUpdates[addrHash]; ok && account != nil {
+				ok, root := tds.t.DeepHash(addrHash[:])
+				if ok {
+					account.Root = root
+					//fmt.Printf("Set %x root for addrHash %x\n", root, addrHash)
+				} else {
+					//fmt.Printf("Set empty root for addrHash %x\n", addrHash)
+					account.Root = trie.EmptyRoot
 				}
 			}
 		}
@@ -870,7 +845,7 @@ func (tds *TrieDbState) UnwindTo(blockNr uint64) error {
 					return err
 				}
 				// Fetch the code hash
-				if acc.Incarnation > 0 && debug.IsThinHistory() && acc.IsEmptyCodeHash() {
+				if acc.Incarnation > 0 && acc.IsEmptyCodeHash() {
 					if codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, acc.Incarnation)); err == nil {
 						copy(acc.CodeHash[:], codeHash)
 					}
@@ -944,84 +919,55 @@ func (tds *TrieDbState) deleteTimestamp(timestamp uint64) error {
 		return err
 	}
 
-	if debug.IsThinHistory() {
-		if len(changedAccounts) > 0 {
-			innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
-				indexBytes, getErr := tds.db.Get(dbutils.AccountsHistoryBucket, kk)
-				if getErr != nil {
-					if getErr == ethdb.ErrKeyNotFound {
-						return nil
-					}
-					return getErr
+	if len(changedAccounts) > 0 {
+		innerErr := changeset.AccountChangeSetBytes(changedAccounts).Walk(func(kk, _ []byte) error {
+			indexBytes, getErr := tds.db.Get(dbutils.AccountsHistoryBucket, kk)
+			if getErr != nil {
+				if getErr == ethdb.ErrKeyNotFound {
+					return nil
 				}
-
-				index := dbutils.WrapHistoryIndex(indexBytes)
-				index.Remove(timestamp)
-
-				if index.Len() == 0 {
-					return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
-				}
-				return tds.db.Put(dbutils.AccountsHistoryBucket, kk, *index)
-			})
-			if innerErr != nil {
-				return innerErr
+				return getErr
 			}
-			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
-				return err
+
+			index := dbutils.WrapHistoryIndex(indexBytes)
+			index.Remove(timestamp)
+
+			if index.Len() == 0 {
+				return tds.db.Delete(dbutils.AccountsHistoryBucket, kk)
 			}
+			return tds.db.Put(dbutils.AccountsHistoryBucket, kk, *index)
+		})
+		if innerErr != nil {
+			return innerErr
 		}
-
-		if len(changedStorage) > 0 {
-			innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
-				indexBytes, getErr := tds.db.Get(dbutils.StorageHistoryBucket, kk)
-				if getErr != nil {
-					if getErr == ethdb.ErrKeyNotFound {
-						return nil
-					}
-					return getErr
-				}
-
-				index := dbutils.WrapHistoryIndex(indexBytes)
-				index.Remove(timestamp)
-
-				if index.Len() == 0 {
-					return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
-				}
-				return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
-			})
-			if innerErr != nil {
-				return innerErr
-			}
-			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
-				return err
-			}
+		if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
+			return err
 		}
-	} else {
-		if len(changedAccounts) > 0 {
-			innerErr := changeset.Walk(changedAccounts, func(kk, _ []byte) error {
-				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
-				return tds.db.Delete(dbutils.AccountsHistoryBucket, composite)
-			})
+	}
 
-			if innerErr != nil {
-				return innerErr
+	if len(changedStorage) > 0 {
+		innerErr := changeset.StorageChangeSetBytes(changedStorage).Walk(func(kk, _ []byte) error {
+			indexBytes, getErr := tds.db.Get(dbutils.StorageHistoryBucket, kk)
+			if getErr != nil {
+				if getErr == ethdb.ErrKeyNotFound {
+					return nil
+				}
+				return getErr
 			}
-			if err := tds.db.Delete(dbutils.AccountChangeSetBucket, changeSetKey); err != nil {
-				return err
+
+			index := dbutils.WrapHistoryIndex(indexBytes)
+			index.Remove(timestamp)
+
+			if index.Len() == 0 {
+				return tds.db.Delete(dbutils.StorageHistoryBucket, kk)
 			}
+			return tds.db.Put(dbutils.StorageHistoryBucket, kk, *index)
+		})
+		if innerErr != nil {
+			return innerErr
 		}
-		if len(changedStorage) > 0 {
-			innerErr := changeset.Walk(changedStorage, func(kk, _ []byte) error {
-				composite, _ := dbutils.CompositeKeySuffix(kk, timestamp)
-				return tds.db.Delete(dbutils.StorageHistoryBucket, composite)
-			})
-
-			if innerErr != nil {
-				return innerErr
-			}
-			if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
-				return err
-			}
+		if err := tds.db.Delete(dbutils.StorageChangeSetBucket, changeSetKey); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -1054,7 +1000,7 @@ func (tds *TrieDbState) readAccountDataByHash(addrHash common.Hash) (*accounts.A
 		return nil, err
 	}
 
-	if tds.historical && debug.IsThinHistory() && a.Incarnation > 0 {
+	if tds.historical && a.Incarnation > 0 {
 		codeHash, err := tds.db.Get(dbutils.ContractCodeBucket, dbutils.GenerateStoragePrefix(addrHash, a.Incarnation))
 		if err == nil {
 			a.CodeHash = common.BytesToHash(codeHash)

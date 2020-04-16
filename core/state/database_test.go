@@ -27,7 +27,6 @@ import (
 	"github.com/ledgerwatch/turbo-geth/accounts/abi/bind/backends"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
-	"github.com/ledgerwatch/turbo-geth/common/debug"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/state"
@@ -481,9 +480,7 @@ func TestReorgOverStateChange(t *testing.T) {
 
 func TestDatabaseStateChangeDBSizeDebug(t *testing.T) {
 	t.Skip()
-	if !debug.IsThinHistory() {
-		t.Skip()
-	}
+
 	// Configure and generate a sample block chain
 	numOfContracts := 10
 	txPerBlock := 10
