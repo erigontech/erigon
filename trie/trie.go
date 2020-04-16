@@ -286,7 +286,7 @@ func (t *Trie) Update(key, value []byte) {
 	if t.root == nil {
 		t.root = &shortNode{Key: hex, Val: newnode}
 	} else {
-		_, t.root = t.insert(t.root, hex, 0, valueNode(value))
+		_, t.root = t.insert(t.root, hex, valueNode(value))
 	}
 }
 
@@ -310,7 +310,7 @@ func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
 	if t.root == nil {
 		t.root = &shortNode{Key: hex, Val: newnode}
 	} else {
-		_, t.root = t.insert(t.root, hex, 0, newnode)
+		_, t.root = t.insert(t.root, hex, newnode)
 	}
 }
 
@@ -339,7 +339,7 @@ func (t *Trie) UpdateAccountCode(key []byte, code codeNode) error {
 	accNode.codeSize = len(code)
 
 	// t.insert will call the observer methods itself
-	_, t.root = t.insert(t.root, hex, 0, accNode)
+	_, t.root = t.insert(t.root, hex, accNode)
 	return nil
 }
 
@@ -362,7 +362,7 @@ func (t *Trie) UpdateAccountCodeSize(key []byte, codeSize int) error {
 	accNode.codeSize = codeSize
 
 	// t.insert will call the observer methods itself
-	_, t.root = t.insert(t.root, hex, 0, accNode)
+	_, t.root = t.insert(t.root, hex, accNode)
 	return nil
 }
 
@@ -504,7 +504,13 @@ func (t *Trie) NeedResolution(contract []byte, storageKey []byte) (bool, *Resolv
 	}
 }
 
-func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
+// can pass incarnation=0 if start from root, method internally will
+// put incarnation from accountNode when pass it by traverse
+func (t *Trie) insert(origNode node, key []byte, value node) (updated bool, newNode node) {
+	return t.insertRecursive(origNode, key, 0, value)
+}
+
+func (t *Trie) insertRecursive(origNode node, key []byte, pos int, value node) (updated bool, newNode node) {
 	if len(key) == pos {
 		origN, origNok := origNode.(valueNode)
 		vn, vnok := value.(valueNode)
@@ -553,7 +559,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 	case nil:
 		return true, &shortNode{Key: common.CopyBytes(key[pos:]), Val: value}
 	case *accountNode:
-		updated, nn = t.insert(n.storage, key, pos, value)
+		updated, nn = t.insertRecursive(n.storage, key, pos, value)
 		if updated {
 			n.storage = nn
 			n.rootCorrect = false
@@ -564,7 +570,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		// If the whole key matches, keep this short node as is
 		// and only update the value.
 		if matchlen == len(n.Key) || n.Key[matchlen] == 16 {
-			updated, nn = t.insert(n.Val, key, pos+matchlen, value)
+			updated, nn = t.insertRecursive(n.Val, key, pos+matchlen, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
 				n.Val = nn
@@ -616,7 +622,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 		i1, i2 := n.childrenIdx()
 		switch key[pos] {
 		case i1:
-			updated, nn = t.insert(n.child1, key, pos+1, value)
+			updated, nn = t.insertRecursive(n.child1, key, pos+1, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
 				n.child1 = nn
@@ -624,7 +630,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			}
 			newNode = n
 		case i2:
-			updated, nn = t.insert(n.child2, key, pos+1, value)
+			updated, nn = t.insertRecursive(n.child2, key, pos+1, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
 				n.child2 = nn
@@ -662,7 +668,7 @@ func (t *Trie) insert(origNode node, key []byte, pos int, value node) (updated b
 			updated = true
 			n.ref.len = 0
 		} else {
-			updated, nn = t.insert(child, key, pos+1, value)
+			updated, nn = t.insertRecursive(child, key, pos+1, value)
 			if updated {
 				t.evictNodeFromHashMap(n)
 				n.Children[key[pos]] = nn
@@ -845,7 +851,7 @@ func (t *Trie) Delete(key []byte) {
 	if t.binary {
 		hex = keyHexToBin(hex)
 	}
-	_, t.root = t.delete(t.root, hex, 0, false, 0)
+	_, t.root = t.delete(t.root, hex, false)
 }
 
 func (t *Trie) convertToShortNode(child node, pos uint) node {
@@ -869,13 +875,17 @@ func (t *Trie) convertToShortNode(child node, pos uint) node {
 	return &shortNode{Key: []byte{byte(pos)}, Val: child}
 }
 
+func (t *Trie) delete(origNode node, key []byte, preserveAccountNode bool) (updated bool, newNode node) {
+	return t.deleteRecursive(origNode, key, 0, preserveAccountNode, 0)
+}
+
 // delete returns the new root of the trie with key deleted.
 // It reduces the trie to minimal form by simplifying
 // nodes on the way up after deleting recursively.
 //
 // can pass incarnation=0 if start from root, method internally will
 // put incarnation from accountNode when pass it by traverse
-func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode node) {
+func (t *Trie) deleteRecursive(origNode node, key []byte, keyStart int, preserveAccountNode bool, incarnation uint64) (updated bool, newNode node) {
 	var nn node
 	switch n := origNode.(type) {
 	case *shortNode:
@@ -901,7 +911,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				// from the subtrie. Child can never be nil here since the
 				// subtrie must contain at least two other values with keys
 				// longer than n.Key.
-				updated, nn = t.delete(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
+				updated, nn = t.deleteRecursive(n.Val, key, keyStart+matchlen, preserveAccountNode, incarnation)
 				if !updated {
 					newNode = n
 				} else {
@@ -935,7 +945,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 		i1, i2 := n.childrenIdx()
 		switch key[keyStart] {
 		case i1:
-			updated, nn = t.delete(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child1, key, keyStart+1, preserveAccountNode, incarnation)
 			if !updated {
 				newNode = n
 				t.observers.BranchNodeTouched(key[:keyStart])
@@ -952,7 +962,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 				}
 			}
 		case i2:
-			updated, nn = t.delete(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
+			updated, nn = t.deleteRecursive(n.child2, key, keyStart+1, preserveAccountNode, incarnation)
 			if !updated {
 				newNode = n
 				t.observers.BranchNodeTouched(key[:keyStart])
@@ -976,7 +986,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 
 	case *fullNode:
 		child := n.Children[key[keyStart]]
-		updated, nn = t.delete(child, key, keyStart+1, preserveAccountNode, incarnation)
+		updated, nn = t.deleteRecursive(child, key, keyStart+1, preserveAccountNode, incarnation)
 		if !updated {
 			newNode = n
 			t.observers.BranchNodeTouched(key[:keyStart])
@@ -1062,7 +1072,7 @@ func (t *Trie) delete(origNode node, key []byte, keyStart int, preserveAccountNo
 
 			return true, nil
 		}
-		updated, nn = t.delete(n.storage, key, keyStart, preserveAccountNode, n.Incarnation)
+		updated, nn = t.deleteRecursive(n.storage, key, keyStart, preserveAccountNode, n.Incarnation)
 		if updated {
 			n.storage = nn
 			n.rootCorrect = false
@@ -1089,7 +1099,7 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 		hexPrefix = keyHexToBin(hexPrefix)
 	}
 
-	_, t.root = t.delete(t.root, hexPrefix, 0, true, 0)
+	_, t.root = t.delete(t.root, hexPrefix, true)
 
 }
 

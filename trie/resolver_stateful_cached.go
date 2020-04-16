@@ -231,7 +231,7 @@ func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []
 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
-	if tr.trace {
+	if tr.trace && fromCache {
 		fmt.Printf("Walker Cached: blockNr: %t, %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", isAccount, blockNr, keyIdx, kAsNibbles, v, fromCache)
 	}
 
@@ -351,7 +351,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				}
 			}
 			fromCache, minKey = keyIsBefore(cacheK, k)
-			fmt.Println(fromCache)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
 				cmp := int(-1)
@@ -421,11 +420,10 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					return err
 				}
 				k, v = c.Next()
-				fmt.Println(k)
-				if len(k) > 32 && isAccount {
-					_, _ = c.Last()
-					k = nil
-					v = nil
+				if isAccount {
+					for len(k) > 32 {
+						k, v = c.Next()
+					}
 				}
 				continue
 			}
