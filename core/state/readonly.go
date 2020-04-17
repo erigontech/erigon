@@ -69,7 +69,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 	st := llrb.New()
 	var s [common.HashLength + common.IncarnationLength + common.HashLength]byte
 	copy(s[:], addrHash[:])
-	accData, _ := dbs.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	accData, _ := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	var acc accounts.Account
 	if err = acc.DecodeForStorage(accData); err != nil {
 		log.Error("Error decoding account", "error", err)
@@ -94,7 +94,7 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 		})
 	}
 	numDeletes := st.Len() - overrideCounter
-	err = dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err = dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, s[:], 8*(common.HashLength+common.IncarnationLength), dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if !bytes.HasPrefix(ks, addrHash[:]) {
 			return false, nil
 		}
@@ -146,10 +146,14 @@ func (dbs *DbState) ForEachStorage(addr common.Address, start []byte, cb func(ke
 
 func (dbs *DbState) ForEachAccount(start []byte, cb func(address *common.Address, addrHash common.Hash), maxResults int) {
 	results := 0
-	err := dbs.db.WalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
+	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, start[:], 0, dbs.blockNr+1, func(ks, vs []byte) (bool, error) {
 		if vs == nil || len(vs) == 0 {
 			// Skip deleted entries
 			return true, nil
+		}
+
+		if len(ks) > 32 {
+			return false, nil
 		}
 		addrHash := common.BytesToHash(ks[:common.HashLength])
 		preimage, err := dbs.db.Get(dbutils.PreimagePrefix, addrHash[:])
@@ -173,7 +177,7 @@ func (dbs *DbState) ReadAccountData(address common.Address) (*accounts.Account, 
 	if err != nil {
 		return nil, err
 	}
-	enc, err := dbs.db.GetAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, addrHash[:], dbs.blockNr+1)
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -196,7 +200,7 @@ func (dbs *DbState) ReadAccountStorage(address common.Address, incarnation uint6
 	}
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, keyHash)
-	enc, err := dbs.db.GetAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
+	enc, err := dbs.db.GetAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, compositeKey, dbs.blockNr+1)
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -268,7 +272,10 @@ func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissin
 	missingPreimages := 0
 	var acc accounts.Account
 	var prefix [32]byte
-	err := dbs.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	err := dbs.db.Walk(dbutils.CurrentStateBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+		if len(k) > 32 {
+			return false, nil
+		}
 		addr := common.BytesToAddress(dbs.GetKey(k))
 		var err error
 		if err = acc.DecodeForStorage(v); err != nil {
@@ -313,7 +320,7 @@ func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissin
 			return false, err
 		}
 
-		err = dbs.db.Walk(dbutils.StorageBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
+		err = dbs.db.Walk(dbutils.CurrentStateBucket, dbutils.GenerateStoragePrefix(addrHash, acc.GetIncarnation()), uint(common.HashLength*8+common.IncarnationLength), func(ks, vs []byte) (bool, error) {
 			key := dbs.GetKey(ks[common.HashLength+common.IncarnationLength:]) //remove account address and version from composite key
 
 			if !excludeStorage {
@@ -363,7 +370,7 @@ func (dbs *DbState) WalkStorageRange(addrHash common.Hash, prefix trie.Keybytes,
 
 	i := 0
 
-	err := dbs.db.WalkAsOf(dbutils.StorageBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.StorageHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
 			val := new(big.Int).SetBytes(value)
 
@@ -393,8 +400,11 @@ func (dbs *DbState) WalkRangeOfAccounts(prefix trie.Keybytes, maxItems int, walk
 	i := 0
 
 	var acc accounts.Account
-	err := dbs.db.WalkAsOf(dbutils.AccountsBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
+	err := dbs.db.WalkAsOf(dbutils.CurrentStateBucket, dbutils.AccountsHistoryBucket, startkey, fixedbits, dbs.blockNr+1,
 		func(key []byte, value []byte) (bool, error) {
+			if len(key) > 32 {
+				return false, nil
+			}
 			if len(value) > 0 {
 				if err := acc.DecodeForStorage(value); err != nil {
 					return false, err

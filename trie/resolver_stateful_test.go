@@ -165,14 +165,13 @@ func TestTwoStorageItems(t *testing.T) {
 	require, assert, db := require.New(t), assert.New(t), ethdb.NewMemDatabase()
 	tr := New(common.Hash{})
 
-	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5")
-	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7")
+	key1 := common.Hex2Bytes("d7b6990105719101dabeb77144f2a3385c8033acd3af97e9423a695e81ad1eb5f5")
+	key2 := common.Hex2Bytes("df6966c971051c3d54ec59162606531493a51404a002842f56009d7e5cf4a8c7f5")
 	val1 := common.Hex2Bytes("02")
 	val2 := common.Hex2Bytes("03")
 
 	require.NoError(db.Put(dbutils.CurrentStateBucket, key1, val1))
 	require.NoError(db.Put(dbutils.CurrentStateBucket, key2, val2))
-
 	leaf1 := shortNode{Key: keybytesToHex(key1[1:]), Val: valueNode(val1)}
 	leaf2 := shortNode{Key: keybytesToHex(key2[1:]), Val: valueNode(val2)}
 	var branch fullNode
@@ -187,7 +186,7 @@ func TestTwoStorageItems(t *testing.T) {
 
 	// Resolve the root node
 
-	rootHash := common.HexToHash("d06f3adc0b0624495478b857a37950d308d6840b349fe2c9eb6dcb813e0ccfb8")
+	rootHash := common.HexToHash("85737b049107f866fedbd6d787077fc2c245f4748e28896a3e8ee82c377ecdcf")
 	assert.Equal(rootHash, crypto.Keccak256Hash(rootRlp))
 
 	req := &ResolveRequest{
@@ -359,7 +358,7 @@ func TestApiDetails(t *testing.T) {
 				//fmt.Printf("%x\n", tries[i].root.(*fullNode).Children[15].(*fullNode).Children[15].hash())
 				assert.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0, true)
+				err := resolver.ResolveStatefulCached(db, 0, false)
 				//fmt.Printf("%x\n", tries[i].root.(*shortNode).Val.(*fullNode).Children[15].hash())
 				assert.NoError(err)
 			}
@@ -381,7 +380,7 @@ func TestApiDetails(t *testing.T) {
 				err := resolver.ResolveStateful(db, 0)
 				assert.NoError(err)
 			} else {
-				err := resolver.ResolveStatefulCached(db, 0, true)
+				err := resolver.ResolveStatefulCached(db, 0, false)
 				assert.NoError(err)
 			}
 

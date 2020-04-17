@@ -49,7 +49,7 @@ func (dsw *DbStateWriter) UpdateAccountData(ctx context.Context, address common.
 	if err != nil {
 		return err
 	}
-	return dsw.tds.db.Put(dbutils.AccountsBucket, addrHash[:], data)
+	return dsw.tds.db.Put(dbutils.CurrentStateBucket, addrHash[:], data)
 }
 
 func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Address, original *accounts.Account) error {
@@ -60,7 +60,7 @@ func (dsw *DbStateWriter) DeleteAccount(ctx context.Context, address common.Addr
 	if err != nil {
 		return err
 	}
-	return dsw.tds.db.Delete(dbutils.AccountsBucket, addrHash[:])
+	return dsw.tds.db.Delete(dbutils.CurrentStateBucket, addrHash[:])
 }
 
 func (dsw *DbStateWriter) UpdateAccountCode(addrHash common.Hash, incarnation uint64, codeHash common.Hash, code []byte) error {
@@ -98,9 +98,9 @@ func (dsw *DbStateWriter) WriteAccountStorage(ctx context.Context, address commo
 
 	compositeKey := dbutils.GenerateCompositeStorageKey(addrHash, incarnation, seckey)
 	if len(v) == 0 {
-		return dsw.tds.db.Delete(dbutils.StorageBucket, compositeKey)
+		return dsw.tds.db.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return dsw.tds.db.Put(dbutils.StorageBucket, compositeKey, vv)
+		return dsw.tds.db.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }
 

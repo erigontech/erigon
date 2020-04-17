@@ -342,14 +342,25 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 		var fromCache bool
 		for k != nil || cacheK != nil {
 			// for Address bucket, skip cache keys longer than 31 bytes
-			if tr.trace {
-				fmt.Printf("For loop: %x, %x\n", cacheK, k)
-			}
 			if isAccount {
 				for len(cacheK) > maxAccountKeyLen {
 					cacheK, cacheV = cache.Next()
 				}
+				for len(k) > 32 {
+					k, v = c.Next()
+				}
+			} else {
+				for len(k) == 32 && k != nil {
+					k, v = c.Next()
+				}
 			}
+			if cacheK == nil && k == nil {
+				break
+			}
+			if tr.trace {
+				fmt.Printf("For loop: %x, %x\n", cacheK, k)
+			}
+
 			fromCache, minKey = keyIsBefore(cacheK, k)
 			if fixedbytes > 0 {
 				// Adjust rangeIdx if needed
@@ -420,11 +431,6 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 					return err
 				}
 				k, v = c.Next()
-				if isAccount {
-					for len(k) > 32 {
-						k, v = c.Next()
-					}
-				}
 				continue
 			}
 

@@ -224,7 +224,10 @@ func (tr *ResolverStateful) WalkerStorage(keyIdx int, k []byte, v []byte) error 
 // Walker - k, v - shouldn't be reused in the caller's code
 func (tr *ResolverStateful) Walker(isAccount bool, keyIdx int, k []byte, v []byte) error {
 	//fmt.Printf("Walker: keyIdx: %d key:%x  value:%x\n", keyIdx, k, v)
-	if isAccount && len(k) > 32 {
+	if isAccount && len(k) != 32 {
+		return nil
+	}
+	if !isAccount && len(k) == 32 {
 		return nil
 	}
 

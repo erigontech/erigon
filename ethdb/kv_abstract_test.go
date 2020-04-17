@@ -57,7 +57,7 @@ func TestManagedTx(t *testing.T) {
 	for _, db := range writeDBs {
 		db := db
 		if err := db.Update(ctx, func(tx ethdb.Tx) error {
-			b := tx.Bucket(dbutils.AccountsBucket)
+			b := tx.Bucket(dbutils.CurrentStateBucket)
 			for i := uint8(0); i < 10; i++ {
 				require.NoError(t, b.Put([]byte{i}, []byte{1}))
 			}
@@ -90,7 +90,7 @@ func testPrefixFilter(t *testing.T, db ethdb.KV) {
 	assert := assert.New(t)
 
 	if err := db.View(context.Background(), func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor().Prefix([]byte{2})
 		counter := 0
 		for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
@@ -148,7 +148,7 @@ func testCtxCancel(t *testing.T, db ethdb.KV) {
 	defer cancel()
 
 	if err := db.View(cancelableCtx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.AccountsBucket).Cursor()
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor()
 		for {
 			for k, _, err := c.First(); k != nil || err != nil; k, _, err = c.Next() {
 				if err != nil {
@@ -165,7 +165,7 @@ func testNoValuesIterator(t *testing.T, db ethdb.KV) {
 	assert, ctx := assert.New(t), context.Background()
 
 	if err := db.View(ctx, func(tx ethdb.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		c := b.Cursor()
 
 		k, _, err := c.First()

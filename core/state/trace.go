@@ -41,7 +41,7 @@ func (tds *TraceDbState) ReadAccountData(address common.Address) (*accounts.Acco
 	if err != nil {
 		return nil, err
 	}
-	enc, err := tds.currentDb.Get(dbutils.AccountsBucket, buf[:])
+	enc, err := tds.currentDb.Get(dbutils.CurrentStateBucket, buf[:])
 	if err != nil || enc == nil || len(enc) == 0 {
 		return nil, nil
 	}
@@ -62,7 +62,7 @@ func (tds *TraceDbState) ReadAccountStorage(address common.Address, incarnation 
 		return nil, err
 	}
 
-	enc, err := tds.currentDb.Get(dbutils.StorageBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
+	enc, err := tds.currentDb.Get(dbutils.CurrentStateBucket, dbutils.GenerateCompositeStorageKey(addrHash, incarnation, buf))
 	if err != nil || enc == nil {
 		return nil, nil
 	}
@@ -96,7 +96,7 @@ func (tds *TraceDbState) UpdateAccountData(ctx context.Context, address common.A
 	dataLen := account.EncodingLengthForStorage()
 	data := make([]byte, dataLen)
 	account.EncodeForStorage(data)
-	return tds.currentDb.Put(dbutils.AccountsBucket, addrHash[:], data)
+	return tds.currentDb.Put(dbutils.CurrentStateBucket, addrHash[:], data)
 }
 
 func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address, original *accounts.Account) error {
@@ -104,7 +104,7 @@ func (tds *TraceDbState) DeleteAccount(_ context.Context, address common.Address
 	if err != nil {
 		return err
 	}
-	return tds.currentDb.Delete(dbutils.AccountsBucket, addrHash[:])
+	return tds.currentDb.Delete(dbutils.CurrentStateBucket, addrHash[:])
 }
 
 func (tds *TraceDbState) UpdateAccountCode(codeHash common.Hash, code []byte) error {
@@ -124,8 +124,8 @@ func (tds *TraceDbState) WriteAccountStorage(address common.Address, incarnation
 	vv := make([]byte, len(v))
 	copy(vv, v)
 	if len(v) == 0 {
-		return tds.currentDb.Delete(dbutils.StorageBucket, compositeKey)
+		return tds.currentDb.Delete(dbutils.CurrentStateBucket, compositeKey)
 	} else {
-		return tds.currentDb.Put(dbutils.StorageBucket, compositeKey, vv)
+		return tds.currentDb.Put(dbutils.CurrentStateBucket, compositeKey, vv)
 	}
 }

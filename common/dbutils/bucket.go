@@ -4,9 +4,13 @@ import "github.com/ledgerwatch/turbo-geth/metrics"
 
 // The fields below define the low level database schema prefixing.
 var (
+	// Contains Accounts:
 	// key - address hash
 	// value - account encoded for storage
-	AccountsBucket = []byte("AT")
+	// Contains Storage:
+	//key - address hash + incarnation + storage key hash
+	//value - storage value(common.hash)
+	CurrentStateBucket = []byte("CST")
 
 	//current
 	//key - key + encoded timestamp(block number)
@@ -15,10 +19,6 @@ var (
 	//key - address hash
 	//value - list of block where it's changed
 	AccountsHistoryBucket = []byte("hAT")
-
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
-	StorageBucket = []byte("ST")
 
 	//current
 	//key - address hash + incarnation + storage key hash
@@ -110,9 +110,8 @@ var (
 )
 
 var Buckets = [][]byte{
-	AccountsBucket,
+	CurrentStateBucket,
 	AccountsHistoryBucket,
-	StorageBucket,
 	StorageHistoryBucket,
 	CodeBucket,
 	ContractCodeBucket,
