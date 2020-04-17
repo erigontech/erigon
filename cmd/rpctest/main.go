@@ -3,14 +3,14 @@ package main
 import (
 	"bufio"
 	"bytes"
-	//"encoding/base64"
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	//"path"
+	"path"
 	"strings"
 	"time"
 
@@ -287,7 +287,7 @@ func compareBalances(balance, balanceg *EthBalance) bool {
 	return true
 }
 
-func printModifiedAccounts(ma *DebugModifiedAccounts) {
+func (ma *DebugModifiedAccounts) Print() {
 	r := ma.Result
 	rset := make(map[common.Address]struct{})
 	for _, a := range r {
@@ -318,8 +318,8 @@ func compareModifiedAccounts(ma, mag *DebugModifiedAccounts) (bool, map[common.A
 	for _, a := range rg {
 		if _, ok := rset[a]; !ok {
 			fmt.Printf("%x not present in r\n", a)
-			// We tolerate that
-			//return false, nil
+			// We tolerate that, because go-ethereum does not include contracts that were created and then self-destructed
+			// within the block range
 		}
 	}
 	return true, rset
@@ -483,7 +483,6 @@ const Geth = "geth"
 const TurboGeth = "turbo_geth"
 
 var routes = map[string]string{
-	//Geth:      "http://192.168.1.96:8545",
 	Geth:      "http://192.168.1.238:8545",
 	TurboGeth: "http://192.168.1.126:8545",
 }
@@ -560,6 +559,81 @@ func (g *RequestGenerator) TurboGeth(method, body string, response interface{}) 
 	return g.call(TurboGeth, method, body, response)
 }
 
+// vegetaWrite (to be run as a goroutine) writing results of server calls into several files:
+// results to /$tmp$/turbo_geth_stress_test/results_*.csv
+// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
+func vegetaWrite(enabled bool, resultsCh chan CallResult) {
+	var err error
+	var files map[string]map[string]*os.File
+	var vegetaFiles map[string]map[string]*os.File
+	if enabled {
+		files = map[string]map[string]*os.File{
+			Geth:      make(map[string]*os.File),
+			TurboGeth: make(map[string]*os.File),
+		}
+		vegetaFiles = map[string]map[string]*os.File{
+			Geth:      make(map[string]*os.File),
+			TurboGeth: make(map[string]*os.File),
+		}
+		tmpDir := os.TempDir()
+		fmt.Printf("tmp dir is: %s\n", tmpDir)
+		dir := path.Join(tmpDir, "turbo_geth_stress_test")
+		if err = os.MkdirAll(dir, 0770); err != nil {
+			panic(err)
+		}
+
+		for _, route := range []string{Geth, TurboGeth} {
+			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+				file := path.Join(dir, "results_"+route+"_"+method+".csv")
+				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+
+		for _, route := range []string{Geth, TurboGeth} {
+			for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
+				file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
+				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				if err != nil {
+					panic(err)
+				}
+			}
+		}
+	}
+
+	for res := range resultsCh {
+		// If not enabled, simply keep draining the results channel
+		if enabled {
+			if res.Err != nil {
+				fmt.Printf("error response. target: %s, err: %s\n", res.Target, res.Err)
+			}
+			// files with call stats
+			if f, ok := files[res.Target][res.Method]; ok {
+				row := fmt.Sprintf("%d, %s, %d\n", res.RequestID, res.Method, res.Took.Microseconds())
+				if _, err := fmt.Fprint(f, row); err != nil {
+					panic(err)
+				}
+			}
+
+			// vegeta files, write into all target files
+			// because if "needCompare" is false - then we don't have responses from TurboGeth
+			// but we still have enough information to build vegeta file for TurboGeth
+			for _, target := range []string{Geth, TurboGeth} {
+				if f, ok := vegetaFiles[target][res.Method]; ok {
+					template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
+					row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))
+
+					if _, err := fmt.Fprint(f, row+"\n"); err != nil {
+						panic(err)
+					}
+				}
+			}
+		}
+	}
+}
+
 // bench1 compares response of TurboGeth with Geth
 // but also can be used for comparing RPCDaemon with Geth
 // parameters:
@@ -573,76 +647,8 @@ func bench1(needCompare bool, fullTest bool) {
 
 	resultsCh := make(chan CallResult, 1000)
 	defer close(resultsCh)
+	go vegetaWrite(false, resultsCh)
 
-	// This goroutine writing results of server calls into several files:
-	// results to /$tmp$/turbo_geth_stress_test/results_*.csv
-	// vegeta format going to files /$tmp$/turbo_geth_stress_test/vegeta_*.txt
-	/*
-		go func() {
-			var err error
-			files := map[string]map[string]*os.File{
-				Geth:      make(map[string]*os.File),
-				TurboGeth: make(map[string]*os.File),
-			}
-			vegetaFiles := map[string]map[string]*os.File{
-				Geth:      make(map[string]*os.File),
-				TurboGeth: make(map[string]*os.File),
-			}
-			tmpDir := os.TempDir()
-			fmt.Printf("tmp dir is: %s\n", tmpDir)
-			dir := path.Join(tmpDir, "turbo_geth_stress_test")
-			if err = os.MkdirAll(dir, 0770); err != nil {
-				panic(err)
-			}
-
-			for _, route := range []string{Geth, TurboGeth} {
-				for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
-					file := path.Join(dir, "results_"+route+"_"+method+".csv")
-					files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-					if err != nil {
-						panic(err)
-					}
-				}
-			}
-
-			for _, route := range []string{Geth, TurboGeth} {
-				for _, method := range []string{"eth_getBlockByNumber", "debug_storageRangeAt"} {
-					file := path.Join(dir, "vegeta_"+route+"_"+method+".txt")
-					vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
-					if err != nil {
-						panic(err)
-					}
-				}
-			}
-
-			for res := range resultsCh {
-				if res.Err != nil {
-					fmt.Printf("error response. target: %s, err: %s\n", res.Target, res.Err)
-				}
-				// files with call stats
-				if f, ok := files[res.Target][res.Method]; ok {
-					row := fmt.Sprintf("%d, %s, %d\n", res.RequestID, res.Method, res.Took.Microseconds())
-					if _, err := fmt.Fprint(f, row); err != nil {
-						panic(err)
-					}
-				}
-
-				// vegeta files, write into all target files
-				// because if "needCompare" is false - then we don't have responses from TurboGeth
-				// but we still have enough information to build vegeta file for TurboGeth
-				for _, target := range []string{Geth, TurboGeth} {
-					if f, ok := vegetaFiles[target][res.Method]; ok {
-						template := `{"method": "POST", "url": "%s", "body": "%s", "header": {"Content-Type": ["application/json"]}}`
-						row := fmt.Sprintf(template, routes[target], base64.StdEncoding.EncodeToString([]byte(res.RequestBody)))
-
-						if _, err := fmt.Fprint(f, row+"\n"); err != nil {
-							panic(err)
-						}
-					}
-				}
-			}
-		}()
-	*/
 	var res CallResult
 	reqGen := &RequestGenerator{
 		client: client,
@@ -651,7 +657,7 @@ func bench1(needCompare bool, fullTest bool) {
 	reqGen.reqID++
 	var blockNumber EthBlockNumber
 	res = reqGen.TurboGeth("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	//resultsCh <- res
+	resultsCh <- res
 	if res.Err != nil {
 		fmt.Printf("Could not get block number: %v\n", res.Err)
 		return
@@ -666,14 +672,14 @@ func bench1(needCompare bool, fullTest bool) {
 	}
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 49000
+	firstBn := 1800000
 	prevBn := firstBn
 	storageCounter := 0
 	for bn := firstBn; bn <= int(lastBlock); bn++ {
 		reqGen.reqID++
 		var b EthBlockByNumber
 		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn), &b)
-		//resultsCh <- res
+		resultsCh <- res
 		if res.Err != nil {
 			fmt.Printf("Could not retrieve block %d: %v\n", bn, res.Err)
 			return
@@ -718,7 +724,7 @@ func bench1(needCompare bool, fullTest bool) {
 					var sr DebugStorageRange
 					for nextKey != nil {
 						res = reqGen.Geth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &sr)
-						//resultsCh <- res
+						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get storageRange: %s: %v\n", tx.Hash, res.Err)
 							break
@@ -734,14 +740,13 @@ func bench1(needCompare bool, fullTest bool) {
 						}
 					}
 
-					//fmt.Printf("storageRange: %d\n", len(sm))
 					if needCompare {
 						smg := make(map[common.Hash]storageEntry)
 						nextKey = &common.Hash{}
 						for nextKey != nil {
 							var srg DebugStorageRange
 							res = reqGen.TurboGeth("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, tx.To, *nextKey), &srg)
-							//resultsCh <- res
+							resultsCh <- res
 							if res.Err != nil {
 								fmt.Printf("Could not get storageRange g: %s: %v\n", tx.Hash, res.Err)
 								return
@@ -757,7 +762,6 @@ func bench1(needCompare bool, fullTest bool) {
 							}
 						}
 
-						//fmt.Printf("storageRange g: %d\n", len(smg))
 						if res.Err == nil && sr.Error == nil {
 							if !compareStorageRanges(sm, smg) {
 								fmt.Printf("Different in storage ranges tx %s\n", tx.Hash)
@@ -782,11 +786,10 @@ func bench1(needCompare bool, fullTest bool) {
 
 			var trace EthTxTrace
 			res = reqGen.Geth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &trace)
-			//resultsCh <- res
+			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not trace transaction %s: %v\n", tx.Hash, res.Err)
 				print(client, routes[Geth], reqGen.traceTransaction(tx.Hash))
-				//return
 			}
 
 			if trace.Error != nil {
@@ -796,7 +799,7 @@ func bench1(needCompare bool, fullTest bool) {
 			if needCompare {
 				var traceg EthTxTrace
 				res = reqGen.TurboGeth("debug_traceTransaction", reqGen.traceTransaction(tx.Hash), &traceg)
-				//resultsCh <- res
+				resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Could not trace transaction g %s: %v\n", tx.Hash, res.Err)
 					print(client, routes[TurboGeth], reqGen.traceTransaction(tx.Hash))
@@ -817,7 +820,7 @@ func bench1(needCompare bool, fullTest bool) {
 
 			var receipt EthReceipt
 			res = reqGen.Geth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receipt)
-			//resultsCh <- res
+			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Count not get receipt: %s: %v\n", tx.Hash, res.Err)
 				print(client, routes[Geth], reqGen.getTransactionReceipt(tx.Hash))
@@ -830,7 +833,7 @@ func bench1(needCompare bool, fullTest bool) {
 			if needCompare {
 				var receiptg EthReceipt
 				res = reqGen.TurboGeth("eth_getTransactionReceipt", reqGen.getTransactionReceipt(tx.Hash), &receiptg)
-				//resultsCh <- res
+				resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Count not get receipt g: %s: %v\n", tx.Hash, res.Err)
 					print(client, routes[TurboGeth], reqGen.getTransactionReceipt(tx.Hash))
@@ -850,13 +853,9 @@ func bench1(needCompare bool, fullTest bool) {
 		}
 		reqGen.reqID++
 
-		if !fullTest {
-			continue // TODO: remove me
-		}
-
 		var balance EthBalance
 		res = reqGen.Geth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balance)
-		//resultsCh <- res
+		resultsCh <- res
 		if res.Err != nil {
 			fmt.Printf("Could not get account balance: %v\n", res.Err)
 			return
@@ -868,7 +867,7 @@ func bench1(needCompare bool, fullTest bool) {
 		if needCompare {
 			var balanceg EthBalance
 			res = reqGen.TurboGeth("eth_getBalance", reqGen.getBalance(b.Result.Miner, bn), &balanceg)
-			//resultsCh <- res
+			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not get account balance g: %v\n", res.Err)
 				return
@@ -888,19 +887,17 @@ func bench1(needCompare bool, fullTest bool) {
 			reqGen.reqID++
 			var ma DebugModifiedAccounts
 			res = reqGen.Geth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma)
-			//resultsCh <- res
+			resultsCh <- res
 			if res.Err != nil {
 				fmt.Printf("Could not get modified accounts: %v\n", res.Err)
-				//return
 			}
 			if ma.Error != nil {
 				fmt.Printf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)
-				//return
 			}
 			if needCompare {
 				var mag DebugModifiedAccounts
 				res = reqGen.TurboGeth("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
-				//resultsCh <- res
+				resultsCh <- res
 				if res.Err != nil {
 					fmt.Printf("Could not get modified accounts g: %v\n", res.Err)
 					return
@@ -914,16 +911,16 @@ func bench1(needCompare bool, fullTest bool) {
 					if !ok {
 						fmt.Printf("Modified accouts different for blocks %d-%d\n", prevBn, bn)
 						fmt.Printf("ma-------------------------\n")
-						printModifiedAccounts(&ma)
+						ma.Print()
 						fmt.Printf("\nmag-------------------------\n")
-						printModifiedAccounts(&mag)
+						mag.Print()
 						return
 					}
 					reqGen.reqID++
 					for account := range accountSet {
 						var logs EthLogs
 						res = reqGen.Geth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logs)
-						//resultsCh <- res
+						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get logs for account %x: %v\n", account, res.Err)
 							return
@@ -934,7 +931,7 @@ func bench1(needCompare bool, fullTest bool) {
 						}
 						var logsg EthLogs
 						res = reqGen.TurboGeth("eth_getLogs", reqGen.getLogs(prevBn, bn, account), &logsg)
-						//resultsCh <- res
+						resultsCh <- res
 						if res.Err != nil {
 							fmt.Printf("Could not get logs for account g %x: %v\n", account, res.Err)
 							return
@@ -1219,7 +1216,7 @@ func bench5() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogethURL := "http://192.168.1.126:9545"
+	turbogethURL := routes[TurboGeth]
 	file, err := os.Open("txs.txt")
 	if err != nil {
 		panic(err)
@@ -1309,7 +1306,7 @@ func bench7() {
 	var client = &http.Client{
 		Timeout: time.Second * 600,
 	}
-	turbogethURL := "http://192.168.1.126:8545"
+	turbogethURL := routes[TurboGeth]
 	blockhash := common.HexToHash("0x820b9eb70726aef7706b4db5b55ec6d6684fa155e0f964c8253970861f96ab6b")
 	reqID := 1
 	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
