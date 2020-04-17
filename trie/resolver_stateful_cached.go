@@ -332,11 +332,18 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	startkey := startkeys[rangeIdx]
 
 	err := db.View(func(tx *bolt.Tx) error {
-		cache := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
+		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
+		var cache *bolt.Cursor
+		if cacheBucket != nil {
+			cache = cacheBucket.Cursor()
+		}
 		c := tx.Bucket(bucket).Cursor()
 
 		k, v := c.Seek(startkey)
-		cacheK, cacheV := cache.Seek(startkey)
+		var cacheK, cacheV []byte
+		if cache != nil {
+			cacheK, cacheV = cache.Seek(startkey)
+		}
 
 		var minKey []byte
 		var fromCache bool
