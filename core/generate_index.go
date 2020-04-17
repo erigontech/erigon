@@ -2,8 +2,6 @@ package core
 
 import (
 	"bytes"
-	//"encoding/binary"
-	"fmt"
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -42,7 +40,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		if !ok || len(indexes) == 0 {
 
 			indexBytes, err := ig.db.GetIndexChunk(ig.bucketToWrite, k, blockNum)
-			if err != nil {
+			if err != nil && err != ethdb.ErrKeyNotFound {
 				return err
 			}
 			var index *dbutils.HistoryIndexBytes
@@ -58,7 +56,7 @@ func (ig *IndexGenerator) changeSetWalker(blockNum uint64) func([]byte, []byte) 
 		}
 
 		lastIndex := indexes[len(indexes)-1]
-		if len(*lastIndex)+8 > dbutils.MaxChunkSize {
+		if dbutils.CheckNewIndexChunk(*lastIndex) {
 			lastIndex = dbutils.NewHistoryIndex()
 			indexes = append(indexes, lastIndex)
 			ig.cache[string(k)] = indexes
@@ -83,6 +81,7 @@ func (ig *IndexGenerator) GenerateIndex() error {
 
 	//todo add truncate to all db
 	if bolt, ok := ig.db.(*ethdb.BoltDatabase); ok {
+		log.Warn("Remove bucket", "bucket", string(ig.bucketToWrite))
 		err := bolt.DeleteBucket(ig.bucketToWrite)
 		if err != nil {
 			return err
@@ -117,7 +116,6 @@ func (ig *IndexGenerator) GenerateIndex() error {
 		stop := true
 		err := ig.db.Walk(ig.csBucket, currentKey, 0, func(k, v []byte) (b bool, e error) {
 			blockNum, _ := dbutils.DecodeTimestamp(k)
-			fmt.Println(blockNum, len(ig.cache), batchSize)
 			currentKey = common.CopyBytes(k)
 			err := ig.csWalker(v).Walk(ig.changeSetWalker(blockNum))
 			if err != nil {
@@ -125,7 +123,11 @@ func (ig *IndexGenerator) GenerateIndex() error {
 			}
 
 			if len(ig.cache) > batchSize {
-				log.Info("Next chunk", "currentKey", common.Bytes2Hex(currentKey), "time", time.Since(startTime))
+				log.Info("Next chunk",
+					"blocknum", blockNum,
+					"time", time.Since(startTime),
+					"chunk size", len(ig.cache),
+				)
 				stop = false
 				return false, nil
 			}

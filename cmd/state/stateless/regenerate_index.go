@@ -15,13 +15,13 @@ func RegenerateIndex(chaindata string, indexBucket []byte, csBucket []byte) erro
 		return err
 	}
 	var walker func([]byte) core.ChangesetWalker
-	if bytes.Equal(dbutils.AccountChangeSetBucket, indexBucket) {
+	if bytes.Equal(dbutils.AccountChangeSetBucket, csBucket) {
 		walker = func(cs []byte) core.ChangesetWalker {
 			return changeset.AccountChangeSetBytes(cs)
 		}
 	}
 
-	if bytes.Equal(dbutils.StorageChangeSetBucket, indexBucket) {
+	if bytes.Equal(dbutils.StorageChangeSetBucket, csBucket) {
 		walker = func(cs []byte) core.ChangesetWalker {
 			return changeset.StorageChangeSetBytes(cs)
 		}
