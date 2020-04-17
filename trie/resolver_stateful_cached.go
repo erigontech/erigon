@@ -341,6 +341,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 			cache = cacheBucket.Cursor()
 		}
 		c := tx.Bucket(bucket).Cursor()
+		accRoots := tx.Bucket(dbutils.IntermediateTrieHashBucket).Cursor()
 
 		k, v := c.Seek(startkey)
 		var cacheK, cacheV []byte
