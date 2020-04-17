@@ -3,6 +3,8 @@ package stateless
 import (
 	"bytes"
 	"fmt"
+	"image"
+	"image/color"
 	"math"
 	"math/big"
 	"time"
@@ -12,11 +14,7 @@ import (
 	"github.com/ledgerwatch/bolt"
 
 	"github.com/ledgerwatch/turbo-geth/common"
-	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/crypto"
-
-	"image"
-	"image/color"
 
 	"github.com/llgcode/draw2d"
 	"github.com/llgcode/draw2d/draw2dimg"
@@ -36,19 +34,11 @@ func (a *KeyItem) Less(b llrb.Item) bool {
 func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	var storageRoot common.Hash
 	err := db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
-		if b == nil {
-			return fmt.Errorf("Could not find accounts bucket")
-		}
-		enc, _ := b.Get(crypto.Keccak256(contract[:]))
+		enc, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
 		if enc == nil {
 			return fmt.Errorf("Could find account %x\n", contract)
 		}
-		var account accounts.Account
-		if err := account.DecodeForStorage(enc); err != nil {
-			return err
-		}
-		storageRoot = account.Root
+		storageRoot = common.BytesToHash(common.CopyBytes(enc))
 		return nil
 	})
 	return storageRoot, err

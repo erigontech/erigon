@@ -24,6 +24,7 @@ import (
 
 	"github.com/ledgerwatch/turbo-geth/common"
 	"github.com/ledgerwatch/turbo-geth/common/dbutils"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types/accounts"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
 	"github.com/ledgerwatch/turbo-geth/log"
@@ -269,12 +270,14 @@ func (dbs *DbState) dump(c collector, excludeCode, excludeStorage, excludeMissin
 	missingPreimages := 0
 	var acc accounts.Account
 	var prefix [32]byte
-	err := dbs.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, v []byte) (bool, error) {
+	err := dbs.db.Walk(dbutils.AccountsBucket, prefix[:], 0, func(k, _ []byte) (bool, error) {
 		addr := common.BytesToAddress(dbs.GetKey(k))
 		var err error
-		if err = acc.DecodeForStorage(v); err != nil {
+		_, err = rawdb.ReadAccount(dbs.db, common.BytesToHash(k), &acc)
+		if err != nil {
 			return false, err
 		}
+
 		var code []byte
 
 		if !acc.IsEmptyCodeHash() {

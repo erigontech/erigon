@@ -221,18 +221,18 @@ func (tr *ResolverStatefulCached) RebuildTrie(
 	return nil
 }
 
-func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error {
-	return tr.Walker(true, blockNr, fromCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerAccounts(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot []byte) error {
+	return tr.Walker(true, blockNr, fromCache, keyIdx, k, v, accRoot)
 }
 
-func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error {
-	return tr.Walker(false, blockNr, fromCache, keyIdx, k, v)
+func (tr *ResolverStatefulCached) WalkerStorage(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot []byte) error {
+	return tr.Walker(false, blockNr, fromCache, keyIdx, k, v, accRoot)
 }
 
 // Walker - k, v - shouldn't be reused in the caller's code
-func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte) error {
+func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCache bool, keyIdx int, kAsNibbles []byte, v []byte, accRoot []byte) error {
 	if tr.trace && fromCache {
-		fmt.Printf("Walker Cached: blockNr: %t, %d, keyIdx: %d key:%x  value:%x, fromCache: %v\n", isAccount, blockNr, keyIdx, kAsNibbles, v, fromCache)
+		fmt.Printf("Walker Cached: %t, blockNr: %d, keyIdx: %d key:%x  value:%x, fromCache: %v, accRoot: %x\n", isAccount, blockNr, keyIdx, kAsNibbles, v, fromCache, accRoot)
 	}
 
 	if keyIdx != tr.keyIdx {
@@ -291,6 +291,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 			if err := tr.a.DecodeForStorage(v); err != nil {
 				return fmt.Errorf("fail DecodeForStorage: %w", err)
 			}
+			tr.a.Root = common.BytesToHash(accRoot)
 			if tr.a.IsEmptyCodeHash() && tr.a.IsEmptyRoot() {
 				tr.fieldSet = AccountFieldSetNotContract
 			} else {
@@ -303,7 +304,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 				if err := tr.hb.hash(tr.a.CodeHash[:]); err != nil {
 					return err
 				}
-				if err := tr.hb.hash(tr.a.Root[:]); err != nil {
+				if err := tr.hb.hash(accRoot); err != nil {
 					return err
 				}
 			}
@@ -318,7 +319,7 @@ func (tr *ResolverStatefulCached) Walker(isAccount bool, blockNr uint64, fromCac
 }
 
 // MultiWalk2 - looks similar to db.MultiWalk but works with hardcoded 2-nd bucket IntermediateTrieHashBucket
-func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool) error) error {
+func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket []byte, startkeys [][]byte, fixedbits []uint, walker func(keyIdx int, blockNr uint64, k []byte, v []byte, fromCache bool, accRoot []byte) error) error {
 	if len(startkeys) == 0 {
 		return nil
 	}
@@ -331,6 +332,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 	rangeIdx := 0 // What is the current range we are extracting
 	fixedbytes, mask := ethdb.Bytesmask(fixedbits[rangeIdx])
 	startkey := startkeys[rangeIdx]
+	var accRootKey, accRoot []byte
 
 	err := db.View(func(tx *bolt.Tx) error {
 		cacheBucket := tx.Bucket(dbutils.IntermediateTrieHashBucket)
@@ -425,9 +427,14 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 
 			keyAsNibbles.Reset()
 			DecompressNibbles(minKey, &keyAsNibbles.B)
-
 			if !fromCache {
-				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false); err != nil {
+				if isAccountBucket {
+					accRootKey, accRoot = accRoots.SeekTo(k)
+					if accRoot == nil || !bytes.Equal(k, accRootKey) {
+						return fmt.Errorf("acc root not found for %x", k)
+					}
+				}
+				if err := walker(rangeIdx, blockNr, keyAsNibbles.B, v, false, accRoot); err != nil {
 					return err
 				}
 				k, v = c.Next()
@@ -451,7 +458,7 @@ func (tr *ResolverStatefulCached) MultiWalk2(db *bolt.DB, blockNr uint64, bucket
 				continue
 			}
 
-			if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache); err != nil {
+			if err := walker(rangeIdx, blockNr, keyAsNibbles.B, cacheV, fromCache, nil); err != nil {
 				return fmt.Errorf("waker err: %w", err)
 			}
 

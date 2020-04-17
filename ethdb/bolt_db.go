@@ -210,23 +210,30 @@ func (db *BoltDatabase) GetAsOf(bucket, hBucket, key []byte, timestamp uint64) (
 			return nil
 		}
 		{
-			b := tx.Bucket(bucket)
-			if b == nil {
+			v, _ := tx.Bucket(bucket).Get(key)
+			if v == nil {
 				return ErrKeyNotFound
 			}
-			c := b.Cursor()
 
-			k, v := c.Seek(key)
-			if k != nil && bytes.Equal(k, key) {
-				dat = make([]byte, len(v))
-				copy(dat, v)
-				return nil
-			}
+			dat = make([]byte, len(v))
+			copy(dat, v)
+			return nil
 		}
 
 		return ErrKeyNotFound
 	})
 	return dat, err
+}
+
+func HackAddRootToAccountBytes(accNoRoot []byte, root []byte) (accWithRoot []byte, err error) {
+	var acc accounts.Account
+	if err := acc.DecodeForStorage(accNoRoot); err != nil {
+		return nil, err
+	}
+	acc.Root = common.BytesToHash(root)
+	accWithRoot = make([]byte, acc.EncodingLengthForStorage())
+	acc.EncodeForStorage(accWithRoot)
+	return accWithRoot, nil
 }
 
 func Bytesmask(fixedbits uint) (fixedbytes int, mask byte) {

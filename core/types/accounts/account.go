@@ -60,10 +60,6 @@ func (a *Account) EncodingLengthForStorage() uint {
 		structLength += uint((bits.Len64(a.Nonce)+7)/8) + 1
 	}
 
-	if !a.IsEmptyRoot() {
-		structLength += 33 // 32-byte array + 1 bytes for length
-	}
-
 	if !a.IsEmptyCodeHash() {
 		structLength += 33 // 32-byte array + 1 bytes for length
 	}
@@ -168,24 +164,16 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		pos += incarnationBytes + 1
 	}
 
-	// Encoding Root
-	if !a.IsEmptyRoot() {
-		fieldSet |= 8
-		buffer[pos] = 32
-		copy(buffer[pos+1:], a.Root.Bytes())
-		pos += 33
-	}
-
 	// Encoding CodeHash
 	if !a.IsEmptyCodeHash() {
-		fieldSet |= 16
+		fieldSet |= 8
 		buffer[pos] = 32
 		copy(buffer[pos+1:], a.CodeHash.Bytes())
 		pos += 33
 	}
 	// Encoding StorageSize
 	if a.HasStorageSize {
-		fieldSet |= 32
+		fieldSet |= 16
 		storageSizeBytes := (bits.Len64(a.StorageSize) + 7) / 8
 		buffer[pos] = byte(storageSizeBytes)
 		var storageSize = a.StorageSize
@@ -441,7 +429,6 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 			pos = newPos + balanceBytes
 		}
 	}
-
 	if pos < len(enc) {
 		rootBytes, s, newPos := decodeLengthForHashing(enc, pos)
 		if s {
@@ -596,24 +583,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		decodeLength := int(enc[pos])
 
 		if decodeLength != 32 {
-			return fmt.Errorf("root should be 32 bytes long, got %d instead",
-				decodeLength)
-		}
-
-		if len(enc) < pos+decodeLength+1 {
-			return fmt.Errorf(
-				"malformed CBOR for Account.Root: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		a.Root.SetBytes(enc[pos+1 : pos+decodeLength+1])
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&16 > 0 {
-		decodeLength := int(enc[pos])
-
-		if decodeLength != 32 {
 			return fmt.Errorf("codehash should be 32 bytes long, got %d instead",
 				decodeLength)
 		}
@@ -628,7 +597,7 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		pos += decodeLength + 1
 	}
 
-	if fieldSet&32 > 0 {
+	if fieldSet&16 > 0 {
 		decodeLength := int(enc[pos])
 
 		if len(enc) < pos+decodeLength+1 {
@@ -643,49 +612,6 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 	}
 
 	return nil
-}
-
-func GetIncarnationFomStorage(enc []byte) (common.Hash, error) {
-	var root common.Hash
-
-	var fieldSet = enc[0]
-	var pos = 1
-
-	if fieldSet&1 > 0 {
-		decodeLength := int(enc[pos])
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&2 > 0 {
-		decodeLength := int(enc[pos])
-
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&4 > 0 {
-		decodeLength := int(enc[pos])
-		pos += decodeLength + 1
-	}
-
-	if fieldSet&8 > 0 {
-		decodeLength := int(enc[pos])
-
-		if decodeLength != 32 {
-			return emptyRoot, fmt.Errorf("root should be 32 bytes long, got %d instead",
-				decodeLength)
-		}
-
-		if len(enc) < pos+decodeLength+1 {
-			return emptyRoot, fmt.Errorf(
-				"malformed CBOR for Account.Root: %s, Length %d",
-				enc[pos+1:], decodeLength)
-		}
-
-		root.SetBytes(enc[pos+1 : pos+decodeLength+1])
-		pos += decodeLength + 1
-	}
-
-	return root, nil
 }
 
 func (a *Account) SelfCopy() *Account {
@@ -723,7 +649,6 @@ func (a *Account) SetIncarnation(v uint64) {
 func (a *Account) Equals(acc *Account) bool {
 	return a.Nonce == acc.Nonce &&
 		a.CodeHash == acc.CodeHash &&
-		a.Root == acc.Root &&
 		a.Balance.Cmp(&acc.Balance) == 0 &&
 		a.Incarnation == acc.Incarnation &&
 		a.HasStorageSize == acc.HasStorageSize &&

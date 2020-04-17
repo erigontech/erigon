@@ -335,14 +335,13 @@ func checkRoots(stateDb ethdb.Database, rootHash common.Hash, blockNum uint64) {
 		var addrHash common.Hash
 		copy(addrHash[:], k[:32])
 		if _, ok := roots[addrHash]; !ok {
-			if enc, _ := stateDb.Get(dbutils.AccountsBucket, addrHash[:]); enc == nil {
+			account := &accounts.Account{}
+			if ok, err2 := rawdb.ReadAccount(stateDb, addrHash, account); err2 != nil {
+				return false, err2
+			} else if !ok {
 				roots[addrHash] = nil
 			} else {
-				var account accounts.Account
-				if err = account.DecodeForStorage(enc); err != nil {
-					return false, err
-				}
-				roots[addrHash] = &account
+				roots[addrHash] = account
 				incarnationMap[account.Incarnation]++
 			}
 		}
