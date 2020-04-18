@@ -2,14 +2,19 @@ package stateless
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -23,6 +28,7 @@ const (
 )
 
 type BlockProvider interface {
+	core.ChainContext
 	io.Closer
 	FastFwd(uint64) error
 	NextBlock() (*types.Block, error)
@@ -65,7 +71,16 @@ func NewBlockProviderFromDb(path string, createDbFunc CreateDbFunc) (BlockProvid
 
 	return &BlockChainBlockProvider{
 		bc: chain,
+		db: ethDb,
 	}, nil
+}
+
+func (p *BlockChainBlockProvider) Engine() consensus.Engine {
+	return p.bc.Engine()
+}
+
+func (p *BlockChainBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	return p.bc.GetHeader(h, i)
 }
 
 func (p *BlockChainBlockProvider) Close() error {
@@ -85,8 +100,11 @@ func (p *BlockChainBlockProvider) NextBlock() (*types.Block, error) {
 }
 
 type ExportFileBlockProvider struct {
-	stream *rlp.Stream
-	fh     io.Closer
+	stream    *rlp.Stream
+	engine    consensus.Engine
+	headersDb ethdb.Database
+	batch     ethdb.DbWithPendingMutations
+	fh        io.Closer
 }
 
 func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
@@ -103,11 +121,47 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 		}
 	}
 	stream := rlp.NewStream(reader, 0)
-	return &ExportFileBlockProvider{stream, fh}, nil
+	engine := ethash.NewFullFaker()
+	// keeping all the past block headers in memory
+	headersDb := mustCreateTempDatabase()
+	return &ExportFileBlockProvider{stream, engine, headersDb, nil, fh}, nil
+}
+
+func getTempFileName() string {
+	tmpfile, err := ioutil.TempFile("", "headers.bolt")
+	if err != nil {
+		panic(fmt.Errorf("failed to create a temp file: %w", err))
+	}
+	tmpfile.Close()
+	fmt.Printf("creating a temp headers db @ %s\n", tmpfile.Name())
+	return tmpfile.Name()
+}
+
+func mustCreateTempDatabase() ethdb.Database {
+	db, err := ethdb.NewBoltDatabase(getTempFileName())
+	if err != nil {
+		panic(fmt.Errorf("failed to create a temp db for headers: %w", err))
+	}
+	return db
 }
 
 func (p *ExportFileBlockProvider) Close() error {
 	return p.fh.Close()
+}
+
+func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
+	if p.batch == nil {
+		p.batch = p.headersDb.NewBatch()
+	}
+
+	rawdb.WriteHeader(context.TODO(), p.batch, h)
+
+	if p.batch.BatchSize() > 1000 {
+		if _, err := p.batch.Commit(); err != nil {
+			panic(fmt.Errorf("error writing headers: %w", err))
+		}
+		p.batch = nil
+	}
 }
 
 func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
@@ -117,8 +171,11 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return nil
 		} else if err != nil {
 			return fmt.Errorf("error fast fwd: %v", err)
-		} else if b.NumberU64() >= to-1 {
-			return nil
+		} else {
+			p.WriteHeader(b.Header())
+			if b.NumberU64() >= to-1 {
+				return nil
+			}
 		}
 	}
 }
@@ -130,5 +187,18 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("error fast fwd: %v", err)
 	}
+
+	p.WriteHeader(b.Header())
 	return &b, nil
+}
+
+func (p *ExportFileBlockProvider) Engine() consensus.Engine {
+	return p.engine
+}
+
+func (p *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	if p.batch != nil {
+		return rawdb.ReadHeader(p.batch, h, i)
+	}
+	return rawdb.ReadHeader(p.headersDb, h, i)
 }
