@@ -321,7 +321,7 @@ func (w *Wallet) Status() (string, error) {
 	case !status.Initialized:
 		return "Empty, waiting for initialization", nil
 	default:
-		return "Online", nil
+		return "Online", nil //nolint:goconst
 	}
 }
 

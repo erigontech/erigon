@@ -85,10 +85,10 @@ func memoryMap(path string, lock bool) (*os.File, mmap.MMap, []uint32, error) {
 		}
 	}
 	if lock {
-		if err := mem.Lock(); err != nil {
-			mem.Unmap()
+		if err2 := mem.Lock(); err2 != nil {
+			mem.Unmap() //nolint:errcheck
 			file.Close()
-			return nil, nil, nil, err
+			return nil, nil, nil, err2
 		}
 	}
 	return file, mem, buffer[len(dumpMagic):], err

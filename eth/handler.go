@@ -1285,7 +1285,6 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		}
 
 		// Clean up: reuse engine... probably we can
-		pm.noMorePeers <- struct{}{}       // exit pm.syncer loop
 		time.Sleep(100 * time.Millisecond) // wait for pm.syncer finish
 
 		engine := pm.blockchain.Engine()
@@ -1299,7 +1298,6 @@ func (pm *ProtocolManager) handleDebugMsg(p *debugPeer) error {
 		pm.forkFilter = forkid.NewFilter(pm.blockchain)
 		initPm(pm, pm.txpool, pm.blockchain.Engine(), pm.blockchain, pm.blockchain.ChainDb())
 		pm.quitSync = make(chan struct{})
-		go pm.syncer()
 		remotedbserver.StartDeprecated(ethDb.AbstractKV(), "") // hack to make UI work. But need to somehow re-create whole Node or Ethereum objects
 
 		// hacks to speedup local sync

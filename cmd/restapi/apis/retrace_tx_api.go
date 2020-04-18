@@ -138,7 +138,7 @@ func ReadChainConfig(db ethdb.KV, chain string) *params.ChainConfig {
 	case "mainnet":
 		k = params.MainnetGenesisHash[:]
 	case "testnet":
-		k = params.TestnetGenesisHash[:]
+		k = params.RopstenGenesisHash[:]
 	case "rinkeby":
 		k = params.RinkebyGenesisHash[:]
 	case "goerli":

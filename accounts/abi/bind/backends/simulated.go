@@ -533,8 +533,6 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, tx *types.Transa
 	})
 	//fmt.Printf("==== End producing block %d\n", (b.prependBlock.NumberU64() + 1))
 	b.pendingBlock = blocks[0]
-	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
-	b.pendingState = state.New(b.pendingTds)
 	b.pendingHeader = b.pendingBlock.Header()
 	return nil
 }
@@ -647,8 +645,6 @@ func (b *SimulatedBackend) AdjustTime(adjustment time.Duration) error {
 		block.OffsetTime(int64(adjustment.Seconds()))
 	})
 	b.pendingBlock = blocks[0]
-	b.pendingTds = state.NewTrieDbState(b.prependBlock.Root(), b.prependDb.MemCopy(), b.prependBlock.NumberU64())
-	b.pendingState = state.New(b.pendingTds)
 	b.pendingHeader = b.pendingBlock.Header()
 
 	return nil

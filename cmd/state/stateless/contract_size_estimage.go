@@ -36,7 +36,7 @@ func storageRoot(db *bolt.DB, contract common.Address) (common.Hash, error) {
 	err := db.View(func(tx *bolt.Tx) error {
 		enc, _ := tx.Bucket(dbutils.IntermediateTrieHashBucket).Get(crypto.Keccak256(contract[:]))
 		if enc == nil {
-			return fmt.Errorf("Could find account %x\n", contract)
+			return fmt.Errorf("could find account %x", contract)
 		}
 		storageRoot = common.BytesToHash(common.CopyBytes(enc))
 		return nil

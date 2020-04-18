@@ -29,6 +29,7 @@ import (
 	"syscall"
 
 	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/common/dbutils"
 	"github.com/ledgerwatch/turbo-geth/core"
 	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
@@ -301,9 +302,13 @@ func ExportPreimages(db ethdb.Database, fn string) error {
 		writer = gzip.NewWriter(writer)
 		defer writer.(*gzip.Writer).Close()
 	}
-	// Iterate over the preimages and export them
-	it := db.NewIterator([]byte("secure-key-"), nil)
-	defer it.Release()
+	err = db.Walk(dbutils.PreimagePrefix, nil, 0, func(k []byte, v []byte) (bool, error) {
+		_, writeErr := writer.Write(v)
+		return true, writeErr
+	})
+	if err != nil {
+		return err
+	}
 
 	log.Info("Exported preimages", "file", fn)
 	return nil

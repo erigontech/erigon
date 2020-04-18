@@ -734,21 +734,17 @@ func (api *RetestethAPI) AccountRange(ctx context.Context,
 		}
 	*/
 
-	acchash := common.BigToHash((*big.Int)(addressHash))
-	rangeResult, err := eth.AccountRange(dbState, &acchash, int(maxResults))
-	if err != nil {
-		return result, err
-	}
+	/*
+		result.NextKey = rangeResult.Next
 
-	result.NextKey = rangeResult.Next
-
-	for k, v := range rangeResult.Accounts {
-		if v == nil {
-			result.AddressMap[k] = common.Address{}
-		} else {
-			result.AddressMap[k] = *v
+		for k, v := range rangeResult.Accounts {
+			if v == nil {
+				result.AddressMap[k] = common.Address{}
+			} else {
+				result.AddressMap[k] = *v
+			}
 		}
-	}
+	*/
 
 	return result, nil
 }

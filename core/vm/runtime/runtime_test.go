@@ -344,6 +344,6 @@ func BenchmarkSimpleLoop(b *testing.B) {
 	//	}})
 
 	for i := 0; i < b.N; i++ {
-		Execute(code, nil, nil)
+		Execute(code, nil, nil, 0)
 	}
 }

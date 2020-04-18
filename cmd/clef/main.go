@@ -419,8 +419,8 @@ func newAccount(c *cli.Context) error {
 	// This gives is us access to the external API
 	apiImpl := core.NewSignerAPI(am, 0, true, ui, nil, false, pwStorage)
 	// This gives us access to the internal API
-	internalApi := core.NewUIServerAPI(apiImpl)
-	addr, err := internalApi.New(context.Background())
+	internalAPI := core.NewUIServerAPI(apiImpl)
+	addr, err := internalAPI.New(context.Background())
 	if err == nil {
 		fmt.Printf("Generated account %v\n", addr.String())
 	}

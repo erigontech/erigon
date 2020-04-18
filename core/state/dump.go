@@ -182,8 +182,6 @@ func (tds *TrieDbState) dump(c collector, excludeCode, excludeStorage, excludeMi
 	if err != nil {
 		panic(err)
 	}
-
-	return nextKey
 }
 
 // RawDump returns the entire state an a single large object

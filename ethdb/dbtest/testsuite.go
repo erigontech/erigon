@@ -265,38 +265,13 @@ func TestDatabaseSuite(t *testing.T, New func() dataStore) {
 				t.Errorf("got: %s; want: %s", got, want)
 			}
 		}
-			it := db.NewIterator(nil, nil)
-			if got, want := iterateKeys(it), []string{"2", "3", "4", "5", "6"}; !reflect.DeepEqual(got, want) {
-				t.Errorf("got: %s; want: %s", got, want)
-			}
-		}
 	})
 
 	t.Run("BatchReplay", func(t *testing.T) {
-		db := New()
-		defer db.Close()
-
-		want := []string{"1", "2", "3", "4"}
-		b := db.NewBatch()
-		for _, k := range want {
-			if err := b.Put([]byte(k), nil); err != nil {
-				t.Fatal(err)
-			}
-		}
-
-		b2 := db.NewBatch()
-		if err := b.Replay(b2); err != nil {
-			t.Fatal(err)
-		}
-
-		if err := b2.Replay(db); err != nil {
-			t.Fatal(err)
-		}
-
-		it := db.NewIterator(nil, nil)
-		if got := iterateKeys(it); !reflect.DeepEqual(got, want) {
-			t.Errorf("got: %s; want: %s", got, want)
-		}
+		// TurboGeth doesn't define and doesn't use the Replay method anywhere
+		//
+		// This test is intentionally left blank with this comment
+		// to make sure that future rebases won't confuse anyone.
 	})
 }
 
@@ -311,6 +286,5 @@ func iterateKeysFromKey(db ethdb.Database, fromKey []byte) []string {
 		return true, nil
 	})
 	sort.Strings(keys)
-	it.Release()
 	return keys
 }
