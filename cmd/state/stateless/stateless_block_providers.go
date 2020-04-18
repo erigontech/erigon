@@ -74,12 +74,12 @@ func NewBlockProviderFromDb(path string, createDbFunc CreateDbFunc) (BlockProvid
 	}, nil
 }
 
-func (m *BlockChainBlockProvider) Engine() consensus.Engine {
-	return m.bc.Engine()
+func (p *BlockChainBlockProvider) Engine() consensus.Engine {
+	return p.bc.Engine()
 }
 
-func (m *BlockChainBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
-	return m.bc.GetHeader(h, i)
+func (p *BlockChainBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	return p.bc.GetHeader(h, i)
 }
 
 func (p *BlockChainBlockProvider) Close() error {
@@ -156,7 +156,9 @@ func (p *ExportFileBlockProvider) WriteHeader(h *types.Header) {
 	rawdb.WriteHeader(context.TODO(), p.batch, h)
 
 	if p.batch.BatchSize() > 1000 {
-		p.batch.Commit()
+		if _, err := p.batch.Commit(); err != nil {
+			panic(fmt.Errorf("error writing headers: %w", err))
+		}
 		p.batch = nil
 	}
 }
@@ -189,13 +191,13 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 	return &b, nil
 }
 
-func (m *ExportFileBlockProvider) Engine() consensus.Engine {
-	return m.engine
+func (p *ExportFileBlockProvider) Engine() consensus.Engine {
+	return p.engine
 }
 
-func (m *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
-	if m.batch != nil {
-		return rawdb.ReadHeader(m.batch, h, i)
+func (p *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	if p.batch != nil {
+		return rawdb.ReadHeader(p.batch, h, i)
 	}
-	return rawdb.ReadHeader(m.headersDb, h, i)
+	return rawdb.ReadHeader(p.headersDb, h, i)
 }

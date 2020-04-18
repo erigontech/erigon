@@ -198,8 +198,8 @@ func Stateless(
 	engine := ethash.NewFullFaker()
 
 	if blockNum > 1 {
-		bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
-		check(err)
+		bc, errBc := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
+		check(errBc)
 		block := bc.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
