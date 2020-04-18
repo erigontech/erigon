@@ -71,6 +71,7 @@ func NewBlockProviderFromDb(path string, createDbFunc CreateDbFunc) (BlockProvid
 
 	return &BlockChainBlockProvider{
 		bc: chain,
+		db: ethDb,
 	}, nil
 }
 
