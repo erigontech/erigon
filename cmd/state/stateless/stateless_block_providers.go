@@ -2,14 +2,18 @@ package stateless
 
 import (
 	"compress/gzip"
+	"context"
 	"fmt"
 	"io"
 	"net/url"
 	"os"
 	"strings"
 
+	"github.com/ledgerwatch/turbo-geth/common"
+	"github.com/ledgerwatch/turbo-geth/consensus"
 	"github.com/ledgerwatch/turbo-geth/consensus/ethash"
 	"github.com/ledgerwatch/turbo-geth/core"
+	"github.com/ledgerwatch/turbo-geth/core/rawdb"
 	"github.com/ledgerwatch/turbo-geth/core/types"
 	"github.com/ledgerwatch/turbo-geth/core/vm"
 	"github.com/ledgerwatch/turbo-geth/ethdb"
@@ -23,6 +27,7 @@ const (
 )
 
 type BlockProvider interface {
+	core.ChainContext
 	io.Closer
 	FastFwd(uint64) error
 	NextBlock() (*types.Block, error)
@@ -68,6 +73,14 @@ func NewBlockProviderFromDb(path string, createDbFunc CreateDbFunc) (BlockProvid
 	}, nil
 }
 
+func (m *BlockChainBlockProvider) Engine() consensus.Engine {
+	return m.bc.Engine()
+}
+
+func (m *BlockChainBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	return m.bc.GetHeader(h, i)
+}
+
 func (p *BlockChainBlockProvider) Close() error {
 	p.db.Close()
 	return nil
@@ -85,8 +98,10 @@ func (p *BlockChainBlockProvider) NextBlock() (*types.Block, error) {
 }
 
 type ExportFileBlockProvider struct {
-	stream *rlp.Stream
-	fh     io.Closer
+	stream    *rlp.Stream
+	engine    consensus.Engine
+	headersDb ethdb.Database
+	fh        io.Closer
 }
 
 func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
@@ -103,7 +118,10 @@ func NewBlockProviderFromExportFile(fn string) (BlockProvider, error) {
 		}
 	}
 	stream := rlp.NewStream(reader, 0)
-	return &ExportFileBlockProvider{stream, fh}, nil
+	engine := ethash.NewFullFaker()
+	// keeping all the past block headers in memory
+	headersDb := ethdb.NewMemDatabase()
+	return &ExportFileBlockProvider{stream, engine, headersDb, fh}, nil
 }
 
 func (p *ExportFileBlockProvider) Close() error {
@@ -117,8 +135,11 @@ func (p *ExportFileBlockProvider) FastFwd(to uint64) error {
 			return nil
 		} else if err != nil {
 			return fmt.Errorf("error fast fwd: %v", err)
-		} else if b.NumberU64() >= to-1 {
-			return nil
+		} else {
+			rawdb.WriteHeader(context.TODO(), p.headersDb, b.Header())
+			if b.NumberU64() >= to-1 {
+				return nil
+			}
 		}
 	}
 }
@@ -130,5 +151,15 @@ func (p *ExportFileBlockProvider) NextBlock() (*types.Block, error) {
 	} else if err != nil {
 		return nil, fmt.Errorf("error fast fwd: %v", err)
 	}
+
+	rawdb.WriteHeader(context.TODO(), p.headersDb, b.Header())
 	return &b, nil
+}
+
+func (m *ExportFileBlockProvider) Engine() consensus.Engine {
+	return m.engine
+}
+
+func (m *ExportFileBlockProvider) GetHeader(h common.Hash, i uint64) *types.Header {
+	return rawdb.ReadHeader(m.headersDb, h, i)
 }

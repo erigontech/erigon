@@ -196,11 +196,11 @@ func Stateless(
 	chainConfig := params.MainnetChainConfig
 	vmConfig := vm.Config{}
 	engine := ethash.NewFullFaker()
-	bcb2, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
-	check(err)
 
 	if blockNum > 1 {
-		block := bcb2.GetBlockByNumber(blockNum - 1)
+		bc, err := core.NewBlockChain(stateDb, nil, chainConfig, engine, vm.Config{}, nil)
+		check(err)
+		block := bc.GetBlockByNumber(blockNum - 1)
 		fmt.Printf("Block number: %d\n", blockNum-1)
 		fmt.Printf("Block root hash: %x\n", block.Root())
 		preRoot = block.Root()
@@ -296,7 +296,7 @@ func Stateless(
 		for i, tx := range block.Transactions() {
 			statedb.Prepare(tx.Hash(), block.Hash(), i)
 			var receipt *types.Receipt
-			receipt, err = core.ApplyTransaction(chainConfig, bcb2, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
+			receipt, err = core.ApplyTransaction(chainConfig, blockProvider, nil, gp, statedb, tds.TrieStateWriter(), header, tx, usedGas, vmConfig)
 			if err != nil {
 				fmt.Printf("tx %x failed: %v\n", tx.Hash(), err)
 				return
@@ -393,7 +393,7 @@ func Stateless(
 			ibs := state.New(s)
 			ibs.SetTrace(trace)
 			s.SetBlockNr(blockNum)
-			if err = runBlock(ibs, s, s, chainConfig, bcb2, block); err != nil {
+			if err = runBlock(ibs, s, s, chainConfig, blockProvider, block); err != nil {
 				fmt.Printf("Error running block %d through stateless2: %v\n", blockNum, err)
 				finalRootFail = true
 			} else if !binary {
