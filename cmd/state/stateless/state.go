@@ -294,8 +294,11 @@ beginTx2:
 		if pre == nil {
 			return nil
 		}
-		c := tx.Bucket(dbutils.AccountsBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
 		for k, _, err := c.Seek(r.AccountKey); k != nil || err != nil; k, _, err = c.Next() {
+			if len(k) != 32 {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -517,8 +520,11 @@ beginTx:
 beginTx2:
 	// Go through the current state
 	if err := r.remoteDB.View(ctx, func(tx ethdb.Tx) error {
-		c := tx.Bucket(dbutils.StorageBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
+		c := tx.Bucket(dbutils.CurrentStateBucket).Cursor().Prefetch(CursorBatchSize).NoValues()
 		for k, _, err := c.Seek(r.StorageKey); k != nil || err != nil; k, _, err = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			if err != nil {
 				return err
 			}
@@ -1445,17 +1451,19 @@ func storageUsage() {
 	count := 0
 	var leafSize uint64
 	err = db.View(func(tx *bolt.Tx) error {
-		a := tx.Bucket(dbutils.AccountsBucket)
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			copy(addr[:], k[:20])
 			del, ok := deleted[addr]
 			if !ok {
-				vv, _ := a.Get(crypto.Keccak256(addr[:]))
+				vv, _ := b.Get(crypto.Keccak256(addr[:]))
 				del = vv == nil
 				deleted[addr] = del
 				if del {
@@ -1556,12 +1564,15 @@ func tokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			copy(addr[:], k[:20])
 			if _, ok := tokens[addr]; ok {
 				itemsByAddress[addr]++
@@ -1632,12 +1643,15 @@ func nonTokenUsage() {
 	//itemsByCreator := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			copy(addr[:], k[:20])
 			if _, ok := tokens[addr]; !ok {
 				itemsByAddress[addr]++
@@ -1693,12 +1707,15 @@ func oldStorage() {
 	itemsByAddress := make(map[common.Address]int)
 	count := 0
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.StorageBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, _ := c.First(); k != nil; k, _ = c.Next() {
+			if len(k) == 32 {
+				continue
+			}
 			copy(addr[:], k[:20])
 			itemsByAddress[addr]++
 			count++
@@ -1768,12 +1785,15 @@ func dustEOA() {
 	thresholdMap := make(map[uint64]int)
 	var a accounts.Account
 	err = db.View(func(tx *bolt.Tx) error {
-		b := tx.Bucket(dbutils.AccountsBucket)
+		b := tx.Bucket(dbutils.CurrentStateBucket)
 		if b == nil {
 			return nil
 		}
 		c := b.Cursor()
 		for k, v := c.First(); k != nil; k, v = c.Next() {
+			if len(k) != 32 {
+				continue
+			}
 			if err1 := a.DecodeForStorage(v); err1 != nil {
 				return err1
 			}
